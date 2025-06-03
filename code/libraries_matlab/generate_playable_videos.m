@@ -1,4 +1,9 @@
-function generate_playable_videos(recording_path, output_dir, apply_digital_gain, fill_missing_frames, draw_pupil_ROI, debayer_images, num_chunks_to_use) 
+function generate_playable_videos(recording_path, output_dir,...
+                                  apply_digital_gain, fill_missing_frames, draw_pupil_ROI, debayer_images,...
+                                  time_ranges,... 
+                                  chunk_ranges..., 
+                                  Pi_util_path
+                                 ) 
 % Generate a directory of playable videos from a recording directory 
 % of the light logger 
 %
@@ -35,10 +40,24 @@ function generate_playable_videos(recording_path, output_dir, apply_digital_gain
 %                           the images when constructing them 
 %                           into a video
 %
-%   num_chunks_to_use     - Numeric. The number of chunks to 
-%                           use for generating the video from 
-%                           each sensor. Default is all. 
+%   time_ranges           - Struct. Represents the selected 
+%                           range of time to parse. Form is 
+%                           a struct with fields (WPM)
+%                           where each field is a tuple 
+%                           of a range [start, end). 
 %
+%   chunk_ranges          - Struct. Represents the selected 
+%                           range of chunks to parse. Form is 
+%                           a struct with fields (WPM)
+%                           where each field is a tuple 
+%                           of a range [start, end). Note:
+%                           the use of this and time_ranges is
+%                           exclusively OR. 0-indexed. 
+%
+%   matlab_analysis_libraries_path  - String. Path to the utilized MATLAB 
+%                                     helper functions (chunk_dict_to_matlab)
+% 
+%   Pi_util_path           - String. Path to the Pi_util.py helper file
 %
 % Outputs:
 %
@@ -62,20 +81,14 @@ function generate_playable_videos(recording_path, output_dir, apply_digital_gain
         fill_missing_frames {mustBeNumericOrLogical} = false; % Whether or not to fill in the missing frames in videos with black dummy frames 
         draw_pupil_ROI {mustBeNumericOrLogical} = false; % Whether or not to highlight the region that is used for the pupil AGC 
         debayer_images {mustBeNumericOrLogical} = false; % Whether or not to debayer the images when constructing them into a video 
-        num_chunks_to_use {mustBeNumeric} = inf; % The number of chunks to use for generating the video from each sensor. 
+        time_ranges = false; % The timestamps to splice out of a video in the form [start, end) (relative to start of the video)
+        chunk_ranges = false; % The chunk numbers to splice out of a video in the form [start, end] (0-indexed)
+        matlab_analysis_libraries_path {mustBeText} = fullfile(fileparts(fileparts(fileparts(mfilename("fullpath")))), "libraries_matlab"); % Path to the utilized MATLAB helper functions (chunk_dict_to_matlab)
+        Pi_util_path {mustBeText} = fullfile(fileparts(mfilename("fullpath")), 'Pi_util');  % Path to the Pi_util.py helper file
     end
 
-    % First, save the current directory the user is working in 
-    cwd = pwd(); 
-
-    % Next, find the path to the current file 
-    [filedir, ~, ~] = fileparts(mfilename("fullpath"));
-
-    % cd into the directory where this file lives 
-    cd(filedir);
-
     % Import the Python utility function 
-    Pi_util = py.importlib.import_module("Pi_util");
+    Pi_util = import_pyfile(Pi_util_path);
 
     % Call the Python helper function 
     Pi_util.generate_playable_videos(recording_path, output_dir, apply_digital_gain, fill_missing_frames, draw_pupil_ROI, debayer_images, num_chunks_to_use);
