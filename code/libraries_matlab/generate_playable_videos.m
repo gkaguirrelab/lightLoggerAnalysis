@@ -1,5 +1,6 @@
 function generate_playable_videos(recording_path, output_dir,...
                                   apply_digital_gain, fill_missing_frames, draw_pupil_ROI, debayer_images,...
+                                  password,...
                                   time_ranges,... 
                                   chunk_ranges..., 
                                   Pi_util_path
@@ -8,7 +9,13 @@ function generate_playable_videos(recording_path, output_dir,...
 % of the light logger 
 %
 % Syntax:
-%   generate_playable_videos(recording_path, output_dir, apply_digital_gain, fill_missing_frames, debayer_images, num_chunks_to_use) 
+%   generate_playable_videos(recording_path, output_dir,...
+%                            apply_digital_gain, fill_missing_frames, draw_pupil_ROI, debayer_images,...
+%                            password,...
+%                            time_ranges,... 
+%                            chunk_ranges..., 
+%                            Pi_util_path
+%                           ) 
 %
 % Description:
 %   Generates a directory of playable videos, one for each camera sensor
@@ -39,6 +46,9 @@ function generate_playable_videos(recording_path, output_dir,...
 %   debayer_images        - Logical. Whether or not to debayer 
 %                           the images when constructing them 
 %                           into a video
+%
+%   password               - String. Represents the password 
+%                           used to encrypt the data (if encrypted)
 %
 %   time_ranges           - Struct. Represents the selected 
 %                           range of time to parse. Form is 
@@ -83,14 +93,23 @@ function generate_playable_videos(recording_path, output_dir,...
         debayer_images {mustBeNumericOrLogical} = false; % Whether or not to debayer the images when constructing them into a video 
         time_ranges = false; % The timestamps to splice out of a video in the form [start, end) (relative to start of the video)
         chunk_ranges = false; % The chunk numbers to splice out of a video in the form [start, end] (0-indexed)
+        password {mustBeText} = "1234"; % The password needed to decrypt encrypted + compressed files (.blosc files)
         matlab_analysis_libraries_path {mustBeText} = fullfile(fileparts(fileparts(fileparts(mfilename("fullpath")))), "libraries_matlab"); % Path to the utilized MATLAB helper functions (chunk_dict_to_matlab)
         Pi_util_path {mustBeText} = fullfile(fileparts(mfilename("fullpath")), 'Pi_util');  % Path to the Pi_util.py helper file
     end
+
+    % Append path to the Python file importer
+    matlab_libraries_path = matlab_analysis_libraries_path;
+    addpath(matlab_libraries_path); 
 
     % Import the Python utility function 
     Pi_util = import_pyfile(Pi_util_path);
 
     % Call the Python helper function 
-    Pi_util.generate_playable_videos(recording_path, output_dir, apply_digital_gain, fill_missing_frames, draw_pupil_ROI, debayer_images, num_chunks_to_use);
+    Pi_util.generate_playable_videos(recording_path, output_dir, apply_digital_gain,...
+                                     fill_missing_frames, draw_pupil_ROI, debayer_images,..
+                                     password,...
+                                     time_ranges, chunk_ranges...
+                                    );
 
 end
