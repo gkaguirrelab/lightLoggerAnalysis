@@ -1,9 +1,8 @@
-function chunks = parse_chunks(path_to_experiment, ...
+function chunks = parse_chunks(path_to_experiment,...
+                               matlab_analysis_libraries_path, Pi_util_path,...
                                apply_digital_gain, use_mean_frame, convert_time_units, convert_to_floats,...
                                time_ranges, chunk_ranges, mean_axes, contains_agc_metadata,...
-                               password,...
-                               matlab_analysis_libraries_path,...
-                               Pi_util_path...
+                               password...
                               )
 % Parse the chunks of a recording from the light logger into a cell of chunk structs
 %
@@ -25,6 +24,12 @@ function chunks = parse_chunks(path_to_experiment, ...
 % Inputs:
 %   path_to_experiment    - String. The path to the suprafile 
 %                           containing all of the chunks.
+% 
+%   matlab_analysis_libraries_path  - String. Path to the utilized MATLAB 
+%                                     helper functions (chunk_dict_to_matlab)                                       
+%
+%   Pi_util_path           - String. Path to the Pi_util.py helper file
+%
 %
 %   apply_digital_gain    - Logical. Whether or not to apply 
 %                           each frame's associated digital gain
@@ -69,12 +74,8 @@ function chunks = parse_chunks(path_to_experiment, ...
 %                           a struct with fields (WPM) where 
 %                           each field is a boolean. 
 %
-%   matlab_analysis_libraries_path  - String. Path to the utilized MATLAB 
-%                                     helper functions (chunk_dict_to_matlab)
-%                                       
-%
-%   Pi_util_path           - String. Path to the Pi_util.py helper file
-%
+%  password               - String. Represents the password 
+%                           used to encrypt the data (if encrypted)
 %
 % Outputs:
 %
@@ -91,6 +92,8 @@ function chunks = parse_chunks(path_to_experiment, ...
     % Parse and validate the input arguments
     arguments 
         path_to_experiment {mustBeText}; % The path to the suprafolder for this experiment
+        matlab_analysis_libraries_path {mustBeText} = fullfile(fileparts(fileparts(fileparts(mfilename("fullpath")))), "libraries_matlab"); % Path to the utilized MATLAB helper functions (chunk_dict_to_matlab)
+        Pi_util_path {mustBeText} = fullfile(fileparts(mfilename("fullpath")), 'Pi_util');  % Path to the Pi_util.py helper file
         apply_digital_gain {mustBeNumericOrLogical} = false; % Whether or not to apply digital gain values to each frame 
         use_mean_frame {mustBeNumericOrLogical} = false; % Whether to use the mean frame from the camera sensors or the entire frames 
         convert_time_units {mustBeNumericOrLogical} = false; % Whether to convert different time units from the different sensors all to seconds 
@@ -100,15 +103,13 @@ function chunks = parse_chunks(path_to_experiment, ...
         mean_axes = false; % The axes per sensor to apply mean over if we want to take some sort of mean. Note: ONLY for camera sensors  
         contains_agc_metadata = false; % Flags for each sensor if its metadata matrix contains AGC data
         password {mustBeText} = "1234"; % The password needed to decrypt encrypted + compressed files (.blosc files)
-        matlab_analysis_libraries_path {mustBeText} = fullfile(fileparts(fileparts(fileparts(mfilename("fullpath")))), "libraries_matlab"); % Path to the utilized MATLAB helper functions (chunk_dict_to_matlab)
-        Pi_util_path {mustBeText} = fullfile(fileparts(mfilename("fullpath")), 'Pi_util');  % Path to the Pi_util.py helper file
     end 
 
     % Append path to the individual chunk parsing helper function 
     matlab_libraries_path = matlab_analysis_libraries_path;
     addpath(matlab_libraries_path); 
 
-    % Load in the Pi util hepler file 
+    % Load in the Pi util helper file 
     Pi_util = import_pyfile(Pi_util_path);
 
     % Apply the default time ranges to splice out of the video if not supplied 
