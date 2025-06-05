@@ -66,12 +66,9 @@ function plot_chunks(chunks, matlab_analysis_libraries_path, path_to_ms_util)
     MS_accelerometer_chunks_t = [];
     MS_LS_chunks_v = [];
     MS_sunglasses_chunks_v = [];
-    MS_LS_window_length = 10; % The number of readings that correspond 
-                              % to the standard deviation context window used 
-                              % for plotting the accelerometer results.
-                              % 10 readings for 6 channels are sent per buffer
-                              % every second. Therefore, 10 readings is equal 
-                              % to an approximately 60 second window 
+    MS_LS_window_length = double(ms_util.MS_LS_BUFFER_SIZE); % This defines the sliding window used to
+                                                             % plot the std of accelerometer readings.
+                                                             % This is default set to 1 packet (1 second)
 
     % Initialize containers for the approximate FPS values 
     world_chunks_fps = [];
@@ -236,9 +233,9 @@ function plot_chunks(chunks, matlab_analysis_libraries_path, path_to_ms_util)
     end 
 
     % Replace the RAW (hard to interpret) accelerometer readings with 
-    % the mean of the last N seconds for each point 
+    % the std of the last N seconds for each point 
     for rr = 1:size(MS_LS_chunks_v, 1) % Iterate over the rows of the accelerometer 
-        % For the first 10 readings, ignore since we do not have enough readings
+        % For the first N readings, ignore since we do not have enough readings
         % for the context window 
         if(rr <= MS_LS_window_length)
             continue;
