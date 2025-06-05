@@ -65,6 +65,7 @@ function plot_chunks(chunks, matlab_analysis_libraries_path, path_to_ms_util)
     MS_TS_chunks_v = [];
     MS_accelerometer_chunks_t = [];
     MS_LS_chunks_v = [];
+    MS_LS_chunks_v_std = [];
     MS_sunglasses_chunks_v = [];
     MS_LS_window_length = double(ms_util.MS_LS_BUFFER_SIZE); % This defines the sliding window used to
                                                              % plot the std of accelerometer readings.
@@ -234,6 +235,7 @@ function plot_chunks(chunks, matlab_analysis_libraries_path, path_to_ms_util)
 
     % Replace the RAW (hard to interpret) accelerometer readings with 
     % the std of the last N seconds for each point 
+    MS_LS_chunks_v_std = zeros(size(MS_LS_chunks_v));
     for rr = 1:size(MS_LS_chunks_v, 1) % Iterate over the rows of the accelerometer 
         % For the first N readings, ignore since we do not have enough readings
         % for the context window 
@@ -245,7 +247,7 @@ function plot_chunks(chunks, matlab_analysis_libraries_path, path_to_ms_util)
         % for each channel via the context window 
         context_window = MS_LS_chunks_v(rr-MS_LS_window_length:rr, :); 
         context_window_std = std(context_window);    
-        MS_LS_chunks_v(rr, :) = context_window_std; 
+        MS_LS_chunks_v_std(rr, :) = context_window_std; 
 
     end
 
@@ -335,15 +337,31 @@ function plot_chunks(chunks, matlab_analysis_libraries_path, path_to_ms_util)
     xlim([min_common_time, max_common_time]); 
     legend show; 
 
-    % Plot the accelerometer readings
+    % Plot the RAW accelerometer readings
     nexttile; 
-    title("MS Accelerometer Readings"); 
+    title("MS Accelerometer Readings [Raw]"); 
     hold on ; 
     % LS accelerometer has meaningful channel label names, 
     % not just numbers 
     channel_labels = {'X', 'Y', 'Z', 'ΩP', 'ΩR', 'ΩY'}; 
     for cc = 1:size(MS_LS_chunks_v, 2)
         plot(MS_accelerometer_chunks_t, MS_LS_chunks_v(:, cc), 'x', "DisplayName", channel_labels{cc});
+    end 
+    legend show ; 
+    xlabel("Time [s]");
+    ylabel("Count");
+    ylim([-33000, 33000]); % Set the ylim to show between 16 bit signed int range smoothly 
+    xlim([min_common_time, max_common_time]); 
+
+    % Plot the window calcualted STD accelerometer readings
+    nexttile; 
+    title("MS Accelerometer Readings [Window std]"); 
+    hold on ; 
+    % LS accelerometer has meaningful channel label names, 
+    % not just numbers 
+    channel_labels = {'X', 'Y', 'Z', 'ΩP', 'ΩR', 'ΩY'}; 
+    for cc = 1:size(MS_LS_chunks_v, 2)
+        plot(MS_accelerometer_chunks_t, MS_LS_chunks_v_std(:, cc), 'x', "DisplayName", channel_labels{cc});
     end 
     legend show ; 
     xlabel("Time [s]");
