@@ -64,6 +64,7 @@ function plot_chunks(chunks, matlab_analysis_libraries_path, path_to_ms_util)
     MS_AS_chunks_v = [];
     MS_TS_chunks_v = [];
     MS_accelerometer_chunks_t = [];
+    MS_accelerometer_t_chunkstarts = []; % Denote the start of each accelerometer chunk 
     MS_LS_chunks_v = [];
     MS_LS_chunks_v_std = [];
     MS_sunglasses_chunks_v = [];
@@ -107,6 +108,7 @@ function plot_chunks(chunks, matlab_analysis_libraries_path, path_to_ms_util)
         MS_AS_chunk_v = chunks{cc}.M.v.AS; 
         MS_TS_chunk_v = chunks{cc}.M.v.TS; 
 
+        MS_accelerometer_t_chunkstarts = [MS_accelerometer_t_chunkstarts, chunks{cc}.M.t(1)];
         MS_accelerometer_chunk_t = double(ms_util.generate_accelerometer_t(chunks{cc}.M.t)); 
         MS_LS_chunk_v = chunks{cc}.M.v.LS; 
 
@@ -347,6 +349,10 @@ function plot_chunks(chunks, matlab_analysis_libraries_path, path_to_ms_util)
     for cc = 1:size(MS_LS_chunks_v, 2)
         plot(MS_accelerometer_chunks_t, MS_LS_chunks_v(:, cc), 'x', "DisplayName", channel_labels{cc});
     end 
+
+    % Now, let's add vertical lines to denote chunk start points 
+    xline(MS_accelerometer_t_chunkstarts, '--r', 'Chunk Start', 'HandleVisibility', 'Off')
+
     legend show ; 
     xlabel("Time [s]");
     ylabel("Count");
@@ -363,6 +369,10 @@ function plot_chunks(chunks, matlab_analysis_libraries_path, path_to_ms_util)
     for cc = 1:size(MS_LS_chunks_v, 2)
         plot(MS_accelerometer_chunks_t, MS_LS_chunks_v_std(:, cc), 'x', "DisplayName", channel_labels{cc});
     end 
+    
+    % Now, let's add vertical lines to denote chunk start points 
+    xline(MS_accelerometer_t_chunkstarts, '--r', 'Chunk Start', 'HandleVisibility', 'Off');
+
     legend show ; 
     xlabel("Time [s]");
     ylabel("In-Window std");
@@ -512,7 +522,7 @@ function plot_chunks(chunks, matlab_analysis_libraries_path, path_to_ms_util)
     % Open a figure for plotting 
     % information about the MS 
     figure ; 
-    t = tiledlayout(2,2); 
+    t = tiledlayout(3,3); 
     title(t, "MS + Sunglasses", "FontWeight", "bold"); 
 
     % Plot all of the channels of the AS chip 
@@ -540,8 +550,9 @@ function plot_chunks(chunks, matlab_analysis_libraries_path, path_to_ms_util)
     % Set the ylim to show between 16 bit unsigned range smoothly 
     %ylim([-5, 66000]); 
 
+    % Plot the RAW accelerometer readings
     nexttile; 
-    title("LS Channel Readings"); 
+    title("LS Readings [Raw]"); 
     hold on ; 
     % LS accelerometer has meaningful channel label names, 
     % not just numbers 
@@ -549,11 +560,35 @@ function plot_chunks(chunks, matlab_analysis_libraries_path, path_to_ms_util)
     for cc = 1:size(MS_LS_chunks_v, 2)
         plot(MS_accelerometer_chunks_t, MS_LS_chunks_v(:, cc), 'x', "DisplayName", channel_labels{cc});
     end 
+
+    % Now, let's add vertical lines to denote chunk start points 
+    xline(MS_accelerometer_t_chunkstarts, '--r', 'Chunk Start', 'HandleVisibility', 'Off')
+
+    legend show ; 
+    xlabel("Time [s]");
+    ylabel("Count");
+    ylim([-33000, 33000]); % Set the ylim to show between 16 bit signed int range smoothly 
+    xlim([min_common_time, max_common_time]); 
+
+    % Plot the window calcualted STD accelerometer readings
+    nexttile; 
+    title("LS Readings [Window std]"); 
+    hold on ; 
+    % LS accelerometer has meaningful channel label names, 
+    % not just numbers 
+    channel_labels = {'X', 'Y', 'Z', 'ΩP', 'ΩR', 'ΩY'}; 
+    for cc = 1:size(MS_LS_chunks_v, 2)
+        plot(MS_accelerometer_chunks_t, MS_LS_chunks_v_std(:, cc), 'x', "DisplayName", channel_labels{cc});
+    end 
+    
+    % Now, let's add vertical lines to denote chunk start points 
+    xline(MS_accelerometer_t_chunkstarts, '--r', 'Chunk Start', 'HandleVisibility', 'Off');
+
     legend show ; 
     xlabel("Time [s]");
     ylabel("In-Window std");
-    % Set the ylim to show between 16 bit signed int range smoothly 
-    ylim([-33000, 33000]); 
+    ylim([-33000, 33000]); % Set the ylim to show between 16 bit signed int range smoothly 
+    xlim([min_common_time, max_common_time]); 
 
     nexttile; 
     title("Sunglasses Readings"); 
