@@ -31,7 +31,7 @@ function generate_playable_videos(recording_path, output_dir,...
 %                           directory of videos will be output. 
 %    
 %   matlab_analysis_libraries_path  - String. Path to the utilized MATLAB 
-%                                     helper functions (chunk_dict_to_matlab)
+%                                     helper functions (e.g. import_pyfile)
 % 
 %   Pi_util_path           - String. Path to the Pi_util.py helper file
 %

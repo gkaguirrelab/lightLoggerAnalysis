@@ -1,4 +1,4 @@
-function plot_chunks(chunks)
+function plot_chunks(chunks, matlab_analysis_libraries_path, path_to_ms_util)
 % Plot all of the sensors readings for all of the chunks in a parsed_chunks
 % cell. Treat this as one large timeseries and video and label sensors 
 % accordingly. Convert the counts to contrast units to put the sensors 
@@ -16,8 +16,11 @@ function plot_chunks(chunks)
 % Inputs:
 %   chunks                - Cell. Cell array of parsed chunk 
 %                           structs. 
-%    
 %
+%   matlab_analysis_libraries_path  - String. Path to the utilized MATLAB 
+%                                     helper functions (e.g. import_pyfile)     
+% 
+%   Pi_util_path          - String. Path to the ms_util.py helper file
 %
 % Outputs:
 %
@@ -27,25 +30,23 @@ function plot_chunks(chunks)
 %{
     path_to_experiment = '/Volumes/EXTERNAL1/test_folder_0';
     chunks = parse_chunks(path_to_experiment, true, true, true);
-    plot_chunks(chunks);
+    matlab_analysis_libraries_path = "/Users/zacharykelly/lightLogger/libraries_matlab"; 
+    path_to_ms_util = "lightLogger/ms/ms_util.py";
+    plot_chunks(chunks, matlab_analysis_libraries_path, path_to_ms_util);
 %}
+
+    arguments 
+        chunks; % Cell array of parsed chunks 
+        matlab_analysis_libraries_path {mustBeText} = fullfile(fileparts(fileparts(fileparts(mfilename("fullpath")))), "libraries_matlab"); % Path to the utilized MATLAB helper functions (chunk_dict_to_matlab) 
+        path_to_ms_util {mustBeText} = fullfile(fileparts(fileparts(fileparts(mfilename("fullpath")))), "ms", "ms_util"); % Path to the Python MS utility file
+    end 
+    
+    % First, let's add the MATLAB helper libraries to the path 
+    addpath(matlab_analysis_libraries_path); 
 
     % First, we will retrieve the Python MS util library to help 
     % us more easily plot it 
-
-    % Save where the user is currently working 
-    cwd = pwd(); 
-
-    % Construct the path to the ms directory 
-    ms_dir = fullfile(fileparts(fileparts(fileparts(mfilename("fullpath")))), "ms");
-
-    % cd into the MS dir and import the MS util Python library 
-    cd(ms_dir);
-    ms_util = py.importlib.import_module("ms_util"); 
-
-    % Return to the original working directory 
-    cd(cwd); 
-
+    ms_util = import_pyfile(path_to_ms_util);
 
     % Initialize containers for the flattened readings
     % of world and pupil
