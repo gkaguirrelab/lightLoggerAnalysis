@@ -1,4 +1,4 @@
-function plot_chunks(chunks, matlab_analysis_libraries_path, path_to_ms_util)
+function plot_chunks(chunks, lightlogger_libraries_matlab, path_to_ms_util)
 % Plot all of the sensors readings for all of the chunks in a parsed_chunks
 % cell. Treat this as one large timeseries and video and label sensors 
 % accordingly. Convert the counts to contrast units to put the sensors 
@@ -17,8 +17,9 @@ function plot_chunks(chunks, matlab_analysis_libraries_path, path_to_ms_util)
 %   chunks                - Cell. Cell array of parsed chunk 
 %                           structs. 
 %
-%   matlab_analysis_libraries_path  - String. Path to the utilized MATLAB 
-%                                     helper functions (e.g. import_pyfile)     
+%   lightlogger_libraries_matlab  - String. Path to the utilized MATLAB 
+%                                   helper functions (e.g. import_pyfile)
+%                                   from the lightlogger repo       
 % 
 %   Pi_util_path          - String. Path to the ms_util.py helper file
 %
@@ -37,12 +38,12 @@ function plot_chunks(chunks, matlab_analysis_libraries_path, path_to_ms_util)
 
     arguments 
         chunks; % Cell array of parsed chunks 
-        matlab_analysis_libraries_path {mustBeText} = fullfile(fileparts(fileparts(fileparts(mfilename("fullpath")))), "libraries_matlab"); % Path to the utilized MATLAB helper functions (chunk_dict_to_matlab) 
+        lightlogger_libraries_matlab {mustBeText} = fullfile(fileparts(fileparts(fileparts(mfilename("fullpath")))), "libraries_matlab"); % Path to the utilized MATLAB helper functions (chunk_dict_to_matlab) 
         path_to_ms_util {mustBeText} = fullfile(fileparts(fileparts(fileparts(mfilename("fullpath")))), "ms", "ms_util"); % Path to the Python MS utility file
     end 
     
     % First, let's add the MATLAB helper libraries to the path 
-    addpath(matlab_analysis_libraries_path); 
+    addpath(lightlogger_libraries_matlab); 
 
     % First, we will retrieve the Python MS util library to help 
     % us more easily plot it 
