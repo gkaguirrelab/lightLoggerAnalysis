@@ -12,7 +12,7 @@ function [spd,frq] = calcTemporalSPD( v, fps, options )
 %   frame. Optional arguments adjust this behavior.
 %
 % Inputs:
-%   v                     - 640x480xt array of 8 bit unsigned integers.
+%   v                     - tx480x640 array of 8 bit unsigned integers.
 %                           This is a "chunk" of the world camera video
 %   fps                   - Scalar. Sampling rate of the recording (frames
 %                           per second). Defaults to 200.
@@ -33,7 +33,7 @@ function [spd,frq] = calcTemporalSPD( v, fps, options )
 %}
 
 arguments
-    v (640,480,:) {mustBeNumeric}
+    v (:,480,640) {mustBeNumeric}
     fps (1,1) {mustBeScalarOrEmpty} = 200
     options.applyFieldCorrection (1,1) logical = false
     options.lineResolution (1,1) logical = false
@@ -42,7 +42,7 @@ end
 
 % Combine data across space. We modify v to either nan components we do
 % not wish to include, or replace elements with derived values
-switch options.channel
+switch options.spatialChannel
     case 'RGB'
         % no change
     otherwise
@@ -59,7 +59,7 @@ end
 
 % Take the mean of each frame, accounting for nan values. This is the
 % signal
-signal = squeeze(mean(mean(v,1,"omitmissing"),2,"omitmissing"));
+signal = squeeze(mean(mean(v,2,"omitmissing"),3,"omitmissing"));
 
 % Convert to contrast units
 signal = (signal - mean(signal))/mean(signal);
