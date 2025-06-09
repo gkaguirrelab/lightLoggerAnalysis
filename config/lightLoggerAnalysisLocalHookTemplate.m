@@ -55,10 +55,7 @@ dirMatches = dirMatches([dirMatches.isdir]);
 % Check if we found any matches
 if ~isempty(dirMatches)
     % Take the first match (
-        light_logger_path = fullfile(dirMatches(1).folder, dirMatches(1).name);
-
-    % Save the path to a variable or a preference
-    fprintf('Found lightLogger folder: %s\n', light_logger_path);
+    light_logger_path = fullfile(dirMatches(1).folder, dirMatches(1).name);
 else
     error("ERROR: No lightLogger directory found"); 
 end
