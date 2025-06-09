@@ -5,7 +5,7 @@
         "importance": "",
         "localHookTemplate": "config/lightLoggerAnalysisLocalHookTemplate.m",
         "printLocalHookOutput": "1",
-        "name": "lightLogger",
+        "name": "lightLoggerAnalysis",
         "pathPlacement": "append",
         "subfolder": "",
         "toolboxRoot": "",
