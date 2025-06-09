@@ -21,16 +21,17 @@ function PlotSPD(spd, frq)
 %} 
 
 arguments 
-        spd (2999, 1)
-        frq (1, 2999)
+        spd (1, :)
+        frq (1, :)
        
 end
 
-% Plot and label 
+% Plot and label
     figure;
-    loglog(frq, spd);
+    loglog(frq, spd, 'DisplayName', "Temporal SPD");
     xlabel('Frequency (Hz)');
     ylabel('Spectral Power Density (contrast^2/Hz)');
     title('Temporal SPD');
+    legend show;
 
 end
