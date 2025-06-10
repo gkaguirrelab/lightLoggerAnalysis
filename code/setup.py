@@ -71,7 +71,7 @@ def main():
             if(not package): continue
 
             # Otherwise, we will install into the desired virtual environment 
-            subprocess.run([venv_python_executable, "-m", "pip", "install", package])
+            subprocess.run([venv_python_executable, "-m", "pip", "install", "--no-cache-dir", "--force-reinstall", package])
 
 if(__name__ == "__main__"):
     main()
