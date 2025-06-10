@@ -62,7 +62,7 @@ function [v, m] = load_frame_buffer(frame_buffer_path, metadata_path, contains_a
     % Load the frame buffer
     v_m = cell(Pi_util.load_frame_buffer(frame_buffer_path, metadata_path, contains_agc_metadata, password)); 
     
-    % Splice out the 
+    % Splice out the frame buffer and the metadata
     [v, m] = v_m{:}; 
 
     return ; 
