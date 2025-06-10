@@ -1,9 +1,9 @@
-function [v, m] = load_frame_buffer(frame_buffer_path, metadata_path, contains_agc_metadata, password)
+function [v, m] = load_frame_buffer(frame_buffer_path, metadata_path, contains_agc_metadata, apply_digital_gain, password)
 % Utility function to read in a numpy single frame buffer and optionally 
 % its associated metadata into MATLAB as pure MATLAB type. 
 %
 % Syntax:
-%  [v, m] = load_frame_buffer(frame_buffer_path, metadata_path, contains_agc_metadata, password)
+%  [v, m] = load_frame_buffer(frame_buffer_path, metadata_path, contains_agc_metadata, apply_digital_gain, password)
 %
 % Description:
 %   Given a path to a numpy array representing a frame buffer for 
@@ -23,6 +23,9 @@ function [v, m] = load_frame_buffer(frame_buffer_path, metadata_path, contains_a
 %   
 %   contains_agc_metadata - Bool. Whether or not the metadata 
 %                           matrix contains data from an AGC. 
+%
+%   apply_digital_gain   - Bool. Whether or not to apply digital 
+%                          gain as stored in the metadata
 %
 %   password             - String. Password used to decrypt 
 %                          encrypted data. 
@@ -52,6 +55,7 @@ function [v, m] = load_frame_buffer(frame_buffer_path, metadata_path, contains_a
         frame_buffer_path {mustBeText}; % Path to a specific frame buffer 
         metadata_path {mustBeText} = ""; % Path to the metadata matrix for this frame buffer 
         contains_agc_metadata {mustBeNumericOrLogical} = false; % Whether or not the metadata buffer contains AGC data. Should usually be TRUE for world
+        apply_digital_gain {mustBeNumericOrLogical} = false; % Whether or not to apply digital gain as stored in the metadata
         password {mustBeText} = "1234"; % Password used to decrypt encrpyted files
     end 
 
@@ -60,7 +64,7 @@ function [v, m] = load_frame_buffer(frame_buffer_path, metadata_path, contains_a
     Pi_util = import_pyfile(getpref("lightLoggerAnalysis", Pi_util_path)); 
 
     % Load the frame buffer
-    v_m = cell(Pi_util.load_frame_buffer(frame_buffer_path, metadata_path, contains_agc_metadata, password)); 
+    v_m = cell(Pi_util.load_frame_buffer(frame_buffer_path, metadata_path, contains_agc_metadata, apply_digital_gain, password)); 
     
     % Splice out the frame buffer and the metadata
     [v, m] = v_m{:}; 
