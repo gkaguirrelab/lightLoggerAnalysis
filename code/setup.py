@@ -50,6 +50,7 @@ def main():
     # Generate the environment
     print(f"Generating environment @ path: {env_output_path}")
     venv.create(env_output_path, with_pip=True)
+    subprocess.run([os.path.join(env_output_path, "bin", "python3"), "-m", "ensurepip", "--upgrade"])
     print("Generated!")
     
     # Install the relevant libraries
