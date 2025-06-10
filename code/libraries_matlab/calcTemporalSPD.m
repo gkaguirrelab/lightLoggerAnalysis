@@ -69,15 +69,8 @@ signal = squeeze(mean(mean(v,2,"omitmissing"),3,"omitmissing"));
 % Convert to contrast units
 signal = (signal - mean(signal))/mean(signal);
 
-% FFT of the signal in contrast units
-[frq,amp] = simpleFFT(signal,fps);
-
-% Discard the zero and nyquit frequencies
-frq = frq(2:end-1); amp = amp(2:end-1);
-
-% Covert from amplitude (contrast) to spectral power density
-% (contrast^2/Hz)
-spd=(amp.^2)./(frq');
+% PSD of the signal in units of contrast^2/Hz
+[frq, spd] = simplePSD(signal, fps);
 
 end
 
