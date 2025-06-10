@@ -65,5 +65,15 @@ function [v, m] = load_frame_buffer(frame_buffer_path, metadata_path, contains_a
     % Splice out the frame buffer and the metadata
     [v, m] = v_m{:}; 
 
+    % Convert v to double 
+    v = double(v); 
+
+    % Convert m to double if provided 
+    if(m == py.None)
+        m = []; 
+    else     
+        m = double(m);
+    end 
+
     return ; 
 end 
