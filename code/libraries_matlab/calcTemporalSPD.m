@@ -30,10 +30,11 @@ function [spd,frq] = calcTemporalSPD( v, fps, options )
 %
 % Examples:
 %{
-%   fps = 200;
-%   num_frames = 30 * fps;
-%   v = zeros(num_frames, 480, 640);
-%   [spd, frq] = calcTemporalSPD(v, fps);
+    fps = 200;
+    num_frames = 30 * fps;
+    v = rand(num_frames, 480, 640)*255;
+    [spd, frq] = calcTemporalSPD(v, fps);
+    plotSPD(spd, frq);
 %}
 
 arguments
@@ -77,9 +78,6 @@ frq = frq(2:end-1); amp = amp(2:end-1);
 % Covert from amplitude (contrast) to spectral power density
 % (contrast^2/Hz)
 spd=(amp.^2)./(frq');
-
-% Plot result of SPD function
-PlotSPD(spd, frq);
 
 end
 
