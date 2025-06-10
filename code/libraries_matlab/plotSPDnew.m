@@ -1,4 +1,4 @@
-function PlotSPD(spd, frq)
+function plotSPDnew(spd, frq)
 % Plots the SPD function for a chunk.
 %
 % Syntax:
