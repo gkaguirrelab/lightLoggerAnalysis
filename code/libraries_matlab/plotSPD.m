@@ -14,7 +14,8 @@ function plotSPD(spd, frq)
 %
 % Examples:
 %{  
-    test_path = "./mychunks";
+    dataDir = getpref('lightLoggerAnalysis','dataBaseDir');
+    test_path = fullfile(dataDir,;
     chunks = parse_chunks(test_path);
     [spd, frq] = calcTemporalSPD(chunks{1}.W.v, 200);
     PlotSPD(spd, frq);

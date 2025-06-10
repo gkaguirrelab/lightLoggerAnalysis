@@ -39,27 +39,16 @@ end
 % Set the prefs
 setpref(projectName,'dropboxBaseDir',dropboxBaseDir); % main directory path 
 
+% Set the light logger recordings directory
+setpref(projectName,'dataBaseDir',fullfile(dropboxBaseDir,'FLIC_data'));
+
 % Set the default cal directory to this project
 calLocalData = fullfile(tbLocateProjectSilent(projectName),'cal');
 setpref('combiLEDToolbox','CalDataFolder',calLocalData);
 
 % Find the light logger directory 
-light_logger_path = "";     
-
-% Search recursively for folders named "lightLogger"
-dirMatches = dir(fullfile('~/', '**', 'lightLogger'));
-
-% Filter only directories (sometimes dir returns files too)
-dirMatches = dirMatches([dirMatches.isdir]);
-
-% Check if we found any matches
-if ~isempty(dirMatches)
-    % Take the first match (
-    light_logger_path = fullfile(dirMatches(1).folder, dirMatches(1).name);
-else
-    error("ERROR: No lightLogger directory found"); 
-end
-
+light_logger_path = tbLocateProject('lightLogger');
+     
 % Save the LightLogger MATLAB libraries used in LightLogger Analysis
 % as a pref
 light_logger_libraries_matlab = fullfile(light_logger_path, "libraries_matlab"); 
