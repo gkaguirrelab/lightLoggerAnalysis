@@ -39,7 +39,7 @@ end
 % Set the prefs
 setpref(projectName,'dropboxBaseDir',dropboxBaseDir); % main directory path 
 
-% Set the default cal directory to the current project
+% Set the default cal directory to this project
 calLocalData = fullfile(tbLocateProjectSilent(projectName),'cal');
 setpref('combiLEDToolbox','CalDataFolder',calLocalData);
 
