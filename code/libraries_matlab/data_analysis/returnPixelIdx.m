@@ -1,8 +1,8 @@
-function idxMatrix = returnPixelIdx(chunks, targetChunk, pixelClass)
+function idxMatrix = returnPixelIdx(pixelClass, options)
 % Generates 1D pixel location mask for a specific and RBG value. 
 %
 % Syntax:l
-%   idxMatrix = returnPixelIdx(chunks, targetChunk, pixelClass)
+%   idxMatrix = returnPixelIdx(pixelClass, options)
 % 
 % Description;
 %   Calculates the Bayer filter mask (1 for specified color, 0 otherwise)
@@ -13,12 +13,14 @@ function idxMatrix = returnPixelIdx(chunks, targetChunk, pixelClass)
 %   the content of the video frame, only its dimensions.
 % 
 % Inputs:
-%   chunks             Cell array of structs (i.e., output from parse_chunks).
-%                      Each struct is expected to contain a 'W' field, which
-%                      in turn has a 'v' field with dimensions [num_frames x rows x cols].
-%   targetChunk        Scalar integer. The 1-based index of the specific chunk
-%                      within 'chunks' for which to determine mask dimensions.
-%   pixelClass         String ('R', 'G', or 'B') specifying the color to identify.
+%   pixelClass          - String ('R', 'G', or 'B') specifying the color to identify.
+%
+% Optional key/value pairs:
+%   'nRows'             - Scalar integer. The number of rows (height) of the camera frame.
+%                         Defaults to 480 if not provided.
+% 
+%   'nCols'             - Scalar integer. The number of columns (width) of the camera frame.
+%                         Defaults to 640 if not provided.
 %
 % Output:
 %   idxMatrix     Single 1D column vector (a mask).
@@ -27,31 +29,22 @@ function idxMatrix = returnPixelIdx(chunks, targetChunk, pixelClass)
 %
 % Examples:
 %{
-    chunks = cell(3, 1);
-    chunks{1}.W.v = uint8(rand(30, 480, 640) * 255);
-    chunks{2}.W.v = uint8(rand(30, 480, 640) * 255);
-    chunks{3}.W.v = uint8(rand(30, 480, 640) * 255);
-    idxMatrix_RED_chunk1 = returnPixelIdx(chunks, 1, 'R');
-    idxMatrix_GREEN_chunk2 = returnPixelIdx(chunks, 2, 'G');
-    idxMatrix_BLUE_chunk3 = returnPixelIdx(chunks, 3, 'B');
+    ---- How to use with Chunks Data ----
+    1. ** create necessary file paths **
+    2. ** parse Chunks as normal **
+
+    [~, actual_nRows, actual_nCols] = size(chunks{i}.W.v)
+    X_mask = returnPixelIdx('X', 'nRows', actual_nRows, 'nCols', actual_nCols);
 %}
 
-
-% If the input 'chunks' is empty, return an empty cell array. 
-if isempty(chunks)
-    idxMatrix = {};
-    return;
+arguments
+    pixelClass (1,1) string {mustBeMember(pixelClass, {'R', 'G', 'B'})}
+    options.nRows (1,1) {mustBePositive, mustBeInteger} = 480
+    options.nCols (1,1) {mustBePositive, mustBeInteger} = 640
 end
 
-% Navigate to the raw video frames for specified chunk.
-targetData = chunks{targetChunk}.W.v;
-
-% Extract the dimensions of a single frame from the 3D video data. Ignore
-% number of frames.
-[~, nRows, nCols] = size(targetData);
-
-disp(['DEBUG: Inside returnPixelIdx - Derived nRows: ', num2str(nRows)]);
-disp(['DEBUG: Inside returnPixelIdx - Derived nCols: ', num2str(nCols)])
+nRows = options.nRows;
+nCols = options.nCols;
 
 % Initialize 2D Bayer mask.
 temp_idxMatrix = zeros(nRows, nCols, 'uint8');
@@ -61,7 +54,7 @@ switch pixelClass
     case 'R'
         for rr = 1:nRows
             for cc = 1:nCols
-                if mod(rr, 2) ~= 0 && mod(cc, 2) ~= 0
+                if mod(rr - 1, 2) ~= 0 && mod(cc - 1, 2) ~= 0
                    temp_idxMatrix(rr, cc) = 1;
                 end
             end
@@ -70,8 +63,8 @@ switch pixelClass
     case 'G'
         for rr = 1:nRows
             for cc = 1:nCols
-                if (mod(rr, 2) == 0 && mod(cc, 2) ~= 0) || ...
-                   (mod(rr, 2) ~= 0 && mod(cc, 2) == 0)
+                if (mod(rr - 1, 2) == 0 && mod(cc - 1, 2) ~= 0) || ...
+                   (mod(rr - 1, 2) ~= 0 && mod(cc - 1, 2) == 0)
                     temp_idxMatrix(rr, cc) = 1;
                 end
             end
@@ -80,7 +73,7 @@ switch pixelClass
     case 'B'
         for rr = 1:nRows
             for cc = 1:nCols
-                if mod(rr, 2) == 0 && mod(cc, 2) == 0
+                if mod(rr - 1, 2) == 0 && mod(cc - 1, 2) == 0
                     temp_idxMatrix(rr, cc) = 1;
                 end
             end
@@ -88,8 +81,6 @@ switch pixelClass
     otherwise
             error("Invalid pixelClass. Use 'R', 'G', or 'B'.");
 end
-
-disp(['DEBUG: Inside returnPixelIdx - Size of tempBayerMask2D before flattening: ', num2str(size(temp_idxMatrix))]);
 
 % Flatten the 2D mask into a 1D column vector. 
 idxMatrix = temp_idxMatrix;
