@@ -53,8 +53,8 @@ temp_idxMatrix = zeros(nRows, nCols, dtype=np.uint8)
 % (you can calculate this on your own, but if you want to save yourself some work)
 addpath(getpref('lightLoggerAnalysis', 'light_logger_libraries_matlab')); 
 world_util = import_pyfile(getpref('lightLoggerAnalysis', 'world_util_path')); 
-R_pixel_coords = world_util.WORLD_R_PIXELS + 1; % + 1 here since Python indices are 0 indexed and MATLAB is 1 
-B_pixel_coords = world_util.WORLD_G_PIXELS + 1; % they are in the shape [ (row, col)  ]
+R_pixel_coords = double(world_util.WORLD_R_PIXELS) + 1; % + 1 here since Python indices are 0 indexed and MATLAB is 1 
+B_pixel_coords = double(world_util.WORLD_G_PIXELS) + 1; % they are in the shape [ (row, col)  ]
 
 switch pixelClass
     case 'R' % You might have to ensure pixel class is upper case if you're going to do this (not entirely sure with MATLAB)
