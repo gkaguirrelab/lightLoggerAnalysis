@@ -29,12 +29,19 @@ function idxMatrix = returnPixelIdx(pixelClass, options)
 %
 % Examples:
 %{
-    ---- How to use with Chunks Data ----
+    ---- To Use With Chunks Data
     1. ** create necessary file paths **
     2. ** parse Chunks as normal **
 
     [~, actual_nRows, actual_nCols] = size(chunks{i}.W.v)
     X_mask = returnPixelIdx('X', 'nRows', actual_nRows, 'nCols', actual_nCols);
+    
+    ---- To Express Mean Signal of Each Frame for Different Color Channel
+    myChunk = chunks{1};
+    for tt=1:5400; 
+    myFrame = squeeze(myChunk.W.v(tt,:,:)); 
+    myVal(tt) = mean(myFrame(myIdx)); 
+
 %}
 
 arguments
