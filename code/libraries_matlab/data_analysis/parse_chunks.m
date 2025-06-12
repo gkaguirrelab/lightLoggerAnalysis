@@ -1,5 +1,4 @@
 function chunks = parse_chunks(path_to_experiment,...
-                               lightlogger_libraries_matlab, Pi_util_path,...
                                apply_digital_gain, use_mean_frame, convert_time_units, convert_to_floats,...
                                time_ranges, chunk_ranges, mean_axes, contains_agc_metadata,...
                                password...
@@ -8,7 +7,6 @@ function chunks = parse_chunks(path_to_experiment,...
 %
 % Syntax:
 % function chunks = parse_chunks(path_to_experiment, ...
-%                                lightlogger_libraries_matlab, Pi_util_path,...
 %                                apply_digital_gain, use_mean_frame, convert_time_units, convert_to_floats,...
 %                                time_ranges, chunk_ranges, mean_axes, contains_agc_metadata,...
 %                                password...
@@ -23,12 +21,6 @@ function chunks = parse_chunks(path_to_experiment,...
 % Inputs:
 %   path_to_experiment    - String. The path to the suprafile 
 %                           containing all of the chunks 
-% 
-%   lightlogger_libraries_matlab  - String. Path to the utilized MATLAB 
-%                                   helper functions (e.g. import_pyfile)
-%                                   from the lightlogger repo                                            
-%
-%   Pi_util_path           - String. Path to the Pi_util.py helper file
 %
 %
 %   apply_digital_gain    - Logical. Whether or not to apply 
@@ -92,8 +84,6 @@ function chunks = parse_chunks(path_to_experiment,...
     % Parse and validate the input arguments
     arguments 
         path_to_experiment {mustBeText}; % The path to the suprafolder for this experiment
-        lightlogger_libraries_matlab {mustBeText} = fullfile(fileparts(fileparts(fileparts(mfilename("fullpath")))), "libraries_matlab"); % Path to the utilized MATLAB helper functions (chunk_dict_to_matlab)
-        Pi_util_path {mustBeText} = fullfile(fileparts(mfilename("fullpath")), 'Pi_util');  % Path to the Pi_util.py helper file
         apply_digital_gain {mustBeNumericOrLogical} = false; % Whether or not to apply digital gain values to each frame 
         use_mean_frame {mustBeNumericOrLogical} = false; % Whether to use the mean frame from the camera sensors or the entire frames 
         convert_time_units {mustBeNumericOrLogical} = false; % Whether to convert different time units from the different sensors all to seconds 
@@ -106,10 +96,10 @@ function chunks = parse_chunks(path_to_experiment,...
     end 
 
     % Append path to the individual chunk parsing helper function 
-    addpath(lightlogger_libraries_matlab); 
+    addpath(getpref("lightLoggerAnalysis", "light_logger_libraries_matlab")); 
 
     % Load in the Pi util helper file 
-    Pi_util = import_pyfile(Pi_util_path);
+    Pi_util = import_pyfile(getpref("lightLoggerAnalysis", "Pi_util_path"));
 
     % Apply the default time ranges to splice out of the video if not supplied 
     if(~isstruct(time_ranges))

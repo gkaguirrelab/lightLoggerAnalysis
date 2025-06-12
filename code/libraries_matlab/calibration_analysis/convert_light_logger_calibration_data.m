@@ -12,6 +12,7 @@ function LightLoggerCalibrationData = convert_light_logger_calibration_data(expe
         mean_axes = struct; 
         mean_axes.W = [1, 2]; 
         mean_axes.P = [1, 2];
+        mean_axes.M = [];
     end 
 
     disp("Conversion | Importing libraries...");
@@ -21,38 +22,43 @@ function LightLoggerCalibrationData = convert_light_logger_calibration_data(expe
     tbUse('combiLEDToolbox'); 
 
     % Add the path to our misc MATLAB utility functions
-    addpath(fullfile(fileparts(fileparts(mfilename("fullpath"))), "libraries_matlab"));
+    addpath(getpref("lightLoggerAnalysis", "light_logger_libraries_matlab"));
 
     % Import the Python library used for downloading from Dropbox 
-    Pi_util_path = fullfile(fileparts(fileparts(mfilename("fullpath"))), "raspberry_pi_firmware", "utility", "Pi_util.py"); 
-    Pi_util = import_pyfile(Pi_util_path);
+    Pi_util = import_pyfile(getpref("lightLoggerAnalysis", "Pi_util_path"));
 
-    % Next, we will construct the path to the CalibrationData struct which contains information about 
-    % the experiment
+    % Load in the Calibration Metadata 
     NDF_folder_path = fullfile(experiment_folder, sprintf("NDF_%d", NDF)); 
-    CalibrationData_struct_filepath = fullfile(NDF_folder_path, "CalibrationData.mat.bytes"); 
-    CalibrationData_struct_file = fopen(CalibrationData_struct_filepath, 'rb'); % Open the file whose bytes represent the CalibrationData struct 
-    CalibrationData_struct_bytes = fread(CalibrationData_struct_file, Inf, '*uint8'); % Load in the bytes from that file
-    CalibrationData = getArrayFromByteStream(CalibrationData_struct_bytes); % Parse the bytes back into a struct
-    fclose(CalibrationData_struct_file); % Close the file
-
+    calibration_metadata = load_calibration_metadata(experiment_folder, NDF_folder_path); 
+   
     % Next, we will load in the recordings and rudimentarily convert the Py.dict to a struct. 
     % Further nested conversion will be needed for each reading method
     disp("Conversion | Parsing recordings...")
     parsed_readings = struct(Pi_util.load_sorted_calibration_files(NDF_folder_path, true, use_mean_frame, true, true, mean_axes)); 
 
     % Convert the subfields to purely MATLAB type
-    parsed_readings.ms_linearity = [] %convert_ms_linearity_to_matlab(CalibrationData.ms_linearity, parsed_readings.ms_linearity);
-    parsed_readings.temporal_sensitivity = convert_temporal_sensitivity_to_matlab(CalibrationData.temporal_sensitivity, parsed_readings.temporal_sensitivity);
-    parsed_readings.phase_fitting = convert_temporal_sensitivity_to_matlab(CalibrationData.phase_fitting, parsed_readings.phase_fitting);
-    parsed_readings.contrast_gamma = convert_temporal_sensitivity_to_matlab(CalibrationData.contrast_gamma, parsed_readings.contrast_gamma);
+    parsed_readings.ms_linearity = convert_ms_linearity_to_matlab(calibration_metadata.ms_linearity, parsed_readings.ms_linearity);
+    parsed_readings.temporal_sensitivity = convert_temporal_sensitivity_to_matlab(calibration_metadata.temporal_sensitivity, parsed_readings.temporal_sensitivity);
+    parsed_readings.phase_fitting = convert_temporal_sensitivity_to_matlab(calibration_metadata.phase_fitting, parsed_readings.phase_fitting);
+    parsed_readings.contrast_gamma = convert_temporal_sensitivity_to_matlab(calibration_metadata.contrast_gamma, parsed_readings.contrast_gamma);
 
     % Initialize a return struct 
-    LightLoggerCalibrationData.CalibrationData = CalibrationData;
-    LightLoggerCalibrationData.ParsedReadings = parsed_readings; 
+    LightLoggerCalibrationData.metadata = calibration_metadata;
+    LightLoggerCalibrationData.readings = parsed_readings; 
 
     return ; 
 
+end 
+
+% Local function to load in the Calibration struct from the raw bytes 
+function calibration_metadata = load_calibration_metadata(experiment_folder, NDF_folder_path)
+    % Next, we will construct the path to the CalibrationData struct which contains information about 
+    % the experiment
+    calibration_metadata_struct_filepath = fullfile(NDF_folder_path, "CalibrationData.mat.bytes"); 
+    calibration_metadata_struct_file = fopen(calibration_metadata_struct_filepath, 'rb'); % Open the file whose bytes represent the CalibrationData struct 
+    calibration_metadata_struct_bytes = fread(calibration_metadata_struct_file, Inf, '*uint8'); % Load in the bytes from that file
+    calibration_metadata = getArrayFromByteStream(calibration_metadata_struct_bytes); % Parse the bytes back into a struct
+    fclose(calibration_metadata_struct_file); % Close the file
 end 
 
 % Local function to convert the ms linearity field of the readings dict to pure 

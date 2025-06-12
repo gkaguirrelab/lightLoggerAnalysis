@@ -43,19 +43,23 @@ setpref(projectName,'dropboxBaseDir',dropboxBaseDir); % main directory path
 setpref(projectName,'dataBaseDir',fullfile(dropboxBaseDir,'FLIC_data'));
 
 % Set the default cal directory to this project
-calLocalData = fullfile(tbLocateProjectSilent(projectName),'cal');
+calLocalData = fullfile(tbLocateProject(projectName),'cal');
 setpref('combiLEDToolbox','CalDataFolder',calLocalData);
 
 % Find the light logger directory 
 light_logger_path = tbLocateProject('lightLogger');
+combiExperiments_path = tbLocateProject('combiExperiments');
      
 % Save the LightLogger MATLAB libraries used in LightLogger Analysis
 % as a pref
 light_logger_libraries_matlab = fullfile(light_logger_path, "libraries_matlab"); 
 setpref(projectName, 'light_logger_libraries_matlab', light_logger_libraries_matlab); 
 
+% Save the path to combiExperiments 
+setpref(projectName, 'combiExperiments_path', combiExperiments_path);
+
 % Save the paths to relevant Python libraries as prefs
-Pi_util_path = fullfile(light_logger_path, "raspberry_pi_firmware", "utility", "Pi_uti.py");
+Pi_util_path = fullfile(light_logger_path, "raspberry_pi_firmware", "utility", "Pi_util.py");
 setpref(projectName, 'Pi_util_path', Pi_util_path); 
 world_util_path = fullfile(light_logger_path, "world", "world_util.py"); 
 setpref(projectName, 'world_util_path', world_util_path); 

@@ -1,4 +1,4 @@
-function plot_chunks(chunks, lightlogger_libraries_matlab, path_to_ms_util)
+function plot_chunks(chunks)
 % Plot all of the sensors readings for all of the chunks in a parsed_chunks
 % cell. Treat this as one large timeseries and video and label sensors 
 % accordingly. Convert the counts to contrast units to put the sensors 
@@ -17,12 +17,6 @@ function plot_chunks(chunks, lightlogger_libraries_matlab, path_to_ms_util)
 %   chunks                - Cell. Cell array of parsed chunk 
 %                           structs. 
 %
-%   lightlogger_libraries_matlab  - String. Path to the utilized MATLAB 
-%                                   helper functions (e.g. import_pyfile)
-%                                   from the lightlogger repo       
-% 
-%   Pi_util_path          - String. Path to the ms_util.py helper file
-%
 % Outputs:
 %
 %   NONE                
@@ -31,23 +25,19 @@ function plot_chunks(chunks, lightlogger_libraries_matlab, path_to_ms_util)
 %{
     path_to_experiment = '/Volumes/EXTERNAL1/test_folder_0';
     chunks = parse_chunks(path_to_experiment, true, true, true);
-    matlab_analysis_libraries_path = "/Users/zacharykelly/lightLogger/libraries_matlab"; 
-    path_to_ms_util = "lightLogger/ms/ms_util.py";
     plot_chunks(chunks, matlab_analysis_libraries_path, path_to_ms_util);
 %}
 
     arguments 
         chunks; % Cell array of parsed chunks 
-        lightlogger_libraries_matlab {mustBeText} = fullfile(fileparts(fileparts(fileparts(mfilename("fullpath")))), "libraries_matlab"); % Path to the utilized MATLAB helper functions (chunk_dict_to_matlab) 
-        path_to_ms_util {mustBeText} = fullfile(fileparts(fileparts(fileparts(mfilename("fullpath")))), "ms", "ms_util"); % Path to the Python MS utility file
     end 
     
     % First, let's add the MATLAB helper libraries to the path 
-    addpath(lightlogger_libraries_matlab); 
+    addpath(getpref('lightLoggerAnalysis', 'light_logger_libraries_matlab')); 
 
     % First, we will retrieve the Python MS util library to help 
     % us more easily plot it 
-    ms_util = import_pyfile(path_to_ms_util);
+    ms_util = import_pyfile(getpref("lightLoggerAnalysis", "ms_util_path"));
 
     % Initialize containers for the flattened readings
     % of world and pupil
@@ -65,7 +55,7 @@ function plot_chunks(chunks, lightlogger_libraries_matlab, path_to_ms_util)
     MS_AS_chunks_v = [];
     MS_TS_chunks_v = [];
     MS_accelerometer_chunks_t = [];
-    MS_accelerometer_t_chunkstarts = []; % Denote the start of each accelerometer chunk 
+    MS_chunkstarts = []; % Denote the start of each chunk for the MS
     MS_LS_chunks_v = [];
     MS_LS_chunks_v_std = [];
     MS_sunglasses_chunks_v = [];
@@ -108,9 +98,6 @@ function plot_chunks(chunks, lightlogger_libraries_matlab, path_to_ms_util)
         MS_light_sensing_chunk_t = chunks{cc}.M.t;
         MS_AS_chunk_v = chunks{cc}.M.v.AS; 
         MS_TS_chunk_v = chunks{cc}.M.v.TS; 
-
-        MS_accelerometer_t_chunkstarts = [MS_accelerometer_t_chunkstarts, chunks{cc}.M.t(1)];
-        MS_accelerometer_chunk_t = double(ms_util.generate_accelerometer_t(chunks{cc}.M.t)); 
         MS_LS_chunk_v = chunks{cc}.M.v.LS; 
 
         MS_sunglasses_chunk_v = chunks{cc}.S.v; 
@@ -175,16 +162,20 @@ function plot_chunks(chunks, lightlogger_libraries_matlab, path_to_ms_util)
             % Calculate the average FPS 
             MS_chunk_fps = numel(MS_light_sensing_chunk_t) / (MS_light_sensing_chunk_t(end) - MS_light_sensing_chunk_t(1));
 
-            % Append them to the flattened arrays
+            % Append the chunk readings to the flattened arrays
             MS_chunks_fps = [MS_chunks_fps, MS_chunk_fps]; 
             MS_light_sensing_chunks_t = [MS_light_sensing_chunks_t, MS_light_sensing_chunk_t];
             MS_AS_chunks_v = [MS_AS_chunks_v; MS_AS_chunk_v];
             MS_TS_chunks_v = [MS_TS_chunks_v; MS_TS_chunk_v];
             
+            MS_accelerometer_chunk_t = double(ms_util.generate_accelerometer_t(chunks{cc}.M.t)); 
             MS_accelerometer_chunks_t = [MS_accelerometer_chunks_t, MS_accelerometer_chunk_t];
             MS_LS_chunks_v = [MS_LS_chunks_v; MS_LS_chunk_v];
     
             MS_sunglasses_chunks_v = [MS_sunglasses_chunks_v, MS_sunglasses_chunk_v];
+
+            MS_chunkstarts = [MS_chunkstarts, chunks{cc}.M.t(1)];
+
 
         end 
 
@@ -352,7 +343,7 @@ function plot_chunks(chunks, lightlogger_libraries_matlab, path_to_ms_util)
     end 
 
     % Now, let's add vertical lines to denote chunk start points 
-    xline(MS_accelerometer_t_chunkstarts, '--r', 'Chunk Start', 'HandleVisibility', 'Off')
+    xline(MS_chunkstarts, '--r', 'Chunk Start', 'HandleVisibility', 'Off')
 
     legend show ; 
     xlabel("Time [s]");
@@ -372,7 +363,7 @@ function plot_chunks(chunks, lightlogger_libraries_matlab, path_to_ms_util)
     end 
     
     % Now, let's add vertical lines to denote chunk start points 
-    xline(MS_accelerometer_t_chunkstarts, '--r', 'Chunk Start', 'HandleVisibility', 'Off');
+    xline(MS_chunkstarts, '--r', 'Chunk Start', 'HandleVisibility', 'Off');
 
     legend show ; 
     xlabel("Time [s]");
@@ -451,6 +442,7 @@ function plot_chunks(chunks, lightlogger_libraries_matlab, path_to_ms_util)
     nexttile;
     title("AGC Settings by Frame");
     hold on;
+    xlabel("Frame #")
     xlim([-100, size(world_agc_settings, 1)]);
 
     yyaxis left; 
@@ -563,7 +555,7 @@ function plot_chunks(chunks, lightlogger_libraries_matlab, path_to_ms_util)
     end 
 
     % Now, let's add vertical lines to denote chunk start points 
-    xline(MS_accelerometer_t_chunkstarts, '--r', 'Chunk Start', 'HandleVisibility', 'Off')
+    xline(MS_chunkstarts, '--r', 'Chunk Start', 'HandleVisibility', 'Off')
 
     legend show ; 
     xlabel("Time [s]");
@@ -583,7 +575,7 @@ function plot_chunks(chunks, lightlogger_libraries_matlab, path_to_ms_util)
     end 
     
     % Now, let's add vertical lines to denote chunk start points 
-    xline(MS_accelerometer_t_chunkstarts, '--r', 'Chunk Start', 'HandleVisibility', 'Off');
+    xline(MS_chunkstarts, '--r', 'Chunk Start', 'HandleVisibility', 'Off');
 
     legend show ; 
     xlabel("Time [s]");
