@@ -42,14 +42,35 @@ arguments
     fps (1,1) {mustBeScalarOrEmpty} = 200
     options.applyFieldCorrection (1,1) logical = false
     options.lineResolution (1,1) logical = false
-    options.spatialChannel (1,1) string = 'RGB';
+    options.spatialChannel (1,1) string = {'R', 'B', 'G'};
 end
+
+% Get dimensions from the input video data (v)
+[nFrames, nRows, nCols] = size(v);
 
 % Combine data across space. We modify v to either nan components we do
 % not wish to include, or replace elements with derived values
 switch options.spatialChannel
-    case 'RGB'
-        % no change
+    case {'R', 'B', 'G'}
+        pixel_mask = returnPixelIdx(options.spatialChannel, 'nRows', nRows, 'nCols', nCols);
+
+        % Initialize 'masked_v' as a double array of NaNs 
+        masked_v = nan(size(v));
+
+        % Loop through each frame in the video data and apply color mask
+        for t = 1:nFrames
+            % Extract current 2D frame
+            current_frame = squeeze(v(t, :, :)); 
+            % Flatten 2D frame into single 1D vector
+            flattened_frame = current_frame(:);
+            % Apply mask and set '0' pixel values to NaN
+            flattened_frame(pixel_mask ~= 1) = NaN;
+            % Reshape masked 1D vector back into original 2D shape
+            masked_v(t, :, :) = reshape(flattened_frame, nRows, nCols);
+        end
+    
+        v = masked_v;
+
     otherwise
         error('Not a defined channel setting')
 end

@@ -10,11 +10,11 @@ myChunkIdx = 1;
 myChunk = chunks{myChunkIdx};
 
 % Get dimensions from video data
-[numFrames, actual_nRows, actual_nCols] = size(myChunk.W.v);
+[nFrames, nRows, nCols] = size(myChunk.W.v);
 
-mask_R = returnPixelIdx('R', 'nRows', actual_nRows, 'nCols', actual_nCols);
-mask_G = returnPixelIdx('G', 'nRows', actual_nRows, 'nCols', actual_nCols);
-mask_B = returnPixelIdx('B', 'nRows', actual_nRows, 'nCols', actual_nCols);
+mask_R = returnPixelIdx('R', 'nRows', nRows, 'nCols', nCols);
+mask_G = returnPixelIdx('G', 'nRows', nRows, 'nCols', nCols);
+mask_B = returnPixelIdx('B', 'nRows', nRows, 'nCols', nCols);
 
 for tt = 1:numFrames
     % Extract current 2D frame
@@ -37,7 +37,7 @@ end
 
 % Visualize the result
 figure;
-plot(1:numFrames, avgOverTime_R, 'R', 1:numFrames, avgOverTime_G, 'G', 1:numFrames, avgOverTime_B, 'B');
+plot(1:nFrames, avgOverTime_R, 'R', 1:Frames, avgOverTime_G, 'G', 1:Frames, avgOverTime_B, 'B');
 xlabel('Frame Number');
 ylabel('Mean Intensity');
 title('Mean Signal of Each Color Channel Over Time');
