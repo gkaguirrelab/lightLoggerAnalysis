@@ -18,6 +18,8 @@ function [msLinearityFigHandles, ttfFigHandle] = analyze_light_logger_calibratio
         ttfFigHandle = []; % TODO: Explain this: 
     end 
 
+
+
     % First, extract the broad subfields of the calibration information and the parsed readings
     % from the input struct
     calibration_metadata = LightLoggerCalibrationData.metadata;

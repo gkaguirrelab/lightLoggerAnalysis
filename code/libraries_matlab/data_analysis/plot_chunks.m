@@ -244,16 +244,16 @@ function plot_chunks(chunks)
         MS_LS_chunks_v_std(rr, :) = context_window_std; 
 
     end
+    
+    % Find the min/max time (x-axis) of the sensors we will plot together
+    min_common_time = min([min(world_chunks_t), min(pupil_chunks_t), min(MS_light_sensing_chunks_t), min(MS_accelerometer_chunks_t)]); 
+    max_common_time = max([max(world_chunks_t), max(pupil_chunks_t), max(MS_light_sensing_chunks_t), max(MS_accelerometer_chunks_t)]); 
 
     % Open a figure for plotting 
     % information about the performance of sensors combined 
     figure ; 
     t = tiledlayout(3,3); 
     title(t, "Sensors' Performance Summarized", "FontWeight", "bold");
-    
-    % Find the min/max time (x-axis) of the sensors we will plot together
-    min_common_time = min([min(world_chunks_t), min(pupil_chunks_t), min(MS_light_sensing_chunks_t), min(MS_accelerometer_chunks_t)]); 
-    max_common_time = max([max(world_chunks_t), max(pupil_chunks_t), max(MS_light_sensing_chunks_t), max(MS_accelerometer_chunks_t)]); 
 
     % First, plot the world sensor counts 
     nexttile; 
@@ -595,3 +595,11 @@ function plot_chunks(chunks)
 
 
 end
+
+% Local function to plot the summarized figure 
+
+% Local function to plot the world camera's figure 
+
+% Local function to plot the pupil camera's figure 
+
+% Local function to plot the MS's figure 
