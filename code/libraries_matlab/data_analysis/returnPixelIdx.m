@@ -1,4 +1,4 @@
-function idxMatrix = returnPixelIdx(pixelClass, options)
+function [idxMatrix_flat, idxMatrix_mat] = returnPixelIdx(pixelClass, options)
 % Generates 1D pixel location mask for a specific and RBG value. 
 %
 % Syntax:l
@@ -34,7 +34,7 @@ function idxMatrix = returnPixelIdx(pixelClass, options)
     2. ** parse Chunks as normal **
 
     [~, actual_nRows, actual_nCols] = size(chunks{i}.W.v)
-    X_mask = returnPixelIdx('X', 'nRows', actual_nRows, 'nCols', actual_nCols);
+    [X_mask_flat, X_mask_mat] = returnPixelIdx('X', 'nRows', actual_nRows, 'nCols', actual_nCols);
     
     ---- To Express Mean Signal of Each Frame for Different Color Channel
     myChunk = chunks{1};
@@ -53,11 +53,11 @@ end
 nRows = options.nRows;
 nCols = options.nCols;
 
-% Initialize 2D Bayer mask.
+% Initialize 2D Bayer mask
 temp_idxMatrix = zeros(nRows, nCols, 'uint8');
 
 switch pixelClass
-    % Mark positions for RED pixels. 
+    % Mark positions for RED pixels
     case 'R'
         for rr = 1:nRows
             for cc = 1:nCols
@@ -66,7 +66,7 @@ switch pixelClass
                 end
             end
         end
-    % Mark positions for GREEN pixels. 
+    % Mark positions for GREEN pixels 
     case 'G'
         for rr = 1:nRows
             for cc = 1:nCols
@@ -76,7 +76,7 @@ switch pixelClass
                 end
             end
         end
-    % Mark positions for BLUE pixels. 
+    % Mark positions for BLUE pixels 
     case 'B'
         for rr = 1:nRows
             for cc = 1:nCols
@@ -89,5 +89,7 @@ switch pixelClass
             error("Invalid pixelClass. Use 'R', 'G', or 'B'.");
 end
 
-% Flatten the 2D mask into a 1D column vector. 
-idxMatrix = temp_idxMatrix;
+% Flatten the 2D mask into a 1D column vector
+idxMatrix_flat = temp_idxMatrix(:);
+% Preserve 2D mask 
+idxMatrix_mat = temp_idxMatrix;
