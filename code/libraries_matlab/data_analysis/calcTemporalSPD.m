@@ -52,24 +52,23 @@ end
 % not wish to include, or replace elements with derived values
 switch options.spatialChannel
     case {'R', 'B', 'G'}
-        pixel_mask = returnPixelIdx(options.spatialChannel, 'nRows', nRows, 'nCols', nCols);
+        % Create 2D binary mask across all frames where 1 is a pixel of the
+        % desired color, everything else is 0
+        [~, idxMatrix_mat_2D] = returnPixelIdx(options.spatialChannel, 'nRows', nRows, 'nCols', nCols);
+        
+        % Create a 3D binary mask by replicating 2D mask across the time
+        % dimension. Ensures mask and 'v' are the same size.
+        idxMatrix_mat_3D = repmat(idxMatrix_mat_2D, [nFrames, 1, 1]);
+        
+        % Apply v-compatible mask and set '0' pixel values to NaN
+        v(idxMatrix_mat_3D ~= 1) = NaN;
 
-        % Initialize 'masked_v' as a double array of NaNs 
-        masked_v = nan(size(v));
-
-        % Loop through each frame in the video data and apply color mask
-        for t = 1:nFrames
-            % Extract current 2D frame
-            current_frame = squeeze(v(t, :, :)); 
-            % Flatten 2D frame into single 1D vector
-            flattened_frame = current_frame(:);
-            % Apply mask and set '0' pixel values to NaN
-            flattened_frame(pixel_mask ~= 1) = NaN;
-            % Reshape masked 1D vector back into original 2D shape
-            masked_v(t, :, :) = reshape(flattened_frame, nRows, nCols);
-        end
-    
-        v = masked_v;
+        % ASSERT FUNCTION FOR NaN COUNT     ----(might not need this)
+        assert(sum(isnan(v), 'all') == sum(idxMatrix_mat_3D == 0, 'all'), ...
+        'Assertion failed: Number of NaNs in v (%d) does not match expected masked pixels (%d) for %s channel.');
+        % ASSERT FUNCTION FOR NaN VALUES
+        assert(all(isnan(v(idxMatrix_mat_3D == 0))) && (all(~isnan(v(idxMatrix_mat_3D ~= 0)))), ...
+            'Assertion failed: Incorrect NaN pattern after spatial channel masking for selected channel.');
 
     otherwise
         error('Not a defined channel setting')
