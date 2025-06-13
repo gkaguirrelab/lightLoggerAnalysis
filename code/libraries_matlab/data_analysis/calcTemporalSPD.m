@@ -56,9 +56,6 @@ switch options.spatialChannel
         % desired color, everything else is 0
         [~, idxMatrix_mat_2D] = returnPixelIdx(options.spatialChannel, 'nRows', nRows, 'nCols', nCols);
         
-        % Convert v to double-precision type to store NaN values
-        v = double(v);
-
         % Create a 3D binary mask by replicating 2D mask across the time
         % dimension. Ensures mask and 'v' are the same size.
         idxMatrix_mat_3D = repmat(idxMatrix_mat_2D, [nFrames, 1, 1]);
@@ -66,7 +63,7 @@ switch options.spatialChannel
         % Apply v-compatible mask and set '0' pixel values to NaN
         v(idxMatrix_mat_3D ~= 1) = NaN;
 
-        % ASSERT FUNCTION FOR NaN COUNT
+        % ASSERT FUNCTION FOR NaN COUNT     ----(might not need this)
         assert(sum(isnan(v), 'all') == sum(idxMatrix_mat_3D == 0, 'all'), ...
         'Assertion failed: Number of NaNs in v (%d) does not match expected masked pixels (%d) for %s channel.');
         % ASSERT FUNCTION FOR NaN VALUES
