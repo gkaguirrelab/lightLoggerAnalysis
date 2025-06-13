@@ -1,5 +1,4 @@
 function generate_playable_videos(recording_path, output_dir,...
-                                  lightlogger_libraries_matlab, Pi_util_path,...
                                   apply_digital_gain, fill_missing_frames, draw_pupil_ROI, debayer_images,...
                                   time_ranges,... 
                                   chunk_ranges,...
@@ -10,7 +9,6 @@ function generate_playable_videos(recording_path, output_dir,...
 %
 % Syntax:
 %   generate_playable_videos(recording_path, output_dir,...
-%                            lightlogger_libraries_matlab, Pi_util_path,...
 %                            apply_digital_gain, fill_missing_frames, draw_pupil_ROI, debayer_images,...
 %                            time_ranges,... 
 %                            chunk_ranges,...
@@ -29,12 +27,6 @@ function generate_playable_videos(recording_path, output_dir,...
 %
 %   output_dir            - String. The directory where the new
 %                           directory of videos will be output. 
-%    
-%   lightlogger_libraries_matlab  - String. Path to the utilized MATLAB 
-%                                   helper functions (e.g. import_pyfile)
-%                                   from the lightlogger repo   
-% 
-%   Pi_util_path           - String. Path to the Pi_util.py helper file
 %
 %   apply_digital_gain    - Logical. Whether or not to apply 
 %                           digital gain to the frames 
@@ -47,7 +39,6 @@ function generate_playable_videos(recording_path, output_dir,...
 %   draw_pupil_ROI        - Logical. Whether or not to 
 %                           highlight the region that is 
 %                           used for the pupil AGC 
-%
 %
 %   debayer_images        - Logical. Whether or not to debayer 
 %                           the images when constructing them 
@@ -78,20 +69,16 @@ function generate_playable_videos(recording_path, output_dir,...
 %{
     path_to_experiment = '/Volumes/EXTERNAL1/fixedWalkingPAGC';
     output_dir = "./"; 
-    matlab_analysis_libraries_path = "../example_lib_path"; 
-    Pi_util_path = "../Pi_util.py"; 
     apply_digital_gain = true; 
     fill_missing_frames = true; 
     draw_pupil_ROI = false; 
     debayer_images = false; 
-    generate_playable_videos(path_to_experiment, output_dir, matlab_analysis_libraries_path, Pi_util_path, apply_digital_gain, fill_missing_frames, draw_pupil_ROI, debayer_images) 
+    generate_playable_videos(path_to_experiment, output_dir, apply_digital_gain, fill_missing_frames, draw_pupil_ROI, debayer_images) 
 %}
 
     arguments
         recording_path {mustBeText}; % The path to the folder of the recording 
         output_dir {mustBeText}; % The directory in which a new folder containing videos from each sensor will go 
-        lightlogger_libraries_matlab {mustBeText} = fullfile(fileparts(fileparts(fileparts(mfilename("fullpath")))), "libraries_matlab"); % Path to the utilized MATLAB helper functions (chunk_dict_to_matlab)
-        Pi_util_path {mustBeText} = fullfile(fileparts(mfilename("fullpath")), 'Pi_util');  % Path to the Pi_util.py helper file
         apply_digital_gain {mustBeNumericOrLogical} = false; % Whether or not to apply digital gain when generating the videos 
         fill_missing_frames {mustBeNumericOrLogical} = false; % Whether or not to fill in the missing frames in videos with black dummy frames 
         draw_pupil_ROI {mustBeNumericOrLogical} = false; % Whether or not to highlight the region that is used for the pupil AGC 
@@ -102,7 +89,7 @@ function generate_playable_videos(recording_path, output_dir,...
     end
 
     % Append path to the Python file importer;
-    addpath(lightlogger_libraries_matlab); 
+    addpath(getpref("lightLoggerAnalysis", "light_logger_libraries_matlab")); 
 
     % Set the default values for certain input structs
     % Apply the default time ranges to splice out of the video if not supplied 
@@ -132,7 +119,7 @@ function generate_playable_videos(recording_path, output_dir,...
     end 
 
     % Import the Python utility function 
-    Pi_util = import_pyfile(Pi_util_path);
+    Pi_util = import_pyfile(getpref("lightLoggerAnalysis", "Pi_util_path"));
 
     % Call the Python helper function 
     Pi_util.generate_playable_videos(recording_path, output_dir, apply_digital_gain,...
