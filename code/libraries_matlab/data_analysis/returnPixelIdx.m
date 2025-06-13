@@ -1,5 +1,5 @@
 function [idxMatrix_flat, idxMatrix_mat] = returnPixelIdx(pixelClass, options)
-% Generates 1D pixel location mask for a specific and RBG value. 
+% Generates 1D and 2D pixel location masks for a specific RBG value. 
 %
 % Syntax:l
 %   idxMatrix = returnPixelIdx(pixelClass, options)
@@ -23,25 +23,27 @@ function [idxMatrix_flat, idxMatrix_mat] = returnPixelIdx(pixelClass, options)
 %                         Defaults to 640 if not provided.
 %
 % Output:
-%   idxMatrix     Single 1D column vector (a mask).
-%                 - '1' at indices where the specified color pixel is located, and '0' elsewhere.
-%                 - Length is (nRows * nCols).
+%   idxMatrix_flat      1D column vector (mask).
+%                       - '1' at indices where the specified color pixel is located, and '0' elsewhere.
+%                       - Length is (nRows * nCols).
+% 
+%   idxMatrix_mat       2D matrix (mask).
+%                       - '1' at indices where the specified color pixel is located, and '0' elsewhere.
+%                       - Dimensions are (nRows * nCols).
 %
 % Examples:
 %{
-    ---- To Use With Chunks Data
+    ---- To Use With Chunks Data ----
     1. ** create necessary file paths **
     2. ** parse Chunks as normal **
 
     [~, actual_nRows, actual_nCols] = size(chunks{i}.W.v)
     [X_mask_flat, X_mask_mat] = returnPixelIdx('X', 'nRows', actual_nRows, 'nCols', actual_nCols);
     
-    ---- To Express Mean Signal of Each Frame for Different Color Channel
-    myChunk = chunks{1};
-    for tt=1:5400; 
-    myFrame = squeeze(myChunk.W.v(tt,:,:)); 
-    myVal(tt) = mean(myFrame(myIdx)); 
+    OR (recommended)
 
+    Use plotMeanPixel.m script to express and visualize mean signal of each frame in
+    the chunk for all three color channels.
 %}
 
 arguments
@@ -52,6 +54,9 @@ end
 
 nRows = options.nRows;
 nCols = options.nCols;
+
+assert(mod(nRows, 2) == 0 && mod(nCols, 2) == 0, ...
+    'Assertion failed: Frame dimensions must be even for consistent Bayer pattern generation.');
 
 % Initialize 2D Bayer mask
 temp_idxMatrix = zeros(nRows, nCols, 'uint8');
@@ -66,6 +71,7 @@ switch pixelClass
                 end
             end
         end
+
     % Mark positions for GREEN pixels 
     case 'G'
         for rr = 1:nRows

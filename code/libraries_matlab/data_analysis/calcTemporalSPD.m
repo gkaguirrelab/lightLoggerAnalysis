@@ -68,7 +68,7 @@ switch options.spatialChannel
         'Assertion failed: Number of NaNs in v (%d) does not match expected masked pixels (%d) for %s channel.');
         % ASSERT FUNCTION FOR NaN VALUES
         assert(all(isnan(v(idxMatrix_mat_3D == 0))) && (all(~isnan(v(idxMatrix_mat_3D ~= 0)))), ...
-            'Assertion failed: Incorrect NaN pattern after spatial channel masking for selected channel.');
+            'Assertion failed: Incorrect NaN pattern after spatial channel masking.');
 
     otherwise
         error('Not a defined channel setting')
