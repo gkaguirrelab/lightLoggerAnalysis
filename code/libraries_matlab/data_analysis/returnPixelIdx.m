@@ -71,7 +71,8 @@ switch pixelClass
                 end
             end
         end
-
+        assert((sum(temp_idxMatrix, 'all')) == (nRows * nCols / 2)), ...
+            'Assertion failed: Incorrect count of active pixels (1s) for RED channel';
     % Mark positions for GREEN pixels 
     case 'G'
         for rr = 1:nRows
@@ -82,6 +83,8 @@ switch pixelClass
                 end
             end
         end
+        assert((sum(temp_idxMatrix, 'all')) == (nRows * nCols / 4)), ...
+            'Assertion failed: Incorrect count of active pixels (1s) for RED channel';
     % Mark positions for BLUE pixels 
     case 'B'
         for rr = 1:nRows
@@ -91,6 +94,8 @@ switch pixelClass
                 end
             end
         end
+        assert((sum(temp_idxMatrix, 'all')) == (nRows * nCols / 2)), ...
+            'Assertion failed: Incorrect count of active pixels (1s) for BLUE channel';
     otherwise
             error("Invalid pixelClass. Use 'R', 'G', or 'B'.");
 end
