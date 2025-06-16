@@ -32,6 +32,6 @@ end
     xlabel('Frequency (Hz)');
     ylabel('Spectral Power Density (contrast^2/Hz)');
     title('Temporal SPD');
-    legend show;
+    % legend show;
 
 end

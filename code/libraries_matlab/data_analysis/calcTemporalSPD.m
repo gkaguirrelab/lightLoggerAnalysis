@@ -42,7 +42,7 @@ arguments
     fps (1,1) {mustBeScalarOrEmpty} = 200
     options.applyFieldCorrection (1,1) logical = false
     options.lineResolution (1,1) logical = false
-    options.spatialChannel (1,1) string = {'R', 'B', 'G'};
+    options.spatialChannel (1,1) string {mustBeMember(options.spatialChannel, {'R', 'G', 'B', 'RGB'})} = 'RGB'
 end
 
 % Get dimensions from the input video data (v)
@@ -65,10 +65,12 @@ switch options.spatialChannel
 
         % ASSERT FUNCTION FOR NaN COUNT     ----(might not need this)
         assert(sum(isnan(v), 'all') == sum(idxMatrix_mat_3D == 0, 'all'), ...
-        'Assertion failed: Number of NaNs in v (%d) does not match expected masked pixels (%d) for %s channel.');
+            'Assertion failed: Number of NaNs in v (%d) does not match expected masked pixels (%d) for %s channel.');
         % ASSERT FUNCTION FOR NaN VALUES
         assert(all(isnan(v(idxMatrix_mat_3D == 0))) && (all(~isnan(v(idxMatrix_mat_3D ~= 0)))), ...
             'Assertion failed: Incorrect NaN pattern after spatial channel masking.');
+    
+    case 'RGB'
 
     otherwise
         error('Not a defined channel setting')
