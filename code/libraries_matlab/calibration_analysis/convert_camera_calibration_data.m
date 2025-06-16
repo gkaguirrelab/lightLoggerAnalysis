@@ -1,7 +1,9 @@
-function camera_intrinsics = convert_camera_calibration_data(path_to_images)
+function camera_intrinsics = convert_camera_calibration_data(input_path, output_path)
+
 
     arguments 
-        path_to_images {mustBeText}; % Path to folder containing images (as raw .npy/.blosc) used for Camera Calibration in MATLAB
+        input_path {mustBeText}; % Path to folder containing images (as raw .npy/.blosc) used for Camera Calibration in MATLAB
+        output_path {mustBeText}; % Path to the folder where the converted images will be output as .tiff files
     end 
 
     % First, let's load the Python helper library 
@@ -11,7 +13,7 @@ function camera_intrinsics = convert_camera_calibration_data(path_to_images)
     % Retrieve the calibration images in the form 
     % { (title, image)  }
     calibration_data = cellfun(@(x) image_title_tuple_to_matlab(x),...
-                               cell(world_util.load_calibration_images(path_to_images)),...
+                               cell(world_util.load_calibration_images(input_path)),...
                                'UniformOutput', false...
                               );
 
@@ -20,7 +22,7 @@ function camera_intrinsics = convert_camera_calibration_data(path_to_images)
 
     % Display the images before we send them to be calibrated  
     t = tiledlayout(preview_grid_size(1), preview_grid_size(2)); 
-    sgtitle("Image Preview | Present: ");
+    sgtitle("Image Preview");
     for ii = 1:numel(calibration_data)
         % Move to the next tile 
         nexttile;
@@ -33,12 +35,11 @@ function camera_intrinsics = convert_camera_calibration_data(path_to_images)
         imshow(image);
         title(sprintf("%s", title_str));  
     
+        % Save the image to the output path 
+        % in an uncompressed file format 
+        output_filepath = fullfile(output_path, sprintf("%s.tiff", title_str));
+        imwrite(uint8(image), output_filepath, 'Compression', 'none'); 
     end 
-
-    % Extract only the images from the array 
-
-    % Save the images as some viewable format
-
 
 end 
 
