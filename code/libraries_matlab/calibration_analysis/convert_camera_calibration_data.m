@@ -31,13 +31,17 @@ function camera_intrinsics = convert_camera_calibration_data(input_path, output_
         title_and_image = calibration_data{ii}; 
         [title_str, image] = title_and_image{:}; 
 
+        % Now, let's extract only the name part 
+        % of the filename 
+        [~, filename, ~] = fileparts(title_str);
+
         % Display the image 
         imshow(image);
         title(sprintf("%s", title_str));  
     
         % Save the image to the output path 
         % in an uncompressed file format 
-        output_filepath = fullfile(output_path, sprintf("%s.tiff", title_str));
+        output_filepath = fullfile(output_path, sprintf("%s.tiff", filename));
         imwrite(uint8(image), output_filepath, 'Compression', 'none'); 
     end 
 
