@@ -110,7 +110,7 @@ for cc = 1:numel(contrast_levels)
         'DisplayName', sprintf("C: %.3f", contrast_levels(cc)));
 
     % Generate the ideal device curve for the world camera
-    world_fps = 200;
+    world_fps = 120;
     xfine = logspace(log10(frequencies(1)),log10(frequencies(end)),100);
     ideal_device = idealDiscreteSampleFilter(xfine, 1/world_fps);
     plot(log10(xfine), ideal_device, "--", "Color",[0.5 0.5 0.5], "DisplayName", "Ideal Device");

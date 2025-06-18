@@ -78,7 +78,12 @@ function chunks = parse_chunks(path_to_experiment,...
 % Examples:
 %{
     path_to_experiment = '/Volumes/EXTERNAL1/test_folder_0';
-    chunks = parse_chunks(path_to_experiment); 
+    apply_digital_gain = true; 
+    use_mean_frame = false; 
+    convert_time_units = true; 
+    convert_to_floats = true; 
+    time_ranges = false; 
+    chunks = parse_chunks(path_to_experiment, apply_digital_gain, use_mean_frame, convert_time_units, convert_to_floats, time_ranges); 
 %}
 
     % Parse and validate the input arguments
