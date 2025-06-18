@@ -40,59 +40,55 @@ function [spd,frq] = calcTemporalSPD( v, fps, options )
 arguments
     v (:,480,640) {mustBeNumeric}
     fps (1,1) {mustBeScalarOrEmpty} = 200
+    options.regionMatrix (:,:) {mustBeNumeric} = ones(480,640);
     options.applyFieldCorrection (1,1) logical = false
     options.lineResolution (1,1) logical = false
-    options.spatialChannel (1,1) string {mustBeMember(options.spatialChannel, {'R', 'G', 'B', 'RGB'})} = 'RGB'
+    options.byChannel (1,1) logical = false
+    options.postreceptoralChannel {mustBeMember(options.postreceptoralChannel,{'LM', 'L-M', 'S'})} = 'S'
 end
 
-% Get dimensions from the input video data (v)
+% Convert video data to double and get dimensions
+v = double(v);
 [nFrames, nRows, nCols] = size(v);
 
-% Combine data across space. We modify v to either nan components we do
-% not wish to include, or replace elements with derived values
-switch options.spatialChannel
-    case {'R', 'B', 'G'}
-        % Create 2D binary mask across all frames where 1 is a pixel of the
-        % desired color, everything else is 0
-        [~, idxMatrix_mat_2D] = returnPixelIdx(options.spatialChannel, 'nRows', nRows, 'nCols', nCols);
-        
-        % Create a 3D binary mask by replicating 2D mask across the time
-        % dimension. Ensures mask and 'v' are the same size.
-        idxMatrix_mat_3D = repmat(idxMatrix_mat_2D, [nFrames, 1, 1]);
-        
-        % Apply v-compatible mask and set '0' pixel values to NaN
-        v(idxMatrix_mat_3D ~= 1) = NaN;
+% Reshape 3D video into 2D matrix
+mat2D_V = reshape(v, nFrames, nRows * nCols);
 
-        % ASSERT FUNCTION FOR NaN COUNT     ----(might not need this)
-        assert(sum(isnan(v), 'all') == sum(idxMatrix_mat_3D == 0, 'all'), ...
-            'Assertion failed: Number of NaNs in v (%d) does not match expected masked pixels (%d) for %s channel.');
-        % ASSERT FUNCTION FOR NaN VALUES
-        assert(all(isnan(v(idxMatrix_mat_3D == 0))) && (all(~isnan(v(idxMatrix_mat_3D ~= 0)))), ...
-            'Assertion failed: Incorrect NaN pattern after spatial channel masking.');
-    
-    case 'RGB'
+% Prepare output
+channels = {'R','G','B'};
+rgbSignal = nan(nFrames, numel(channels));
 
-    otherwise
-        error('Not a defined channel setting')
+for cc = 1:numel(channels)
+
+    % Get 2D Bayer Mask for this channel
+    [~, mask2D] = returnPixelIdx(channels{cc}, 'nRows', nRows, 'nCols', nCols);
+
+    % Flatten and apply regionMatrix mask with logical 'AND'
+    maskVec = mask2D(:) & options.regionMatrix(:);
+
+    % Compute average per frame
+    rgbSignal(:, cc) = mean(mat2D_V(:, maskVec), 2);
+
 end
 
-% If we wish to treat each line of the video as a separate time point, then
-% we reformat v to have the dimensions 640 x 1 x [t * 480]
-if options.lineResolution
-    % Need to implement this step properly
-    % v = reshape(v',1,numel(v));    
-    fps = fps * 480;
-end
+% Convert to LMS
+lmsSignal = cameraToCones(rgbSignal);
 
-% Take the mean of each frame, accounting for nan values. This is the
-% signal
-signal = squeeze(mean(mean(v,2,"omitmissing"),3,"omitmissing"));
+Select a post-receptoral channel
+switch options.postreceptoralChannel
+    case {'LM'}
+        signal = (lmsSignal(:,1)+lmsSignal(:,2))/2;
+    case {'L-M'}
+        signal = (lmsSignal(:,1)-lmsSignal(:,2));
+    case {'S'}
+        signal = ((lmsSignal(:,3)-lmsSignal(:,1))+lmsSignal(:,2))/2;
+end
 
 % Convert to contrast units
-signal = (signal - mean(signal))/mean(signal);
+signal(:,1) = (signal(:,1) - mean(signal(:,1)))/mean(signal(:,1));
 
 % PSD of the signal in units of contrast^2/Hz
-[frq, spd] = simplePSD(signal, fps);
+[frq, spd] = simplePSD(signal(:,1), fps);
 
 end
 

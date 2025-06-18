@@ -18,7 +18,7 @@ function plotSPD(spd, frq)
     test_path = fullfile(dataDir,;
     chunks = parse_chunks(test_path);
     [spd, frq] = calcTemporalSPD(chunks{1}.W.v, 200);
-    PlotSPD(spd, frq);
+    plotSPD(spd, frq);
 %} 
 
 arguments 
