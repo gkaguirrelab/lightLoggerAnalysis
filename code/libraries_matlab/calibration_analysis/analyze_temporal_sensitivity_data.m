@@ -4,8 +4,8 @@ function ttfFigHandle = analyze_temporal_sensitivity_data(CalibrationData, sorte
 % contrast using the Klein photometer and the "ChromaSurf" sofwate. The
 % values are given here, and used for correction of the observed response
 % amplitude below
-testModDepthFrequencies = [0.25,0.5,1,3,6,12,25,50,100];
-testModDepthAmplitudes = [1,1,1,1,0.983,0.975,0.939,0.90,0.66];
+testModDepthFrequencies = [0.1, 0.25,0.5,1,3,6,12,25,50,100];
+testModDepthAmplitudes = [1,1,1,1,1,0.983,0.975,0.939,0.90,0.66];
 
 % Retrieve the contrast levels and frequencies shown to the device
 contrast_levels = CalibrationData.contrast_levels;
@@ -44,14 +44,13 @@ for cc = 1:numel(contrast_levels)
     % Generate a matrix to save the amplitudes per measure per sensor
     local_amplitudes = zeros([n_measures, 4]);
     for nn = 1:n_measures
-
+        % Generate a figure for the sinusoidal fits
         fitsByMeasureHandle = figure('Position',[0,0,500,1500]);
         t = tiledlayout(numel(frequencies),1);
         sgtitle(sprintf("Sensor fits by measure. C: %.3f | M: %d", contrast, nn));
 
         % Iterate over the frequency levels at this contrast
         for ff = 1:numel(frequencies)
-
             % Get this frequency
             frequency = frequencies(ff);
 
@@ -69,7 +68,7 @@ for cc = 1:numel(contrast_levels)
             [world_r2, world_amplitude, ~, world_fit] = fourierRegression( world_v_contrast, world_t, frequency );
 
             % Show the world fit for this combination of contrast measure and frequency
-            nexttile ;
+            nexttile(t) ;
 
             % Plot the world camera and its fit sinusoid
             local_world_t = world_t - world_t(1);
@@ -87,11 +86,44 @@ for cc = 1:numel(contrast_levels)
 
             % Save the amplitude for this measure
             local_amplitudes(nn, 1) = world_amplitude;
-
             world_amplitude_data(nn,ff) = world_amplitude;
 
-
         end
+
+        % Generate a figure to illustrate AGC settings performance
+        AGCByMeasureHandle = figure('Position',[0,0,500,1500]);
+        t2 = tiledlayout(numel(frequencies), 1);
+        sgtitle(sprintf("AGC performance by measure. C: %.3f | M: %d", contrast, nn));
+
+        for ii = 1:numel(frequencies)
+            % Get this frequency
+            frequency = frequencies(ff);
+
+            % Retrieve the measurement for this combination
+            % of contrast and frequency and measurement number
+            measurement = sorted_measurements{cc, ff, nn};
+
+            % Retreive the world settings for this measure 
+            world_settings = measurement.W.settings;
+
+            % Show the world AGC performance for this measure 
+            nexttile(t2); 
+        
+            yyaxis left; 
+            plot(world_t, world_settings.Again, '-b', 'DisplayName', 'AnalogueGain'); 
+            hold on; 
+            plot(world_t, world_settings.Dgain, '-r', 'DisplayName', 'DigitalGain');
+            ylabel("Gain Value"); 
+
+            yyaxis right; 
+            plot(world_t, world_settings.exposure, '-g', 'DisplayName', 'Exposure [s]'); 
+
+            % Label the plot 
+            title(sprintf("F: %2.2f | R2: %2.2f", frequency, world_r2));
+            xlabel("Time [s]"); 
+            ylabel("Exposure Time [s]"); 
+            legend show; 
+        end 
 
     end
 

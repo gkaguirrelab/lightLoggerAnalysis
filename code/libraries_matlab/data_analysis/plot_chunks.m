@@ -463,7 +463,7 @@ function plot_chunks(chunks)
     end
     hold on; 
     ylabel("Exposure"); 
-    ylim([0, 5100]); 
+    ylim([0, 10000]); 
 
     legend show;  
 
