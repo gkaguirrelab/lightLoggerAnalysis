@@ -38,18 +38,21 @@ function [meta, signal] = extractLabSphereData(filename)
 C = readcell(filename, 'Delimiter', ',');
 
 % Separate row names from raw data
-rowNames = string(C(:,1));
 rawData  = C(:,2:end);
 nScans   = size(rawData,2);
 
 % Get human‐readable timestamps
-tsRow   = find(rowNames == "TimeStamp:", 1);
-stamps  = string(rawData(tsRow,:));
+stamps = string(rawData(2,:));
+comments = string(rawData(8,:));
 
-% 4) Print available scan options for user
+% Display scans with timestamp and comment
 fprintf('Available scans:\n');
 for i = 1:nScans
-  fprintf('  %2d: %s\n', i, stamps(i));
+    if strlength(comments(i)) > 0
+        fprintf('  %2d: %s  — %s\n  ', i, char(stamps(i)), char(comments(i)));
+    else
+        fprintf('  %2d: %s\n  ', i, char(stamps(i)));
+    end
 end
 
 % Prompt user to select scan number
@@ -58,34 +61,14 @@ if ~isscalar(sel) || sel<1 || sel>nScans || sel~=round(sel)
   error('Invalid scan number. Must be an integer between 1 and %d.', nScans);
 end
 
-% Define desired data rows and their field names
-  rows = { ...
-    'Sample Rate (Hz):'
-    'Minimum Value:'
-    'Maximum Value:'
-    'Fundamental Frequency (Hz):'
-    'Percent Flicker:'
-  };
-  fieldNames = { ...
-    'SampleRateHz'
-    'MinimumValue'
-    'MaximumValue'
-    'FundamentalFrequencyHz'
-    'PercentFlicker'
-  };
-
-% Initialize output struct and extract each metadata value
+% Initialize output struct and extract desired metadata values
 meta = struct();
-
-for k = 1:numel(rows)
-  idx = find(rowNames == rows{k},1);
-  raw = rawData{idx, sel};
-  meta.(fieldNames{k}) = raw;
-end
+meta.SampleRateHz = rawData{10, sel};
+meta.FundamentalFrequencyHz = rawData{29, sel};
+meta.PercentFlicker = rawData{30, sel};
 
 % Extract time series data and convert into signal vector
-tsDataRow = find(rowNames == "Time Series Data:", 1);
-  seriesCells = rawData(tsDataRow+1:end, sel);
+  seriesCells = rawData(37:end, sel);
   N = numel(seriesCells);
   signal = zeros(N,1);
   for i = 1:N
