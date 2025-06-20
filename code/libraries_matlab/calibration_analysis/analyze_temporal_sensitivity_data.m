@@ -95,7 +95,7 @@ for cc = 1:numel(contrast_levels)
         t2 = tiledlayout(numel(frequencies), 1);
         sgtitle(sprintf("AGC performance by measure. C: %.3f | M: %d", contrast, nn));
 
-        for ii = 1:numel(frequencies)
+        for ff = 1:numel(frequencies)
             % Get this frequency
             frequency = frequencies(ff);
 
@@ -104,6 +104,7 @@ for cc = 1:numel(contrast_levels)
             measurement = sorted_measurements{cc, ff, nn};
 
             % Retreive the world settings for this measure 
+            world_t = measurement.W.t; 
             world_settings = measurement.W.settings;
 
             % Show the world AGC performance for this measure 
