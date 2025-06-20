@@ -459,10 +459,10 @@ function plot_chunks(chunks)
 
     yyaxis right; 
     if(size(world_agc_settings, 1) > 0)
-        plot(world_agc_settings(:, 3), "o", "DisplayName", "Exposure");
+        plot(world_agc_settings(:, 3), "o", "DisplayName", "Exposure [s]");
     end
     hold on; 
-    ylabel("Exposure"); 
+    ylabel("Exposure Time"); 
     ylim([0, 10000]); 
 
     legend show;  
@@ -504,10 +504,10 @@ function plot_chunks(chunks)
 
     yyaxis right; 
     if(size(pupil_agc_settings, 1) > 0)
-        plot(pupil_agc_settings(:, 3), "o", "DisplayName", "Exposure");
+        plot(pupil_agc_settings(:, 3), "o", "DisplayName", "Exposure [units]");
     end
     hold on; 
-    ylabel("Exposure"); 
+    ylabel("Exposure [units]"); 
     ylim([-2, 515]); 
 
     legend show;  
