@@ -85,10 +85,10 @@ switch options.postreceptoralChannel
 end
 
 % Convert to contrast units
-signal(:,1) = (signal(:,1) - mean(signal(:,1)))/mean(signal(:,1));
+signal = (signal - mean(signal))/mean(signal);
 
 % PSD of the signal in units of contrast^2/Hz
-[frq, spd] = simplePSD(signal(:,1), fps);
+[frq, spd] = simplePSD(signal, fps);
 
 end
 

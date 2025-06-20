@@ -25,6 +25,8 @@ function [meta, signal] = extractLabSphereData(filename)
 % Examples:
 %{
     [meta, signal] = extractLabSphereData('Labsphere_SaveAllScans.csv');
+
+    signal(:,1) = (signal(:,1) - mean(signal(:,1)))/mean(signal(:,1));
     [frq, spd] = simplePSD(signal(:,1), meta.SampleRateHz);
     
     figure;
