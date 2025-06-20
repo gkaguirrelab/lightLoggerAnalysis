@@ -39,7 +39,7 @@ signalRange = [0,255];
 
 % Properties of the sinusoid
 modDurSecs = 10;
-f0 = [0.25, 0.5, 1, 3, 6, 12, 25, 50, 100];
+f0 = [0.1, 0.25, 0.5, 1, 3, 6, 12, 25, 50, 100];
 contrast = 0.5;
 backgroundNDF = [0,-1,-2,-3,-4];
 
@@ -68,7 +68,7 @@ for bb = 1:length(backgroundNDF)
 
         % Set the properties of the gain and exposure
         gain = 1;
-        exposure = 5000;
+        exposure = 37;
 
         % Clear the signal variable
         signal = nan(size(source));
@@ -106,9 +106,7 @@ for bb = 1:length(backgroundNDF)
         fit = (fit * meanY) + meanY;
 
         % Define the time domain of the fit
-        deltaTmodel = 1/fpsModel;
-        offset = (length(settle)+1)*deltaTsignal;
-        tsModel = offset:deltaTmodel:(length(fit)-1)*deltaTmodel + offset;
+        tsModel = tsSignal(length(settle)+1:end);
 
         % Plot this case
         if plotAll
