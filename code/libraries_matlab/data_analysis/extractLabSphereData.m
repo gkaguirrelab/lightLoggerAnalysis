@@ -8,8 +8,8 @@ function [meta, signal] = extractLabSphereData(filename)
 % Description: 
 %   This function loads the CSV data from one or more Labsphere scan(s), 
 %   lists their available timestamps, and prompts the user for a selection.
-%   Extracts sample rate, min/max values, frequency, and flicker metrics
-%   into the output struct. Also reads the full time-series data for the 
+%   Extracts sample rate, frequency, and flicker metrics into the output 
+%   struct. Also reads the full time-series data for the 
 %   chosen scan and converts into a numeric 'signal' vector to be used in
 %   determining temporal SPD in units of contrast.
 %
@@ -68,6 +68,7 @@ meta = struct();
 meta.SampleRateHz = rawData{10, sel};
 meta.FundamentalFrequencyHz = rawData{29, sel};
 meta.PercentFlicker = rawData{30, sel};
+% add scale max value (row 12)
 
 % Extract time series data and convert into signal vector
   seriesCells = rawData(37:end, sel);
@@ -81,5 +82,6 @@ meta.PercentFlicker = rawData{30, sel};
 % Trim trailing NaN values for shorter scans. 
 validIdx = find(~isnan(signal));
 signal = signal(1:validIdx(end));
+signal = (signal - mean(signal))/mean(signal);
 
 end
