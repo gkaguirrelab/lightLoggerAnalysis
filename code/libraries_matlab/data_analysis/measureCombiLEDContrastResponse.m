@@ -10,7 +10,8 @@
 [fileName, fileDir] = uigetfile('.csv');
 fullPath = fullfile(fileDir,fileName);
 
-% Make sure to clear and preallocate arrays 
+% Make sure to clear and preallocate arrays
+contrasts = zeros(1,23);
 amplitudes = zeros(14,23);
 fHz = zeros(14,23);
 
@@ -18,23 +19,32 @@ fHz = zeros(14,23);
 for ii = 14:23
     [meta, signal(:,ii)] = extractLabSphereData(fullPath,ii);
     fHz(ii) = round(meta.FundamentalFrequencyHz);
+
     dt = 1/meta.SampleRateHz;
     tSecs = 0:dt:(length(signal(:,ii))-1)*dt;
+    
     [~,amplitudes(ii)] = fourierRegression( signal(:,ii), tSecs, fHz(ii) );
+
+    % Obtain contrasts from comment
+    comment = meta.Comment;
+    contrast = regexpi(comment, '(0\.\d+) contrast', 'tokens');
+    if ~isempty(contrast)
+        contrasts(ii) = str2double(contrast{1}{1});
+    else
+        warning('No contrast value found in comment for scan %d.', ii);
+    end
+
 end    
 
-% Known contrasts
-conts = [0.05 0.1 0.15 0.2 0.25 0.3 0.35 0.4 0.45 0.5];
-
 % Find linear model
-polyfit(conts, amplitudes(14:23), 1)
+p = polyfit(contrasts(14:23), amplitudes(14:23), 1);
 slope = p(1);
 intercept = p(2);
 
 %% Make a plot of contrast vs. amplitude, and fit with linear model
-plot(conts, amplitudes(14:23))
+plot(contrasts(14:23), amplitudes(14:23), '*b')
 hold on
-plot(conts, polyval(p, conts))
+plot(contrasts(14:23), polyval(p, contrasts(14:23)))
 
 xlabel('Contrast')
 ylabel('Amplitude')

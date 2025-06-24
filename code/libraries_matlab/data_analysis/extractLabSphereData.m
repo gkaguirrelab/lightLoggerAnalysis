@@ -45,14 +45,14 @@ nScans   = size(rawData,2);
 
 % Get human‐readable timestamps
 stamps = string(rawData(2,:));
-comments = string(rawData(8,:));
+comment = string(rawData(8,:));
 
 % Display scans with timestamp and comment
 if nargin == 1
     fprintf('Available scans:\n');
     for i = 1:nScans
-        if strlength(comments(i)) > 0
-            fprintf('  %2d: %s  — %s\n  ', i, char(stamps(i)), char(comments(i)));
+        if strlength(comment(i)) > 0
+            fprintf('  %2d: %s  — %s\n  ', i, char(stamps(i)), char(comment(i)));
         else
             fprintf('  %2d: %s\n  ', i, char(stamps(i)));
         end
@@ -67,6 +67,7 @@ end
 
 % Initialize output struct and extract desired metadata values
 meta = struct();
+meta.Comment = rawData{8, sel};
 meta.SampleRateHz = rawData{10, sel};
 meta.FundamentalFrequencyHz = rawData{29, sel};
 meta.PercentFlicker = rawData{30, sel};
@@ -84,6 +85,8 @@ end
 % Trim trailing NaN values for shorter scans.
 validIdx = find(~isnan(signal));
 signal = signal(1:validIdx(end));
+
+% Convert to contrast units
 signal = (signal - mean(signal))/mean(signal);
 
 end
