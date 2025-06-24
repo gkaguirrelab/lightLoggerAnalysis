@@ -6,7 +6,7 @@ function chunks = parse_chunks(path_to_experiment,...
 % Parse the chunks of a recording from the light logger into a cell of chunk structs
 %
 % Syntax:
-% function chunks = parse_chunks(path_to_experiment, ...
+% chunks = parse_chunks(path_to_experiment, ...
 %                                apply_digital_gain, use_mean_frame, convert_time_units, convert_to_floats,...
 %                                time_ranges, chunk_ranges, mean_axes, contains_agc_metadata,...
 %                                password...
@@ -66,14 +66,14 @@ function chunks = parse_chunks(path_to_experiment,...
 %                           a struct with fields (WPM) where 
 %                           each field is a boolean. 
 %
-%  password               - String. Represents the password 
-%                           used to encrypt the data (if encrypted)
+%   password               - String. Represents the password 
+%                            used to encrypt the data (if encrypted)
 %
 % Outputs:
 %
-%   chunks                - Cell. A cell containing structs 
-%                           of all of the sensors' data 
-%                           for a given chunk.  
+%   chunks                 - Cell. A cell containing structs 
+%                            of all of the sensors' data 
+%                            for a given chunk.  
 %
 % Examples:
 %{

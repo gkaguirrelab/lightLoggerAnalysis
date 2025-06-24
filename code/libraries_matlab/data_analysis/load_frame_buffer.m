@@ -61,7 +61,7 @@ function [v, m] = load_frame_buffer(frame_buffer_path, metadata_path, contains_a
 
     % Let's load in the Python helper file
     addpath(getpref("lightLoggerAnalysis", "light_logger_libraries_matlab"));
-    Pi_util = import_pyfile(getpref("lightLoggerAnalysis", Pi_util_path)); 
+    Pi_util = import_pyfile(getpref("lightLoggerAnalysis", "Pi_util_path")); 
 
     % Load the frame buffer
     v_m = cell(Pi_util.load_frame_buffer(frame_buffer_path, metadata_path, contains_agc_metadata, apply_digital_gain, password)); 

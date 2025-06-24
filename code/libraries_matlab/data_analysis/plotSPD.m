@@ -1,4 +1,4 @@
-function plotSPD(spd, frq)
+function plotSPD(spd, frq, varargin)
 % Plots the SPD function for a chunk.
 %
 % Syntax:
@@ -11,6 +11,8 @@ function plotSPD(spd, frq)
 %   spd                   - 1xf. The spectral power density in units of
 %                           contrast^2/Hz.
 %   frq                   - 1xf. The frequencies (in Hz) for the spd value.
+%   varargin              - Optional plotting style arguments, e.g.:
+%                           'Color', [1 0 0], 'LineWidth', 2, etc.
 %
 % Examples:
 %{  
@@ -26,12 +28,16 @@ arguments
         frq (1, :)
 end
 
-% Plot and label
-    figure;
-    loglog(frq, spd, 'DisplayName', "Temporal SPD");
-    xlabel('Frequency (Hz)');
-    ylabel('Spectral Power Density (contrast^2/Hz)');
-    title('Temporal SPD');
-    % legend show;
-
+arguments (Repeating)
+        varargin
 end
+
+
+% Plot and label
+spd = reshape(spd, 1, []);
+frq = reshape(frq, 1, []);
+
+% Fix any zero/negative frequencies
+frq(frq <= 0) = eps;
+
+loglog(frq, spd, varargin{:});

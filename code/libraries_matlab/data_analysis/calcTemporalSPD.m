@@ -74,7 +74,7 @@ end
 % Convert to LMS
 lmsSignal = cameraToCones(rgbSignal);
 
-Select a post-receptoral channel
+% Select a post-receptoral channel
 switch options.postreceptoralChannel
     case {'LM'}
         signal = (lmsSignal(:,1)+lmsSignal(:,2))/2;
