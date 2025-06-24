@@ -1,0 +1,42 @@
+%% SCRIPT TO EXPRESS AVERAGE SPD ACROSS CHUNKS FOR EACH LMS OPERATION
+%
+% This script loads video chunks, calculates their individual Temporal SPD
+% (for combined RGB, 200 FPS), averages these SPDs, and plots the result.
+
+
+% Hard code desired number of frames for fixed-length slicing
+nFrames = 3000;
+
+% Filter empty/invalid chunks
+good_chunks = cellfun(@(chunk) ~isempty(chunk) && any(chunk.W.v(:)), chunks);
+
+% Define the post-receptoral channels to analyze
+channels = {'LM', 'L-M', 'S'};
+% Define colors for plotting (Note: users on light mode adjust 'w' to 'b')
+channel_colors = containers.Map({'LM', 'L-M', 'S'}, {'w', 'r', 'b'});
+
+% Prepare storage
+avg_spds = cell(1, numel(channels));
+
+for c = 1:numel(channels)
+    channel_name = channels{c};
+
+    % Apply calcTemporalSPD to each video data element.
+    [spds, frqs] = cellfun(@(chunk) calcTemporalSPD(chunk.W.v(1:nFrames,:,:), 200, 'postreceptoralChannel', channel_name), chunks(good_chunks), 'UniformOutput', false);
+
+    % Average the SPDs across chunks
+    avg_spds{c} = mean(cat(2, spds{:}), 2)';
+end
+
+% Visualize the result 
+figure;
+hold on;
+
+for c = 1:numel(channels)
+    plotSPD(avg_spds{c}, frqs{1}, 'Color', channel_colors(channels{c}));
+end
+
+legend(channels);
+title('Average Temporal SPD for LMS Channel Operations');
+xlabel('Temporal Frequency (Hz)');
+ylabel('Power (contrast^2 / Hz)');
