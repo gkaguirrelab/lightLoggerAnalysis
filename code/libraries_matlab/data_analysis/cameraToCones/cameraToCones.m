@@ -1,14 +1,34 @@
 function coneVec = cameraToCones(rgbVec, camera)
-% Convert an n x 3 matrix of camera rgb measurements to an n x 3 matrix of
-% relative lms cone weights. This is all quite crude at the moment.
-
+% 
+% 
+% Description: 
+%   Converts an n x 3 matrix of camera RGB measurements to an n x 3 matrix of
+%   relative LMS cone weights using a predefined spectral sensitivity
+%   model for the camera.
+%
+% Inputs: 
+%   rgbVec          - 
+%   camera          - (optional) String specifying camera model.
+%                            'standard' (default)  - uses average industry camera
+%                            'imx219'              - uses IMX219-specific sensitivities
+% 
+% Output:
+%   coneVec         - n × 3 matrix of estimated LMS cone excitations
+% 
+% 
 % Table that contains the average spectral sensitivity functions of the
 % camera sensors in commercial mobile phones, reported in:
 %   Tominaga S, Nishi S, Ohtera R. Measurement and estimation of spectral
 %   sensitivity functions for mobile phone cameras. Sensors. 2021 Jul
 %   22;21(15):4985.
+% 
+% Examples:
+%{
+   coneVec = cameraToCones(rgbVals);             % standard model
+   coneVec = cameraToCones(rgbVals, 'imx219');   % custom IMX219 model
+%}
 
-% Default
+% Default camera model
 if nargin < 2
     camera = 'standard';
 end
@@ -31,6 +51,8 @@ switch lower(camera)
     otherwise
         error('Unknown camera type. Use ''standard'' or ''imx219''.');
 end
+
+disp("Using camera model: " + camera)
 
 % Convert wavelengths to sampling format
 S = WlsToS(wls);

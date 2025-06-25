@@ -45,6 +45,7 @@ arguments
     options.lineResolution (1,1) logical = false
     options.byChannel (1,1) logical = false
     options.postreceptoralChannel {mustBeMember(options.postreceptoralChannel,{'LM', 'L-M', 'S'})} = 'S'
+    options.camera (1,:) char {mustBeMember(options.camera, {'standard', 'imx219'})} = 'standard'
 end
 
 % Convert video data to double and get dimensions
@@ -72,7 +73,7 @@ for cc = 1:numel(channels)
 end
 
 % Convert to LMS
-lmsSignal = cameraToCones(rgbSignal);
+lmsSignal = cameraToCones(rgbSignal, options.camera);
 
 % Select a post-receptoral channel
 switch options.postreceptoralChannel

@@ -23,7 +23,7 @@ for c = 1:numel(channels)
     channel_name = channels{c};
 
     % Apply calcTemporalSPD to each video data element.
-    [spds, frqs] = cellfun(@(chunk) calcTemporalSPD(chunk.W.v(1:nFrames,:,:), fps, 'postreceptoralChannel', channel_name), chunks(good_chunks), 'UniformOutput', false);
+    [spds, frqs] = cellfun(@(chunk) calcTemporalSPD(chunk.W.v(1:nFrames,:,:), fps, 'postreceptoralChannel', channel_name, 'camera', 'standard'), chunks(good_chunks), 'UniformOutput', false);
 
     % Average the SPDs across chunks
     avg_spds{c} = mean(cat(2, spds{:}), 2)';
