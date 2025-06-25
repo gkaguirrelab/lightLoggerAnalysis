@@ -40,4 +40,5 @@ frq = reshape(frq, 1, []);
 % Fix any zero/negative frequencies
 frq(frq <= 0) = eps;
 
+%plot(log10(frq), log10(spsd), varargin{:})
 loglog(frq, spd, varargin{:});

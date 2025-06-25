@@ -4,8 +4,9 @@
 % (for combined RGB, 200 FPS), averages these SPDs, and plots the result.
 
 
-% Hard code desired number of frames for fixed-length slicing
-nFrames = 3000;
+% Get number of frames
+[nFrames, ~] = size(v);
+fps = 184.74;
 
 % Filter empty/invalid chunks
 good_chunks = cellfun(@(chunk) ~isempty(chunk) && any(chunk.W.v(:)), chunks);
@@ -22,7 +23,7 @@ for c = 1:numel(channels)
     channel_name = channels{c};
 
     % Apply calcTemporalSPD to each video data element.
-    [spds, frqs] = cellfun(@(chunk) calcTemporalSPD(chunk.W.v(1:nFrames,:,:), 200, 'postreceptoralChannel', channel_name), chunks(good_chunks), 'UniformOutput', false);
+    [spds, frqs] = cellfun(@(chunk) calcTemporalSPD(chunk.W.v(1:nFrames,:,:), fps, 'postreceptoralChannel', channel_name), chunks(good_chunks), 'UniformOutput', false);
 
     % Average the SPDs across chunks
     avg_spds{c} = mean(cat(2, spds{:}), 2)';
@@ -33,9 +34,13 @@ figure;
 hold on;
 
 for c = 1:numel(channels)
-    plotSPD(avg_spds{c}, frqs{1}, 'Color', channel_colors(channels{c}));
+    nonzero_idx = frqs{c} > 0;
+    clean_frq = frqs{c}(nonzero_idx);
+    clean_spd = avg_spds{c}(nonzero_idx);
+    plotSPD(clean_spd, clean_frq, 'Color', channel_colors(channels{c}));
 end
 
+set(gca, 'XScale', 'log', 'YScale', 'log');
 legend(channels);
 title('Average Temporal SPD for LMS Channel Operations');
 xlabel('Temporal Frequency (Hz)');

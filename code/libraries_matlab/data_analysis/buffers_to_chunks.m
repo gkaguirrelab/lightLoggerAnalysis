@@ -17,9 +17,14 @@
 %
 % Usage:
 %   path_to_video = 'XXXX'
+%   Pi_util_path = 'XXX'
+%   world_util_path = 'XXX'
 %   MIN = X     (or define in script)
 %   MAX = X     (or define in script)
 
+% Import
+Pi_util = import_pyfile(getpref('lightLoggerAnalysis', 'Pi_util_path'));
+world_util = import_pyfile(getpref('lightLoggerAnalysis', 'world_util_path'));
 
 % sensor_chunks is a Python dict
 sensor_chunks = Pi_util.group_sensors_files(path_to_video); 
