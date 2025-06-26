@@ -45,7 +45,7 @@ arguments
     options.lineResolution (1,1) logical = false
     options.byChannel (1,1) logical = false
     options.postreceptoralChannel {mustBeMember(options.postreceptoralChannel,{'LM', 'L-M', 'S'})} = 'S'
-    options.camera (1,:) char {mustBeMember(options.camera, {'standard', 'imx219'})} = 'standard'
+    options.camera (1,:) char {mustBeMember(options.camera, {'standard', 'imx219'})} = 'imx219'
 end
 
 % Convert video data to double and get dimensions
@@ -72,8 +72,13 @@ for cc = 1:numel(channels)
 
 end
 
-% Convert to LMS
-lmsSignal = cameraToCones(rgbSignal, options.camera);
+% Convert RGB --> LMS contrast relative to background
+background_RGB = mean(rgbSignal, 1);
+modulation_RGB = rgbSignal - background_RGB;
+modulation_LMS = cameraToCones(modulation_RGB, options.camera);
+background_LMS = cameraToCones(background_RGB, options.camera);
+
+lmsSignal = modulation_LMS ./ background_LMS;
 
 % Select a post-receptoral channel
 switch options.postreceptoralChannel
@@ -84,9 +89,6 @@ switch options.postreceptoralChannel
     case {'S'}
         signal = ((lmsSignal(:,3)-lmsSignal(:,1))+lmsSignal(:,2))/2;
 end
-
-% Convert to contrast units
-signal = (signal - mean(signal))/mean(signal);
 
 % PSD of the signal in units of contrast^2/Hz
 [frq, spd] = simplePSD(signal, fps);

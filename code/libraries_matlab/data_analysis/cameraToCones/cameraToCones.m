@@ -9,8 +9,8 @@ function coneVec = cameraToCones(rgbVec, camera)
 % Inputs: 
 %   rgbVec          - 
 %   camera          - (optional) String specifying camera model.
-%                            'standard' (default)  - uses average industry camera
-%                            'imx219'              - uses IMX219-specific sensitivities
+%                            'standard'            - uses average industry camera
+%                            'imx219' (default)    - uses IMX219-specific sensitivities
 % 
 % Output:
 %   coneVec         - n × 3 matrix of estimated LMS cone excitations
@@ -30,7 +30,7 @@ function coneVec = cameraToCones(rgbVec, camera)
 
 % Default camera model
 if nargin < 2
-    camera = 'standard';
+    camera = 'imx219';
 end
 
 % Load camera spectral sensitivity functions
