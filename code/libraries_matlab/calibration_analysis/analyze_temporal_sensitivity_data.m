@@ -4,8 +4,8 @@ function ttfFigHandle = analyze_temporal_sensitivity_data(CalibrationData, sorte
 % contrast using the Klein photometer and the "ChromaSurf" sofwate. The
 % values are given here, and used for correction of the observed response
 % amplitude below
-testModDepthFrequencies = [1/29, 0.1, 0.25,0.5,1,3,6,12,25,50,100];
-testModDepthAmplitudes = [1, 1,1,1,1,1,0.983,0.975,0.939,0.90,0.66];
+testModDepthFrequencies = [0.25,0.5,1,3,6,12,25,50,100];
+testModDepthAmplitudes = [1,1,1,1,0.983,0.975,0.939,0.90,0.66];
 
 % Retrieve the contrast levels and frequencies shown to the device
 contrast_levels = CalibrationData.contrast_levels;

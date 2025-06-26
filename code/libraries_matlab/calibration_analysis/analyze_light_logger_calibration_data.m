@@ -49,7 +49,6 @@ function [msLinearityFigHandles, ttfFigHandle] = analyze_light_logger_calibratio
         % Report the temporal offset values and standard deviations
         fprintf('Mean and std of world - pupil temporal offset [ms]: %2.5f, %2.5f\n',1000*mean(temporal_offsets_secs('W-P')),1000*std(temporal_offsets_secs('W-P')))
         fprintf('Mean and std of world - AS temporal offset [ms]: %2.5f, %2.5f\n',1000*mean(temporal_offsets_secs('W-AS')),1000*std(temporal_offsets_secs('W-AS')))
-        fprintf('Mean and std of world - TS temporal offset [ms]: %2.5f, %2.5f\n',1000*mean(temporal_offsets_secs('W-TS')),1000*std(temporal_offsets_secs('W-TS')))
     end
 
     % 4. Analyze the contrast gamma readings
