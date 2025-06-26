@@ -75,20 +75,11 @@ for nn = 1:n_measures
     hold on;
     yyaxis left
     plot(slow_measurement.W.t, convert_to_contrast(slow_measurement.W.v), '.k','MarkerSize',10, 'DisplayName', 'World Measured');
-    plot(slow_measurement.W.t, world_fit_slow_TS, '-k', 'DisplayName', 'World Fit');
+    plot(slow_measurement.W.t, world_fit_slow_AS, '-k', 'DisplayName', 'World Fit');
     yyaxis right
     plot(slow_measurement.M.t, convert_to_contrast(slow_measurement.M.v.AS(:, 5)), '.r','MarkerSize',20, 'DisplayName', 'AS Measured');
     plot(slow_measurement.M.t, AS_fit, '-r', 'DisplayName', 'AS Fit');
     legend show ;
-
-    % Next tile we will print the slow video TS chip and its fit
-    % nexttile ;
-    % title(sprintf("MS-TS Fit | F: %.3f", frequencies(1)));
-    % hold on;
-    % plot(slow_measurement.M.t, convert_to_contrast(slow_measurement.M.v.TS(:, 1)), '.', 'DisplayName', 'Measured');
-    % plot(slow_measurement.M.t, TS_fit, '.', 'DisplayName', 'Fit');
-    % 
-    % legend show ;
 
     % Next tile we will print the Fast video world camera and its fit
     nexttile;
@@ -118,7 +109,6 @@ for nn = 1:n_measures
     plot(slow_measurement.W.t, convert_to_contrast(slow_measurement.W.v), '.', 'DisplayName', 'World');
     yyaxis right
     plot(slow_measurement.M.t, convert_to_contrast(slow_measurement.M.v.AS(:, 5)), '.', 'DisplayName', 'MS-AS');
-    plot(slow_measurement.M.t, convert_to_contrast(slow_measurement.M.v.TS(:, 1)), '.', 'DisplayName', 'MS-TS');
     xlabel("Time [s]");
     ylabel("Contrast");
 
@@ -133,7 +123,6 @@ for nn = 1:n_measures
     plot(slow_measurement.W.t, convert_to_contrast(slow_measurement.W.v), '.', 'DisplayName', 'World');
     yyaxis right
     plot(slow_measurement.M.t+world_ms_AS_temporal_offset_secs(nn), convert_to_contrast(slow_measurement.M.v.AS(:, 5)), '.', 'DisplayName', 'MS-AS');
-    plot(slow_measurement.M.t+world_ms_TS_temporal_offset_secs(nn), convert_to_contrast(slow_measurement.M.v.TS(:, 1)), '.', 'DisplayName', 'MS-TS');
     xlabel("Time [s]");
     ylabel("Contrast");
 
