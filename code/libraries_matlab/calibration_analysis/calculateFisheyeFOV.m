@@ -13,6 +13,13 @@ function fov_degrees = calculateFisheyeFOV(fisheyeIntrinsics)
 %
 %   Outputs:
 %       fov_degrees       - The diagonal field of view of the camera in degrees.
+%
+% EXAMPLE USE:
+%{
+    data = load('<FULL_PATH_TO_FILE>');
+    fisheyeIntrinsics = data.camera_intrinsics_calibration.camera_intrinsics.Intrinsics;
+    fov_degrees = calculateFisheyeFOV(fisheyeIntrinsics);
+%}
 
 % Extract relevant properties from the fisheyeIntrinsics object
 mappingCoefficients = fisheyeIntrinsics.MappingCoefficients; % [a0 a2 a3 a4]

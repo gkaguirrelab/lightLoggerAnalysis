@@ -28,11 +28,6 @@ function coneVec = cameraToCones(rgbVec, camera)
    coneVec = cameraToCones(rgbVals, 'imx219');   % custom IMX219 model
 %}
 
-% Default camera model
-if nargin < 2
-    camera = 'imx219';
-end
-
 % Load camera spectral sensitivity functions
 switch lower(camera)
     case 'standard'
@@ -51,8 +46,6 @@ switch lower(camera)
     otherwise
         error('Unknown camera type. Use ''standard'' or ''imx219''.');
 end
-
-disp("Using camera model: " + camera)
 
 % Convert wavelengths to sampling format
 S = WlsToS(wls);

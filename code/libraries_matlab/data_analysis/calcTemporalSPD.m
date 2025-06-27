@@ -90,7 +90,7 @@ switch options.postreceptoralChannel
         signal = ((lmsSignal(:,3)-lmsSignal(:,1))+lmsSignal(:,2))/2;
 end
 
-% PSD of the signal in units of contrast^2/Hz
+% PSD of the signal
 [frq, spd] = simplePSD(signal, fps);
 
 end
