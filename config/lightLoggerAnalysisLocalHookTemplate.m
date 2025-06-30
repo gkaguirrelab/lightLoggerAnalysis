@@ -54,6 +54,7 @@ combiExperiments_path = tbLocateProject('combiExperiments');
 % as a pref
 light_logger_libraries_matlab = fullfile(light_logger_path, "libraries_matlab"); 
 setpref(projectName, 'light_logger_libraries_matlab', light_logger_libraries_matlab); 
+addpath(light_logger_libraries_matlab);
 
 % Save the path to combiExperiments 
 setpref(projectName, 'combiExperiments_path', combiExperiments_path);
@@ -67,3 +68,8 @@ pupil_util_path = fullfile(light_logger_path, "pupil", "pupil_util.py");
 setpref(projectName, 'pupil_util_path', pupil_util_path); 
 ms_util_path = fullfile(light_logger_path, "ms", "ms_util.py"); 
 setpref(projectName, 'ms_util_path', ms_util_path); 
+
+
+% Add all functions in the current directory to the path 
+light_logger_analysis_path = tbLocateProject('lightLoggerAnalysis');
+addpath(genpath(light_logger_analysis_path));

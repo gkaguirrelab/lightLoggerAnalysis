@@ -1,5 +1,4 @@
 function LightLoggerCalibrationData = convert_light_logger_calibration_data(experiment_folder,...
-                                                                            NDF,...
                                                                             apply_digital_gain,...
                                                                             convert_time_units,...
                                                                             convert_to_floats,...
@@ -8,7 +7,6 @@ function LightLoggerCalibrationData = convert_light_logger_calibration_data(expe
                                                                            )
     arguments 
         experiment_folder {mustBeText}; 
-        NDF {mustBeInteger};
         apply_digital_gain = false;  
         convert_time_units = false; 
         convert_to_floats = false; 
@@ -26,25 +24,15 @@ function LightLoggerCalibrationData = convert_light_logger_calibration_data(expe
     end 
 
     disp("Conversion | Importing libraries...");
-
-    % Include dependencies (without this the rawData struct of the cal field)
-    % of the metadata struct will be empty 
-    tbUse('combiLEDToolbox'); 
-
-    % Add the path to our misc MATLAB utility functions
-    addpath(getpref("lightLoggerAnalysis", "light_logger_libraries_matlab"));
+    tbUseProject('lightLoggerAnalysis');
 
     % Import the Python library used for downloading from Dropbox 
     Pi_util = import_pyfile(getpref("lightLoggerAnalysis", "Pi_util_path"));
 
-    % Load in the Calibration Metadata 
-    NDF_folder_path = fullfile(experiment_folder, sprintf("NDF_%d", NDF)); 
-    calibration_metadata = load_calibration_metadata(experiment_folder, NDF_folder_path); 
-   
     % Next, we will load in the recordings and rudimentarily convert the Py.dict to a struct. 
     % Further nested conversion will be needed for each reading method
     disp("Conversion | Parsing recordings...")
-    parsed_readings = struct(Pi_util.load_sorted_calibration_files(NDF_folder_path,...
+    parsed_readings = struct(Pi_util.load_sorted_calibration_files(experiment_folder,...
                                                                    apply_digital_gain,...
                                                                    use_mean_frame,...
                                                                    convert_time_units,...
@@ -53,11 +41,22 @@ function LightLoggerCalibrationData = convert_light_logger_calibration_data(expe
                                                                   )...
                             ); 
 
+    % Save the path to the current file's directory. we are going to need this when we mess around with tbUses
+    path_to_file_dir = fileparts(mfilename("fullpath"));
+
+    % Load in the Calibration Metadata 
+    % Include dependencies (without this the rawData structs of the cal field)
+    % of the metadata struct will be empty 
+    tbUse('combiLEDToolbox'); 
+    addpath(path_to_file_dir);
+    calibration_metadata = load_calibration_metadata(fullfile(experiment_folder, "calibration_metadata.mat.bytes")); 
+    tbUseProject('lightLoggerAnalysis');
+
     % Convert the subfields to purely MATLAB type
     parsed_readings.ms_linearity = convert_ms_linearity_to_matlab(calibration_metadata.ms_linearity, parsed_readings.ms_linearity);
-    parsed_readings.temporal_sensitivity = convert_temporal_sensitivity_to_matlab(calibration_metadata.temporal_sensitivity, parsed_readings.temporal_sensitivity);
-    parsed_readings.phase_fitting = convert_temporal_sensitivity_to_matlab(calibration_metadata.phase_fitting, parsed_readings.phase_fitting);
-    parsed_readings.contrast_gamma = convert_temporal_sensitivity_to_matlab(calibration_metadata.contrast_gamma, parsed_readings.contrast_gamma);
+    %parsed_readings.temporal_sensitivity = convert_temporal_sensitivity_to_matlab(calibration_metadata.temporal_sensitivity, parsed_readings.temporal_sensitivity);
+    %parsed_readings.phase_fitting = convert_temporal_sensitivity_to_matlab(calibration_metadata.phase_fitting, parsed_readings.phase_fitting);
+    %parsed_readings.contrast_gamma = convert_temporal_sensitivity_to_matlab(calibration_metadata.contrast_gamma, parsed_readings.contrast_gamma);
 
     % Initialize a return struct 
     LightLoggerCalibrationData.metadata = calibration_metadata;
@@ -67,64 +66,58 @@ function LightLoggerCalibrationData = convert_light_logger_calibration_data(expe
 
 end 
 
-% Local function to load in the Calibration struct from the raw bytes 
-function calibration_metadata = load_calibration_metadata(experiment_folder, NDF_folder_path)
-    % Next, we will construct the path to the CalibrationData struct which contains information about 
-    % the experiment
-    calibration_metadata_struct_filepath = fullfile(NDF_folder_path, "CalibrationData.mat.bytes"); 
-    calibration_metadata_struct_file = fopen(calibration_metadata_struct_filepath, 'rb'); % Open the file whose bytes represent the CalibrationData struct 
-    calibration_metadata_struct_bytes = fread(calibration_metadata_struct_file, Inf, '*uint8'); % Load in the bytes from that file
-    calibration_metadata = getArrayFromByteStream(calibration_metadata_struct_bytes); % Parse the bytes back into a struct
-    fclose(calibration_metadata_struct_file); % Close the file
-end 
-
 % Local function to convert the ms linearity field of the readings dict to pure 
 % MATLAB types. Note: the CalibrationData referenced here is the substruct of CalibrationData
 % specifically for ms_linearity
-function converted_linearity = convert_ms_linearity_to_matlab(CalibrationData, ms_linearity)
+function converted_linearity = convert_ms_linearity_to_matlab(calibration_metadata, ms_linearity_readings)
     % First, let's extract some information about what we intended 
-    num_settings_levels = numel(CalibrationData.background_scalars);
-    n_measures = CalibrationData.n_measures; 
+    num_NDF_levels = numel(calibration_metadata.NDFs);
+    num_settings_levels = numel(calibration_metadata.background_scalars);
+    n_measures = calibration_metadata.n_measures; 
     
-    % .ms_linearity is a YxZ py.list. Convert this outer list to cell.
-    % This gives you a cell of py.lists. The outer cell represents the 
-    % settings number and the inner one represents the measurements 
-    % for this settings level 
-    ms_linearity = cell(ms_linearity); 
+    % Now, we will allocate an output array 
+    converted_linearity = cell(num_NDF_levels, num_settings_levels, n_measures);
 
-    % Convert those inner py.list to cell. Now you have a cell of cells 
-    ms_linearity = cellfun(@(x) cell(x), ms_linearity, 'UniformOutput', false); 
+    % Then, we will convert the outer Python list, representing the NDF levels, 
+    % to cell array 
+    ms_linearity_readings = cell(ms_linearity_readings); 
 
-    % Form this back into a cell matrix of shape settingsLevel x measurementNum 
-    ms_linearity = vertcat(ms_linearity{:});
+    % Next, we will convert each inner 1xY py.list to a cell array. 
+    % These lists represent the lists of recordings at different settings levels 
+    ms_linearity_readings = cellfun(@(x) cell(x), ms_linearity_readings, 'UniformOutput', false);
 
-    % Let's do some checking that these dimensions match what we intended 
-    intended_size = [num_settings_levels, n_measures]; 
-    actual_size = size(ms_linearity); 
-    assert(isequal(intended_size, actual_size)); 
+    % Next, we need to go in all of those recording cells and convert the inner py.list of 
+    % measurements at a given settings level to cell 
+    for nn = 1:num_NDF_levels
+        % Convert all the repeated measurements at this settings level to cell 
+        NDF_cell = cellfun(@(x) cell(x), ms_linearity_readings{nn}, 'UniformOutput', false);   
 
-    % Convert the inner elements, 1x1 py.list of recording chunks 
-    % to cells (thus making them 1x1 py.dict)
-    ms_linearity = cellfun(@(x) cell(x), ms_linearity); 
-
-    % Now that we have it in the correct shape, 
-    % let's create a cell for the reorganized values 
-    converted_linearity = cell(num_settings_levels, n_measures);
-
-    % Iterate over the settings level 
-    for ss = 1:num_settings_levels
-        % Iterate over the measurements per settings level
-        for nn =1:n_measures
-            % Find the index of the setting that was used for this combination 
-            % of measurement and settings number 
-            settings_idx = CalibrationData.background_scalars_orders(nn, ss); 
+        % Then, convert those 1x1 py.lists representing chunks of recordings for each measurement 
+        % to cell 
+        for ss = 1:num_settings_levels
+            % Retrieve the settings level cell 
+            settings_cell = cell(NDF_cell{ss}); 
             
-            % Convert this dictionary to MATLAB types and save it into the matrix 
-            converted_linearity{settings_idx, nn} = chunk_dict_to_matlab(ms_linearity{ss, nn}); 
-        end 
-    end 
+            % Iterate over the measures at this settings level 
+            for mm = 1:n_measures
+                % Find the index of the setting that was used for this combination 
+                % of measurement and settings number 
+                settings_idx = calibration_metadata.background_scalars_orders(nn, mm, ss); 
+                setting = calibration_metadata.background_scalars(settings_idx);
 
-    return ; 
+                % Retrieve the measurement cell 
+                measurement_cell = cell(settings_cell{mm}); 
+                
+                % Convert the chunks in the cell to MATLAB struct type 
+                measurement_cell = cellfun(@(x) chunk_dict_to_matlab(x), measurement_cell, 'UniformOutput', false); 
+                
+                %save the updated measurement cell into the settings cell 
+                converted_linearity{nn, ss, mm} = measurement_cell{:}; 
+            end 
+
+        end 
+
+    end 
 
 end 
 
