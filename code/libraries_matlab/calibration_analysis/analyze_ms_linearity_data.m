@@ -270,6 +270,9 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements)
                 hold(across_NDF_channel_ax, 'on'); 
             end 
 
+            % Add a reference line
+            plot(across_NDF_channel_ax, [limits(1),limits(2)],[limits(1),limits(2)],':k', "DisplayName", "ReferenceLine");
+
             % Label the plot 
             title(across_NDF_channel_ax, sprintf("Ch: %d", ch)); 
             
