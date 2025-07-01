@@ -5,24 +5,35 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements)
 %   analyze_ms_linearity_data(calibration_metadata, measurements)
 %
 % Description:
-%   TODO 
+%   Analyze linearity calibration data collected from the MS. 
+%   Illustrate several plots showing the raw sensor counts 
+%   from all channels of each chip at various settings/NDF 
+%   levels, as well as the linearity of these in comparison 
+%   to the predicted counts at a given NDF level.  
 %
 % Inputs:
-%   label                 - String. Optional notes to attach
-%                           to the front of the saved filenames
+%   calibration_metadata  - Struct. ms_linearity substruct 
+%                           of the light logger metadata 
+%                           struct containing only 
+%                           ms_linearity related metadata 
 %
-%   dropbox_savedir       - String. The path to the directory
-%                           on DropBox where the files will be
-%                           output
+%   measurements         - Cell. Parsed recordings made from 
+%                          the light logger and converted to MATLAB 
+%                          type.  
 %
 % Outputs:
 %
-%   success               - Int. Returns 1 on success, 0 on failure.
+%   NONE             
 %
 % Examples:
 %{
 
 %}
+    arguments 
+        calibration_metadata; % Struct representing the metadata for the ms_linearity calibration measurement 
+        measurements; % Parsed and converted recordings from the light logger 
+    end 
+
 
     % Save the path to CombiExperiments. We will use this as a relative
     % path to find other files
