@@ -143,9 +143,6 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements)
             xlabel("Settings Level");
             ylabel("Averged Count");
 
-            % Set the limit for the mean detector counts as an unsigned 16 bit range 
-            ylim([-5, 2^16+1000])
-
             % Show the legend for the plot
             legend show ;
 
@@ -229,7 +226,7 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements)
             % that are finite and not at the ceiling or floor. We also exclude
             % the points measured using the ND6 filter, as we do not have an
             % independent measure of the spectral transmittance of these.
-            p = polyfit(predicted_channel_readings, measured_channel_readings,1);
+            p = polyfit(predicted_channel_readings, measured_channel_readings, 1);
             fitY = polyval(p, predicted_channel_readings);
 
             % Plot the original points
@@ -308,7 +305,7 @@ function counts_mat = extract_detector_counts(NDF_num, measurements, chip)
 
     % First, let's find the max number of readings we have and the number 
     % of channels that we have so that we can allocate a matrix 
-    max_num_readings = 0; 
+    min_num_readings = inf; 
     n_channels = 0; 
     for ss = 1:num_settings_levels
         for nn = 1:n_measures
@@ -317,7 +314,7 @@ function counts_mat = extract_detector_counts(NDF_num, measurements, chip)
 
             % Add the number of readings 
             if(chip == "ASM7341")
-                max_num_readings = max(max_num_readings, size(measurement.M.v.AS, 1));
+                min_num_readings = min(min_num_readings, size(measurement.M.v.AS, 1));
                 
                 % Save the total number of channels if we have not already
                 if(n_channels == 0)
@@ -325,7 +322,7 @@ function counts_mat = extract_detector_counts(NDF_num, measurements, chip)
                 end 
 
             else 
-                max_num_readings = max(max_num_readings, size(measurement.M.v.TS, 1));
+                min_num_readings = min(min_num_readings, size(measurement.M.v.TS, 1));
 
                  % Save the total number of channels if we have not already
                 if(n_channels == 0)
@@ -338,8 +335,7 @@ function counts_mat = extract_detector_counts(NDF_num, measurements, chip)
 
 
     % Initialize a matrix to store the values for this NDF 
-    % TODO: Change this, can't have nan. It messes things up. 
-    counts_mat = nan(num_settings_levels, n_measures, max_num_readings, n_channels);
+    counts_mat = nan(num_settings_levels, n_measures, min_num_readings, n_channels);
 
     % Next, we will go over each measurement and extract the channels
     % for the desired chip 
@@ -357,10 +353,9 @@ function counts_mat = extract_detector_counts(NDF_num, measurements, chip)
             end 
 
             % Insert these readings into the matrix 
-            counts_mat(ss, nn, 1:size(readings, 1), :) = readings;
-
-        
+            counts_mat(ss, nn, 1:min_num_readings, :) = readings(1:min_num_readings, :);
         end
+
     end
 
     return ;
