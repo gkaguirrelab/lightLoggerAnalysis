@@ -1,4 +1,4 @@
-function ttfFigHandle = analyze_temporal_sensitivity_data(CalibrationData, sorted_measurements, NDF, ttfFigHandle)
+function ttfFigHandle = analyze_temporal_sensitivity_data(calibration_metadata, measurements)
 
 % We measured the modulation depth of the stimulus source as a function of
 % contrast using the Klein photometer and the "ChromaSurf" sofwate. The
@@ -34,6 +34,76 @@ else
     figure(ttfFigHandle);
 end
 hold on ;
+
+% Extract some information we will use often 
+frequencies = calibration_metadata.frequencies; 
+contrast_levels = calibration_metadata.contrast_levels; 
+NDFs = calibration_metadata.NDFs; 
+
+% First, we will iterate over the NDFs 
+for nn = 1:numel(NDFs)
+    % Retrieve the current NDF 
+    NDF = calibration_metadata.NDFs(nn); 
+
+    % Next, we will iterate over the contrast levels 
+    % at this NDF level 
+    for cc = 1:numel(contrast_levels)
+        % Retrieve the contrast level we used for this recording 
+        contrast = contrast_levels(cc); 
+        
+        % TODO: Change this
+        t = tiledlayout(numel(frequencies),1);
+        sgtitle(sprintf("Sensor fits by measure. C: %.3f | M: %d", contrast, nn));
+
+        % Next, we will iterate over the frequencies captured at this contrast level 
+        for ff = 1:numel(frequencies)
+            % Retrieve the frequency of this measurement 
+            frequency = frequencies(ff);
+
+
+            % Next, iterate over the measurements made at this frequency 
+            for mm = 1:numel(calibration_metadata.n_measures)
+                % Retrieve the given measurement
+                measurement = sorted_measurements{nn, cc, ff, mm}; 
+
+                % Retrieve the relevant world variables
+                world_t = measurement.W.t; % t is time units converted to seconds
+                world_v = measurement.W.v; % v here is the mean pixel of each frame
+
+                % Now, we will perform the fitting procedure of the observed measurements to
+                % a fit sinusoid. Though first, convert the world to contrast
+                world_v_contrast = (world_v - mean(world_v)) / mean(world_v);
+                [world_r2, world_amplitude, ~, world_fit] = fourierRegression( world_v_contrast, world_t, frequency );
+
+                % Show the world fit for this combination of contrast measure and frequency
+                nexttile(t) ;
+
+                % Plot the world camera and its fit sinusoid
+                local_world_t = world_t - world_t(1);
+
+                plot(local_world_t, world_v_contrast, 'k.', 'DisplayName', sprintf('WorldMeasured Freq=%2.1f Hz',frequency));
+                hold on
+                plot(local_world_t, world_fit, 'r-', 'DisplayName', sprintf('WorldFit R2=%.3f', world_r2));
+                xlabel("Time [s]");
+                ylabel("Contrast");
+                ylim([-1, 1]); % Set to 8 bit unsigned range
+
+                % Show the legend for this tile
+                % legend show;
+                title(sprintf("F: %2.2f | R2: %2.2f", frequency, world_r2));
+
+
+            end 
+
+
+        end 
+
+
+    end 
+
+
+end 
+
 
 % Now, we will iterate over the contrast levels and frequencies
 for cc = 1:numel(contrast_levels)
