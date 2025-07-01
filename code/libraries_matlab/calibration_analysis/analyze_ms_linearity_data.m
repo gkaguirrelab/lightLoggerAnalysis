@@ -85,45 +85,54 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements)
                                         } ...
                                       );
 
+    % First, let's iterate over the chips 
+    chips = keys(spectral_sensitivity_map);
+    for cc = 1:numel(chips)
+        % Retrieve the name of the chip we are analyzing
+        chip = chips{cc};
 
-    % First, let's iterate over the NDF levels 
-    for nn = 1:numel(calibration_metadata.NDFs)
-        % Retrieve the current NDF 
-        NDF = calibration_metadata.NDFs(nn); 
+        % Create a tiledlayout figure we will use to show the counts by settings 
+        % level for this chip across NDF levels 
+        [rows, cols] = find_min_figsize(numel(calibration_metadata.NDFs)); 
+        figure; 
+        counts_by_NDF_tiled = tiledlayout(rows, cols); 
+        title(counts_by_NDF_tiled, sprintf("Counts by NDF Level | C: %s", chip), 'FontWeight', 'Bold'); 
 
-        % Let's retrieve the cal file for this NDF
-        cal = calibration_metadata.cal_files{nn};
+        % Create a tabbed figure with one tab per NDF level. 
+        % Each tab will have all of a given chip's channels on it 
+        % for that NDF 
+        uif = uifigure('Name', sprintf("%s Channel Linearity Per NDF", chip)); 
+        tab_group = uitabgroup(uif);  
 
-        % Get the source from the cal file, as we need this to resample the
-        % detector spectral sensitivity functions
-        sourceS = cal.rawData.S; % This is the baseCal adjusted for transmitence
+        % Next, iterate over the NDF levels
+        for nn = 1:numel(calibration_metadata.NDFs)
+            % Retrieve the current NDF 
+            NDF = calibration_metadata.NDFs(nn); 
 
-        % Extract information regarding the light source that was used to
-        % calibrate the minispect
-        sourceP_abs = cal.processedData.P_device;
-
-        % Retrieve the wavelengths
-        wls = SToWls(sourceS);
-
-        % Reformat the minispect SPDs to be in the space of 
-        % the source SPDs 
-        minipspectP_rels_map = reformat_SPDs(spectral_sensitivity_map, sourceS);
-
-        % Next, let's iterate over the chips at this NDF level 
-        chips = keys(spectral_sensitivity_map);
-        for cc = 1:numel(chips)
-            % Retrieve the name of the chip we are analyzing
-            chip = chips{cc};
-
-            % Retrieve the starting idx of this chip's readings 
-            NDF_start_end_matrix = NDF_start_end_map(chip); 
-            starting_idx = 1 + NDF_start_end_matrix(nn, 1); 
+            % Creat a new tab for this NDF for measured/predicted plot  
+            tab = uitab(tab_group, 'Title', sprintf("NDF %.2f", NDF)); 
             
-            % Push the starting index forward if we are not just 
-            % at the start 
-            if(nn > 1)
-                starting_idx = starting_idx + NDF_start_end_matrix(nn-1, 1); 
-            end     
+            % Define a tiled layout that will go in this tab 
+            [rows, cols] = find_min_figsize(n_channels_map(chip)); 
+            measured_predicted_tiled = tiledlayout(tab, rows, cols); 
+
+            % Let's retrieve the cal file for this NDF
+            cal = calibration_metadata.cal_files{nn};
+
+            % Get the source from the cal file, as we need this to resample the
+            % detector spectral sensitivity functions
+            sourceS = cal.rawData.S; % This is the baseCal adjusted for transmitence
+
+            % Extract information regarding the light source that was used to
+            % calibrate the minispect
+            sourceP_abs = cal.processedData.P_device;
+
+            % Retrieve the wavelengths
+            wls = SToWls(sourceS);
+
+            % Reformat the minispect SPDs to be in the space of 
+            % the source SPDs 
+            minipspectP_rels_map = reformat_SPDs(spectral_sensitivity_map, sourceS);
 
             % Initialize a summation variable for the detector counts
             % as we are going to average them over the reps
@@ -152,26 +161,33 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements)
             detector_counts = squeeze(mean(detector_counts, [2, 3]));
 
             % Plot the detector counts across settings levels
-            figure ;
-            title(sprintf("Averaged Counts by Settings Level | NDF %.3f | C: %s", NDF, chip));
-            hold on ;
-            for ch = 1:n_detector_channels
-                plot(background_scalars, detector_counts(:, ch), "-x", 'DisplayName', sprintf("CH%d", ch));
-            end
+            counts_ax = nexttile(counts_by_NDF_tiled) ;
 
+            title(counts_ax, sprintf("Averaged Counts by Settings Level | NDF %.3f", NDF));
+            hold(counts_ax, 'on'); 
+            for ch = 1:n_detector_channels
+                plot(counts_ax, background_scalars, detector_counts(:, ch), "-x", 'DisplayName', sprintf("Ch%d", ch));
+            end
+            
             % Label the plot
-            xlabel("Settings Level");
-            ylabel("Averged Count");
+            xlabel(counts_ax, "Settings Level");
+            ylabel(counts_ax, "Averged Count");
 
             % Show the legend for the plot
-            legend show ;
+            legend(counts_ax); 
+            hold(counts_ax, 'off');
 
-            % Initialize some variables to hold loop results
+            % Initialize variables to calculate the predicted counts
             sphereSPDs = nan(n_settings_levels, sourceS(3));
             predictedCounts = nan(n_settings_levels, n_detector_channels);
 
             % Iterate over the primary steps, that is, the number of scalars
             for ss = 1:n_settings_levels
+                if(background_scalars(ss) == 0.55 && chip == "TSL2591")
+                    fprintf("Chip: %s | Settings Level: %.2f | Count: %f\n", chip, background_scalars(ss), detector_counts(ss, 1))
+                end 
+
+
                 % Get the source settings by multiplying background
                 % by the scalar value at primaryStep kk
                 source_settings = background * background_scalars(ss);
@@ -187,31 +203,53 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements)
 
             end % End n_primary steps
 
-            % Retrieve the filter function used to exclude points
-            % from fitting LBF
-            goodIdxFilter = goodIdxFilterMap(chip);
-
             % Retrieve the measured/predicted counts for this chip
             % at this NDF level
-            measured_local = detector_counts;
-            predicted_local = predictedCounts;
+            measured = detector_counts;
+            predicted = predictedCounts;
 
-            % Append these to the across NDF measures 
-            predicted_measured_global = predicted_measured_map(string(chip)); 
-            predicted_measured_global{1} = [ predicted_measured_global{1} ; predicted_local]; 
-            predicted_measured_global{2} = [ predicted_measured_global{2} ; measured_local]; 
-            predicted_measured_map(chip) = predicted_measured_global; 
+            % Next, we will plot the measured and predicted counts per channel
+            
+            % Retrieve the limits for this chip 
+            limits = lim_map(chip); 
+            for ch = 1:n_detector_channels
+                % Retrieve the ax to plot on 
+                measured_predicted_ax = nexttile(measured_predicted_tiled); 
+                
+                % Plot the measured vs predicted data 
+                plot(measured_predicted_ax, log10(predicted(:, ch)), log10(measured(:, ch)), '-x', 'DisplayName', 'Data'); 
+                hold(measured_predicted_ax, 'on'); 
 
-            % Save the start/end of the readings in the flattened array for this NDF level 
-            NDF_start_end_matrix = NDF_start_end_map(chip); 
-            NDF_start_end_matrix(nn, :) = [starting_idx, starting_idx + size(detector_counts, 1)]; 
-            NDF_start_end_map(chip) = NDF_start_end_matrix; 
+                % Fit a linear model, but only to the "good" points (i.e., those
+                % that are finite and not at the ceiling or floor. We also exclude
+                % the points measured using the ND6 filter, as we do not have an
+                % independent measure of the spectral transmittance of these.
+                p = polyfit(log10(predicted(:, ch)), log10(measured(:, ch)), 1);
+                fitY = polyval(p, log10(predicted(:, ch)));
+                plot(measured_predicted_ax, log10(predicted(:, ch)), fitY, '-r', 'DisplayName', 'Fit'); 
 
-        end % Chip loop 
+                % Add a reference line
+                plot(measured_predicted_ax, [limits(1),limits(2)],[limits(1),limits(2)],':k', "DisplayName", "ReferenceLine");
 
-    end  % NDF loop 
+                % Pretty up the plot
+                xlim(measured_predicted_ax, limits);
+                xlabel(measured_predicted_ax, sprintf('%s predicted counts [log]', chip));
+                ylim(measured_predicted_ax, limits);
+                ylabel(measured_predicted_ax, sprintf('%s measured counts [log]', chip));
 
+                legend(measured_predicted_ax, 'Location','southwest');
 
+                title(measured_predicted_ax, sprintf('channel %d, [slope intercept] = %2.2f, %2.2f',ch, p));
+                hold(measured_predicted_ax, 'off'); 
+            end     
+
+            
+
+        end  % NDF loop 
+    
+    end % Chip loop
+
+    %{
     % Now, we can plot the results for each chip over all NDF levels 
     for cc = 1:numel(chips)
         % Retrieve the name of the chip 
@@ -230,8 +268,17 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements)
 
         % Generate a figure for this chip 
         [rows, cols] = find_min_figsize(n_detector_channels);
-        figure; 
-        t = tiledlayout(rows, cols);
+        %figure; 
+        
+        % Create a tabbed figure with a tab for every NDF level 
+        tg = uitabgroup(); 
+        for 
+
+        
+
+        
+        
+        % t = tiledlayout(rows, cols);
         sgtitle(sprintf("%s Measured vs Predicted Counts", chip), 'FontWeight', 'bold', 'FontSize', 14); 
 
         % Find the limits for this chip
@@ -302,7 +349,7 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements)
 
     end 
 
-
+    %}
 
 end
 
