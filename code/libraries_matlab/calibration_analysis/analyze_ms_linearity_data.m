@@ -45,7 +45,7 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements)
                                     
     % Create a map for the limits for the chips' associated curves
     lim_map = containers.Map({'ASM7341', 'TSL2591'},...
-                             {[-1, 5], [-1, 6]}...
+                             {[-6, 6], [-6, 6]}...
                             );
 
     % Initialize a map between chips and the number of channels that they have
@@ -76,6 +76,16 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements)
                                             } ...
                                           );
 
+    % Initialize a matrix of starting/ending indices 
+    % for each NDF for each chip 
+    NDF_start_end_map = containers.Map( ...
+                                        {'ASM7341', 'TSL2591'}, ...
+                                        { zeros(numel(calibration_metadata.NDFs), 2), ...
+                                          zeros(numel(calibration_metadata.NDFs), 2) ...
+                                        } ...
+                                      );
+
+
     % First, let's iterate over the NDF levels 
     for nn = 1:numel(calibration_metadata.NDFs)
         % Retrieve the current NDF 
@@ -104,6 +114,16 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements)
         for cc = 1:numel(chips)
             % Retrieve the name of the chip we are analyzing
             chip = chips{cc};
+
+            % Retrieve the starting idx of this chip's readings 
+            NDF_start_end_matrix = NDF_start_end_map(chip); 
+            starting_idx = 1 + NDF_start_end_matrix(nn, 1); 
+            
+            % Push the starting index forward if we are not just 
+            % at the start 
+            if(nn > 1)
+                starting_idx = starting_idx + NDF_start_end_matrix(nn-1, 1); 
+            end     
 
             % Initialize a summation variable for the detector counts
             % as we are going to average them over the reps
@@ -167,9 +187,6 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements)
 
             end % End n_primary steps
 
-            % Find the limits for this chip
-            limits = lim_map(chip);
-
             % Retrieve the filter function used to exclude points
             % from fitting LBF
             goodIdxFilter = goodIdxFilterMap(chip);
@@ -185,6 +202,11 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements)
             predicted_measured_global{2} = [ predicted_measured_global{2} ; measured_local]; 
             predicted_measured_map(chip) = predicted_measured_global; 
 
+            % Save the start/end of the readings in the flattened array for this NDF level 
+            NDF_start_end_matrix = NDF_start_end_map(chip); 
+            NDF_start_end_matrix(nn, :) = [starting_idx, starting_idx + size(detector_counts, 1)]; 
+            NDF_start_end_map(chip) = NDF_start_end_matrix; 
+
         end % Chip loop 
 
     end  % NDF loop 
@@ -194,6 +216,9 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements)
     for cc = 1:numel(chips)
         % Retrieve the name of the chip 
         chip = chips{cc}; 
+
+        % Retrieve the start/end for each NDF in the flattened array 
+        NDF_start_end_matrix = NDF_start_end_map(chip); 
 
         % Retrieve the number of channels for this chip 
         n_detector_channels = n_channels_map(chip); 
@@ -209,6 +234,12 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements)
         t = tiledlayout(rows, cols);
         sgtitle(sprintf("%s Measured vs Predicted Counts", chip), 'FontWeight', 'bold', 'FontSize', 14); 
 
+        % Find the limits for this chip
+        limits = lim_map(chip);
+
+        % Find the filter used to find good indices for this chip 
+        goodIdxFilter = goodIdxFilterMap(chip); 
+
         % Loop across the channels of the chip and show predicted vs measured
         for ch = 1:n_detector_channels
             % Begin plotting on the tiles 
@@ -222,16 +253,39 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements)
             predicted_channel_readings = log10(predicted(:,ch));
             measured_channel_readings = log10(measured(:, ch));
 
-            % Fit a linear model, but only to the "good" points (i.e., those
-            % that are finite and not at the ceiling or floor. We also exclude
-            % the points measured using the ND6 filter, as we do not have an
-            % independent measure of the spectral transmittance of these.
-            p = polyfit(predicted_channel_readings, measured_channel_readings, 1);
-            fitY = polyval(p, predicted_channel_readings);
+            % Plot the original points for each NDF level 
+            for nn = 1:numel(calibration_metadata.NDFs)
+                % Retrieve the start and end of the splice of the conjoined readings 
+                % matrix for this NDF 
+                start_and_end = NDF_start_end_matrix(nn, :);
 
-            % Plot the original points
-            plot(predicted_channel_readings, measured_channel_readings, '-x', 'DisplayName', 'Measured');
-            plot(predicted_channel_readings, fitY, '-k', 'LineWidth', 1.5, 'DisplayName', "Fit");
+                starting_idx = start_and_end(1); 
+                ending_idx = start_and_end(2);
+
+                % Splice out the data for only this NDF 
+                predicted_this_NDF = predicted_channel_readings(starting_idx:ending_idx); 
+                measured_this_NDF =  measured_channel_readings(starting_idx:ending_idx); 
+
+                % Splice out only the good indices with the good index filter 
+                goodIdx = goodIdxFilter(predicted_this_NDF, measured_this_NDF);
+
+                % Fit a linear model, but only to the "good" points (i.e., those
+                % that are finite and not at the ceiling or floor. We also exclude
+                % the points measured using the ND6 filter, as we do not have an
+                % independent measure of the spectral transmittance of these.
+                p = polyfit(predicted_this_NDF(goodIdx), measured_this_NDF(goodIdx), 1);
+                fitY = polyval(p, predicted_this_NDF(goodIdx));
+
+                % Plot the fit line for this NDF 
+                label_fit = sprintf("Fit%.2f", calibration_metadata.NDFs(nn)); 
+                plot(predicted_channel_readings(goodIdx), fitY, '-k', 'LineWidth', 1.5, 'DisplayName', label_fit);
+
+                % Generate the label and plot this NDF level's readings 
+                label_measured = sprintf("NDF%.2f", calibration_metadata.NDFs(nn)); 
+                plot(predicted_this_NDF(goodIdx), measured_this_NDF(goodIdx), '-x', 'DisplayName', label_measured);
+
+
+            end 
 
             % Pretty up the plot
             xlim(limits);
@@ -239,7 +293,7 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements)
             ylim(limits);
             ylabel(sprintf('%s measured counts [log]', chip));
 
-            legend('Location','southeast');
+            legend('Location','southwest');
 
             title(sprintf('channel %d, [slope intercept] = %2.2f, %2.2f',ch,p));
 
