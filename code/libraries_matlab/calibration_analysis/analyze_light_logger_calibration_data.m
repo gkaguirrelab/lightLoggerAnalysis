@@ -1,32 +1,20 @@
-function [msLinearityFigHandles, ttfFigHandle] = analyze_light_logger_calibration_data(LightLoggerCalibrationData)
-%{
-    whichMSChannelsToPlot = {[],[]};
-    msLinearityFigHandles = {};
-    ttfFigHandle = [];
-    load('/Users/aguirre/Aguirre-Brainard Lab Dropbox/Geoffrey Aguirre/FLIC_data/LightLogger_RadCal/W1P1M1/NDF_0/nd0.mat','nd0');
-    [msLinearityFigHandles, ttfFigHandle] = analyze_light_logger_calibration_data(nd0,whichMSChannelsToPlot,msLinearityFigHandles,ttfFigHandle);
-%}
-
+function analyze_light_logger_calibration_data(light_logger_calibration_data)
     arguments 
-        LightLoggerCalibrationData; % Struct that has both metadata and parsed readings from the experiment 
+        light_logger_calibration_data; % Struct that has both metadata and parsed readings from the experiment 
     end 
 
 
 
     % First, extract the broad subfields of the calibration information and the parsed readings
     % from the input struct
-    calibration_metadata = LightLoggerCalibrationData.metadata;
-    parsed_readings = LightLoggerCalibrationData.readings;
+    calibration_metadata = light_logger_calibration_data.metadata;
+    parsed_readings = light_logger_calibration_data.readings;
 
-    % 1. Analyze the MS linearity readings.
+    % 1. Analyze the MS linearity readings if there are any to analyze.
     if(numel(calibration_metadata.ms_linearity.NDFs > 0)) 
         analyze_ms_linearity_data(calibration_metadata.ms_linearity,...
-                                parsed_readings.ms_linearity,...
-                                calibration_metadata.cal,...
-                                calibration_metadata.ndf,...
-                                whichMSChannelsToPlot,...
-                                msLinearityFigHandles...
-                                );
+                                  parsed_readings.ms_linearity...
+                                 );
     end                             
 
     %{
