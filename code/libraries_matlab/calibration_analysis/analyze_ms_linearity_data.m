@@ -91,6 +91,12 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements)
         % Retrieve the name of the chip we are analyzing
         chip = chips{cc};
 
+        % Grab the channels of the chip we are fitting;
+        n_detector_channels = n_channels_map(chip);
+
+        % Retrieve the limits for this chip 
+        limits = lim_map(chip); 
+
         % Create a tiledlayout figure we will use to show the counts by settings 
         % level for this chip across NDF levels 
         [rows, cols] = find_min_figsize(numel(calibration_metadata.NDFs)); 
@@ -103,6 +109,9 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements)
         % for that NDF 
         uif = uifigure('Name', sprintf("%s Channel Linearity Per NDF", chip)); 
         tab_group = uitabgroup(uif);  
+
+        % Initialize a cell array that will hold the measured/predicted value by NDF 
+        measured_predicted_by_NDF = {}; 
 
         % Next, iterate over the NDF levels
         for nn = 1:numel(calibration_metadata.NDFs)
@@ -145,9 +154,6 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements)
             % Find the associated detectorP_rel for this chip
             detectorP_rel = minipspectP_rels_map(chip);
 
-            % Grab the channels of the chip we are fitting;
-            n_detector_channels = n_channels_map(chip);
-
             % Extract all of the counts from the sorted measurements
             % This gives you a settings x measurement x readings x channels
             % matrix
@@ -174,7 +180,7 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements)
             ylabel(counts_ax, "Averged Count");
 
             % Show the legend for the plot
-            legend(counts_ax); 
+            legend(counts_ax, 'Location', 'best'); 
             hold(counts_ax, 'off');
 
             % Initialize variables to calculate the predicted counts
@@ -183,11 +189,6 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements)
 
             % Iterate over the primary steps, that is, the number of scalars
             for ss = 1:n_settings_levels
-                if(background_scalars(ss) == 0.55 && chip == "TSL2591")
-                    fprintf("Chip: %s | Settings Level: %.2f | Count: %f\n", chip, background_scalars(ss), detector_counts(ss, 1))
-                end 
-
-
                 % Get the source settings by multiplying background
                 % by the scalar value at primaryStep kk
                 source_settings = background * background_scalars(ss);
@@ -209,9 +210,6 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements)
             predicted = predictedCounts;
 
             % Next, we will plot the measured and predicted counts per channel
-            
-            % Retrieve the limits for this chip 
-            limits = lim_map(chip); 
             for ch = 1:n_detector_channels
                 % Retrieve the ax to plot on 
                 measured_predicted_ax = nexttile(measured_predicted_tiled); 
@@ -237,119 +235,57 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements)
                 ylim(measured_predicted_ax, limits);
                 ylabel(measured_predicted_ax, sprintf('%s measured counts [log]', chip));
 
-                legend(measured_predicted_ax, 'Location','southwest');
+                legend(measured_predicted_ax, 'Location','best');
 
                 title(measured_predicted_ax, sprintf('channel %d, [slope intercept] = %2.2f, %2.2f',ch, p));
                 hold(measured_predicted_ax, 'off'); 
             end     
-
             
+            % Save the measured and predicted at this NDF 
+            measured_predicted_by_NDF{nn} = {measured, predicted}; 
 
         end  % NDF loop 
-    
-    end % Chip loop
 
-    %{
-    % Now, we can plot the results for each chip over all NDF levels 
-    for cc = 1:numel(chips)
-        % Retrieve the name of the chip 
-        chip = chips{cc}; 
+        % Now, plot linearity across all NDF levels for a given chip 
+        [rows, cols] = find_min_figsize(n_detector_channels); 
+        figure; 
+        across_NDF_figure = tiledlayout(rows, cols); 
+        title(across_NDF_figure, sprintf("Measured vs Predicted across NDF | C: %s", chip), 'FontWeight', 'Bold');
 
-        % Retrieve the start/end for each NDF in the flattened array 
-        NDF_start_end_matrix = NDF_start_end_map(chip); 
-
-        % Retrieve the number of channels for this chip 
-        n_detector_channels = n_channels_map(chip); 
-
-        % Retrieve the predicted/measured values for this chip across NDF levels 
-        predicted_measured = predicted_measured_map(chip); 
-        predicted = predicted_measured{1}; 
-        measured = predicted_measured{2};   
-
-        % Generate a figure for this chip 
-        [rows, cols] = find_min_figsize(n_detector_channels);
-        %figure; 
-        
-        % Create a tabbed figure with a tab for every NDF level 
-        tg = uitabgroup(); 
-        for 
-
-        
-
-        
-        
-        % t = tiledlayout(rows, cols);
-        sgtitle(sprintf("%s Measured vs Predicted Counts", chip), 'FontWeight', 'bold', 'FontSize', 14); 
-
-        % Find the limits for this chip
-        limits = lim_map(chip);
-
-        % Find the filter used to find good indices for this chip 
-        goodIdxFilter = goodIdxFilterMap(chip); 
-
-        % Loop across the channels of the chip and show predicted vs measured
+        % Iterate over the channels 
         for ch = 1:n_detector_channels
-            % Begin plotting on the tiles 
-            nexttile; 
+            % Retrieve the axes to plot on
+            across_NDF_channel_ax = nexttile(across_NDF_figure); 
 
-            % Draw a reference line
-            plot([limits(1),limits(2)],[limits(1),limits(2)],':k', "DisplayName", "ReferenceLine");
-            hold on;
+            % Retrieve the values per NDF level 
+            NDF_data = zeros(1, numel(calibration_metadata.NDFs));
 
-            % Log transform the measured and predicted counts
-            predicted_channel_readings = log10(predicted(:,ch));
-            measured_channel_readings = log10(measured(:, ch));
-
-            % Plot the original points for each NDF level 
+            % Plot the data 
             for nn = 1:numel(calibration_metadata.NDFs)
-                % Retrieve the start and end of the splice of the conjoined readings 
-                % matrix for this NDF 
-                start_and_end = NDF_start_end_matrix(nn, :);
+                NDF_measured_predicted = measured_predicted_by_NDF{nn}; 
+                measured = NDF_measured_predicted{1};
+                predicted = NDF_measured_predicted{2};
 
-                starting_idx = start_and_end(1); 
-                ending_idx = start_and_end(2);
-
-                % Splice out the data for only this NDF 
-                predicted_this_NDF = predicted_channel_readings(starting_idx:ending_idx); 
-                measured_this_NDF =  measured_channel_readings(starting_idx:ending_idx); 
-
-                % Splice out only the good indices with the good index filter 
-                goodIdx = goodIdxFilter(predicted_this_NDF, measured_this_NDF);
-
-                % Fit a linear model, but only to the "good" points (i.e., those
-                % that are finite and not at the ceiling or floor. We also exclude
-                % the points measured using the ND6 filter, as we do not have an
-                % independent measure of the spectral transmittance of these.
-                p = polyfit(predicted_this_NDF(goodIdx), measured_this_NDF(goodIdx), 1);
-                fitY = polyval(p, predicted_this_NDF(goodIdx));
-
-                % Plot the fit line for this NDF 
-                label_fit = sprintf("Fit%.2f", calibration_metadata.NDFs(nn)); 
-                plot(predicted_channel_readings(goodIdx), fitY, '-k', 'LineWidth', 1.5, 'DisplayName', label_fit);
-
-                % Generate the label and plot this NDF level's readings 
-                label_measured = sprintf("NDF%.2f", calibration_metadata.NDFs(nn)); 
-                plot(predicted_this_NDF(goodIdx), measured_this_NDF(goodIdx), '-x', 'DisplayName', label_measured);
-
-
+                plot(across_NDF_channel_ax, log10(predicted(:, ch)), log10(measured(:, ch)), '-x', 'DisplayName', sprintf("NDF%.2f", calibration_metadata.NDFs(nn)));
+                hold(across_NDF_channel_ax, 'on'); 
             end 
 
-            % Pretty up the plot
-            xlim(limits);
-            xlabel(sprintf('%s predicted counts [log]', chip));
-            ylim(limits);
-            ylabel(sprintf('%s measured counts [log]', chip));
+            % Label the plot 
+            title(across_NDF_channel_ax, sprintf("Ch: %d", ch)); 
+            
+            xlim(across_NDF_channel_ax, limits);
+            xlabel(across_NDF_channel_ax, sprintf('%s predicted counts [log]', chip));
+            ylim(across_NDF_channel_ax, limits);
+            ylabel(across_NDF_channel_ax, sprintf('%s measured counts [log]', chip));
+            
+            legend(across_NDF_channel_ax, 'Location', 'best'); 
 
-            legend('Location','southwest');
+            hold(across_NDF_channel_ax, 'off');
 
-            title(sprintf('channel %d, [slope intercept] = %2.2f, %2.2f',ch,p));
 
-        end % Channel loop 
-        hold off; 
-
-    end 
-
-    %}
+        end 
+    
+    end % Chip loop
 
 end
 
