@@ -111,8 +111,8 @@ function converted_linearity = convert_ms_linearity_to_matlab(calibration_metada
                 % Convert the chunks in the cell to MATLAB struct type 
                 measurement_cell = cellfun(@(x) chunk_dict_to_matlab(x), measurement_cell, 'UniformOutput', false); 
                 
-                %save the updated measurement cell into the settings cell 
-                converted_linearity{nn, ss, mm} = measurement_cell{:}; 
+                % Save the updated measurement cell into the settings cell 
+                converted_linearity{nn, settings_idx, mm} = measurement_cell{:}; 
             end 
 
         end 

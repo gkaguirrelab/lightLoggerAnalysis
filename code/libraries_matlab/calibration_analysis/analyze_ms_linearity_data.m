@@ -124,7 +124,7 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements)
             % matrix
             detector_counts = extract_detector_counts(nn, measurements, chip);
 
-             % Now, let's take the mean across measurements (the number of times)
+            % Now, let's take the mean across measurements (the number of times)
             % we exposed this settings level as well as the mean across readings
             % the number of readings at each measurement. We may later be
             % interested in the variability across the set of measures.
@@ -142,6 +142,9 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements)
             % Label the plot
             xlabel("Settings Level");
             ylabel("Averged Count");
+
+            % Set the limit for the mean detector counts as an unsigned 16 bit range 
+            ylim([-5, 2^16+1000])
 
             % Show the legend for the plot
             legend show ;
@@ -166,8 +169,6 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements)
                 predictedCounts(ss,:) = sphereSPDs(ss,:)*detectorP_rel;
 
             end % End n_primary steps
-
-            % Plot this chip's measured vs predicted counts
 
             % Find the limits for this chip
             limits = lim_map(chip);
@@ -337,8 +338,8 @@ function counts_mat = extract_detector_counts(NDF_num, measurements, chip)
 
 
     % Initialize a matrix to store the values for this NDF 
+    % TODO: Change this, can't have nan. It messes things up. 
     counts_mat = nan(num_settings_levels, n_measures, max_num_readings, n_channels);
-
 
     % Next, we will go over each measurement and extract the channels
     % for the desired chip 
