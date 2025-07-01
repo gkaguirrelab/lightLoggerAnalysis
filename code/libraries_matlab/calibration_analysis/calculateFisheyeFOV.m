@@ -14,9 +14,9 @@ function fov_degrees = calculateFisheyeFOV(fisheyeIntrinsics)
 %   Outputs:
 %       fov_degrees       - The diagonal field of view of the camera in degrees.
 %
-% EXAMPLE USE:
+% Usage:
 %{
-    data = load('<FULL_PATH_TO_FILE>');
+    data = load('~/FLIC_admin/Equipment/ArduCam B0392 IMX219 Wide Angle M12/camera_intrinsics_calibration.mat');
     fisheyeIntrinsics = data.camera_intrinsics_calibration.camera_intrinsics.Intrinsics;
     fov_degrees = calculateFisheyeFOV(fisheyeIntrinsics);
 %}

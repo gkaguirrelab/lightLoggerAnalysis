@@ -1,12 +1,39 @@
-%% SCRIPT TO EXPRESS AVERAGE SPD ACROSS CHUNKS FOR EACH LMS OPERATION
+%% SCRIPT TO EXPRESS AVERAGE SPD ACROSS CHUNKS; Basic
 %
 % This script loads video chunks, calculates their individual Temporal SPD
 % (for combined RGB, 200 FPS), averages these SPDs, and plots the result.
 
+[nFrames, nRows, nCols] = size(v);
+fps = 184.74;
 
+% Filter empty/invalid chunks
+good_chunks = cellfun(@(chunk) ~isempty(chunk) && any(chunk.W.v(:)), chunks);
+
+% Get SPDs
+[spds, frqs] = cellfun(@(chunk) calcTemporalSPD(chunk.W.v(1:nFrames,:,:), fps, 'lineResolution', true), chunks(good_chunks), 'UniformOutput', false);
+
+% Get average SPDs    
+avg_spds = mean(cat(2, spds{:}), 2)';
+
+% Keep valid/non-zero values
+frq_vec = frqs{1}(:);
+nonzero_idx = frq_vec > 0;
+clean_frqs = frq_vec(nonzero_idx);
+clean_spds = avg_spds(nonzero_idx);
+
+% Visualize
+plotSPD(clean_spds, clean_frqs)
+title('SPD for Combined LMS');
+xlabel('Temporal Frequency (Hz)');
+ylabel('Power (contrast^2 / Hz)');
+
+%% SCRIPT TO EXPRESS AVERAGE SPD ACROSS CHUNKS FOR EACH LMS OPERATION; Center & Periphery Analysis
 % Get number of frames
 [nFrames, nRows, nCols] = size(v);
 fps = 184.74;
+
+% Filter empty/invalid chunks
+good_chunks = cellfun(@(chunk) ~isempty(chunk) && any(chunk.W.v(:)), chunks);
 
 % Create central and peripheral matrix
 centerMatrix = zeros(nRows, nCols);
@@ -14,9 +41,6 @@ centerMatrix(121:360, 161:480) = 1;
 
 peripheryMatrix = ones(nRows, nCols);
 peripheryMatrix(121:360, 161:480) = 0;
-
-% Filter empty/invalid chunks
-good_chunks = cellfun(@(chunk) ~isempty(chunk) && any(chunk.W.v(:)), chunks);
 
 % Define the post-receptoral channels to analyze
 channels = {'LM', 'L-M', 'S'};
