@@ -526,7 +526,7 @@ function plot_chunks(chunks)
         plot(MS_light_sensing_chunks_t, log10(MS_AS_chunks_v(:, cc)), 'x', "DisplayName", sprintf("ch%d", cc));
     end 
     xlabel("Time [s]");
-    ylabel("Count");
+    ylabel("Count [log]");
     legend show ; 
     % Set the ylim to show between 16 bit unsigned range smoothly 
     %ylim([-5, 66000]); 
@@ -538,7 +538,7 @@ function plot_chunks(chunks)
         plot(MS_light_sensing_chunks_t, log10(MS_TS_chunks_v(:, cc)), 'x', "DisplayName", sprintf("ch%d", cc-1));
     end 
     xlabel("Time [s]");
-    ylabel("Count");
+    ylabel("Count [log]");
     legend show ; 
     % Set the ylim to show between 16 bit unsigned range smoothly 
     %ylim([-5, 66000]); 

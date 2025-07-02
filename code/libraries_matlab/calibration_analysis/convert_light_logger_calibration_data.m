@@ -54,7 +54,7 @@ function LightLoggerCalibrationData = convert_light_logger_calibration_data(expe
 
     % Convert the subfields to purely MATLAB type
     parsed_readings.ms_linearity = convert_ms_linearity_to_matlab(calibration_metadata.ms_linearity, parsed_readings.ms_linearity);
-    %parsed_readings.temporal_sensitivity = convert_temporal_sensitivity_to_matlab(calibration_metadata.temporal_sensitivity, parsed_readings.temporal_sensitivity);
+    parsed_readings.temporal_sensitivity = convert_temporal_sensitivity_to_matlab(calibration_metadata.temporal_sensitivity, parsed_readings.temporal_sensitivity);
     %parsed_readings.phase_fitting = convert_temporal_sensitivity_to_matlab(calibration_metadata.phase_fitting, parsed_readings.phase_fitting);
     %parsed_readings.contrast_gamma = convert_temporal_sensitivity_to_matlab(calibration_metadata.contrast_gamma, parsed_readings.contrast_gamma);
 
@@ -69,11 +69,11 @@ end
 % Local function to convert the ms linearity field of the readings dict to pure 
 % MATLAB types. Note: the CalibrationData referenced here is the substruct of CalibrationData
 % specifically for ms_linearity
-function converted_linearity = convert_ms_linearity_to_matlab(calibration_metadata, ms_linearity_readings)
+function converted_linearity = convert_ms_linearity_to_matlab(linearity_calibration_metadata, ms_linearity_readings)
     % First, let's extract some information about what we intended 
-    num_NDF_levels = numel(calibration_metadata.NDFs);
-    num_settings_levels = numel(calibration_metadata.background_scalars);
-    n_measures = calibration_metadata.n_measures; 
+    num_NDF_levels = numel(linearity_calibration_metadata.NDFs);
+    num_settings_levels = numel(linearity_calibration_metadata.background_scalars);
+    n_measures = linearity_calibration_metadata.n_measures; 
     
     % Now, we will allocate an output array 
     converted_linearity = cell(num_NDF_levels, num_settings_levels, n_measures);
@@ -102,8 +102,8 @@ function converted_linearity = convert_ms_linearity_to_matlab(calibration_metada
             for mm = 1:n_measures
                 % Find the index of the setting that was used for this combination 
                 % of measurement and settings number 
-                settings_idx = calibration_metadata.background_scalars_orders(nn, mm, ss); 
-                setting = calibration_metadata.background_scalars(settings_idx);
+                settings_idx = linearity_calibration_metadata.background_scalars_orders(nn, mm, ss); 
+                setting = linearity_calibration_metadata.background_scalars(settings_idx);
 
                 % Retrieve the measurement cell 
                 measurement_cell = cell(settings_cell{mm}); 
@@ -126,15 +126,23 @@ end
 % phase fitting fields of the readings dict to pure 
 % MATLAB types. Note: the CalibrationData referenced here is the substruct of CalibrationData
 % specifically for temporal sensitivity
-function converted_temporal_sensitivity = convert_temporal_sensitivity_to_matlab(CalibrationData, temporal_sensitivity)
-    % Let's retrieve the original order of the contrast levels and frequencies 
-    contrast_levels = CalibrationData.contrast_levels; 
-    frequencies = CalibrationData.frequencies; 
+function converted_temporal_sensitivity = convert_temporal_sensitivity_to_matlab(temporal_sensitivity_calibration_metadata, temporal_sensitivity_readings)
+    % First, let's retrieve some basic information from the struct 
+    num_NDF_levels = numel(temporal_sensitivity_calibration_metadata.NDFs); 
+    num_contrast_levels = numel(temporal_sensitivity_calibration_metadata.contrast_levels); 
+    num_frequencies = numel(temporal_sensitivity_calibration_metadata.frequencies); 
+
+    % Then Let's retrieve the original order of the contrast levels and frequencies 
+    contrast_levels = temporal_sensitivity_calibration_metadata.contrast_levels; 
+    frequencies = temporal_sensitivity_calibration_metadata.frequencies; 
     
-    % Let's extract the order in which the contrast and frequencies were exposed 
-    contrast_orders = CalibrationData.contrast_levels_orders; 
-    frequencies_orders = CalibrationData.frequencies_orders; 
+    % Then Let's extract the order in which the contrast and frequencies were exposed 
+    contrast_orders = temporal_sensitivity_calibration_metadata.contrast_levels_orders; 
+    frequencies_orders = temporal_sensitivity_calibration_metadata.frequencies_orders; 
     
+    % UP TO HERE IN REFACTOR
+
+
     % First, .temporal_sensitivity is a 1x1 py.list Convert this outer list to cell.
     % This gives you a cell array with 1 element, a YxZ py.list
     temporal_sensitivity = cell(temporal_sensitivity); 
@@ -151,7 +159,7 @@ function converted_temporal_sensitivity = convert_temporal_sensitivity_to_matlab
 
     % First, let's calculate the actual size of the 
     % recording matrix and ensure it aligns with our expectations
-    intended_size = [numel(contrast_levels), numel(frequencies), CalibrationData.n_measures];
+    intended_size = [numel(contrast_levels), numel(frequencies), temporal_sensitivity_calibration_metadata.n_measures];
 
     % If we intended to measure nothing, just return empty 
     if(intended_size(1) == 0)
