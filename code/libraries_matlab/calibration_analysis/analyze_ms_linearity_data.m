@@ -269,7 +269,18 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements)
         figure; 
         across_NDF_figure = tiledlayout(rows, cols); 
         title(across_NDF_figure, sprintf("Measured vs Predicted across NDF | C: %s", chip), 'FontWeight', 'Bold');
-
+        
+        % Make a list of colors for each ND level
+        colorList = [
+            0, 0.4470, 0.7410;   % Blue
+            0.8500, 0.3250, 0.0980;  % Orange
+            0.9290, 0.6940, 0.1250;  % Yellow
+            0.4940, 0.1840, 0.5560;  % Purple
+            0.4660, 0.6740, 0.1880;  % Green
+            0.3010, 0.7450, 0.9330;  % Light Blue
+            0.6350, 0.0780, 0.1840   % Red
+            ];
+        
         % Iterate over the channels 
         for ch = 1:n_detector_channels
             % Retrieve the axes to plot on
@@ -284,7 +295,9 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements)
                 measured = NDF_measured_predicted{1};
                 predicted = NDF_measured_predicted{2};
 
-                plot(across_NDF_channel_ax, log10(predicted(:, ch)), log10(measured(:, ch)), '-x', 'DisplayName', sprintf("NDF%.2f", calibration_metadata.NDFs(nn)));
+                h = scatter(across_NDF_channel_ax, log10(predicted(:, ch)), log10(measured(:, ch)), 'o','MarkerFaceColor', colorList(nn,:), 'DisplayName', sprintf("NDF%.1f", calibration_metadata.NDFs(nn)));
+                h.MarkerFaceAlpha = 0.2;
+                h.MarkerEdgeAlpha = 0.2;
                 hold(across_NDF_channel_ax, 'on'); 
             end 
 
