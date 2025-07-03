@@ -17,7 +17,7 @@ function fov_degrees = calculateFisheyeFOV(fisheyeIntrinsics)
 % Usage:
 %{
     data = load('~/FLIC_admin/Equipment/ArduCam B0392 IMX219 Wide Angle M12/camera_intrinsics_calibration.mat');
-    fisheyeIntrinsics = data.camera_intrinsics_calibration.camera_intrinsics.Intrinsics;
+    fisheyeIntrinsics = data.camera_intrinsics_calibration.results.Intrinsics;    
     fov_degrees = calculateFisheyeFOV(fisheyeIntrinsics);
 %}
 
