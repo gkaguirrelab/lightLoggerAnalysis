@@ -200,13 +200,6 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements)
 
             % Iterate over the primary steps, that is, the number of scalars
             for ss = 1:n_settings_levels
-                % Debugging info 
-                if(background_scalars(ss) == 0.05 && strcmp(chip, 'TSL2591'))
-                    fprintf("NDF: %2.f | Chip: %s | Setting: %.2f | Count: %f\n", NDF, chip, background_scalars(ss), detector_counts(ss));
-
-                end 
-
-
                 % Get the source settings by multiplying background
                 % by the scalar value at primaryStep kk
                 source_settings = background * background_scalars(ss);
