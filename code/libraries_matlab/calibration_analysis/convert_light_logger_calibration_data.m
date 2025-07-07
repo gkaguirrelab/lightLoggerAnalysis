@@ -54,7 +54,7 @@
 
     % Convert the subfields to purely MATLAB type
     parsed_readings.ms_linearity = convert_ms_linearity_to_matlab(calibration_metadata.ms_linearity, parsed_readings.ms_linearity);
-    %parsed_readings.temporal_sensitivity = convert_temporal_sensitivity_to_matlab(calibration_metadata.temporal_sensitivity, parsed_readings.temporal_sensitivity);
+    parsed_readings.temporal_sensitivity = convert_temporal_sensitivity_to_matlab(calibration_metadata.temporal_sensitivity, parsed_readings.temporal_sensitivity);
     %parsed_readings.phase_fitting = convert_temporal_sensitivity_to_matlab(calibration_metadata.phase_fitting, parsed_readings.phase_fitting);
     %parsed_readings.contrast_gamma = convert_temporal_sensitivity_to_matlab(calibration_metadata.contrast_gamma, parsed_readings.contrast_gamma);
 
@@ -131,6 +131,10 @@ function converted_temporal_sensitivity = convert_temporal_sensitivity_to_matlab
     num_NDF_levels = numel(temporal_sensitivity_calibration_metadata.NDFs); 
     num_contrast_levels = numel(temporal_sensitivity_calibration_metadata.contrast_levels); 
     num_frequencies = numel(temporal_sensitivity_calibration_metadata.frequencies); 
+    n_measures = temporal_sensitivity_calibration_metadata.n_measures; 
+
+    % Allocate a converted output 
+    converted_temporal_sensitivity = cell(num_NDF_levels, num_contrast_levels, num_frequencies, n_measures); 
 
     % Then Let's retrieve the original order of the contrast levels and frequencies 
     contrast_levels = temporal_sensitivity_calibration_metadata.contrast_levels; 
@@ -139,80 +143,41 @@ function converted_temporal_sensitivity = convert_temporal_sensitivity_to_matlab
     % Then Let's extract the order in which the contrast and frequencies were exposed 
     contrast_orders = temporal_sensitivity_calibration_metadata.contrast_levels_orders; 
     frequencies_orders = temporal_sensitivity_calibration_metadata.frequencies_orders; 
-    
-    % UP TO HERE IN REFACTOR
-
 
     % First, .temporal_sensitivity is a 1x1 py.list Convert this outer list to cell.
-    % This gives you a cell array with 1 element, a YxZ py.list
-    temporal_sensitivity = cell(temporal_sensitivity); 
-    
-    % Convert this py.list to a cell array 
-    % This give you a cell array like { {YxZ} cell }, 
-    % so let's splice out the extra dimension 
-    temporal_sensitivity = cellfun(@(x) cell(x), temporal_sensitivity, 'UniformOutput', false); 
-                                
-    % This cell array is now a cell array where each element is a cell array of 
-    % YxZ py.list. The outer cell is the contrast level and the inner cell 
-    % is the frequency. First, let's put it back into matrix form. 
-    temporal_sensitivity = vertcat(temporal_sensitivity{:});
+    % This gives you a cell array with of N py.lists corresponding to the NDF levels 
+    temporal_sensitivity_readings = cell(temporal_sensitivity_readings); 
 
-    % First, let's calculate the actual size of the 
-    % recording matrix and ensure it aligns with our expectations
-    intended_size = [numel(contrast_levels), numel(frequencies), temporal_sensitivity_calibration_metadata.n_measures];
+    % Then, convert each NDF level measurement py.list into a cell array as well 
+    temporal_sensitivity_readings = cellfun(@(x) cell(x), temporal_sensitivity_readings, 'UniformOutput', false); 
 
-    % If we intended to measure nothing, just return empty 
-    if(intended_size(1) == 0)
-        converted_temporal_sensitivity = {};
-        return ; 
-    end 
-
-    [present_contrast_levels, present_frequencies] = size(temporal_sensitivity); 
-
-    % Output a warning message here that there were 0 frequencies present 
-    % and 0 contrast levels present. This can be intended behavior, 
-    % at certain NDF levels where we do not record certain measurements 
-    % TODO: Still need to fix this
-    if(present_contrast_levels == 0 || present_frequencies == 0)
-        converted_temporal_sensitivity = {};
-        return ; 
-    end 
-
-    present_measures = length(temporal_sensitivity{1});
-    actual_size = [present_contrast_levels, present_frequencies, present_measures];
-
-    assert( isequal(intended_size, actual_size) );
-
-    % Now, we get a Contrast x Frequency cell of 1xnMeasures cells. Let's create this into
-    % a ContrastxFrequencyxMeasure cell 
-    converted_temporal_sensitivity = cell(present_contrast_levels, present_frequencies, present_measures);
-
-    % Now, we will easily iterate over/convert the measurements and store them in this 
-    % new converted variable. Note: We will ALSO 
-    % do the reordering/unshuffling component here 
-    for cc = 1:present_contrast_levels
-        for ff = 1:present_frequencies
-            % First retrieve the measurement 
-            % cell for this contrast and frequency 
-            measurement_cell = temporal_sensitivity{cc, ff};
+    % Now that we've done some basic conversion, let's do some iteration to fill in our converted cell 
+    % First, iterate over the NDF levels 
+    for nn = 1:num_NDF_levels
+        % Let's retrieve the contrasts measured at this NDF
+        contrast_level_readings = cellfun(@(x) cell(x), temporal_sensitivity_readings{nn}, 'UniformOutput', false);
         
-            % Every measurement is a py.list of 
-            % reading dicts, so first convert this 
-            % measurement into cell, then 
-            % we will parse the reading dicts to MATLAB 
-            % types 
-            for nn = 1:present_measures
-                video_chunks_as_cell = cell(measurement_cell{nn}); 
-                video_chunks_as_cell = cellfun(@(x) chunk_dict_to_matlab(x), video_chunks_as_cell); 
+        % Next, iterate over the contrast levels 
+        for cc = 1:num_contrast_levels
+            % Retrieve the cell of frequencies measured at this contrast 
+            % Convert those py.list of measures per frequency to cell 
+            frequencies_readings = cellfun(@(x) cell(x), contrast_level_readings{cc}, 'UniformOutput', false); 
+            
+            % Then, iterate over the frequencies 
+            for ff = 1:num_frequencies
+                % Retrieve the measurements at this frequnecy 
+                frequency_readings = cellfun(@(x) cell(x), frequencies_readings{ff}, 'UniformOutput', false);
+        
+                % Then, iterate over the measure at this frequency 
+                for mm = 1:n_measures
+                    % Retrieve the cell array of py.dict chunks that compose the measurement
+                    measurement_chunks = frequency_readings{mm};
 
-                % Now, let's find out what REAL idx was this combination of measurement number, 
-                % contrast number, and frequency number 
-                contrast_idx = contrast_orders(nn, cc); 
-                frequency_idx = frequencies_orders(nn, cc, ff); 
-
-                % Store the fully converted reading back into the larger cell 
-                converted_temporal_sensitivity{contrast_idx, frequency_idx, nn} = video_chunks_as_cell;
-                
+                    % Retrieve the mmth measurement at this frequency 
+                    % convert the chunks of this measurement to MATLAB type, and save in struct 
+                    converted_temporal_sensitivity{nn, cc, ff, mm} = cellfun(@(x) chunk_dict_to_matlab(x), measurement_chunks, 'UniformOutput', false);
+                end 
+            
             end 
 
         end 
