@@ -17,16 +17,15 @@ function analyze_light_logger_calibration_data(light_logger_calibration_data)
                                  );
     end                             
 
-    %{
 
     % 2. Analyze the Temporal Sensitivity readings
     if ~isempty(calibration_metadata.temporal_sensitivity.frequencies)
-        ttfFigHandle = analyze_temporal_sensitivity_data(...
-            calibration_metadata.temporal_sensitivity, ...
-            parsed_readings.temporal_sensitivity, calibration_metadata.ndf,...
-            ttfFigHandle);
+        analyze_temporal_sensitivity_data(calibration_metadata.temporal_sensitivity, ...
+                                          parsed_readings.temporal_sensitivity...
+                                         );
     end
 
+    %{
     % 3. Analyze the Phase fitting readings
     if ~isempty(calibration_metadata.phase_fitting.frequencies)
         temporal_offsets_secs = analyze_phase_fit_data(calibration_metadata.phase_fitting, parsed_readings.phase_fitting);

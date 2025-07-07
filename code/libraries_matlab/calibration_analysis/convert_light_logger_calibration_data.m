@@ -173,9 +173,12 @@ function converted_temporal_sensitivity = convert_temporal_sensitivity_to_matlab
                     % Retrieve the cell array of py.dict chunks that compose the measurement
                     measurement_chunks = frequency_readings{mm};
 
+                    % Convert the chunks to MATLAB 
+                    measurement_chunks_matlab = cellfun(@(x) chunk_dict_to_matlab(x), measurement_chunks, 'UniformOutput', false);
+
                     % Retrieve the mmth measurement at this frequency 
                     % convert the chunks of this measurement to MATLAB type, and save in struct 
-                    converted_temporal_sensitivity{nn, cc, ff, mm} = cellfun(@(x) chunk_dict_to_matlab(x), measurement_chunks, 'UniformOutput', false);
+                    converted_temporal_sensitivity{nn, cc, ff, mm} = measurement_chunks_matlab{:};
                 end 
             
             end 
