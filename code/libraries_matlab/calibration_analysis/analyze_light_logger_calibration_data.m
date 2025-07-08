@@ -17,7 +17,7 @@ function analyze_light_logger_calibration_data(light_logger_calibration_data)
 
 
     % 2. Analyze the Temporal Sensitivity readings
-    if ~isempty(calibration_metadata.temporal_sensitivity.frequencies)
+    if(numel(calibration_metadata.temporal_sensitivity.NDFs) > 0)
         analyze_temporal_sensitivity_data(calibration_metadata.temporal_sensitivity, ...
                                           parsed_readings.temporal_sensitivity...
                                          );
@@ -35,7 +35,7 @@ function analyze_light_logger_calibration_data(light_logger_calibration_data)
     %}
 
     % 4. Analyze the contrast gamma readings
-    if ~isempty(calibration_metadata.contrast_gamma.frequencies)
+    if(numel(calibration_metadata.contrast_gamma.NDFs) > 0)
         analyze_contrast_gamma_data(calibration_metadata.contrast_gamma,...
                                     parsed_readings.contrast_gamma...
                                    );

@@ -1,85 +1,80 @@
-function analyze_contrast_gamma_data(CalibrationData, sorted_measurements, NDF, Pi_util)
-% Retrieve the frequencies and contrast levels used to make the measurements
-% as well as the number of measurements made at each level (this should be 1 here)
-contrast_levels = CalibrationData.contrast_levels;
-frequencies = CalibrationData.frequencies;
-n_measures = CalibrationData.n_measures;
+function analyze_contrast_gamma_data(calibration_metadata, measurements)
+    % Retrieve the NDFs, frequencies and contrast levels used to make the measurements
+    % as well as the number of measurements made at each level
+    NDFs = calibration_metadata.NDFs; 
+    contrast_levels = calibration_metadata.contrast_levels;
+    frequencies = calibration_metadata.frequencies;
+    n_measures = calibration_metadata.n_measures;
 
-assert(numel(frequencies) == 1); % Assert this was all made at a single frequency
 
-% Sorted data is based into here as a 3D cell array in the shape
-% (contrastIdx, frequencyIdx, measurementIdx)
+    % First, let's iterate over NDF level 
+    for nn = 1:numel(NDFs)
+        % Retrieve the current NDF 
+        NDF = NDFs(nn); 
 
-% First, retrieve the single frequency exposed under all conditions
-frequency = frequencies(1);
+        % Initialize a tiled layout plot to display the results 
+        [rows, cols] = find_min_figsize(numel(frequencies)); 
+        figure; 
+        NDF_plot = tiledlayout(rows, cols); 
 
-% Initialize an array of avg amplitudes that we will then
-% fill in for each contrast level
-avg_amplitudes = zeros(size(contrast_levels));
+        % Next, iterate over the frequencies 
+        for ff = 1:numel(frequencies)
+            % Move to the next tile of the plot 
+            frequency_contrast_gamma_plot = nexttile(NDF_plot); 
 
-% Then, let's iterate over the contrast levels
-for cc = 1:numel(contrast_levels)
-    % Retrieve the contrast at this level
-    contrast = contrast_levels(cc);
+            % Retrieve the current frequency 
+            frequency = frequencies(ff); 
 
-    % Then, iterate over the measures at this contrast level
-    local_amplitudes = zeros([n_measures, 1]);
-    for nn = 1:n_measures
-        % Retrieve the measurement
-        measurement = sorted_measurements{cc, 1, nn};
+            % Initialize a vector to save the amplitudes per contrast level 
+            amplitudes_by_contrasts = zeros(numel(contrast_levels), n_measures); 
 
-        % Extract the camera temporal support and v vectors
-        world_t = measurement.W.t;
-        world_v = measurement.W.v;
+            % Next, iterate over the contrast levels 
+            % at this frequency 
+            for cc = 1:numel(contrast_levels)
+                % Iterate over the measures over this frequnecy + contrast + NDF 
+                for mm = 1:n_measures
+                    % Retrieve the measurement
+                    measurement = measurements{nn, cc, ff, mm};
 
-        % Fit the modulation to calculate the amplitude
-        % First, convert world to contrat
-        world_v_contrast = (world_v - mean(world_v)) / mean(world_v);
-        [world_r2, world_amplitude, ~, world_fit] = fourierRegression( world_v_contrast, world_t, frequency );
+                    % Extract the camera temporal support and v vectors
+                    world_t = measurement.W.t;
+                    world_v = measurement.W.v;
 
-        % Check that the fits are good
-        if contrast > 0 && world_r2<0.95
-            warning('poor R2 fit')
-        end
+                    % Fit the modulation to calculate the amplitude
+                    % First, convert world to contrat
+                    world_v_contrast = (world_v - mean(world_v)) / mean(world_v);
+                    [world_r2, world_amplitude, ~, world_fit] = fourierRegression( world_v_contrast, world_t, frequency );
 
-        % Illustrate this fit
-        %{
-            figure ; 
-            title(sprintf("World Contrast Gamma Fit C: %.3f | N: %d", contrast, nn)); 
-            hold on ; 
-            plot(world_t, world_v_contrast, '-x', 'DisplayName', 'Measured'); 
-            plot(world_t, world_fit, '-x', 'DisplayName', 'Fit'); 
-            
-            xlabel("Time [t]");
-            ylabel("Contrast"); 
+                    % Save the amplitude for this measurement of this contrast + frequency + NDF 
+                    amplitudes_by_contrasts(cc, mm) = world_amplitude; 
 
+                end % Measure 
+
+            end % Contrast
+
+            % Calculate the average amplitudes for each contrast level at this frequency 
+            mean_amplitudes_by_contrast = mean(amplitudes_by_contrasts, 2); 
+
+            % Plot the mean amplitudes by contrast 
+            plot(contrast_levels, mean_amplitudes_by_contrast, '-x', 'DisplayName', 'Data'); 
+            hold on; 
+            title(sprintf("Contrast Gamma | NDF: %.2f | F: %.2f", NDF, frequency)); 
+            xlabel("Contrast"); 
+            ylabel("Mean Amplitude"); 
+            xlim([-0.05 1.05]);
+            ylim([-0.05 1.05]);
+            axis square
+
+            % Add a linear fit
+            p = polyfit(contrast_levels, mean_amplitudes_by_contrast, 1);
+            plot(contrast_levels, polyval(p, contrast_levels), '-r', 'DisplayName', 'Fit');
+            plot([0 1], [0 1], ':k', 'DisplayName', 'Reference Line');
+
+            % Display the legend 
             legend show; 
-        %}
 
-        % Add to the list of local amplitudes
-        local_amplitudes(nn) = world_amplitude;
-    end
+        end % Frequency 
 
-    % Save the mean amplitude for this contrast level
-    avg_amplitudes(cc) = mean(local_amplitudes);
-end
-
-% Plot the contrast gamma function
-figure ;
-title(sprintf("World Contrast Gamma Function at %d Hz, ND%d",frequency,NDF));
-hold on;
-plot(contrast_levels, avg_amplitudes, '.k','MarkerSize',15, 'DisplayName', 'Observed');
-hold on
-
-% Add a linear fit
-p = polyfit(contrast_levels, avg_amplitudes,1);
-plot(contrast_levels,polyval(p,contrast_levels),'-r');
-plot([0 1],[0 1],':k');
-
-xlabel("Contrast Level");
-ylabel("Avg Amplitude");
-xlim([-0.05 1.05]);
-ylim([-0.05 1.05]);
-axis square
+    end % NDF 
 
 end
