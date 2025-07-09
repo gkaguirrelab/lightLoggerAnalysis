@@ -343,7 +343,9 @@ function plot_chunks(chunks)
     end 
 
     % Now, let's add vertical lines to denote chunk start points 
-    xline(MS_chunkstarts, '--r', 'Chunk Start', 'HandleVisibility', 'Off')
+    if(numel(MS_chunkstarts) > 0)
+        xline(MS_chunkstarts, '--r', 'Chunk Start', 'HandleVisibility', 'Off')
+    end 
 
     legend show ; 
     xlabel("Time [s]");
@@ -363,7 +365,9 @@ function plot_chunks(chunks)
     end 
     
     % Now, let's add vertical lines to denote chunk start points 
-    xline(MS_chunkstarts, '--r', 'Chunk Start', 'HandleVisibility', 'Off');
+    if(numel(MS_chunkstarts) > 0)
+        xline(MS_chunkstarts, '--r', 'Chunk Start', 'HandleVisibility', 'Off');
+    end 
 
     legend show ; 
     xlabel("Time [s]");
@@ -555,7 +559,9 @@ function plot_chunks(chunks)
     end 
 
     % Now, let's add vertical lines to denote chunk start points 
-    xline(MS_chunkstarts, '--r', 'Chunk Start', 'HandleVisibility', 'Off')
+    if(numel(MS_chunkstarts) > 0)
+        xline(MS_chunkstarts, '--r', 'Chunk Start', 'HandleVisibility', 'Off')
+    end 
 
     legend show ; 
     xlabel("Time [s]");
@@ -575,7 +581,9 @@ function plot_chunks(chunks)
     end 
     
     % Now, let's add vertical lines to denote chunk start points 
-    xline(MS_chunkstarts, '--r', 'Chunk Start', 'HandleVisibility', 'Off');
+    if(numel(MS_chunkstarts) > 0)
+        xline(MS_chunkstarts, '--r', 'Chunk Start', 'HandleVisibility', 'Off');
+    end
 
     legend show ; 
     xlabel("Time [s]");
