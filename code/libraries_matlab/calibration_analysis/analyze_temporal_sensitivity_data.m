@@ -6,6 +6,10 @@ function ttfFigHandle = analyze_temporal_sensitivity_data(calibration_metadata, 
     frequencies = calibration_metadata.frequencies;
     n_measures = calibration_metadata.n_measures;
 
+    % Retrieve the contrast attentuation of the CombiLED at higher level frequencies 
+    % to combat rolloff. 
+    contrast_attenuation_with_frequency = contrastAttenuationByFreq(frequencies); 
+
     % First, we will iterate over the NDFs 
     for cc = 1:numel(contrast_levels)
         % Retrieve the current contrast level 
@@ -115,7 +119,7 @@ function ttfFigHandle = analyze_temporal_sensitivity_data(calibration_metadata, 
             % Adjust for the contrast of the stimulus and for the roll-off in
             % modulation depth with temporal frequency. The splicing here is just for debugging if you 
             % ran with just the first few frequencies 
-            meanAmpData = mean_response_amplitude_per_frequency .* (1./test_mod_depth_amplitudes(1:numel(frequencies))) ./ contrast_level;
+            meanAmpData = mean_response_amplitude_per_frequency .* (1./contrast_attenuation_with_frequency(1:numel(frequencies))) ./ contrast_level;
             plot(log10(frequencies), meanAmpData,...
                 '-x',...
                 'MarkerSize',15,...
