@@ -107,6 +107,11 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements)
         0.6350, 0.0780, 0.1840   % Red
         ];                                      
 
+    % add path to isetBIO CIE luminous efficiency function
+    addpath('~/Documents/MATLAB/toolboxes/Psychtoolbox-3/Psychtoolbox/PsychColorimetricData/PsychColorimetricMatFiles');
+    load("T_CIE_Y2.mat");
+    wls_CIE_Y2 = SToWls(S_CIE_Y2); % convert to wavelength
+    
     % First, let's iterate over the chips 
     chips = keys(spectral_sensitivity_map);
     for cc = 1:numel(chips)
@@ -209,7 +214,11 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements)
             sphereSPDs = nan(n_settings_levels, sourceS(3));
             predictedCounts = nan(n_settings_levels, n_detector_channels);
 
+            %resample luminous efficacy function in same space as S (wavelengths)    
+            T_CIE_Y2_resamp = interp1(wls_CIE_Y2, T_CIE_Y2, wls, 'linear', 0); 
+
             % Iterate over the primary steps, that is, the number of scalars
+            % in radiance
             for ss = 1:n_settings_levels
                 % Get the source settings by multiplying background
                 % by the scalar value at primaryStep kk
@@ -286,7 +295,7 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements)
             for nn = 1:numel(calibration_metadata.NDFs)
                 NDF_measured_predicted = measured_predicted_by_NDF{nn}; 
                 measured = NDF_measured_predicted{1};
-                predicted = NDF_measured_predicted{2};
+                predicted = NDF_measured_predicted{2} * pi; % converts radiance to irradiance
 
                 h = scatter(across_NDF_channel_ax,...
                             log10(predicted(:, ch)), log10(measured(:, ch)),...
@@ -305,7 +314,7 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements)
             title(across_NDF_channel_ax, sprintf("Ch: %d", ch)); 
             
             xlim(across_NDF_channel_ax, limits);
-            xlabel(across_NDF_channel_ax, sprintf('%s predicted counts [log]', chip));
+            xlabel(across_NDF_channel_ax, sprintf('%s predicted irradiance [log]', chip));
             ylim(across_NDF_channel_ax, limits);
             ylabel(across_NDF_channel_ax, sprintf('%s measured counts [log]', chip));
             
