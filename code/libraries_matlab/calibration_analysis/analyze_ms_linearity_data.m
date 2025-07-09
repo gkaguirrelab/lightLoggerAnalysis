@@ -157,7 +157,10 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements)
 
             % Get the source from the cal file, as we need this to resample the
             % detector spectral sensitivity functions
-            sourceS = cal.rawData.S; % This is the baseCal adjusted for transmitence
+            % TO DO update code so rawData is available
+            %sourceS = cal.rawData.S; % This is the baseCal adjusted for transmitence
+            %in the meantime, hardcoded 
+            sourceS = [380 2 201];
 
             % Extract information regarding the light source that was used to
             % calibrate the minispect
@@ -229,6 +232,16 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements)
                 % opposed to (e.g.) per 2 nm.
                 sphereSPDs(ss,:) = ( (sourceP_abs*source_settings')/sourceS(2) );
 
+                %Calc illuminance
+                %first, convert to irradiance
+                sphereIrrad(ss,:) = sphereSPDs(ss,:).*pi;
+                irradXCIE(ss,:) = sphereIrrad(ss,:) .* T_CIE_Y2_resamp';
+                integratedIrradXCIE(ss) = sum(irradXCIE(ss,:));
+                % Multiply this integrated value by the “maximum luminous efficacy” value,
+                % which converts from Watts to lumens. This value is 683 lumen/Watt.
+                %result is the illuminance in units of lux (lumen / m2).
+                illum(ss) = integratedIrradXCIE(ss)*683;
+
                 % Derive the prediction of the relative counts based upon the sphereSPD
                 % and the minispectP_rel.
                 predictedCounts(ss,:) = sphereSPDs(ss,:)*detectorP_rel;
@@ -255,14 +268,14 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements)
                 % independent measure of the spectral transmittance of these.
                 p = polyfit(log10(predicted(:, ch)), log10(measured(:, ch)), 1);
                 fitY = polyval(p, log10(predicted(:, ch)));
-                plot(measured_predicted_ax, log10(predicted(:, ch)), fitY, '-r', 'DisplayName', 'Fit'); 
+                plot(measured_predicted_ax, (log10(predicted(:, ch)).*pi), fitY, '-r', 'DisplayName', 'Fit'); 
 
                 % Add a reference line
                 plot(measured_predicted_ax, [limits(1),limits(2)],[limits(1),limits(2)],':k', "DisplayName", "ReferenceLine");
 
                 % Pretty up the plot
                 xlim(measured_predicted_ax, limits);
-                xlabel(measured_predicted_ax, sprintf('%s predicted counts [log]', chip));
+                xlabel(measured_predicted_ax, sprintf('%s predicted irradiance [log]', chip));
                 ylim(measured_predicted_ax, limits);
                 ylabel(measured_predicted_ax, sprintf('%s measured counts [log]', chip));
 
