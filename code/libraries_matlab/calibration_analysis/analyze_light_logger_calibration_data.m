@@ -23,16 +23,14 @@ function analyze_light_logger_calibration_data(light_logger_calibration_data)
                                          );
     end
 
-    %{
     % 3. Analyze the Phase fitting readings
-    if ~isempty(calibration_metadata.phase_fitting.frequencies)
-        temporal_offsets_secs = analyze_phase_fit_data(calibration_metadata.phase_fitting, parsed_readings.phase_fitting);
+    if(numel(calibration_metadata.phase_fitting.NDFs) > 0)
+        analyze_phase_fit_data(calibration_metadata.phase_fitting, parsed_readings.phase_fitting);
 
         % Report the temporal offset values and standard deviations
         fprintf('Mean and std of world - pupil temporal offset [ms]: %2.5f, %2.5f\n',1000*mean(temporal_offsets_secs('W-P')),1000*std(temporal_offsets_secs('W-P')))
         fprintf('Mean and std of world - AS temporal offset [ms]: %2.5f, %2.5f\n',1000*mean(temporal_offsets_secs('W-AS')),1000*std(temporal_offsets_secs('W-AS')))
     end
-    %}
 
     % 4. Analyze the contrast gamma readings
     if(numel(calibration_metadata.contrast_gamma.NDFs) > 0)
