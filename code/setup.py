@@ -50,16 +50,19 @@ def main():
     # Generate the environment
     print(f"Generating environment @ path: {env_output_path}")
     venv.create(env_output_path, with_pip=True)
-    subprocess.run([os.path.join(env_output_path, "bin", "python3"), "-m", "ensurepip", "--upgrade"])
+    
+    # Retrieve the Python executable from the virtual environment 
+    # Note: have to have conditionals here explicitly to handle windows machines
+    venv_bin_dirname: str = "Scripts" if os.name == "nt" else "bin"
+    venv_python_exectuable_name: str = "python.exe" if os.name == 'nt' else 'python3'
+    venv_python_executable: str = os.path.join(env_output_path, venv_bin_dirname, venv_python_exectuable_name)
+    assert(os.path.exists(venv_python_executable))
+
+    subprocess.run([venv_python_executable, "-m", "ensurepip", "--upgrade"])
     print("Generated!")
     
     # Install the relevant libraries
     print("Installing libraries...")
-
-    # Retrieve the Python executable from the virtual environment 
-    venv_python_executable: str = os.path.join(env_output_path, "bin", "python3")
-    assert(os.path.exists(venv_python_executable))
-
     # Open the relevant requirements file
     with open(os.path.join(requirements_dir, selected_type), 'r') as f:
         # Iterate over the packages in the file 
