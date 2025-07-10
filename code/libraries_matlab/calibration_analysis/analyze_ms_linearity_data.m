@@ -56,7 +56,7 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements)
                                     
     % Create a map for the limits for the chips' associated curves
     lim_map = containers.Map({'ASM7341', 'TSL2591'},...
-                             {[-6, 6], [-6, 6]}...
+                             {[-1, 5], [-6, 6]}...
                             );
 
     % Initialize a map between chips and the number of channels that they have
@@ -372,9 +372,9 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements)
         end
     
     end % Chip loop
+predicted_Illum_by_NDF(1,:,5)
 
 end
-predicted_Illum_by_NDF(ch,nn,:)
 
 % Local function to reformat the minispect SPDs to be in the space of 
 % the source SPDs 
@@ -481,7 +481,6 @@ function counts_mat = extract_detector_counts(NDF_num, measurements, chip)
         end
 
     end
-
     return ;
 
 end
