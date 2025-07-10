@@ -259,7 +259,7 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements)
                 measured_predicted_ax = nexttile(measured_predicted_tiled); 
                 
                 % Plot the measured vs predicted data 
-                plot(measured_predicted_ax, log10(predicted(:, ch)), log10(measured(:, ch)), '-x', 'DisplayName', 'Data'); 
+                plot(measured_predicted_ax, log10((predicted(:, ch)).*pi), log10(measured(:, ch)), '-x', 'DisplayName', 'Data'); 
                 hold(measured_predicted_ax, 'on'); 
 
                 % Fit a linear model, but only to the "good" points (i.e., those
@@ -282,26 +282,32 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements)
                 legend(measured_predicted_ax, 'Location','best');
 
                 title(measured_predicted_ax, sprintf('channel %d, [slope intercept] = %2.2f, %2.2f',ch, p));
-                hold(measured_predicted_ax, 'off'); 
-            end     
-            
-            % Save the measured and predicted at this NDF 
-            measured_predicted_by_NDF{nn} = {measured, predicted}; 
+                
+                hold(measured_predicted_ax, 'off');
+            end
 
-        end  % NDF loop 
+            % Save the measured and predicted at this NDF
+            measured_predicted_by_NDF{nn} = {measured, predicted};
+            predicted_Illum_by_NDF(cc,nn,:) = illum;
 
-        % Now, plot linearity across all NDF levels for a given chip 
-        [rows, cols] = find_min_figsize(n_detector_channels); 
-        figure; 
-        across_NDF_figure = tiledlayout(rows, cols); 
-        title(across_NDF_figure, sprintf("Measured vs Predicted across NDF | C: %s", chip), 'FontWeight', 'Bold');
+        end  % NDF loop
+
+        % Now, plot linearity across all NDF levels for a given chip
+        [rows, cols] = find_min_figsize(n_detector_channels);
+        % figure;
+        % across_NDF_figure = tiledlayout(rows, cols);
+        % title(sprintf("Measured vs Predicted across NDF | C: %s", chip), 'FontWeight', 'Bold');
+
         
         % Iterate over the channels 
         for ch = 1:n_detector_channels
+            figure;
             % Retrieve the axes to plot on
-            across_NDF_channel_ax = nexttile(across_NDF_figure); 
+            %across_NDF_channel_ax = nexttile(across_NDF_figure);
+            across_NDF_channel_ax = axes;
+            hold(across_NDF_channel_ax, 'on');
 
-            % Retrieve the values per NDF level 
+            % Retrieve the values per NDF level
             NDF_data = zeros(1, numel(calibration_metadata.NDFs));
 
             % Plot the data 
@@ -330,17 +336,45 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements)
             xlabel(across_NDF_channel_ax, sprintf('%s predicted irradiance [log]', chip));
             ylim(across_NDF_channel_ax, limits);
             ylabel(across_NDF_channel_ax, sprintf('%s measured counts [log]', chip));
-            
-            legend(across_NDF_channel_ax, 'Location', 'best'); 
 
-            hold(across_NDF_channel_ax, 'off');
+            legend(across_NDF_channel_ax, 'Location', 'best');
+            %Add a second x-axis for: Illuminance vs Measured Counts
+            % Create overlay axes (top x-axis, same Y, transparent background)
+            % illum_ax = axes('Position', get(across_NDF_channel_ax, 'Position'), ...
+            %     'Color', 'none', ...
+            %     'XAxisLocation', 'top', ...
+            %     'YAxisLocation', 'right', ...
+            %     'XColor', [0.2 0.2 1], ...
+            %     'YColor', 'none',...
+            %     'Box', 'off',...
+            %     'Parent', gcf);
+            % hold(illum_ax, 'on');
+
+            % % Plot the same data using illuminance
+            % for nn = 1:numel(calibration_metadata.NDFs)
+            %     NDF_measured_predicted = measured_predicted_by_NDF{nn};
+            %     measured = NDF_measured_predicted{1};
+            %     p = scatter(illum_ax, log10(predicted_Illum_by_NDF(ch,nn,:)), log10(measured(:, ch)), ...
+            %         'o','MarkerFaceColor', colorList(nn,:));
+            %     p.MarkerFaceAlpha = 0.2;
+            %     p.MarkerEdgeAlpha = 0.2;
+            % end
+            % 
+            % %Set axis limits to match original Y
+            % set(illum_ax, 'YLim', get(across_NDF_channel_ax, 'YLim'));
+            % set(illum_ax, 'XLimMode', 'auto');  % independent x-limits OK
+            % xlabel(illum_ax, 'log Illuminance [lux]');
+
+                hold(across_NDF_channel_ax, 'off');
+                % hold(illum_ax, 'off');
 
 
-        end 
+        end
     
     end % Chip loop
 
 end
+predicted_Illum_by_NDF(ch,nn,:)
 
 % Local function to reformat the minispect SPDs to be in the space of 
 % the source SPDs 
