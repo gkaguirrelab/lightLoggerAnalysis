@@ -9,7 +9,7 @@ function analyze_light_logger_calibration_data(light_logger_calibration_data)
     parsed_readings = light_logger_calibration_data.readings;
 
     % 1. Analyze the MS linearity readings if there are any to analyze.
-    if(numel(calibration_metadata.ms_linearity.NDFs > 0)) 
+    if(numel(calibration_metadata.ms_linearity.NDFs) > 0) 
         analyze_ms_linearity_data(calibration_metadata.ms_linearity,...
                                   parsed_readings.ms_linearity...
                                  );
