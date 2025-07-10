@@ -1,39 +1,32 @@
 function  analyze_ms_linearity_data(calibration_metadata, measurements)
-% Analyze linearity calibration data collected from the MS
+% Analyze the results of an ms linearity light logger calibration measurement (post-conversion)
 %
 % Syntax:
-%   analyze_ms_linearity_data(calibration_metadata, measurements)
+%  analyze_ms_linearity_data(calibration_metadata, measurements)
 %
 % Description:
-%   Analyze linearity calibration data collected from the MS. 
-%   Illustrate several plots showing the raw sensor counts 
-%   from all channels of each chip at various settings/NDF 
-%   levels, as well as the linearity of these in comparison 
-%   to the predicted counts at a given NDF level.  
-%
+%   Given the parsed and converted metadata for an ms linearity 
+%   calibration measurement, analyze the data and plot the MS 
+%   linearity across NDF levels. 
+%   
 % Inputs:
-%   calibration_metadata  - Struct. ms_linearity substruct 
-%                           of the light logger metadata 
-%                           struct containing only 
-%                           ms_linearity related metadata 
-%
-%   measurements         - Cell. Parsed recordings made from 
-%                          the light logger and converted to MATLAB 
-%                          type.  
-%
-% Outputs:
-%
-%   NONE             
+%   calibration_metadata        - Struct. Converted metadata for 
+%                                 the ms linearity reading 
+%   
+%   measurements                - Cell. The parsed + converted 
+%                                 ms linearity readings
+%                              
 %
 % Examples:
 %{
-
+    path_to_experiment = "/example/path"; 
+    converted_light_logger_data = convert_light_logger_calibration_data(path_to_experiment, true, true true, true); 
+    analyze_ms_linearity_data(converted_light_logger_data.metdata.ms_linearity, converted_light_logger_data.readings.ms_linearity);
 %}
     arguments 
-        calibration_metadata; % Struct representing the metadata for the ms_linearity calibration measurement 
-        measurements; % Parsed and converted recordings from the light logger 
+        calibration_metadata; % The parsed + converted metadata for the ms linearity measuremnet  
+        measurements; % The parsed + conveerted ms linearity measurements 
     end 
-
 
     % Save the path to CombiExperiments. We will use this as a relative
     % path to find other files

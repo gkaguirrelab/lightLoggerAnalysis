@@ -1,4 +1,33 @@
 function analyze_contrast_gamma_data(calibration_metadata, measurements)
+% Analyze the results of a contrast gamma light logger calibration measurement (post-conversion)
+%
+% Syntax:
+%  analyze_contrast_gamma_data(calibration_metadata, measurements)
+%
+% Description:
+%   Given the parsed and converted metadata for a contrast gamma 
+%   calibration measurement, analyze the data and plot the contrast 
+%   gamma plot. 
+%   
+% Inputs:
+%   calibration_metadata        - Struct. Converted metadata for 
+%                                 the contrast gamma reading 
+%   
+%   measurements                - Cell. The parsed + converted 
+%                                 contrast gamma readings
+%                              
+%
+% Examples:
+%{
+    path_to_experiment = "/example/path"; 
+    converted_light_logger_data = convert_light_logger_calibration_data(path_to_experiment, true, true true, true); 
+    analyze_contrast_gamma_data(converted_light_logger_data.metdata.contrast_gamma, converted_light_logger_data.readings.contrast_gamma);
+%}  
+    arguments 
+        calibration_metadata; % The parsed + converted metadata for the contrast gamma measuremnet 
+        measurements; % The parsed + conveerted contrast gamma measurements 
+    end
+    
     % Retrieve the NDFs, frequencies and contrast levels used to make the measurements
     % as well as the number of measurements made at each level
     NDFs = calibration_metadata.NDFs; 

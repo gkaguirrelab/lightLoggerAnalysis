@@ -1,4 +1,32 @@
 function analyze_phase_fit_data(calibration_metadata, measurements)
+% Analyze the results of a phase fitting light logger calibration measurement (post-conversion)
+%
+% Syntax:
+%  analyze_phase_fit_data(calibration_metadata, measurements)
+%
+% Description:
+%   Given the parsed and converted metadata for a phase fitting  
+%   calibration measurement, analyze the data and calculate the phase 
+%   offset in seconds between pairs of sensors. 
+%   
+% Inputs:
+%   calibration_metadata        - Struct. Converted metadata for 
+%                                 the phase fitting reading 
+%   
+%   measurements                - Cell. The parsed + converted 
+%                                 phase fitting readings
+%                              
+%
+% Examples:
+%{
+    path_to_experiment = "/example/path"; 
+    converted_light_logger_data = convert_light_logger_calibration_data(path_to_experiment, true, true true, true); 
+    analyze_ms_linearity_data(converted_light_logger_data.metdata.phase_fitting, converted_light_logger_data.readings.phase_fitting);
+%}
+    arguments 
+        calibration_metadata; % The parsed + converted metadata for the phase alignment measuremnet 
+        measurements; % The parsed + converted metadata for the phase alignment measuremnet 
+    end 
 
     % Specify the number of measurements to discard from the start of the pupil
     % recording (as there is a start-up effect on the signal here)

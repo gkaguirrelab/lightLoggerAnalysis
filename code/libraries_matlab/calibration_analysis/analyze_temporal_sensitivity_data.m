@@ -1,4 +1,36 @@
 function analyze_temporal_sensitivity_data(calibration_metadata, measurements)
+% Analyze the results of a temporal sensitivity light logger calibration measurement (post-conversion)
+%
+% Syntax:
+%  analyze_temporal_sensitivity_data(calibration_metadata, measurements)
+%
+% Description:
+%   Given the parsed and converted metadata for a temporal sensitivity 
+%   calibration measurement, analyze the data and plot the TTF across 
+%   light levels. 
+%   
+% Inputs:
+%   calibration_metadata        - Struct. Converted metadata for 
+%                                 the temporal sensitivity reading 
+%   
+%   measurements                - Cell. The parsed + converted 
+%                                 temporal sensitivity readings
+%                              
+%
+% Examples:
+%{
+    path_to_experiment = "/example/path"; 
+    converted_light_logger_data = convert_light_logger_calibration_data(path_to_experiment, true, true true, true); 
+    analyze_ms_linearity_data(converted_light_logger_data.metdata.temporal_sensitivity, converted_light_logger_data.readings.temporal_sensitivity);
+%}
+    arguments 
+        calibration_metadata; % The parsed + converted metadata for the temporal sensitivity measuremnet 
+        measurements; % The parsed + converted metadata for the temporal sensitivity measuremnet 
+    end 
+    
+    % Define the world FPS (Note: if you changed FPS elsewhere, you will need to change it here too)
+    world_fps = 120; 
+
     % Retrieve some relevant metadata about the experiment
     NDFs = calibration_metadata.NDFs; 
     contrast_levels = calibration_metadata.contrast_levels;
