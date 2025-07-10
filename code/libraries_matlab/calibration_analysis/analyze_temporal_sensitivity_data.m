@@ -1,5 +1,4 @@
-function ttfFigHandle = analyze_temporal_sensitivity_data(calibration_metadata, measurements)
-
+function analyze_temporal_sensitivity_data(calibration_metadata, measurements)
     % Retrieve some relevant metadata about the experiment
     NDFs = calibration_metadata.NDFs; 
     contrast_levels = calibration_metadata.contrast_levels;
@@ -112,9 +111,6 @@ function ttfFigHandle = analyze_temporal_sensitivity_data(calibration_metadata, 
             % Retrieve the mean amplitude for each frequency for this NDF 
             mean_response_amplitude_per_frequency = mean_response_amplitude_data(nn, :, :);
 
-            % Retrieve the amplitudes that we manually measured with the klein for certain frequencies
-            test_mod_depth_amplitudes = getpref("lightLoggerAnalysis", "test_mod_depth_amplitudes");
-
             % Obtain and plot the mean amplitude of response for each frequency across measures.
             % Adjust for the contrast of the stimulus and for the roll-off in
             % modulation depth with temporal frequency. The splicing here is just for debugging if you 
@@ -132,7 +128,7 @@ function ttfFigHandle = analyze_temporal_sensitivity_data(calibration_metadata, 
 
         % Generate the ideal device curve for the world camera
         xfine = logspace(log10(frequencies(1)),log10(frequencies(end)),100);
-        ideal_device = idealDiscreteSampleFilter(xfine, 1/getpref("lightLoggerAnalysis", "world_fps"));
+        ideal_device = idealDiscreteSampleFilter(xfine, 1/world_fps);
         plot(log10(xfine), ideal_device, "--", "Color",[0.5 0.5 0.5], "DisplayName", "Ideal Device");
 
         % Get the approximate filter frequency and amplitude for the data
