@@ -176,9 +176,13 @@ function converted_temporal_sensitivity = convert_temporal_sensitivity_to_matlab
                     % Convert the chunks to MATLAB 
                     measurement_chunks_matlab = cellfun(@(x) chunk_dict_to_matlab(x), measurement_chunks, 'UniformOutput', false);
 
+                    % Find the non-randomized index where this contrast level and the frequency belong 
+                    contrast_idx = contrast_orders(nn, mm, cc); 
+                    frequency_idx = frequencies_orders(nn, mm, cc, ff); 
+                    
                     % Retrieve the mmth measurement at this frequency 
                     % convert the chunks of this measurement to MATLAB type, and save in struct 
-                    converted_temporal_sensitivity{nn, cc, ff, mm} = measurement_chunks_matlab{:};
+                    converted_temporal_sensitivity{nn, contrast_idx, frequency_idx, mm} = measurement_chunks_matlab{:};
                 end 
             
             end 

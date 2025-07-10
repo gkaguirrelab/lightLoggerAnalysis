@@ -12,21 +12,16 @@ function analyze_contrast_gamma_data(calibration_metadata, measurements)
         % Retrieve the current NDF 
         NDF = NDFs(nn); 
 
-        % Initialize a tiled layout plot to display the results 
-        [rows, cols] = find_min_figsize(numel(frequencies)); 
-        figure; 
-        NDF_plot = tiledlayout(rows, cols); 
-
         % Next, iterate over the frequencies 
         for ff = 1:numel(frequencies)
-            % Move to the next tile of the plot 
-            frequency_contrast_gamma_plot = nexttile(NDF_plot); 
-
             % Retrieve the current frequency 
             frequency = frequencies(ff); 
 
             % Initialize a vector to save the amplitudes per contrast level 
             amplitudes_by_contrasts = zeros(numel(contrast_levels), n_measures); 
+
+            % Initialize a vector to save measurements an their fits 
+            measurements_and_fits = cell(numel(contrast_levels), n_measures); 
 
             % Next, iterate over the contrast levels 
             % at this frequency 
@@ -48,15 +43,27 @@ function analyze_contrast_gamma_data(calibration_metadata, measurements)
                     % Save the amplitude for this measurement of this contrast + frequency + NDF 
                     amplitudes_by_contrasts(cc, mm) = world_amplitude; 
 
+                    % Save the measurement and the fit 
+                    measurements_and_fits{cc, mm} = {{world_t, world_v_contrast}, {world_t, world_fit}}; 
+
                 end % Measure 
 
-            end % Contrast
+            end % Contrast 
+
+            % Initialize a tiled layout plot to display the results 
+            [rows, cols] = find_min_figsize(numel(frequencies)); 
+            NDF_fig = figure; 
+            NDF_plot = tiledlayout(rows, cols, 'Parent', NDF_fig); 
+
 
             % Calculate the average amplitudes for each contrast level at this frequency 
             mean_amplitudes_by_contrast = mean(amplitudes_by_contrasts, 2); 
 
+            % Retrieve the NDF plot axis 
+            nexttile(NDF_plot); 
+
             % Plot the mean amplitudes by contrast 
-            plot(contrast_levels, mean_amplitudes_by_contrast, '-x', 'DisplayName', 'Data'); 
+            plot(contrast_levels, sort(mean_amplitudes_by_contrast), '-x', 'DisplayName', 'Data'); 
             hold on; 
             title(sprintf("Contrast Gamma | NDF: %.2f | F: %.2f", NDF, frequency)); 
             xlabel("Contrast"); 
