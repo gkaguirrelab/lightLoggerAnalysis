@@ -176,8 +176,6 @@ function plot_TTF(NDFs, contrast_level, frequencies, response_amplitude_data, wo
                 % Retrieve the response amplitude for the given measure 
                 measure_response_amplitude = response_amplitude_per_frequency(:, mm)'; 
 
-                disp(size(measure_response_amplitude))
-
                 % Adjust for the contrast of the stimulus and for the roll-off in
                 % modulation depth with temporal frequency. The splicing here is just for debugging if you 
                 % ran with just the first few frequencies 

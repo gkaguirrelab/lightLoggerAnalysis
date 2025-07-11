@@ -34,7 +34,7 @@ function analyze_phase_fit_data(calibration_metadata, measurements)
 
     % Retrieve the frequencies and contrast levels used to make the measurements
     % as well as the number of measurements made at each level (this should be 1 here)
-    NDFs = calibration_metdata.NDFs; 
+    NDFs = calibration_metadata.NDFs; 
     contrast_levels = calibration_metadata.contrast_levels;
     frequencies = calibration_metadata.frequencies;
     n_measures = calibration_metadata.n_measures;
@@ -66,19 +66,19 @@ function analyze_phase_fit_data(calibration_metadata, measurements)
                     measurement = measurements{nn, cc, ff, mm}; 
 
                     %%%%%%{ Extract World Measurement %}%%%%%%
-                    world_measurment = measurement.W; 
-                    world_t = world_measurment.t; 
+                    world_measurement = measurement.W; 
+                    world_t = world_measurement.t; 
                     world_v = world_measurement.v; 
                     world_v_contrast = (world_v - mean(world_v)) / mean(world_v); 
                     
                     %%%%%%{ Extract Pupil Measurement %}%%%%%%
-                    pupil_measurmenet = measurement.P; 
-                    pupil_t = pupil_measurment.t; 
+                    pupil_measurement = measurement.P; 
+                    pupil_t = pupil_measurement.t; 
                     pupil_v = pupil_measurement.v; 
                     pupil_v_contrast = (pupil_v - mean(pupil_v)) / mean(pupil_v); 
 
                     %%%%%%{ Extract MS_AS Measurement %}%%%%%%
-                    MS_AS_measurement = measurment.MS.v.AS; 
+                    MS_AS_measurement = measurement.M; 
                     MS_AS_t = MS_AS_measurement.t; 
                     MS_AS_v = MS_AS_measurement.v.AS(:, 5); 
                     MS_AS_v_contrast = (MS_AS_v - mean(MS_AS_v)) / mean(MS_AS_v); 
@@ -109,7 +109,7 @@ function analyze_phase_fit_data(calibration_metadata, measurements)
 
                     % Let's plot the results for this measure 
                     % TODO: 
-
+                    %}
                                                                                                     
 
                 end % Measure
@@ -136,7 +136,7 @@ function analyze_phase_fit_data(calibration_metadata, measurements)
     end % NDF 
 
 
-
+    %{
     % Now, we will iterate over the measurements. We will do this to take the average phase
     temporal_offsets_secs = containers.Map({'W-AS', 'W-TS', 'W-P'}, { zeros([n_measures, 1]), zeros([n_measures, 1]), zeros([n_measures, 1]) });
 
@@ -278,17 +278,15 @@ function analyze_phase_fit_data(calibration_metadata, measurements)
 
         % Show the legend for this plot
         legend show;
+        %}
 
-    end
-
-
-    end
+end
 
 
-    %% LOCAL FUNCTIONS
+  %% LOCAL FUNCTIONS
 
-    % Calculate the phase offset between the sensors and plot them before and after adjustment
-    function [phase_offset, A_fit, B_fit] = calculate_phase_offset(sensorA_t, sensorA_v, sensorB_t, sensorB_v, frequency)
+% Calculate the phase offset between the sensors and plot them before and after adjustment
+function [phase_offset, A_fit, B_fit] = calculate_phase_offset(sensorA_t, sensorA_v, sensorB_t, sensorB_v, frequency)
     % First, fit the two waves independently
     [A_r2, A_amplitude, A_phase, A_fit] = fourierRegression( sensorA_v, sensorA_t, frequency );
     [B_r2, B_amplitude, B_phase, B_fit] = fourierRegression( sensorB_v, sensorB_t, frequency );
@@ -302,7 +300,5 @@ function analyze_phase_fit_data(calibration_metadata, measurements)
     end
 
     return ;
-
-    end
 
 end
