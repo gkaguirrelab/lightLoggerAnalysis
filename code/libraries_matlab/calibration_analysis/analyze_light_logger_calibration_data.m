@@ -1,6 +1,29 @@
 function analyze_light_logger_calibration_data(light_logger_calibration_data)
+% Analyze the results of a light logger calibration measurement (post-conversion)
+%
+% Syntax:
+%  analyze_light_logger_calibration_data(light_logger_calibration_data)
+%
+% Description:
+%   Given a converted light logger calibration data struct, 
+%   analyze the various components of this measurement. That is, 
+%   the ms linearity component, the temporal sensitivity component, 
+%   the phase alignment component, and the contrast gamma component. 
+%
+%
+% Inputs:
+%   light_logger_calibration_data   - Struct. Converted metadata + parsed_readings
+%                                     for the calibration measurement. 
+%                              
+%
+% Examples:
+%{
+    path_to_experiment = "/example/path"; 
+    converted_light_logger_data = convert_light_logger_calibration_data(path_to_experiment, true, true true, true); 
+    analyze_light_logger_calibration(converted_light_logger_data);
+%}
     arguments 
-        light_logger_calibration_data; % Struct that has both metadata and parsed readings from the experiment 
+        light_logger_calibration_data; % Struct that has both converted metadata and readings from the experiment 
     end 
 
     % First, extract the broad subfields of the calibration information and the parsed readings
@@ -9,7 +32,7 @@ function analyze_light_logger_calibration_data(light_logger_calibration_data)
     parsed_readings = light_logger_calibration_data.readings;
 
     % 1. Analyze the MS linearity readings if there are any to analyze.
-    if(numel(calibration_metadata.ms_linearity.NDFs > 0)) 
+    if(numel(calibration_metadata.ms_linearity.NDFs) > 0) 
         analyze_ms_linearity_data(calibration_metadata.ms_linearity,...
                                   parsed_readings.ms_linearity...
                                  );
@@ -25,11 +48,9 @@ function analyze_light_logger_calibration_data(light_logger_calibration_data)
 
     % 3. Analyze the Phase fitting readings
     if(numel(calibration_metadata.phase_fitting.NDFs) > 0)
-        analyze_phase_fit_data(calibration_metadata.phase_fitting, parsed_readings.phase_fitting);
-
-        % Report the temporal offset values and standard deviations
-        fprintf('Mean and std of world - pupil temporal offset [ms]: %2.5f, %2.5f\n',1000*mean(temporal_offsets_secs('W-P')),1000*std(temporal_offsets_secs('W-P')))
-        fprintf('Mean and std of world - AS temporal offset [ms]: %2.5f, %2.5f\n',1000*mean(temporal_offsets_secs('W-AS')),1000*std(temporal_offsets_secs('W-AS')))
+        analyze_phase_fit_data(calibration_metadata.phase_fitting,...
+                               parsed_readings.phase_fitting...
+                              );
     end
 
     % 4. Analyze the contrast gamma readings

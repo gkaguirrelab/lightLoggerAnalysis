@@ -72,19 +72,3 @@ setpref(projectName, 'ms_util_path', ms_util_path);
 % Add all functions in the current directory to the path 
 light_logger_analysis_path = tbLocateProject('lightLoggerAnalysis');
 addpath(genpath(light_logger_analysis_path));
-
-
-% Next, we will save some important constants that we frequently use 
-world_util = import_pyfile(world_util_path);
-world_fps = double(world_util.WORLD_CAM_FPS); 
-setpref(projectName, "world_fps", world_fps);
-clear world_util; 
-
-% For these constants, we measured the modulation depth of the stimulus source as a function of
-% contrast using the Klein photometer and the "ChromaSurf" sofwate. The
-% values are given here, and used for correction of the observed response
-% amplitude below
-test_mod_depth_frequencies = [0.25,0.5,1,3,6,12,25,50,100];
-test_mod_depth_amplitudes = [1,1,1,1,0.983,0.975,0.939,0.90,0.66];
-setpref(projectName, "test_mod_depth_frequencies", test_mod_depth_frequencies); 
-setpref(projectName, "test_mod_depth_amplitudes", test_mod_depth_amplitudes);

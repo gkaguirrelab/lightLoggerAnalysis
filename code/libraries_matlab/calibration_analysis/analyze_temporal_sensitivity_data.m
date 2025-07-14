@@ -1,4 +1,35 @@
-function ttfFigHandle = analyze_temporal_sensitivity_data(calibration_metadata, measurements)
+function analyze_temporal_sensitivity_data(calibration_metadata, measurements)
+% Analyze the results of a temporal sensitivity light logger calibration measurement (post-conversion)
+%
+% Syntax:
+%  analyze_temporal_sensitivity_data(calibration_metadata, measurements)
+%
+% Description:
+%   Given the parsed and converted metadata for a temporal sensitivity 
+%   calibration measurement, analyze the data and plot the TTF across 
+%   light levels. 
+%   
+% Inputs:
+%   calibration_metadata        - Struct. Converted metadata for 
+%                                 the temporal sensitivity reading 
+%   
+%   measurements                - Cell. The parsed + converted 
+%                                 temporal sensitivity readings
+%                              
+%
+% Examples:
+%{
+    path_to_experiment = "/example/path"; 
+    converted_light_logger_data = convert_light_logger_calibration_data(path_to_experiment, true, true true, true); 
+    analyze_ms_linearity_data(converted_light_logger_data.metdata.temporal_sensitivity, converted_light_logger_data.readings.temporal_sensitivity);
+%}
+    arguments 
+        calibration_metadata; % The parsed + converted metadata for the temporal sensitivity measuremnet 
+        measurements; % The parsed + converted metadata for the temporal sensitivity measuremnet 
+    end 
+    
+    % Define the world FPS (Note: if you changed FPS elsewhere, you will need to change it here too)
+    world_fps = 120; 
 
     % Retrieve some relevant metadata about the experiment
     NDFs = calibration_metadata.NDFs; 
@@ -100,56 +131,12 @@ function ttfFigHandle = analyze_temporal_sensitivity_data(calibration_metadata, 
 
         end % NDF  
 
+        % Contrast the TTF per measure per contrast and NDF 
+        plot_TTF(NDFs, contrast_level, frequencies, response_amplitude_data, world_fps, contrast_attenuation_with_frequency); 
 
-        % Construct the TTF for this contrast level 
-        figure ;   
+        % Construct the TTF of the average of the measurements
+        plot_mean_TTF(NDFs, contrast_level, frequencies, response_amplitude_data, world_fps, contrast_attenuation_with_frequency); 
 
-        % We will now take the mean of all measures per frequency 
-        mean_response_amplitude_data = mean(response_amplitude_data, 3); 
-
-        % Plot each NDF line 
-        for nn = 1:numel(NDFs)
-            % Retrieve the mean amplitude for each frequency for this NDF 
-            mean_response_amplitude_per_frequency = mean_response_amplitude_data(nn, :, :);
-
-            % Retrieve the amplitudes that we manually measured with the klein for certain frequencies
-            test_mod_depth_amplitudes = getpref("lightLoggerAnalysis", "test_mod_depth_amplitudes");
-
-            % Obtain and plot the mean amplitude of response for each frequency across measures.
-            % Adjust for the contrast of the stimulus and for the roll-off in
-            % modulation depth with temporal frequency. The splicing here is just for debugging if you 
-            % ran with just the first few frequencies 
-            meanAmpData = mean_response_amplitude_per_frequency .* (1./contrast_attenuation_with_frequency(1:numel(frequencies))) ./ contrast_level;
-            plot(log10(frequencies), meanAmpData,...
-                '-x',...
-                'MarkerSize',15,...
-                'LineWidth',2,...
-                'DisplayName', sprintf("NDF %.2f", NDFs(nn))...
-                );
-            hold on; 
-
-        end 
-
-        % Generate the ideal device curve for the world camera
-        xfine = logspace(log10(frequencies(1)),log10(frequencies(end)),100);
-        ideal_device = idealDiscreteSampleFilter(xfine, 1/getpref("lightLoggerAnalysis", "world_fps"));
-        plot(log10(xfine), ideal_device, "--", "Color",[0.5 0.5 0.5], "DisplayName", "Ideal Device");
-
-        % Get the approximate filter frequency and amplitude for the data
-        [filterFreqHz,filterAmp] = approxFreqFilter(frequencies, meanAmpData);
-        fitVals = filterAmp*idealDiscreteSampleFilter(xfine, 1/filterFreqHz);
-        plot(log10(xfine), fitVals, "-", "Color",[1 0 0], "DisplayName", "Data fit");
-
-        % Add a title
-        title(sprintf("World TTF | C: %.2f | Approx freq %2.2f Hz", contrast_level, filterFreqHz));
-
-        % Label and clean up the plot
-        xlabel("Frequency [hz]");
-        ylabel("Relative Contrast Response");
-        legend show;
-        a = gca();
-        a.XTick = log10(frequencies);
-        a.XTickLabels = arrayfun(@(x) num2str(x),frequencies,'UniformOutput',false);
 
     end % Contrast
 
@@ -173,3 +160,105 @@ function [filterFreqHz,filterAmp] = approxFreqFilter(frequencies, amplitudes)
 
 
 end
+
+% Local function to plot the TTF of all measures of a certain contrast level 
+function plot_TTF(NDFs, contrast_level, frequencies, response_amplitude_data, world_fps, contrast_attenuation_with_frequency)
+        % Construct the Mean TTF for this contrast level 
+        figure ;    
+
+        % Plot each NDF line 
+        for nn = 1:numel(NDFs)
+            % Retrieve the mean amplitude for each frequency for this NDF 
+            response_amplitude_per_frequency = squeeze(response_amplitude_data(nn, :, :));
+
+            % Plot the different measures of each frequency 
+            for mm = 1:size(response_amplitude_per_frequency, 2)
+                % Retrieve the response amplitude for the given measure 
+                measure_response_amplitude = response_amplitude_per_frequency(:, mm)'; 
+
+                % Adjust for the contrast of the stimulus and for the roll-off in
+                % modulation depth with temporal frequency. The splicing here is just for debugging if you 
+                % ran with just the first few frequencies 
+                measure_amp_data = measure_response_amplitude .* (1./contrast_attenuation_with_frequency(1:numel(frequencies))) ./ contrast_level;
+
+                plot(log10(frequencies), measure_amp_data,...
+                    '-x',...
+                    'MarkerSize',15,...
+                    'LineWidth',2,...
+                    'DisplayName', sprintf("NDF %.2f | M: %d", NDFs(nn), mm)...
+                    );
+                hold on; 
+
+            end % Measure 
+
+        end % NDF 
+
+        % Generate the ideal device curve for the world camera
+        xfine = logspace(log10(frequencies(1)),log10(frequencies(end)),100);
+        ideal_device = idealDiscreteSampleFilter(xfine, 1/world_fps);
+        plot(log10(xfine), ideal_device, "--", "Color",[0.5 0.5 0.5], "DisplayName", "Ideal Device");
+
+        % Add a title
+        title(sprintf("World TTF All Measures | C: %.2f", contrast_level));
+
+        % Label and clean up the plot
+        xlabel("Frequency [hz]");
+        ylabel("Relative Contrast Response");
+        legend show;
+        a = gca();
+        a.XTick = log10(frequencies);
+        a.XTickLabels = arrayfun(@(x) num2str(x),frequencies,'UniformOutput',false);
+end 
+
+
+% Local function to plot the mean TTF 
+function plot_mean_TTF(NDFs, contrast_level, frequencies, response_amplitude_data, world_fps, contrast_attenuation_with_frequency)
+        % Construct the Mean TTF for this contrast level 
+        figure ;   
+
+        % We will now take the mean of all measures per frequency 
+        mean_response_amplitude_data = mean(response_amplitude_data, 3); 
+
+        % Plot each NDF line 
+        for nn = 1:numel(NDFs)
+            % Retrieve the mean amplitude for each frequency for this NDF 
+            mean_response_amplitude_per_frequency = mean_response_amplitude_data(nn, :, :);
+
+            % Obtain and plot the mean amplitude of response for each frequency across measures.
+            % Adjust for the contrast of the stimulus and for the roll-off in
+            % modulation depth with temporal frequency. The splicing here is just for debugging if you 
+            % ran with just the first few frequencies 
+            meanAmpData = mean_response_amplitude_per_frequency .* (1./contrast_attenuation_with_frequency(1:numel(frequencies))) ./ contrast_level;
+            plot(log10(frequencies), meanAmpData,...
+                '-x',...
+                'MarkerSize',15,...
+                'LineWidth',2,...
+                'DisplayName', sprintf("NDF %.2f", NDFs(nn))...
+                );
+            hold on; 
+
+        end 
+
+        % Generate the ideal device curve for the world camera
+        xfine = logspace(log10(frequencies(1)),log10(frequencies(end)),100);
+        ideal_device = idealDiscreteSampleFilter(xfine, 1/world_fps);
+        plot(log10(xfine), ideal_device, "--", "Color",[0.5 0.5 0.5], "DisplayName", "Ideal Device");
+
+        % Get the approximate filter frequency and amplitude for the data
+        [filterFreqHz,filterAmp] = approxFreqFilter(frequencies, meanAmpData);
+        fitVals = filterAmp*idealDiscreteSampleFilter(xfine, 1/filterFreqHz);
+        plot(log10(xfine), fitVals, "-", "Color",[1 0 0], "DisplayName", "Data fit");
+
+        % Add a title
+        title(sprintf("World TTF Avg Amplitude | C: %.2f | Approx freq %2.2f Hz", contrast_level, filterFreqHz));
+
+        % Label and clean up the plot
+        xlabel("Frequency [hz]");
+        ylabel("Mean Relative Contrast Response");
+        legend show;
+        a = gca();
+        a.XTick = log10(frequencies);
+        a.XTickLabels = arrayfun(@(x) num2str(x),frequencies,'UniformOutput',false);
+
+
+end 

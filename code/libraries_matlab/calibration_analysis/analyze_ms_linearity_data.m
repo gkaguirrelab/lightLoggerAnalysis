@@ -1,8 +1,9 @@
-function  analyze_ms_linearity_data(calibration_metadata, measurements, opts)
 % Analyze linearity calibration data collected from the MS
+function  analyze_ms_linearity_data(calibration_metadata, measurements, opts)
+% Analyze the results of an ms linearity light logger calibration measurement (post-conversion)
 %
 % Syntax:
-%   analyze_ms_linearity_data(calibration_metadata, measurements)
+%  analyze_ms_linearity_data(calibration_metadata, measurements)
 %
 % Description:
 %   Analyze linearity calibration data collected from the MS.
@@ -26,10 +27,26 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements, opts)
 % Outputs:
 %
 %   NONE
-%
+%   Given the parsed and converted metadata for an ms linearity 
+%   calibration measurement, analyze the data and plot the MS 
+%   linearity across NDF levels. 
+%   
+% Inputs:
+%   calibration_metadata        - Struct. Converted metadata for 
+%                                 the ms linearity reading 
+%   
+%   measurements                - Cell. The parsed + converted 
+%                                 ms linearity readings
+%                              
+%   opts                        - struct for options.
+%                                    plotSettingLevel - bool for whether to
+%                                    plot all the mod settings for each
+%                                    channel.
 % Examples:
 %{
-
+    path_to_experiment = "/example/path"; 
+    converted_light_logger_data = convert_light_logger_calibration_data(path_to_experiment, true, true true, true); 
+    analyze_ms_linearity_data(converted_light_logger_data.metdata.ms_linearity, converted_light_logger_data.readings.ms_linearity);
 %}
 arguments
     calibration_metadata; % Struct representing the metadata for the ms_linearity calibration measurement
@@ -37,10 +54,9 @@ arguments
     opts.plotSettingLevel logical = false;
 end
 
-
-% Save the path to CombiExperiments. We will use this as a relative
-% path to find other files
-combiExperiments_path = getpref('lightLoggerAnalysis', 'combiExperiments_path');
+    % Save the path to CombiExperiments. We will use this as a relative
+    % path to find other files
+    combiExperiments_path = getpref('lightLoggerAnalysis', 'combiExperiments_path');
 
 % Load the minispect SPDs
 spectral_sensitivity_map = containers.Map({'ASM7341', 'TSL2591'},...
