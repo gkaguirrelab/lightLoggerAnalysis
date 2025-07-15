@@ -57,11 +57,15 @@ function analyze_temporal_sensitivity_data(calibration_metadata, measurements)
 
             % Iterate over the measurements at each frequency 
             for mm = 1:n_measures
-                % Initialize figures for the measured vs fit and AGC settings 
+                % Initialize figures for the raw time serie,s measured vs fit and AGC settings 
                 % for this measurement 
+                raw_time_series_fig = figure; 
+                raw_time_series_plot = tiledlayout(raw_time_series_fig, numel(frequencies), 1);
+                sgtitle(raw_time_series_plot, sprintf("Time Series Data | C: %.2f | NDF: %.2f | M: %d", contrast_level, NDF, mm)); 
+
                 measured_fit_fig = figure; 
                 measured_fit_plot = tiledlayout(measured_fit_fig, numel(frequencies), 1);
-                sgtitle(measured_fit_plot, sprintf("Measured vs Fit | C: %.2f | NDF: %.2f | M: %d", contrast_level, NDF, mm)); 
+                sgtitle(measured_fit_plot, sprintf("Measured vs Fit Contrast Units | C: %.2f | NDF: %.2f | M: %d", contrast_level, NDF, mm)); 
 
                 agc_settings_fig = figure; 
                 agc_settings_plot = tiledlayout(agc_settings_fig, numel(frequencies), 1); 
@@ -73,6 +77,7 @@ function analyze_temporal_sensitivity_data(calibration_metadata, measurements)
                     frequency = frequencies(ff);
 
                     % Move to the next tile for each of the above plots 
+                    time_series_ax = nexttile(raw_time_series_plot);
                     measured_fit_ax = nexttile(measured_fit_plot);
                     agc_settings_ax = nexttile(agc_settings_plot); 
 
@@ -91,6 +96,14 @@ function analyze_temporal_sensitivity_data(calibration_metadata, measurements)
 
                     % Now, let's save the amplitude 
                     response_amplitude_data(nn, ff, mm) = world_amplitude; 
+
+                    %%%%%%%%%%%%%%%%{ Plot Raw Time Series Data %}%%%%%%%%%%%%%%%%%
+                    plot(time_series_ax, world_t, world_v, '-x', 'DisplayName', 'Mean Intensity');
+                    hold(time_series_ax, 'on'); 
+                    xlabel(time_series_ax, 'Time [s]'); 
+                    ylabel(time_series_ax, 'Mean Intensity'); 
+                    ylim(time_series_ax, [-5, 260]); 
+                    title(time_series_ax, sprintf("F: %2.2f", frequency))
 
                     %%%%%%%%%%%%%%%%{ Plot measured vs Fit %}%%%%%%%%%%%%%%%%%
                     local_world_t = world_t - world_t(1);
@@ -219,6 +232,9 @@ function plot_mean_TTF(NDFs, contrast_level, frequencies, response_amplitude_dat
         % We will now take the mean of all measures per frequency 
         mean_response_amplitude_data = mean(response_amplitude_data, 3); 
 
+        % Here we will save the line to fit the data to 
+        data_fit_line = []; 
+
         % Plot each NDF line 
         for nn = 1:numel(NDFs)
             % Retrieve the mean amplitude for each frequency for this NDF 
@@ -237,6 +253,11 @@ function plot_mean_TTF(NDFs, contrast_level, frequencies, response_amplitude_dat
                 );
             hold on; 
 
+            % Save the data fit line to just ND1 
+            if(NDFs(nn) == 0)
+                data_fit_line = meanAmpData; 
+            end 
+
         end 
 
         % Generate the ideal device curve for the world camera
@@ -245,7 +266,7 @@ function plot_mean_TTF(NDFs, contrast_level, frequencies, response_amplitude_dat
         plot(log10(xfine), ideal_device, "--", "Color",[0.5 0.5 0.5], "DisplayName", "Ideal Device");
 
         % Get the approximate filter frequency and amplitude for the data
-        [filterFreqHz,filterAmp] = approxFreqFilter(frequencies, meanAmpData);
+        [filterFreqHz,filterAmp] = approxFreqFilter(frequencies, data_fit_line);
         fitVals = filterAmp*idealDiscreteSampleFilter(xfine, 1/filterFreqHz);
         plot(log10(xfine), fitVals, "-", "Color",[1 0 0], "DisplayName", "Data fit");
 
