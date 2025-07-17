@@ -3,12 +3,14 @@ function runGazeCalibrationStimulus
 % with a brief beep signaling each dot onset.
 
 % Hard-coded parameters
-viewingDistCm = 50;
-dotRadiusDeg = 0.2;
+viewingDistCm = 40;
+dotRadiusDeg = 0.6;
 dotTime = 1; 
-repetitions = 5;
+repetitions = 1;
 bgColor = [0 0 0];
 fgColor = [255 255 255];
+redColor  = [255   0   0];
+innerFrac = 0.2;
 
 AssertOpenGL;
 screenNum = max(Screen('Screens'));
@@ -52,9 +54,13 @@ dotRadiusPx = viewingDistCm * tand(dotRadiusDeg) * pxPerCmX;
 
 % Define 13 calibration positions in degrees [xDeg, yDeg]
 degPositions = [ ...
-      0,   0;   -10,  10;   -10, -10;    10,  10;    10, -10; ...
-      0,  10;    0, -10;   -10,   0;     10,   0;   -5,   5; ...
-      5,   5;   -5,  -5;     5,  -5;     0,   0];
+      0,  0;  -20, 20;   -20, -20;   20, 20;   20, -20; ...
+      0, 20;   0, -20;   -20,   0;   20, 0; ...
+     -15, 15;  15, 15;   -15, -15;   15, -15; ...
+
+      -10,  10;   -10, -10;    10,  10;    10, -10; ...
+      0,  10;    0, -10;   -10,   0;     10,   0; ...
+      -5,   5; 5,   5;   -5,  -5;     5,  -5;     0,   0];
 nDots = size(degPositions, 1);
 
 % Check CM distance
@@ -104,15 +110,26 @@ for rep = 1:repetitions
     for i = 1:nDots
         % Play beep (single repetition)
         PsychPortAudio('Start', pahandle, 1, 0, 0);
-
+        
         % Draw dot
         pos  = positions(i,:);
-        rect = [pos(1)-dotRadiusPx, pos(2)-dotRadiusPx, ...
-                pos(1)+dotRadiusPx, pos(2)+dotRadiusPx];
-        Screen('FillOval', win, fgColor, rect);
+        % Outer (white) circle
+        outerRect = [pos(1)-dotRadiusPx, pos(2)-dotRadiusPx, ...
+                     pos(1)+dotRadiusPx, pos(2)+dotRadiusPx];
+        Screen('FillOval', win, fgColor, outerRect);
+        
+        % Inner (red) circle
+        innerRadiusPx = dotRadiusPx * innerFrac;
+        innerRect = [pos(1)-innerRadiusPx, pos(2)-innerRadiusPx, ...
+                     pos(1)+innerRadiusPx, pos(2)+innerRadiusPx];
+        Screen('FillOval', win, redColor, innerRect);
+        WaitSecs(dotTime);
+
         Screen('Flip', win);
         WaitSecs(dotTime);
     end
+    Screen('Flip', win);
+    WaitSecs(dotTime);
 end
 Priority(0);
 ShowCursor;
