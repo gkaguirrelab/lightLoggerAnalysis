@@ -1,24 +1,24 @@
-function runGazeCalibrationStimulus()
+function runGazeCalibrationStimulus
 % Displays 13-dot gaze calibration stimulus at fixed visual angles,
 % with a brief beep signaling each dot onset.
 
 % Hard-coded parameters
-viewingDistCm = 50;       % viewing distance (cm)
-dotRadiusDeg = 0.2;       % dot radius (degrees)
-dotTime      = 1;         % display time per dot (s)
-repetitions  = 1;         % cycles through all dots
-bgColor      = [0 0 0];
-fgColor      = [255 255 255];
+viewingDistCm = 50;
+dotRadiusDeg = 0.2;
+dotTime = 1; 
+repetitions = 5;
+bgColor = [0 0 0];
+fgColor = [255 255 255];
 
 AssertOpenGL;
 screenNum = max(Screen('Screens'));
 
 % Initialize PsychPortAudio for beep
 InitializePsychSound(1);
-sampleRate    = 44100;    % audio sample rate (Hz)
-beepFreq      = 1000;     % beep frequency (Hz)
-beepLengthSec = 0.1;      % beep duration (s)
-nrchannels    = 1;        % mono beep
+sampleRate = 44100;
+beepFreq = 1000;
+beepLengthSec = 0.1;
+nrchannels = 1; 
 % Generate beep
 beep = MakeBeep(beepFreq, beepLengthSec, sampleRate);
 % Open audio device
@@ -26,24 +26,28 @@ pahandle = PsychPortAudio('Open', [], 1, 1, sampleRate, nrchannels);
 % Fill buffer with beep waveform
 PsychPortAudio('FillBuffer', pahandle, beep);
 
-% Query physical display size (mm) → convert to cm
+% Query physical display size (mm) and convert to cm
 [widthMm, heightMm] = Screen('DisplaySize', screenNum);
-widthCm  = widthMm  / 10;
+widthCm  = widthMm / 10;
 heightCm = heightMm / 10;
 
 % Open window and get its pixel resolution
 [win, winRect] = Screen('OpenWindow', screenNum, bgColor);
-[xCen, yCen]  = RectCenter(winRect);
-winWidthPx     = winRect(3) - winRect(1);
-winHeightPx    = winRect(4) - winRect(2);
+[xCen, yCen] = RectCenter(winRect);
+winWidthPx = winRect(3) - winRect(1);
+winHeightPx = winRect(4) - winRect(2);
+
+% Print physical size and pixels to confirm display
+fprintf('→ Screen %d: %.1f×%.1f cm physical → %d×%d px window\n', ...
+        screenNum, widthCm, heightCm, winWidthPx, winHeightPx);
 
 % Compute pixels-per-cm from actual window
 pxPerCmX = winWidthPx  / widthCm;
 pxPerCmY = winHeightPx / heightCm;
 
 % Degree→pixel conversion lambdas
-deg2pxX     = @(deg) viewingDistCm * tand(deg) * pxPerCmX;
-deg2pxY     = @(deg) viewingDistCm * tand(deg) * pxPerCmY;
+deg2pxX = @(deg) viewingDistCm * tand(deg) * pxPerCmX;
+deg2pxY = @(deg) viewingDistCm * tand(deg) * pxPerCmY;
 dotRadiusPx = viewingDistCm * tand(dotRadiusDeg) * pxPerCmX;
 
 % Define 13 calibration positions in degrees [xDeg, yDeg]
@@ -53,7 +57,7 @@ degPositions = [ ...
       5,   5;   -5,  -5;     5,  -5;     0,   0];
 nDots = size(degPositions, 1);
 
-% CHECK CM DISTANCE
+% Check CM distance
 xCm = viewingDistCm * tand(degPositions(:,1));
 yCm = viewingDistCm * tand(degPositions(:,2));
 rCm = hypot(xCm, yCm);
@@ -73,6 +77,25 @@ for i = 1:nDots
     yOff = deg2pxY(degPositions(i,2));
     positions(i,:) = [xCen + xOff, yCen - yOff];
 end
+
+% Instruction text
+text = [
+    'You will see 13 calibration dots appear one by one on the screen,' newline ...
+    'each signaled by a brief beep. Please fix your gaze on each dot when it appears,' newline ...
+    'and do not try to anticipate the location of the next dot.' newline newline ...
+    'Press any key to begin.'
+];
+Screen('TextSize', win, 24);
+DrawFormattedText(win, text, 'center', 'center', fgColor);
+
+% Unify key names across platforms
+KbName('UnifyKeyNames');
+KbReleaseWait;
+FlushEvents('keyDown');
+Screen('Flip', win);
+
+% Wait for key press
+KbWait(-1);
 
 % Draw loop with beep on each dot onset
 HideCursor;
@@ -94,6 +117,4 @@ end
 Priority(0);
 ShowCursor;
 Screen('CloseAll');
-% Close audio device
-tPsychPortAudio('Close', pahandle);
 end
