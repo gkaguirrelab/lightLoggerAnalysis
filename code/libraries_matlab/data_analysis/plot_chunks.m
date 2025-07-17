@@ -72,8 +72,8 @@ function plot_chunks(chunks)
     world_frame_means = [];
     pupil_frame_means = [];
     
-    world_agc_settings = [];
-    pupil_agc_settings = []; 
+    world_chunks_agc_settings = [];
+    pupil_chunks_agc_settings = []; 
 
     % Initialize an array to track start and 
     % end times for all of the chunks of the sensors. 
@@ -95,7 +95,8 @@ function plot_chunks(chunks)
         pupil_chunk_v = chunks{cc}.P.v;
         pupil_chunk_settings = chunks{cc}.P.settings; 
 
-        MS_light_sensing_chunk_t = chunks{cc}.M.t;
+        MS_light_sensing_chunk_t = chunks{cc}.M.t.AS;
+        MS_accelerometer_chunk_t = chunks{cc}.M.t.LS;
         MS_AS_chunk_v = chunks{cc}.M.v.AS; 
         MS_TS_chunk_v = chunks{cc}.M.v.TS; 
         MS_LS_chunk_v = chunks{cc}.M.v.LS; 
@@ -131,7 +132,7 @@ function plot_chunks(chunks)
             world_chunks_v = [world_chunks_v, world_chunk_v]; 
             world_chunks_v_contrast = [world_chunks_v_contrast, world_chunk_v_contrast]; 
             world_chunks_fps = [world_chunks_fps, world_chunk_fps]; 
-            world_agc_settings = [world_agc_settings ; world_chunk_agc_settings]; 
+            world_chunks_agc_settings = [world_agc_settings ; world_chunk_agc_settings]; 
             world_frame_means = [world_frame_means, world_chunk_v];
 
         end 
@@ -154,7 +155,7 @@ function plot_chunks(chunks)
             pupil_chunks_v = [pupil_chunks_v, pupil_chunk_v]; 
             pupil_chunks_v_contrast = [pupil_chunks_v_contrast, pupil_chunk_v_contrast]; 
             pupil_chunks_fps = [pupil_chunks_fps, pupil_chunk_fps]; 
-            pupil_agc_settings = [pupil_agc_settings ; pupil_chunk_agc_settings]; 
+            pupil_chunks_agc_settings = [pupil_agc_settings ; pupil_chunk_agc_settings]; 
             pupil_frame_means = [pupil_frame_means, pupil_chunk_v];
         end 
 
@@ -167,14 +168,13 @@ function plot_chunks(chunks)
             MS_light_sensing_chunks_t = [MS_light_sensing_chunks_t, MS_light_sensing_chunk_t];
             MS_AS_chunks_v = [MS_AS_chunks_v; MS_AS_chunk_v];
             MS_TS_chunks_v = [MS_TS_chunks_v; MS_TS_chunk_v];
-            
-            MS_accelerometer_chunk_t = double(ms_util.generate_accelerometer_t(chunks{cc}.M.t)); 
+        
             MS_accelerometer_chunks_t = [MS_accelerometer_chunks_t, MS_accelerometer_chunk_t];
             MS_LS_chunks_v = [MS_LS_chunks_v; MS_LS_chunk_v];
     
             MS_sunglasses_chunks_v = [MS_sunglasses_chunks_v, MS_sunglasses_chunk_v];
 
-            MS_chunkstarts = [MS_chunkstarts, chunks{cc}.M.t(1)];
+            MS_chunkstarts = [MS_chunkstarts, MS_light_sensing_chunk_t(1)];
 
 
         end 
@@ -248,8 +248,50 @@ function plot_chunks(chunks)
     % Find the min/max time (x-axis) of the sensors we will plot together
     min_common_time = min([min(world_chunks_t), min(pupil_chunks_t), min(MS_light_sensing_chunks_t), min(MS_accelerometer_chunks_t)]); 
     max_common_time = max([max(world_chunks_t), max(pupil_chunks_t), max(MS_light_sensing_chunks_t), max(MS_accelerometer_chunks_t)]); 
+    
+    %%%%%%%%%%%{ Plot Summary Card with important information at a glance }%%%%%%%%%%%
+    plot_summary_card(world_chunks_t, world_chunks_v, world_chunks_v_contrast, present_world_chunks_v_contrast, world_chunks_fps,...
+                      pupil_chunks_t, pupil_chunks_v, pupil_chunks_v_contrast, present_pupil_chunks_v_contrast, pupil_chunks_fps,... 
+                      MS_light_sensing_chunks_t, MS_AS_chunks_v, present_MS_AS_chunks_v, MS_TS_chunks_v, MS_chunks_fps,...
+                      MS_accelerometer_chunks_t, MS_LS_chunks_v, MS_LS_chunks_v_std,... 
+                      MS_chunkstarts,...  
+                      MS_sunglasses_chunks_v,...
+                      min_common_time, max_common_time...
+                     )
 
-    % Open a figure for plotting 
+    % Generate per sensor figures with expanded information
+
+    %%%%%%%%%%%{ Plot World Card }%%%%%%%%%%%
+    plot_world_card(world_chunks_t, world_frame_means, world_chunks_agc_settings,...
+                    min_common_time, max_common_time...
+                   );
+
+    %%%%%%%%%%%{ Plot Pupil Card }%%%%%%%%%%%
+    plot_pupil_card(pupil_chunks_t, pupil_frame_means, pupil_chunks_agc_settings,...
+                    min_common_time, max_common_time...
+                   );
+
+    %%%%%%%%%%%{ Plot MS Card }%%%%%%%%%%%
+    plot_ms_and_sunglasses_card(MS_light_sensing_chunk_t, MS_AS_chunks_v, MS_TS_chunks_v,...
+                                MS_accelerometer_chunks_t, MS_LS_chunks_v, MS_LS_chunks_v_std,...
+                                MS_chunkstarts,...
+                                MS_sunglasses_chunks_v,...
+                                min_common_time, max_common_time... 
+                               ); 
+
+
+end
+
+% Local function to plot the summarized figure 
+function plot_summary_card(world_chunks_t, world_chunks_v, world_chunks_v_contrast, present_world_chunks_v_contrast, world_chunks_fps,...
+                           pupil_chunks_t, pupil_chunks_v, pupil_chunks_v_contrast, present_pupil_chunks_v_contrast, pupil_chunks_fps,... 
+                           MS_light_sensing_chunks_t, MS_AS_chunks_v, present_MS_AS_chunks_v, MS_TS_chunks_v, MS_chunks_fps,...
+                           MS_accelerometer_chunks_t, MS_LS_chunks_v, MS_LS_chunks_v_std,... 
+                           MS_chunkstarts,...  
+                           MS_sunglasses_chunks_v,...
+                           min_common_time, max_common_time...
+                          )
+     % Open a figure for plotting 
     % information about the performance of sensors combined 
     figure ; 
     t = tiledlayout(3,3); 
@@ -420,10 +462,13 @@ function plot_chunks(chunks)
 
     legend show; 
 
+end 
 
-    % Generate per sensor figures with expanded information
 
-
+% Local function to plot the world camera's figure 
+function plot_world_card(world_chunks_t, world_frame_means, world_chunks_agc_settings,...
+                         min_common_time, max_common_time...
+                        )
     % Generate a figure to display the World Camera mean and settings over time 
     figure ; 
     t = tiledlayout(1, 2); 
@@ -434,36 +479,37 @@ function plot_chunks(chunks)
     nexttile; 
     title("Mean Pixel Intensity by Frame"); 
     hold on ; 
-    plot(world_frame_means, "-x", "DisplayName", "World"); 
+    plot(world_chunks_t, world_frame_means, "-x", "DisplayName", "World"); 
+    xlim([min_common_time, max_common_time]);
     ylim([-5, 260]);
     ylabel("Mean Pixel Intensity"); 
-    xlabel("Frame #");
+    xlabel("Time [s]");
     legend show; 
     
     
     % Access the second subplot, the rightmost one, 
     % to display how the settings control this behavior 
     nexttile;
-    title("AGC Settings by Frame");
+    title("AGC Settings");
     hold on;
-    xlabel("Frame #")
-    xlim([-100, size(world_agc_settings, 1)]);
+    xlabel("Time [s]"); 
+    xlim([min_common_time, max_common_time]);
 
     yyaxis left; 
     
-    if(size(world_agc_settings, 1) > 0)
-        plot(world_agc_settings(:, 1), "bx", "DisplayName", "AnalogueGain");
+    if(size(world_chunks_agc_settings, 1) > 0)
+        plot(world_chunks_t, world_agc_settings(:, 1), "bx", "DisplayName", "AnalogueGain");
     end
     hold on; 
-    if(size(world_agc_settings, 1) > 0)
-        plot(world_agc_settings(:, 2), "gx", "DisplayName", "DigitalGain");
+    if(size(world_chunks_agc_settings, 1) > 0)
+        plot(world_chunks_t, world_agc_settings(:, 2), "gx", "DisplayName", "DigitalGain");
     end
     ylabel("Gain"); 
     ylim([-1, 11.5]); 
 
     yyaxis right; 
-    if(size(world_agc_settings, 1) > 0)
-        plot(world_agc_settings(:, 3), "o", "DisplayName", "Exposure [s]");
+    if(size(world_chunks_agc_settings, 1) > 0)
+        plot(world_chunks_t, world_agc_settings(:, 3), "o", "DisplayName", "Exposure [s]");
     end
     hold on; 
     ylabel("Exposure Time"); 
@@ -471,6 +517,12 @@ function plot_chunks(chunks)
 
     legend show;  
 
+end 
+
+% Local function to plot the pupil camera's figure 
+function plot_pupil_card(pupil_chunks_t, pupil_frame_means, pupil_chunks_agc_settings,...
+                         min_common_time, max_common_time...
+                        )
     % Generate a figure to display the Pupil Camera mean and settings over time 
     figure ; 
     t = tiledlayout(1, 2); 
@@ -479,43 +531,53 @@ function plot_chunks(chunks)
     % Access the first subplot, the leftmost one
     % to display mean frame count over time
     nexttile; 
-    title("Mean Pixel Intensity by Frame"); 
+    title("Mean Pixel Intensity"); 
     hold on ; 
-    plot(pupil_frame_means, "-x", "DisplayName", "Pupil"); 
+    plot(pupil_chunks_t, pupil_frame_means, "-x", "DisplayName", "Pupil"); 
+    xlim([min_common_time, max_common_time]); 
     ylim([-5, 260]);
     ylabel("Mean Pixel Intensity"); 
-    xlabel("Frame #");
+    xlabel("Time [s]");
     legend show; 
 
         % Access the second subplot, the rightmost one, 
     % to display how the settings control this behavior 
     nexttile;
-    title("AGC Settings by Frame");
+    title("AGC Settings");
     hold on;
-    xlim([-100, size(pupil_agc_settings, 1)]);
+    xlim([min_common_time, max_common_time]);
 
     yyaxis left; 
     
-    if(size(pupil_agc_settings, 1) > 0)
-        plot(pupil_agc_settings(:, 1), "bx", "DisplayName", "AnalogueGain");
+    if(size(pupil_chunks_agc_settings, 1) > 0)
+        plot(pupil_chunks_t, pupil_agc_settings(:, 1), "bx", "DisplayName", "AnalogueGain");
     end
     hold on; 
-    if(size(pupil_agc_settings, 1) > 0)
-        plot(pupil_agc_settings(:, 2), "gs", "DisplayName", "DigitalGain");
+    if(size(pupil_chunks_agc_settings, 1) > 0)
+        plot(pupil_chunks_t, pupil_agc_settings(:, 2), "gs", "DisplayName", "DigitalGain");
     end
     ylabel("Gain"); 
     ylim([-1, 11]); 
 
     yyaxis right; 
-    if(size(pupil_agc_settings, 1) > 0)
-        plot(pupil_agc_settings(:, 3), "o", "DisplayName", "Exposure [units]");
+    if(size(pupil_chunks_agc_settings, 1) > 0)
+        plot(pupil_chunks_t, pupil_agc_settings(:, 3), "o", "DisplayName", "Exposure [units]");
     end
     hold on; 
     ylabel("Exposure [units]"); 
     ylim([-2, 515]); 
 
-    legend show;  
+    legend show; 
 
+end 
+
+% Local function to plot the MS's figure 
+function plot_ms_and_sunglasses_card(MS_light_sensing_chunks_t, MS_AS_chunks_v, MS_TS_chunks_v,...
+                                     MS_accelerometer_chunks_t, MS_LS_chunks_v, MS_LS_chunks_v_std,...
+                                     MS_chunkstarts,...
+                                     MS_sunglasses_chunks_v,...
+                                     min_common_time, max_common_time...
+                                    )
     % Open a figure for plotting 
     % information about the MS 
     figure ; 
@@ -523,6 +585,8 @@ function plot_chunks(chunks)
     title(t, "MS + Sunglasses", "FontWeight", "bold"); 
 
     % Plot all of the channels of the AS chip 
+
+    %%%%%%%%%%%{ Plot AS Chip }%%%%%%%%%%%
     nexttile; 
     title("AS Channel Readings"); 
     hold on; 
@@ -532,9 +596,8 @@ function plot_chunks(chunks)
     xlabel("Time [s]");
     ylabel("Count [log]");
     legend show ; 
-    % Set the ylim to show between 16 bit unsigned range smoothly 
-    %ylim([-5, 66000]); 
 
+    %%%%%%%%%%%{ Plot TS Chip }%%%%%%%%%%%
     nexttile;
     title("TS Channel Readings"); 
     hold on ; 
@@ -544,10 +607,9 @@ function plot_chunks(chunks)
     xlabel("Time [s]");
     ylabel("Count [log]");
     legend show ; 
-    % Set the ylim to show between 16 bit unsigned range smoothly 
-    %ylim([-5, 66000]); 
 
-    % Plot the RAW accelerometer readings
+
+    %%%%%%%%%%%{ Plot LS Chip [RAW] }%%%%%%%%%%%
     nexttile; 
     title("LS Readings [Raw]"); 
     hold on ; 
@@ -569,7 +631,7 @@ function plot_chunks(chunks)
     ylim([-33000, 33000]); % Set the ylim to show between 16 bit signed int range smoothly 
     xlim([min_common_time, max_common_time]); 
 
-    % Plot the window calcualted STD accelerometer readings
+    %%%%%%%%%%%{ Plot LS Chip [WINDOW STD]}%%%%%%%%%%%    
     nexttile; 
     title("LS Readings [Window std]"); 
     hold on ; 
@@ -591,6 +653,7 @@ function plot_chunks(chunks)
     ylim([-33000, 33000]); % Set the ylim to show between 16 bit signed int range smoothly 
     xlim([min_common_time, max_common_time]); 
 
+    %%%%%%%%%%%{ Plot Sunglasses }%%%%%%%%%%%
     nexttile; 
     title("Sunglasses Readings"); 
     hold on; 
@@ -602,12 +665,5 @@ function plot_chunks(chunks)
     ylim([-5, (2^12)-1 + 100]); 
 
 
-end
 
-% Local function to plot the summarized figure 
-
-% Local function to plot the world camera's figure 
-
-% Local function to plot the pupil camera's figure 
-
-% Local function to plot the MS's figure 
+end 
