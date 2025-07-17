@@ -79,7 +79,7 @@ function analyze_phase_fit_data(calibration_metadata, measurements)
 
                     %%%%%%{ Extract MS_AS Measurement %}%%%%%%
                     MS_AS_measurement = measurement.M; 
-                    MS_AS_t = MS_AS_measurement.t; 
+                    MS_AS_t = MS_AS_measurement.t.AS; 
                     MS_AS_v = MS_AS_measurement.v.AS(:, 5); 
                     MS_AS_v_contrast = (MS_AS_v - mean(MS_AS_v)) / mean(MS_AS_v); 
 
