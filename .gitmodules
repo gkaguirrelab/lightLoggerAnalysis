@@ -1,0 +1,3 @@
+[submodule "code/libraries_python/pylids"]
+	path = code/libraries_python/pylids
+	url = git@github.com:piecesofmindlab/pylids.git
