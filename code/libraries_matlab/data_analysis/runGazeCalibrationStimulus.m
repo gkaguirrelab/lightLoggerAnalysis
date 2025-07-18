@@ -1,12 +1,28 @@
 function runGazeCalibrationStimulus(simulation_mode, device_num, agc_convergence_wait_s, experiment_name)
+% Displays 26-dot gaze calibration stimulus at fixed visual angles, with a brief beep signaling each dot onset.
+% 
+% Description: 
+%   xxxx
+% 
+% Inputs:
+%   simulation_mode             - Boolean. Whether or not to run the calibration only, wihout
+%                                 light logger recording.
+%   device_num                  - Numeric. The device number to use when recording from a real device.
+%   agc_convergence_wait_s      - Numeric. The time in seconds to wait for the AGC to converge to appropriate settings.
+%   experiment_name             - String. The filename the recording will be saved under on the light logger. 
+% 
+% Example:
+%{
+    runGazeCalibrationStimulus(true)
+    runGazeCalibrationStimulus(false, 2, 60, GazeCalib_Run1)
+%}
+                          
     arguments 
-        simulation_mode {mustBeNumericOrLogical} = true; % Whether or not to run the calibration in simulation mode (no light logger)
-        device_num {mustBeNumeric} = 1; % The device number to use when recording from a real device
-        agc_convergence_wait_s {mustBeNumeric} = 60;  % The time in seconds to wait for the AGC to converge to appropriate settings 
-        experiment_name = "GazeCalibration"; % The filename the recording will be saved under on the light logger
-    end 
-    % Displays 13-dot gaze calibration stimulus at fixed visual angles,
-    % with a brief beep signaling each dot onset.
+        simulation_mode {mustBeNumericOrLogical} = true;
+        device_num {mustBeNumeric} = 1;
+        agc_convergence_wait_s {mustBeNumeric} = 60;
+        experiment_name = "GazeCalibration";
+    end
 
     % Hard-coded parameters
     viewingDistCm = 30;
