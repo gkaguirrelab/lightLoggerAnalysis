@@ -228,9 +228,16 @@ function message = generate_light_logger_recording_message(bluetooth_central, ex
     % Then, initialize a struct that will be sent to the light logger 
     message = bluetooth_central.initialize_update_message();
     
+    % Import world_util to retrieve the initial settings for the experiment 
+    world_util = import_pyfile(getpref("lightLoggerAnalysis", "world_util_path")); 
+
     % Initialize the sensors that will be needed for this recording
-    sensors.W.gain = 1; 
-    sesnors.W.exposure = py.int(5000);  
+    % Retrieve a low ND filter initial settings for the world camera 
+    % so that it starts closer to the convergence target 
+    initial_settings = double(world_util.WORLD_NDF_LEVEL_SETTINGS{3});
+
+    sensors.W.gain = initial_settings(1); 
+    sesnors.W.exposure = py.int(initial_settings(2));  
     sensors.W.agc = true; 
     sensors.W.save_agc_metadata = true; 
 
