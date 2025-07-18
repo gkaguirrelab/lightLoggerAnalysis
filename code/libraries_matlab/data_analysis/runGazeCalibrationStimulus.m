@@ -1,3 +1,18 @@
+<<<<<<< HEAD
+tbfunction runGazeCalibrationStimulus
+% Displays 13-dot gaze calibration stimulus at fixed visual angles,
+% with a brief beep signaling each dot onset.
+
+% Hard-coded parameters
+viewingDistCm = 30;
+dotRadiusDeg = 0.6;
+dotTime = 1; 
+repetitions = 1;
+bgColor = [0 0 0];
+fgColor = [255 255 255];
+redColor  = [255   0   0];
+innerFrac = 0.2;
+=======
 function runGazeCalibrationStimulus(simulation_mode, device_num, agc_convergence_wait_s, experiment_name)
     arguments 
         simulation_mode {mustBeNumericOrLogical} = true; % Whether or not to run the calibration in simulation mode (no light logger)
@@ -17,6 +32,7 @@ function runGazeCalibrationStimulus(simulation_mode, device_num, agc_convergence
     fgColor = [255 255 255];
     redColor  = [255   0   0];
     innerFrac = 0.2;
+>>>>>>> 457f9070ae4d539479d57b5e89c1e6c909883300
 
     AssertOpenGL;
     screenNum = max(Screen('Screens'));
