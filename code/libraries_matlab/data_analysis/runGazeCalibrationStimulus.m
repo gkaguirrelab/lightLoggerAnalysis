@@ -10,13 +10,13 @@ function runGazeCalibrationStimulus(simulation_mode, device_num, agc_convergence
 
     % Hard-coded parameters
     viewingDistCm = 30;
-    dotRadiusDeg = 0.6;
+    dotRadiusDeg = 0.8;
     dotTime = 1; 
-    repetitions = 1;
+    repetitions = 3;
     bgColor = [0 0 0];
     fgColor = [255 255 255];
     redColor  = [255   0   0];
-    innerFrac = 0.2;
+    innerFrac = 0.3;
 
     AssertOpenGL;
     screenNum = max(Screen('Screens'));
@@ -92,7 +92,7 @@ function runGazeCalibrationStimulus(simulation_mode, device_num, agc_convergence
 
     % Instruction text
     text = [
-        'You will see 13 calibration dots appear one by one on the screen,' newline ...
+        'You will see 26 calibration dots appear one by one on the screen,' newline ...
         'each signaled by a brief beep. Please fix your gaze on each dot when it appears,' newline ...
         'and do not try to anticipate the location of the next dot.' newline newline ...
         'Press any key to begin.'
@@ -129,7 +129,10 @@ function runGazeCalibrationStimulus(simulation_mode, device_num, agc_convergence
         fprintf("Main | Recording started. Waiting %f seconds for AGC convergence...\n", agc_convergence_wait_s); 
         pause(agc_convergence_wait_s); 
 
-    end 
+    end
+
+    disp('AGC done converging. Press any key to continue.')
+    KbWait(-1);
 
     % Draw loop with beep on each dot onset
     HideCursor;
