@@ -60,6 +60,9 @@ addpath(light_logger_libraries_matlab);
 setpref(projectName, 'combiExperiments_path', combiExperiments_path);
 
 % Save the paths to relevant Python libraries as prefs
+bluetooth_central_path = fullfile(light_logger_path, "phone_firmware", "bluetooth_central.py"); 
+setpref(projectName, "bluetooth_central_path", bluetooth_central_path);
+
 Pi_util_path = fullfile(light_logger_path, "raspberry_pi_firmware", "utility", "Pi_util.py");
 setpref(projectName, 'Pi_util_path', Pi_util_path); 
 world_util_path = fullfile(light_logger_path, "world", "world_util.py"); 
