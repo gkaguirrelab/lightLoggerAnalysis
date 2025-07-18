@@ -9,7 +9,7 @@ function runGazeCalibrationStimulus(simulation_mode, device_num, agc_convergence
     % with a brief beep signaling each dot onset.
 
     % Hard-coded parameters
-    viewingDistCm = 40;
+    viewingDistCm = 30;
     dotRadiusDeg = 0.6;
     dotTime = 1; 
     repetitions = 1;
@@ -101,7 +101,6 @@ function runGazeCalibrationStimulus(simulation_mode, device_num, agc_convergence
     WaitSecs(dotTime);
         fprintf('%4d | %5.1f° | %5.1f° | %7.2f  | %7.2f  | %6.2f\n', ...
             i, degPositions(i,1), degPositions(i,2), xCm(i), yCm(i), rCm(i));
-    end
     fprintf('\n');
 
     % Convert to pixel coordinates
@@ -265,7 +264,7 @@ function message = generate_light_logger_recording_message(bluetooth_central, ex
 
     sensors.W.Again = initial_settings(1); 
     sensors.W.Dgain = initial_settings(2); 
-    sesnors.W.exposure = py.int(initial_settings(3));  
+    sensors.W.exposure = py.int(initial_settings(3));  
     sensors.W.agc = true; 
     sensors.W.save_agc_metadata = true; 
 
