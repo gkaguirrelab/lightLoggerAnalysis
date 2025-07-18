@@ -130,7 +130,7 @@ function runGazeCalibrationStimulus(simulation_mode, device_num, agc_convergence
 
     % Wait for key press
     KbWait(-1);
-    
+
     % First, import the bluetooth library for light logger communication 
     bluetooth_central = import_pyfile(getpref("lightLoggerAnalysis", "bluetooth_central_path")); 
 
@@ -142,7 +142,7 @@ function runGazeCalibrationStimulus(simulation_mode, device_num, agc_convergence
         % We will attempt to start the light logger recording 
         success = start_recording_light_logger(bluetooth_central, experiment_name, device_num);
         if(~success)
-            %Screen('CloseAll'); 
+            Screen('CloseAll'); 
             error('Error starting light logger recording'); 
         end 
 
@@ -154,7 +154,6 @@ function runGazeCalibrationStimulus(simulation_mode, device_num, agc_convergence
     end 
 
     % Record while the stimulus is presented
-
     % Draw loop with beep on each dot onset
     HideCursor;
     Priority(MaxPriority(win));
@@ -174,7 +173,7 @@ function runGazeCalibrationStimulus(simulation_mode, device_num, agc_convergence
     end
     Priority(0);
     ShowCursor;
-    Screen('CloseAll');
+    Screen('CloseAll'); 
 
     % If we are not in simulation mode, stop recording from the light logger 
     if(~simulation_mode)
