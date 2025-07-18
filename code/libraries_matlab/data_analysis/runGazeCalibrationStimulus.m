@@ -77,30 +77,9 @@ function runGazeCalibrationStimulus(simulation_mode, device_num, agc_convergence
     fprintf(' Dot |  x°   |  y°   |   x_cm   |   y_cm   |  r_cm\n');
     fprintf('-----+-------+-------+----------+----------+--------\n');
     for i = 1:nDots
-        % Play beep (single repetition)
-        PsychPortAudio('Start', pahandle, 1, 0, 0);
-        
-        % Draw dot
-        pos  = positions(i,:);
-        % Outer (white) circle
-        outerRect = [pos(1)-dotRadiusPx, pos(2)-dotRadiusPx, ...
-                     pos(1)+dotRadiusPx, pos(2)+dotRadiusPx];
-        Screen('FillOval', win, fgColor, outerRect);
-        
-        % Inner (red) circle
-        innerRadiusPx = dotRadiusPx * innerFrac;
-        innerRect = [pos(1)-innerRadiusPx, pos(2)-innerRadiusPx, ...
-                     pos(1)+innerRadiusPx, pos(2)+innerRadiusPx];
-        Screen('FillOval', win, redColor, innerRect);
-        WaitSecs(dotTime);
-
-        Screen('Flip', win);
-        WaitSecs(dotTime);
+    fprintf('%4d | %5.1f° | %5.1f° | %7.2f  | %7.2f  | %6.2f\n', ...
+        i, degPositions(i,1), degPositions(i,2), xCm(i), yCm(i), rCm(i));
     end
-    Screen('Flip', win);
-    WaitSecs(dotTime);
-        fprintf('%4d | %5.1f° | %5.1f° | %7.2f  | %7.2f  | %6.2f\n', ...
-            i, degPositions(i,1), degPositions(i,2), xCm(i), yCm(i), rCm(i));
     fprintf('\n');
 
     % Convert to pixel coordinates
@@ -120,15 +99,47 @@ function runGazeCalibrationStimulus(simulation_mode, device_num, agc_convergence
     ];
     Screen('TextSize', win, 24);
     DrawFormattedText(win, text, 'center', 'center', fgColor);
-
+    
     % Unify key names across platforms
     KbName('UnifyKeyNames');
     KbReleaseWait;
     FlushEvents('keyDown');
     Screen('Flip', win);
-
+    
     % Wait for key press
     KbWait(-1);
+
+    % Draw loop with beep on each dot onset
+    HideCursor;
+    Priority(MaxPriority(win));
+    for rep = 1:repetitions
+        for i = 1:nDots
+            % Play beep (single repetition)
+            PsychPortAudio('Start', pahandle, 1, 0, 0);
+            
+            % Draw dot
+            pos  = positions(i,:);
+            % Outer (white) circle
+            outerRect = [pos(1)-dotRadiusPx, pos(2)-dotRadiusPx, ...
+                         pos(1)+dotRadiusPx, pos(2)+dotRadiusPx];
+            Screen('FillOval', win, fgColor, outerRect);
+            
+            % Inner (red) circle
+            innerRadiusPx = dotRadiusPx * innerFrac;
+            innerRect = [pos(1)-innerRadiusPx, pos(2)-innerRadiusPx, ...
+                         pos(1)+innerRadiusPx, pos(2)+innerRadiusPx];
+            Screen('FillOval', win, redColor, innerRect);
+            WaitSecs(dotTime);
+    
+            Screen('Flip', win);
+            WaitSecs(dotTime);
+        end
+        Screen('Flip', win);
+        WaitSecs(dotTime);
+    end
+    Priority(0);
+    ShowCursor;
+    Screen('CloseAll');
 
     % First, import the bluetooth library for light logger communication 
     bluetooth_central = import_pyfile(getpref("lightLoggerAnalysis", "bluetooth_central_path")); 
@@ -180,8 +191,7 @@ function runGazeCalibrationStimulus(simulation_mode, device_num, agc_convergence
         if(~success)
             error("Error stopping light logger recording"); 
         end 
-
-    end 
+    end
 
 end
 
