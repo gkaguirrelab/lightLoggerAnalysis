@@ -109,6 +109,28 @@ function runGazeCalibrationStimulus(simulation_mode, device_num, agc_convergence
     % Wait for key press
     KbWait(-1);
 
+    % First, import the bluetooth library for light logger communication 
+    bluetooth_central = import_pyfile(getpref("lightLoggerAnalysis", "bluetooth_central_path")); 
+
+    % If a key has been pressed and we are not in simulation mode, 
+    % start recording on the light logger 
+    if(~simulation_mode)
+        disp("Main | Starting recording on light logger..."); 
+
+        % We will attempt to start the light logger recording 
+        success = start_recording_light_logger(bluetooth_central, experiment_name, device_num);
+        if(~success)
+            Screen('CloseAll'); 
+            error('Error starting light logger recording'); 
+        end 
+
+        % If the light logger was properly started, we need to leave some time for the AGC to converge 
+        % to the appropriate settings 
+        fprintf("Main | Recording started. Waiting %f seconds for AGC convergence...\n", agc_convergence_wait_s); 
+        pause(agc_convergence_wait_s); 
+
+    end 
+
     % Draw loop with beep on each dot onset
     HideCursor;
     Priority(MaxPriority(win));
@@ -140,50 +162,6 @@ function runGazeCalibrationStimulus(simulation_mode, device_num, agc_convergence
     Priority(0);
     ShowCursor;
     Screen('CloseAll');
-
-    % First, import the bluetooth library for light logger communication 
-    bluetooth_central = import_pyfile(getpref("lightLoggerAnalysis", "bluetooth_central_path")); 
-
-    % If a key has been pressed and we are not in simulation mode, 
-    % start recording on the light logger 
-    if(~simulation_mode)
-        disp("Main | Starting recording on light logger..."); 
-
-        % We will attempt to start the light logger recording 
-        success = start_recording_light_logger(bluetooth_central, experiment_name, device_num);
-        if(~success)
-            Screen('CloseAll'); 
-            error('Error starting light logger recording'); 
-        end 
-
-        % If the light logger was properly started, we need to leave some time for the AGC to converge 
-        % to the appropriate settings 
-        fprintf("Main | Recording started. Waiting %f seconds for AGC convergence...\n", agc_convergence_wait_s); 
-        pause(agc_convergence_wait_s); 
-
-    end 
-
-    % Record while the stimulus is presented
-    % Draw loop with beep on each dot onset
-    HideCursor;
-    Priority(MaxPriority(win));
-    for rep = 1:repetitions
-        for i = 1:nDots
-            % Play beep (single repetition)
-            PsychPortAudio('Start', pahandle, 1, 0, 0);
-
-            % Draw dot
-            pos  = positions(i,:);
-            rect = [pos(1)-dotRadiusPx, pos(2)-dotRadiusPx, ...
-                    pos(1)+dotRadiusPx, pos(2)+dotRadiusPx];
-            Screen('FillOval', win, fgColor, rect);
-            Screen('Flip', win);
-            WaitSecs(dotTime);
-        end
-    end
-    Priority(0);
-    ShowCursor;
-    Screen('CloseAll'); 
 
     % If we are not in simulation mode, stop recording from the light logger 
     if(~simulation_mode)
