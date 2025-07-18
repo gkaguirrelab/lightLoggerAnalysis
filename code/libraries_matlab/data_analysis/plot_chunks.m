@@ -132,7 +132,7 @@ function plot_chunks(chunks)
             world_chunks_v = [world_chunks_v, world_chunk_v]; 
             world_chunks_v_contrast = [world_chunks_v_contrast, world_chunk_v_contrast]; 
             world_chunks_fps = [world_chunks_fps, world_chunk_fps]; 
-            world_chunks_agc_settings = [world_agc_settings ; world_chunk_agc_settings]; 
+            world_chunks_agc_settings = [world_chunks_agc_settings ; world_chunk_agc_settings]; 
             world_frame_means = [world_frame_means, world_chunk_v];
 
         end 
@@ -498,18 +498,18 @@ function plot_world_card(world_chunks_t, world_frame_means, world_chunks_agc_set
     yyaxis left; 
     
     if(size(world_chunks_agc_settings, 1) > 0)
-        plot(world_chunks_t, world_agc_settings(:, 1), "bx", "DisplayName", "AnalogueGain");
+        plot(world_chunks_t, world_chunks_agc_settings(:, 1), "bx", "DisplayName", "AnalogueGain");
     end
     hold on; 
     if(size(world_chunks_agc_settings, 1) > 0)
-        plot(world_chunks_t, world_agc_settings(:, 2), "gx", "DisplayName", "DigitalGain");
+        plot(world_chunks_t, world_chunks_agc_settings(:, 2), "gx", "DisplayName", "DigitalGain");
     end
     ylabel("Gain"); 
     ylim([-1, 11.5]); 
 
     yyaxis right; 
     if(size(world_chunks_agc_settings, 1) > 0)
-        plot(world_chunks_t, world_agc_settings(:, 3), "o", "DisplayName", "Exposure [s]");
+        plot(world_chunks_t, world_chunks_agc_settings(:, 3), "o", "DisplayName", "Exposure [s]");
     end
     hold on; 
     ylabel("Exposure Time"); 
