@@ -264,8 +264,9 @@ function message = generate_light_logger_recording_message(bluetooth_central, ex
     % so that it starts closer to the convergence target 
     initial_settings = double(world_util.WORLD_NDF_LEVEL_SETTINGS{3});
 
-    sensors.W.gain = initial_settings(1); 
-    sesnors.W.exposure = py.int(initial_settings(2));  
+    sensors.W.Again = initial_settings(1); 
+    sensors.W.Dgain = initial_settings(2); 
+    sesnors.W.exposure = py.int(initial_settings(3));  
     sensors.W.agc = true; 
     sensors.W.save_agc_metadata = true; 
 
