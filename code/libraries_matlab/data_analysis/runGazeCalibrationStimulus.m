@@ -1,9 +1,9 @@
-function runGazeCalibrationStimulus
+tbfunction runGazeCalibrationStimulus
 % Displays 13-dot gaze calibration stimulus at fixed visual angles,
 % with a brief beep signaling each dot onset.
 
 % Hard-coded parameters
-viewingDistCm = 40;
+viewingDistCm = 30;
 dotRadiusDeg = 0.6;
 dotTime = 1; 
 repetitions = 1;
