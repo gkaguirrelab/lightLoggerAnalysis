@@ -89,10 +89,21 @@ function plot_chunks(chunks)
         % Retrieve the sensor readings for this chunk
         world_chunk_t = chunks{cc}.W.t;
         world_chunk_v = chunks{cc}.W.v;
+
+        % Convert raw frames to array of mean pixels if we have been passed mean frames 
+        if(numel(size(world_chunk_v)) > 2)
+            world_chunk_v = mean(world_chunk_v, [2, 3])'; 
+        end 
+
         world_chunk_settings = chunks{cc}.W.settings; 
 
         pupil_chunk_t = chunks{cc}.P.t;
         pupil_chunk_v = chunks{cc}.P.v;
+        % Convert raw frames to array of mean pixels if we have been passed mean frames 
+        if(numel(size(pupil_chunk_v)) > 2)
+            pupil_chunk_v = mean(pupil_chunk_v, [2, 3])'; 
+        end 
+
         pupil_chunk_settings = chunks{cc}.P.settings; 
 
         MS_light_sensing_chunk_t = chunks{cc}.M.t.AS;
