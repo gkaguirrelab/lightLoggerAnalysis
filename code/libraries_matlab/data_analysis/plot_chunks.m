@@ -155,7 +155,7 @@ function plot_chunks(chunks)
             pupil_chunks_v = [pupil_chunks_v, pupil_chunk_v]; 
             pupil_chunks_v_contrast = [pupil_chunks_v_contrast, pupil_chunk_v_contrast]; 
             pupil_chunks_fps = [pupil_chunks_fps, pupil_chunk_fps]; 
-            pupil_chunks_agc_settings = [pupil_agc_settings ; pupil_chunk_agc_settings]; 
+            pupil_chunks_agc_settings = [pupil_chunks_agc_settings ; pupil_chunk_agc_settings]; 
             pupil_frame_means = [pupil_frame_means, pupil_chunk_v];
         end 
 
@@ -272,7 +272,7 @@ function plot_chunks(chunks)
                    );
 
     %%%%%%%%%%%{ Plot MS Card }%%%%%%%%%%%
-    plot_ms_and_sunglasses_card(MS_light_sensing_chunk_t, MS_AS_chunks_v, MS_TS_chunks_v,...
+    plot_ms_and_sunglasses_card(MS_light_sensing_chunks_t, MS_AS_chunks_v, MS_TS_chunks_v,...
                                 MS_accelerometer_chunks_t, MS_LS_chunks_v, MS_LS_chunks_v_std,...
                                 MS_chunkstarts,...
                                 MS_sunglasses_chunks_v,...
