@@ -1,22 +1,42 @@
 function runGazeCalibrationStimulus(simulation_mode, device_num, agc_convergence_wait_s, experiment_name)
+% Displays 26-dot gaze calibration stimulus at fixed visual angles, with a brief beep signaling each dot onset.
+% 
+% Description: 
+%   xxxx
+% 
+% Inputs:
+%   simulation_mode             - Boolean. Whether or not to run the calibration only, wihout
+%                                 light logger recording.
+%   device_num                  - Numeric. The device number to use when recording from a real device.
+%   agc_convergence_wait_s      - Numeric. The time in seconds to wait for the AGC to converge to appropriate settings.
+%   experiment_name             - String. The filename the recording will be saved under on the light logger. 
+% 
+% Example:
+%{
+    runGazeCalibrationStimulus(true)
+    runGazeCalibrationStimulus(false, 2, 60, GazeCalib_Run1)
+%}
+                          
     arguments 
-        simulation_mode {mustBeNumericOrLogical} = true; % Whether or not to run the calibration in simulation mode (no light logger)
-        device_num {mustBeNumeric} = 1; % The device number to use when recording from a real device
-        agc_convergence_wait_s {mustBeNumeric} = 60;  % The time in seconds to wait for the AGC to converge to appropriate settings 
-        experiment_name = "GazeCalibration"; % The filename the recording will be saved under on the light logger
-    end 
-    % Displays 13-dot gaze calibration stimulus at fixed visual angles,
-    % with a brief beep signaling each dot onset.
+        simulation_mode {mustBeNumericOrLogical} = true;
+        device_num {mustBeNumeric} = 1;
+        agc_convergence_wait_s {mustBeNumeric} = 60;
+        experiment_name = "GazeCalibration";
+    end
 
     % Hard-coded parameters
     viewingDistCm = 30;
-    dotRadiusDeg = 0.6;
+    dotRadiusDeg = 0.8;
     dotTime = 1; 
-    repetitions = 1;
+    repetitions = 3;
     bgColor = [0 0 0];
     fgColor = [255 255 255];
     redColor  = [255   0   0];
+<<<<<<< HEAD
     innerFrac = 0.2;
+=======
+    innerFrac = 0.3;
+>>>>>>> f2e24828d37a76621e3d2749da9c13a57ecd55c7
 
     AssertOpenGL;
     screenNum = max(Screen('Screens'));
@@ -77,30 +97,9 @@ function runGazeCalibrationStimulus(simulation_mode, device_num, agc_convergence
     fprintf(' Dot |  x°   |  y°   |   x_cm   |   y_cm   |  r_cm\n');
     fprintf('-----+-------+-------+----------+----------+--------\n');
     for i = 1:nDots
-        % Play beep (single repetition)
-        PsychPortAudio('Start', pahandle, 1, 0, 0);
-        
-        % Draw dot
-        pos  = positions(i,:);
-        % Outer (white) circle
-        outerRect = [pos(1)-dotRadiusPx, pos(2)-dotRadiusPx, ...
-                     pos(1)+dotRadiusPx, pos(2)+dotRadiusPx];
-        Screen('FillOval', win, fgColor, outerRect);
-        
-        % Inner (red) circle
-        innerRadiusPx = dotRadiusPx * innerFrac;
-        innerRect = [pos(1)-innerRadiusPx, pos(2)-innerRadiusPx, ...
-                     pos(1)+innerRadiusPx, pos(2)+innerRadiusPx];
-        Screen('FillOval', win, redColor, innerRect);
-        WaitSecs(dotTime);
-
-        Screen('Flip', win);
-        WaitSecs(dotTime);
+    fprintf('%4d | %5.1f° | %5.1f° | %7.2f  | %7.2f  | %6.2f\n', ...
+        i, degPositions(i,1), degPositions(i,2), xCm(i), yCm(i), rCm(i));
     end
-    Screen('Flip', win);
-    WaitSecs(dotTime);
-        fprintf('%4d | %5.1f° | %5.1f° | %7.2f  | %7.2f  | %6.2f\n', ...
-            i, degPositions(i,1), degPositions(i,2), xCm(i), yCm(i), rCm(i));
     fprintf('\n');
 
     % Convert to pixel coordinates
@@ -113,20 +112,20 @@ function runGazeCalibrationStimulus(simulation_mode, device_num, agc_convergence
 
     % Instruction text
     text = [
-        'You will see 13 calibration dots appear one by one on the screen,' newline ...
+        'You will see 26 calibration dots appear one by one on the screen,' newline ...
         'each signaled by a brief beep. Please fix your gaze on each dot when it appears,' newline ...
         'and do not try to anticipate the location of the next dot.' newline newline ...
         'Press any key to begin.'
     ];
     Screen('TextSize', win, 24);
     DrawFormattedText(win, text, 'center', 'center', fgColor);
-
+    
     % Unify key names across platforms
     KbName('UnifyKeyNames');
     KbReleaseWait;
     FlushEvents('keyDown');
     Screen('Flip', win);
-
+    
     % Wait for key press
     KbWait(-1);
 
@@ -150,9 +149,11 @@ function runGazeCalibrationStimulus(simulation_mode, device_num, agc_convergence
         fprintf("Main | Recording started. Waiting %f seconds for AGC convergence...\n", agc_convergence_wait_s); 
         pause(agc_convergence_wait_s); 
 
-    end 
+    end
 
-    % Record while the stimulus is presented
+    disp('AGC done converging. Press any key to continue.')
+    KbWait(-1);
+
     % Draw loop with beep on each dot onset
     HideCursor;
     Priority(MaxPriority(win));
@@ -160,19 +161,30 @@ function runGazeCalibrationStimulus(simulation_mode, device_num, agc_convergence
         for i = 1:nDots
             % Play beep (single repetition)
             PsychPortAudio('Start', pahandle, 1, 0, 0);
-
+            
             % Draw dot
             pos  = positions(i,:);
-            rect = [pos(1)-dotRadiusPx, pos(2)-dotRadiusPx, ...
-                    pos(1)+dotRadiusPx, pos(2)+dotRadiusPx];
-            Screen('FillOval', win, fgColor, rect);
+            % Outer (white) circle
+            outerRect = [pos(1)-dotRadiusPx, pos(2)-dotRadiusPx, ...
+                         pos(1)+dotRadiusPx, pos(2)+dotRadiusPx];
+            Screen('FillOval', win, fgColor, outerRect);
+            
+            % Inner (red) circle
+            innerRadiusPx = dotRadiusPx * innerFrac;
+            innerRect = [pos(1)-innerRadiusPx, pos(2)-innerRadiusPx, ...
+                         pos(1)+innerRadiusPx, pos(2)+innerRadiusPx];
+            Screen('FillOval', win, redColor, innerRect);
+            WaitSecs(dotTime);
+    
             Screen('Flip', win);
             WaitSecs(dotTime);
         end
+        Screen('Flip', win);
+        WaitSecs(dotTime);
     end
     Priority(0);
     ShowCursor;
-    Screen('CloseAll'); 
+    Screen('CloseAll');
 
     % If we are not in simulation mode, stop recording from the light logger 
     if(~simulation_mode)
@@ -180,8 +192,7 @@ function runGazeCalibrationStimulus(simulation_mode, device_num, agc_convergence
         if(~success)
             error("Error stopping light logger recording"); 
         end 
-
-    end 
+    end
 
 end
 
