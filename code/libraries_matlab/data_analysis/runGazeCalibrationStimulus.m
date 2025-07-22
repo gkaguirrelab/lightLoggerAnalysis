@@ -32,11 +32,7 @@ function runGazeCalibrationStimulus(simulation_mode, device_num, agc_convergence
     bgColor = [0 0 0];
     fgColor = [255 255 255];
     redColor  = [255   0   0];
-<<<<<<< HEAD
-    innerFrac = 0.2;
-=======
     innerFrac = 0.3;
->>>>>>> f2e24828d37a76621e3d2749da9c13a57ecd55c7
 
     AssertOpenGL;
     screenNum = max(Screen('Screens'));
