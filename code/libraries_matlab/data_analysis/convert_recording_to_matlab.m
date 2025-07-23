@@ -5,6 +5,73 @@ function convert_recording_to_matlab(path_to_recording, output_path,...
                                      contains_agc_metadata,...
                                      password...
                                     )
+% Convert all of the individual chunks of a video to native MATLAB type and save them 
+%
+% Syntax:
+%   convert_recording_to_matlab(path_to_recording, output_path,...
+%                               apply_digital_gain, use_mean_frame,...
+%                               convert_time_units, convert_to_floats,...
+%                               mean_axes,...
+%                               contains_agc_metadata,...
+%                               password...
+%                              )
+%
+% Description:
+%   Given a path to a recording, read in all of the chunks from all of the 
+%   sensors, apply desired transformations, and output the chunks 
+%   converted to MATLAB type in output_path. 
+%
+% Inputs:
+%   path_to_recording     - String. The path to the suprafile 
+%                           containing all of the chunks 
+%
+%
+%   apply_digital_gain    - Logical. Whether or not to apply 
+%                           each frame's associated digital gain
+%                           scalar
+%
+%   use_mean_frame        - Logical. Whether to only use the mean 
+%                           pixel value from each frame for each 
+%                           of the camera-based sensors.
+%
+%   convert_time_units    - Logical. Whether to convert the 
+%                           timestamps from different sensors 
+%                           all into the same units (s).
+% 
+%   convert_to_floats     - Logical. Whether to convert all 
+%                           of the Python np.arrays to float types. 
+%                           Can make things easier coming to MATLAB
+%
+%   mean_axes             - Struct. Represents the axes to mean 
+%                           over when use_mean_frame is true. 
+%                           Only applies to camera senors. Form
+%                           is a struct with fields (WPM) 
+%                           where each field is a tuple of axes. 
+%                           0-indexed.
+%
+%   contains_agc_metdata  - Struct. Represents whether a sensor 
+%                           has or does not have AGC metadata
+%                           for a given recording. Form is 
+%                           a struct with fields (WPM) where 
+%                           each field is a boolean.
+%
+%   password               - String. Represents the password 
+%                            used to encrypt the data (if encrypted)
+%
+% Outputs:
+%
+%   NONE 
+%
+% Examples:
+%{
+    path_to_experiment = '/Volumes/EXTERNAL1/test_folder_0';
+    output_path = "./output_folder"; 
+    apply_digital_gain = true; 
+    use_mean_frame = false; 
+    convert_time_units = true; 
+    convert_to_floats = true; 
+    convert_recording_to_matlab(path_to_recording, output_path, apply_digital_gain, use_mean_frame, convert_time_units, convert_to_floats, mean_axes, contains_agc_metadata, password)
+%}                                    
     arguments 
         path_to_recording {mustBeText}; % Path to the recording file full of chunks 
         output_path {mustBeText}; % Path where the converted recording will be output
@@ -17,6 +84,8 @@ function convert_recording_to_matlab(path_to_recording, output_path,...
         password {mustBeText} = "1234"; % The password needed to decrypt encrypted + compressed files (.blosc files)
     end 
     
+    % Begin timing the function 
+    tic; 
 
     % Apply the default time ranges to splice out of the video (the entire video)
     % Default is a 1x2 None tuple. This signifies the entire video
@@ -101,10 +170,10 @@ function convert_recording_to_matlab(path_to_recording, output_path,...
             % Construct the chunk ranges to splice 
             % (which will just be this current chunk)
             % for this sensor (if it has that many chunks)
-            if( ch > num_chunks_per_sensor.(sensor_name) )
-                chunk_range = {py.None, py.None}; 
+            if(ch > num_chunks_per_sensor.(sensor_name))
+                chunk_range = {py.None, py.None};
             else
-                chunk_range = {ch, ch};
+                chunk_range = {ch-1, ch}; % Have to ensure it is exclusive Python list indexing
             end 
 
             % Save the chunk range for this sensor 
@@ -121,7 +190,7 @@ function convert_recording_to_matlab(path_to_recording, output_path,...
                                    false,...
                                    password...
                                   ); 
-        chunk = chunks_cell{1};      
+        chunk = chunks_cell{ch}; % Fine to use MATLAB index here because we switch back 
         
         % Construct the output path for this chunk 
         output_filepath = fullfile(output_path, sprintf("chunk_%d.mat", ch-1)); 
@@ -131,8 +200,8 @@ function convert_recording_to_matlab(path_to_recording, output_path,...
 
     end 
     
-
-
-
+    % Calculate the time needed for conversion 
+    elapsed_seconds = toc; 
+    fprintf("Main | Conversion took %.3f seconds\n", elapsed_seconds); 
 
 end
