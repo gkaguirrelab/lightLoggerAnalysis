@@ -196,7 +196,7 @@ function convert_recording_to_matlab(path_to_recording, output_path,...
         output_filepath = fullfile(output_path, sprintf("chunk_%d.mat", ch-1)); 
         
         % Save the output chunk 
-        save(output_filepath, "chunk"); 
+        save(output_filepath, "chunk", '-v7.3'); 
 
     end 
     
