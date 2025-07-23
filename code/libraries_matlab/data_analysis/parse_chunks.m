@@ -1,7 +1,7 @@
 function chunks = parse_chunks(path_to_experiment,...
                                apply_digital_gain, use_mean_frame, convert_time_units, convert_to_floats,...
                                time_ranges, chunk_ranges, mean_axes, contains_agc_metadata,...
-                               password...
+                               verbose, password...
                               )
 % Parse the chunks of a recording from the light logger into a cell of chunk structs
 %
@@ -64,7 +64,10 @@ function chunks = parse_chunks(path_to_experiment,...
 %                           has or does not have AGC metadata
 %                           for a given recording. Form is 
 %                           a struct with fields (WPM) where 
-%                           each field is a boolean. 
+%                           each field is a boolean.
+%
+%   verbose               - Logical. Whether or not to print progress 
+%                           to the terminal. 
 %
 %   password               - String. Represents the password 
 %                            used to encrypt the data (if encrypted)
@@ -97,6 +100,7 @@ function chunks = parse_chunks(path_to_experiment,...
         chunk_ranges = false; % The chunk numbers to splice out of a video in the form [start, end] (0-indexed)
         mean_axes = false; % The axes per sensor to apply mean over if we want to take some sort of mean. Note: ONLY for camera sensors  
         contains_agc_metadata = false; % Flags for each sensor if its metadata matrix contains AGC data
+        verbose {mustBeNumericOrLogical} = false; % If you want progress output to the terminal 
         password {mustBeText} = "1234"; % The password needed to decrypt encrypted + compressed files (.blosc files)
     end 
 
@@ -174,7 +178,9 @@ function chunks = parse_chunks(path_to_experiment,...
 
     % Iterate over the chunks and convert them to fully MATLAB types 
     for cc = 1:numel(chunks)
-        fprintf("Converting chunk: %d/%d\n", cc, numel(chunks));
+        if(verbose)
+            fprintf("Converting chunk: %d/%d\n", cc, numel(chunks));
+        end 
 
         % Replace the Python data type with the MATLAB data type. 
         chunks{cc} = chunk_dict_to_matlab(chunks{cc}); 

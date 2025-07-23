@@ -17,38 +17,114 @@ function convert_recording_to_matlab(path_to_recording, output_path,...
         password {mustBeText} = "1234"; % The password needed to decrypt encrypted + compressed files (.blosc files)
     end 
     
+
+    % Apply the default time ranges to splice out of the video (the entire video)
+    % Default is a 1x2 None tuple. This signifies the entire video
+    time_ranges = struct; 
+    
+    % Splice the entire video from all sensors 
+    sensor_names = {'W', 'P', 'M'}; 
+    for ss = 1:numel(sensor_names)  
+        time_ranges.(sensor_names{ss}) = py.tuple({py.None, py.None}); 
+    end 
+
+    % Apply default mean axes if is not selected
+    if(~isstruct(mean_axes))
+        % Default is mean frame for each camera sensor 
+        % Nothing for the MS
+        mean_axes = struct; 
+
+        % Define the default mean axes per sensor 
+        sensor_names = {'W', 'P'}; 
+        for ss = 1:numel(sensor_names)  
+            mean_axes.(sensor_names{ss}) = py.tuple({1, 2}); 
+        end 
+        mean_axes.M = py.tuple();
+
+    end 
+
+
+    % Apply default contains AGC metadata if not supplied
+    if(~isstruct(contains_agc_metadata))
+        % Default is mean frame for each camera sensor 
+        % Nothing for the MS
+        contains_agc_metadata = struct; 
+
+        % Define the default mean axes per sensor 
+        contains_agc_metadata.W = true; 
+        sensor_names = {'P', 'M'}; 
+        for ss = 1:numel(sensor_names)  
+            contains_agc_metadata.(sensor_names{ss}) = false; 
+        end 
+        
+    end 
+
+
+
     % Because parsing chunks in MATLAB, for even a small number, is time consuming and memory 
     % intensive, and impossible for large videos, we will simply each single chunk 
     % at a time, then output this as a MATLAB compatible file so that one can simply read 
     % them in later 
-    
-    % First, let's find out the max number of chunks in the video for each sensor
-    num_chunks_per_sensor.W = 3; 
-    num_chunks_per_sensor.P = 2; 
-    num_chunks_per_sensor.M = 1;  % Dummy data 
+
+    % Import the Pi_util python utility library 
+    Pi_util = import_pyfile(getpref("lightLoggerAnalysis", "Pi_util_path")); 
     
 
+    % First, let's find out the max number of chunks in the video for each sensor.
+    % To do this, we will gather the chunk files per sensor 
+    chunk_files_per_sensor = struct(Pi_util.group_sensors_files(path_to_recording));
+    num_chunks_per_sensor = struct; 
+    sensor_names = fieldnames(chunk_files_per_sensor); 
+    for ss = 1:numel(sensor_names)
+        % Retrieve the sensor name 
+        sensor_name = sensor_names{ss};
+
+        % Save how many chunks this sensor has
+        num_chunks_per_sensor.(sensor_name) = length(chunk_files_per_sensor.(sensor_name)); 
+
+    end     
+
     % Then, we will iterate over the max number of chunks
-    max_num_chunks = max([num_chunks_per_sensor.W, num_chunks_per_sensor.P, num_chunks_per_sensor.M]);  
+    max_num_chunks = max(cell2mat(struct2cell(num_chunks_per_sensor)));
     for ch = 1:max_num_chunks
-        % Construct the chunk ranges to splice 
-        chunk_ranges.W = 1; 
-        chunk_ranges.P = 1; 
-        chunk_ranges.M = 1; 
+        fprintf("Main | Processing chunk %d/%d...\n", ch, max_num_chunks); 
+
+        % Initialize a struct to denote the chunk numbers to 
+        % extract per sensor 
+        chunk_ranges = struct; 
+        
+        % Set the range of chunks that we will extract 
+        for ss = 1:numel(sensor_names)
+            % Retrieve the sensor name 
+            sensor_name = sensor_names{ss}; 
+
+            % Construct the chunk ranges to splice 
+            % (which will just be this current chunk)
+            % for this sensor (if it has that many chunks)
+            if( ch > num_chunks_per_sensor.(sensor_name) )
+                chunk_range = {py.None, py.None}; 
+            else
+                chunk_range = {ch, ch};
+            end 
+
+            % Save the chunk range for this sensor 
+            chunk_ranges.(sensor_name) = py.tuple(chunk_range); 
+        end 
         
         % Let's construct the argumetns to parse chunks 
-        chunk_cells = parse_chunks(path_to_recording, ...
+        chunks_cell = parse_chunks(path_to_recording, ...
                                    apply_digital_gain, use_mean_frame,...
                                    convert_time_units, convert_to_floats,...
-                                   false, chunk_ranges,...
+                                   time_ranges, chunk_ranges,...
                                    mean_axes,...
                                    contains_agc_metadata,...
+                                   false,...
                                    password...
                                   ); 
         chunk = chunks_cell{1};      
         
         % Construct the output path for this chunk 
-        output_filepath = fullfile(output_path, sprintf("chunk_%d.mat", ch)); 
+        output_filepath = fullfile(output_path, sprintf("chunk_%d.mat", ch-1)); 
         
         % Save the output chunk 
         save(output_filepath, "chunk"); 
