@@ -69,11 +69,9 @@ for cc = 1:numel(contrast_levels)
             measured_fit_plot = tiledlayout(measured_fit_fig, numel(frequencies), 1);
             sgtitle(measured_fit_plot, sprintf("Measured vs Fit Contrast Units | C: %.2f | NDF: %.2f | M: %d", contrast_level, NDF, mm));
 
-            if opts.plotAGC
-                agc_settings_fig = figure;
-                agc_settings_plot = tiledlayout(agc_settings_fig, numel(frequencies), 1);
-                sgtitle(agc_settings_plot, sprintf("AGC Performance | C: %.2f | NDF: %.2f | M: %d", contrast_level, NDF, mm));
-            end
+            agc_settings_fig = figure;
+            agc_settings_plot = tiledlayout(agc_settings_fig, numel(frequencies), 1);
+            sgtitle(agc_settings_plot, sprintf("AGC Performance | C: %.2f | NDF: %.2f | M: %d", contrast_level, NDF, mm));
 
             % Iterate over the frequences
             for ff = 1:numel(frequencies)
@@ -83,9 +81,8 @@ for cc = 1:numel(contrast_levels)
                 % Move to the next tile for each of the above plots
                 time_series_ax = nexttile(raw_time_series_plot);
                 measured_fit_ax = nexttile(measured_fit_plot);
-                if opts.plotAGC
-                    agc_settings_ax = nexttile(agc_settings_plot);
-                end
+                agc_settings_ax = nexttile(agc_settings_plot);
+
                 % Retrieve the given measurement
                 measurement = measurements{nn, cc, ff, mm};
 
@@ -152,10 +149,10 @@ for cc = 1:numel(contrast_levels)
     end % NDF
 
     % Contrast the TTF per measure per contrast and NDF
-    plot_TTF(NDFs, contrast_level, frequencies, response_amplitude_data, world_fps, contrast_attenuation_with_frequency, opts);
+    plot_TTF(NDFs, contrast_level, frequencies, response_amplitude_data, world_fps, contrast_attenuation_with_frequency);
 
     % Construct the TTF of the average of the measurements
-    plot_mean_TTF(NDFs, contrast_level, frequencies, response_amplitude_data, world_fps, contrast_attenuation_with_frequency, opts);
+    plot_mean_TTF(NDFs, contrast_level, frequencies, response_amplitude_data, world_fps, contrast_attenuation_with_frequency);
 
 
 end % Contrast
@@ -163,7 +160,7 @@ end % Contrast
 end
 
 %% LOCAL FUNCTIONS
-function [filterFreqHz,filterAmp] = approxFreqFilter(frequencies, amplitudes, opts)
+function [filterFreqHz,filterAmp] = approxFreqFilter(frequencies, amplitudes)
 
 % Trim off the 100 Hz case; this is dominated by signed noise in the
 % amplitude estimation
@@ -182,7 +179,7 @@ filterAmp = f(1);
 end
 
 % Local function to plot the TTF of all measures of a certain contrast level
-function plot_TTF(NDFs, contrast_level, frequencies, response_amplitude_data, world_fps, contrast_attenuation_with_frequency, opts)
+function plot_TTF(NDFs, contrast_level, frequencies, response_amplitude_data, world_fps, contrast_attenuation_with_frequency)
 % Construct the Mean TTF for this contrast level
 if opts.plotEachMeasure
     figure ;
@@ -247,7 +244,7 @@ end
 
 
 % Local function to plot the mean TTF
-function plot_mean_TTF(NDFs, contrast_level, frequencies, response_amplitude_data, world_fps, contrast_attenuation_with_frequency, opts)
+function plot_mean_TTF(NDFs, contrast_level, frequencies, response_amplitude_data, world_fps, contrast_attenuation_with_frequency)
 % Construct the Mean TTF for this contrast level
 figure ;
 
@@ -269,6 +266,7 @@ for nn = 1:numel(NDFs)
     meanAmpData = mean_response_amplitude_per_frequency .* (1./contrast_attenuation_with_frequency(1:numel(frequencies))) ./ contrast_level;
     h = scatter(log10(frequencies), meanAmpData,...
         '-o',...
+        'LineWidth',2,...
         'DisplayName', sprintf("NDF %.2f", NDFs(nn))...
         );
     h.MarkerFaceAlpha = 0.4;

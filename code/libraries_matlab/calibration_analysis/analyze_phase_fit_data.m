@@ -136,7 +136,7 @@ function analyze_phase_fit_data(calibration_metadata, measurements)
     end % NDF 
 
 
-    %{
+
     % Now, we will iterate over the measurements. We will do this to take the average phase
     temporal_offsets_secs = containers.Map({'W-AS', 'W-TS', 'W-P'}, { zeros([n_measures, 1]), zeros([n_measures, 1]), zeros([n_measures, 1]) });
 
@@ -278,7 +278,7 @@ function analyze_phase_fit_data(calibration_metadata, measurements)
 
         % Show the legend for this plot
         legend show;
-        %}
+    end
 
 end
 
