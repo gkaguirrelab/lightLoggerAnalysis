@@ -44,7 +44,6 @@ if(numel(world_ttf_metadata.NDFs) > 0)
 end
 %% 4. Plot phase data
 % load gamma data
-% currently does not make plots :(
 phase_calibration_data = load([drop_box_base_dir, cal_data_path, 'phase_alignment_data/phase_alignment_data.mat']);
 phase_metadata = phase_calibration_data.phase_alignment_calibration_data.metadata.phase_fitting; % will need to be updated if using a different file
 phase_parsed_readings = phase_calibration_data.phase_alignment_calibration_data.readings.phase_fitting;
