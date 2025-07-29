@@ -142,27 +142,27 @@ function analyze_phase_fit_data(calibration_metadata, measurements)
 
     for nn = 1:n_measures
         % Retrieve the sensor readings for this measurement
-        slow_measurement = sorted_measurements{1, 1, nn};
-        fast_measurement = sorted_measurements{1, 2, nn};
+        slow_measurement = measurements{1, 1, 1, nn};
+        fast_measurement = measurements{1, 1, 2, nn};
 
         % Adjust the start times to be relative to world camera
         startTime = slow_measurement.W.t(1);
         slow_measurement.W.t = slow_measurement.W.t - startTime;
         slow_measurement.P.t = slow_measurement.P.t - startTime;
-        slow_measurement.M.t = slow_measurement.M.t - startTime;
+        slow_measurement.M.t.AS = slow_measurement.M.t.AS - startTime;
         slow_measurement.S.t = slow_measurement.S.t - startTime;
 
             startTime = fast_measurement.W.t(1);
         fast_measurement.W.t = fast_measurement.W.t - startTime;
         fast_measurement.P.t = fast_measurement.P.t - startTime;
-        fast_measurement.M.t = fast_measurement.M.t - startTime;
+        fast_measurement.M.t.AS = fast_measurement.M.t.AS - startTime;
         fast_measurement.S.t = fast_measurement.S.t - startTime;
         
         % Calculate the phase difference of the MS chips to the world camera
         % from the slow measurement. Calculate and store the temporal offset
         % between sensors in units of seconds.
         [world_ms_AS_phase_diff, world_fit_slow_AS, AS_fit] = calculate_phase_offset(slow_measurement.W.t, convert_to_contrast(slow_measurement.W.v), ...
-            slow_measurement.M.t, convert_to_contrast(slow_measurement.M.v.AS(:, 5)), ...
+            slow_measurement.M.t.AS, convert_to_contrast(slow_measurement.M.v.AS(:, 5)), ...
             frequencies(1));
 
         world_ms_AS_temporal_offset_secs = temporal_offsets_secs('W-AS');
@@ -170,7 +170,7 @@ function analyze_phase_fit_data(calibration_metadata, measurements)
         temporal_offsets_secs('W-AS') = world_ms_AS_temporal_offset_secs;
 
         [world_ms_TS_phase_diff, world_fit_slow_TS, TS_fit] = calculate_phase_offset(slow_measurement.W.t, convert_to_contrast(slow_measurement.W.v), ...
-            slow_measurement.M.t, convert_to_contrast(slow_measurement.M.v.TS(:, 1)), ...
+            slow_measurement.M.t.AS, convert_to_contrast(slow_measurement.M.v.TS(:, 1)), ...
             frequencies(1));
 
         world_ms_TS_temporal_offset_secs = temporal_offsets_secs('W-TS');
@@ -199,8 +199,8 @@ function analyze_phase_fit_data(calibration_metadata, measurements)
         plot(slow_measurement.W.t, convert_to_contrast(slow_measurement.W.v), '.k','MarkerSize',10, 'DisplayName', 'World Measured');
         plot(slow_measurement.W.t, world_fit_slow_AS, '-k', 'DisplayName', 'World Fit');
         yyaxis right
-        plot(slow_measurement.M.t, convert_to_contrast(slow_measurement.M.v.AS(:, 5)), '.r','MarkerSize',20, 'DisplayName', 'AS Measured');
-        plot(slow_measurement.M.t, AS_fit, '-r', 'DisplayName', 'AS Fit');
+        plot(slow_measurement.M.t.AS, convert_to_contrast(slow_measurement.M.v.AS(:, 5)), '.r','MarkerSize',20, 'DisplayName', 'AS Measured');
+        plot(slow_measurement.M.t.AS, AS_fit, '-r', 'DisplayName', 'AS Fit');
         legend show ;
 
         % Next tile we will print the Fast video world camera and its fit
@@ -230,7 +230,7 @@ function analyze_phase_fit_data(calibration_metadata, measurements)
         yyaxis left
         plot(slow_measurement.W.t, convert_to_contrast(slow_measurement.W.v), '.', 'DisplayName', 'World');
         yyaxis right
-        plot(slow_measurement.M.t, convert_to_contrast(slow_measurement.M.v.AS(:, 5)), '.', 'DisplayName', 'MS-AS');
+        plot(slow_measurement.M.t.AS, convert_to_contrast(slow_measurement.M.v.AS(:, 5)), '.', 'DisplayName', 'MS-AS');
         xlabel("Time [s]");
         ylabel("Contrast");
 
@@ -244,7 +244,7 @@ function analyze_phase_fit_data(calibration_metadata, measurements)
         yyaxis left
         plot(slow_measurement.W.t, convert_to_contrast(slow_measurement.W.v), '.', 'DisplayName', 'World');
         yyaxis right
-        plot(slow_measurement.M.t+world_ms_AS_temporal_offset_secs(nn), convert_to_contrast(slow_measurement.M.v.AS(:, 5)), '.', 'DisplayName', 'MS-AS');
+        plot(slow_measurement.M.t.AS+world_ms_AS_temporal_offset_secs(nn), convert_to_contrast(slow_measurement.M.v.AS(:, 5)), '.', 'DisplayName', 'MS-AS');
         xlabel("Time [s]");
         ylabel("Contrast");
 
@@ -301,4 +301,14 @@ function [phase_offset, A_fit, B_fit] = calculate_phase_offset(sensorA_t, sensor
 
     return ;
 
+end
+
+% Convert raw data in arbirtary units to contrast units
+function contrast_v = convert_to_contrast(v)
+% Take the mean of the input vector
+m = mean(v);
+
+% Convert to contrast
+contrast_v = (v - m) / m;
+return ;
 end

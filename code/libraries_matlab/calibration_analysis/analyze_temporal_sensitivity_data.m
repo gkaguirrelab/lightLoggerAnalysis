@@ -251,11 +251,23 @@ function plot_mean_TTF(NDFs, contrast_level, frequencies, response_amplitude_dat
 % Construct the Mean TTF for this contrast level
 figure ;
 
+% Make a list of colors for each ND level for the conjoined plot
+    colorList = [
+        0.6350, 0.0780, 0.1840   % Red
+        0.8500, 0.3250, 0.0980;  % Orange
+        0.9290, 0.6940, 0.1250;  % Yellow
+        0.4660, 0.6740, 0.1880;  % Green
+        0.3010, 0.7450, 0.9330;  % Light Blue
+        0, 0.4470, 0.7410;   % Blue
+        0.4940, 0.1840, 0.5560;  % Purple
+        ];
+
 % We will now take the mean of all measures per frequency
 mean_response_amplitude_data = mean(response_amplitude_data, 3);
 
 % Here we will save the line to fit the data to
 data_fit_line = [];
+xfine = logspace(log10(frequencies(1)),log10(frequencies(end)),100);
 
 % Plot each NDF line
 for nn = 1:numel(NDFs)
@@ -268,31 +280,30 @@ for nn = 1:numel(NDFs)
     % ran with just the first few frequencies
     meanAmpData = mean_response_amplitude_per_frequency .* (1./contrast_attenuation_with_frequency(1:numel(frequencies))) ./ contrast_level;
     h = scatter(log10(frequencies), meanAmpData,...
-        '-o',...
+        'o', 'filled',...
         'DisplayName', sprintf("NDF %.2f", NDFs(nn))...
         );
     h.MarkerFaceAlpha = 0.4;
     h.MarkerEdgeAlpha = 0.4;
-    hold on;
+    h.MarkerEdgeColor = colorList(nn,:);
+    h.MarkerFaceColor =colorList(nn,:);
     hold on;
 
-    % Save the data fit line to just ND1
-    if(NDFs(nn) == 0)
-        data_fit_line = meanAmpData;
-    end
+    % Get the approximate filter frequency and amplitude for the data
+    data_fit_line = meanAmpData;
+    [filterFreqHz,filterAmp] = approxFreqFilter(frequencies, data_fit_line);
+    fitVals(nn,:) = filterAmp*idealDiscreteSampleFilter(xfine, 1/filterFreqHz);
 
 end
 
 % Generate the ideal device curve for the world camera
-xfine = logspace(log10(frequencies(1)),log10(frequencies(end)),100);
 ideal_device = idealDiscreteSampleFilter(xfine, 1/world_fps);
 plot(log10(xfine), ideal_device, "--", "Color",[0.5 0.5 0.5], "DisplayName", "Ideal Device");
 
 % Get the approximate filter frequency and amplitude for the data
-[filterFreqHz,filterAmp] = approxFreqFilter(frequencies, data_fit_line);
-fitVals = filterAmp*idealDiscreteSampleFilter(xfine, 1/filterFreqHz);
-plot(log10(xfine), fitVals, "-", "Color",[1 0 0], "DisplayName", "Data fit");
-
+for nn = 1:numel(NDFs)
+    plot(log10(xfine), fitVals(nn,:), "-", "Color",colorList(nn,:), 'HandleVisibility', 'off');
+end
 % Add a title
 title(sprintf("World TTF Avg Amplitude | C: %.2f | Approx freq %2.2f Hz", contrast_level, filterFreqHz));
 
@@ -303,6 +314,6 @@ legend show;
 a = gca();
 a.XTick = log10(frequencies);
 a.XTickLabels = arrayfun(@(x) num2str(x),frequencies,'UniformOutput',false);
-
+set(gcf, 'Color', 'w');
 
 end
