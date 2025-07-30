@@ -23,22 +23,23 @@ function plotSPD(spd, frq, varargin)
     plotSPD(spd, frq);
 %} 
 
-arguments 
-        spd (1, :)
-        frq (1, :)
+  %--- 1) flatten to column vectors
+  spd = spd(:);
+  frq = frq(:);
+
+  %--- 2) align lengths
+  N = min(numel(spd), numel(frq));
+  spd = spd(1:N);
+  frq = frq(1:N);
+
+  %--- 3) remove zero or negative freqs
+  keep = frq > 0;
+  spd  = spd(keep);
+  frq  = frq(keep);
+
+  %--- 4) log–log plot
+  loglog(frq, spd, varargin{:});
+  xlabel('Frequency (Hz)')
+  ylabel('Spectral power density (contrast^2/Hz)')
+  title('Temporal SPD')
 end
-
-arguments (Repeating)
-        varargin
-end
-
-
-% Plot and label
-spd = reshape(spd, 1, []);
-frq = reshape(frq, 1, []);
-
-% Fix any zero/negative frequencies
-frq(frq <= 0) = eps;
-
-%plot(log10(frq), log10(spsd), varargin{:})
-loglog(frq, spd, varargin{:});
