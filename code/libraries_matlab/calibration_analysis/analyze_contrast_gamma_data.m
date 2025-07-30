@@ -36,7 +36,10 @@ function analyze_contrast_gamma_data(calibration_metadata, measurements)
     n_measures = calibration_metadata.n_measures;
 
 
-    % First, let's iterate over NDF level 
+    ND1Orange = [0.8500, 0.3250, 0.0980];  % Orange we use for ND1 in other cal plots
+    %if we ever rerun this with multiple NDFs, we should change the colors.
+
+    % First, let's iterate over NDF level
     for nn = 1:numel(NDFs)
         % Retrieve the current NDF 
         NDF = NDFs(nn); 
@@ -92,7 +95,8 @@ function analyze_contrast_gamma_data(calibration_metadata, measurements)
             nexttile(NDF_plot); 
 
             % Plot the mean amplitudes by contrast 
-            plot(contrast_levels, sort(mean_amplitudes_by_contrast), '-x', 'DisplayName', 'Data'); 
+            plot(contrast_levels, sort(mean_amplitudes_by_contrast), 'o',...
+                'MarkerEdgeColor', ND1Orange, 'MarkerFaceColor',ND1Orange, 'DisplayName', 'Data'); 
             hold on; 
             title(sprintf("Contrast Gamma | NDF: %.2f | F: %.2f", NDF, frequency)); 
             xlabel("Contrast"); 
