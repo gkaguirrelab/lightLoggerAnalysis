@@ -100,7 +100,7 @@ function chunks = parse_chunks(path_to_experiment,...
         chunk_ranges = false; % The chunk numbers to splice out of a video in the form [start, end] (0-indexed)
         mean_axes = false; % The axes per sensor to apply mean over if we want to take some sort of mean. Note: ONLY for camera sensors  
         contains_agc_metadata = false; % Flags for each sensor if its metadata matrix contains AGC data
-        verbose {mustBeNumericOrLogical} = false; % If you want progress output to the terminal 
+        verbose {mustBeNumericOrLogical} = true; % If you want progress output to the terminal 
         password {mustBeText} = "1234"; % The password needed to decrypt encrypted + compressed files (.blosc files)
     end 
 
