@@ -85,7 +85,7 @@ end
 
 slopeMap = mean(slopeMap3D, 3, 'omitnan');
 
-%% PROJECT TO VISUAL FIELD (1m) CONSISTENT WITH mapFisheyeVideoChunkToVisualField
+% PROJECT TO VISUAL FIELD (1m) CONSISTENT WITH mapFisheyeVideoChunkToVisualField
 
 [imgHeight, imgWidth] = deal(nRows, nCols);
 [xGrid, yGrid] = meshgrid(1:imgWidth, 1:imgHeight);
@@ -125,7 +125,7 @@ X = reshape(X, imgHeight, imgWidth);
 Y = reshape(Y, imgHeight, imgWidth);
 Z = reshape(Z, imgHeight, imgWidth);
 
-%% Display
+% Display
 
 figure;
 surf(X, Y, Z, slopeMap, 'EdgeColor', 'none');

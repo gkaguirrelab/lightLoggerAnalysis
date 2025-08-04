@@ -217,14 +217,15 @@ for i = 1:N
     hiIdx = AS_if >  thr;
     loIdx = AS_if <= thr;
 
-    % compute slope map for HIGH‐AS
-    if nnz(hiIdx) >= max(window)
-        [X, Y, Z, sH, ~] = mapSlopeSPD( ...
-            Vid(hiIdx,:,:), fsVid, window, step, channel, fisheyeIntrinsics);
-        slopeHighAll(:,:,i) = sH;
-    end
+    % accumulate frames
+    vHiAll = cat(1, vHiAll, ch.W.v(hiIdx,:,:));
+    vLoAll = cat(1, vLoAll, ch.W.v(LoIdx,:,:));
+end
 
-    % compute slope map for LOW‐AS
+% compute slope map for HIGH‐AS
+[Xh, Yh, Zh, ]
+
+% compute slope map for LOW‐AS
     if nnz(loIdx) >= max(window)
         [~, ~, ~, sL, ~] = mapSlopeSPD( ...
             Vid(loIdx,:,:), fsVid, window, step, channel, fisheyeIntrinsics);
@@ -235,18 +236,3 @@ end
 % average across chunks
 slopeHighMean = nanmean(slopeHighAll, 3);
 slopeLowMean  = nanmean(slopeLowAll,  3);
-
-% plot
-figure;
-surf(X, Y, Z, slopeHighMean, 'EdgeColor', 'none');
-axis equal off;
-camlight; lighting gouraud;
-colormap jet; colorbar;
-title('Mean 1/f SPD Slope – HIGH AS');
-
-figure;
-surf(X, Y, Z, slopeLowMean, 'EdgeColor', 'none');
-axis equal off;
-camlight; lighting gouraud;
-colormap jet; colorbar;
-title('Mean 1/f SPD Slope – LOW AS');
