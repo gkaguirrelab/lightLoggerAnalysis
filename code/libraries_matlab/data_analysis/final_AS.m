@@ -46,7 +46,15 @@ for i = 1:N
     AS7_all = [AS7_all; AS7(:)];
 end
 
-thr = mean(AS7_all);  % GLOBAL threshold across all chunks
+as_min = min(AS7_all);
+as_max = max(AS7_all);
+as_norm = (AS7_all - as_min) / (as_max - as_min);
+
+% normalized threshold
+level_norm = graythresh(as_norm);  
+
+% convert back
+thr = level_norm*(as_max - as_min) + as_min;
 
 %% AS BRIGHTNESS OVER TIME        
 figure; hold on;
@@ -70,14 +78,14 @@ legend({files.name},'Interpreter','none','Location','best');
 % Use a nominal 10 s block from chunk 1 to get its frequency bins
 tmp      = load(fullfile(files(1).folder,files(1).name),'chunk');
 Vid0     = tmp.chunk.W.v;
-[~, frq0] = calcTemporalSPD( Vid0(1:round(2*Twin*fsVid),:,:), fsVid );
+[~, frq0] = calcTemporalSPD( Vid0(1:round(2*Twin*fsVid),:,:), fsVid, false );
 f_min    = min(frq0(frq0>0));
 % bounds
 f_start = ceil(f_min); 
 f_end   = floor(fsVid / 2) - 1; 
 f_int   = (f_start : f_end)';
 
-%% 3) SLIDING‐WINDOW SPD SPLIT & AVERAGE ACROSS CHUNKS
+%% SLIDING‐WINDOW SPD SPLIT & AVERAGE ACROSS CHUNKS
 
 allHi = nan(N, numel(f_int));
 allLo = nan(N, numel(f_int));
@@ -110,7 +118,7 @@ for i = 1:N
         fprintf('Chunk %d | t0 = %.2f | nnz(idx) = %d\n', i, t0, nnz(idx));
 
         % compute & trim PSD
-        [P,f] = calcTemporalSPD(Vid(idx,:,:), fsVid);
+        [P,f] = calcTemporalSPD(Vid(idx,:,:), fsVid, false);
         fprintf(' → PSD size = [%d %d], freq range = [%.2f %.2f]\n', size(P), min(f), max(f));
 
         keep  = f>0 & f<=fMax;
@@ -161,7 +169,7 @@ end
 globalHi = nanmean(allHi,1);
 globalLo = nanmean(allLo,1);
 
-%% 4) PLOT GLOBAL SPD (high vs low)
+%% PLOT GLOBAL SPD (high vs low)
 figure;
 plotSPD(globalHi, f_int);
 hold on;

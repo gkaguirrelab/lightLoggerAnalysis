@@ -34,7 +34,7 @@ fprintf('Processing %d patches\n', total_patches);
 slopeMap3D = nan(nRows, nCols, total_patches);
 
 % Get frequency bins
-[~, frq] = calcTemporalSPD(v, fps, 'postreceptoralChannel', channel);
+[~, frq] = calcTemporalSPD(v, fps, false, 'postreceptoralChannel', channel);
 frq_bins = numel(frq);
 
 % Initialize accumulators for SPD
@@ -50,7 +50,7 @@ for row = 1:step:(nRows - window(1) + 1)
         regionMatrix(row:row+window(1)-1, col:col+window(2)-1) = 1;
 
         try
-            [spd, frq] = calcTemporalSPD(v, fps, 'postreceptoralChannel', channel, 'regionMatrix', regionMatrix);
+            [spd, frq] = calcTemporalSPD(v, fps, false, 'postreceptoralChannel', channel, 'regionMatrix', regionMatrix);
         catch ME
             warning('Skipping patch at (%d, %d): %s', row, col, ME.message);
             continue
