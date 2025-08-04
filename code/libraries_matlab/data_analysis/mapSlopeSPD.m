@@ -96,6 +96,8 @@ Z = reshape(Z, nRows, nCols);
 % Display
 gcf;
 surf(X, Y, Z, slopeMap, 'EdgeColor', 'none');
+shading interp;
+lighting none;
 axis equal off; colormap jet; colorbar;
 title('1/f SPD Slope Map'); view(3); camlight; lighting gouraud;
 

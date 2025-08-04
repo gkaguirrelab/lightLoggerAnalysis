@@ -192,13 +192,9 @@ legend('High AS','Low AS','Location','best');
 
 %% SLOPE MAPS
 
-% get image size from first chunk
-C0 = load(fullfile(files(1).folder, files(1).name), 'chunk');
-[~, nRows, nCols] = size(C0.chunk.W.v);
-
 % preallocate
-slopeHighAll = nan(nRows, nCols, N);
-slopeLowAll  = nan(nRows, nCols, N);
+vHiAll = [];
+vLoAll = [];
 
 % chunk loop
 for i = 1:N
@@ -219,20 +215,12 @@ for i = 1:N
 
     % accumulate frames
     vHiAll = cat(1, vHiAll, ch.W.v(hiIdx,:,:));
-    vLoAll = cat(1, vLoAll, ch.W.v(LoIdx,:,:));
+    vLoAll = cat(1, vLoAll, ch.W.v(loIdx,:,:));
 end
 
 % compute slope map for HIGH‐AS
-[Xh, Yh, Zh, ]
+[Xh, Yh, Zh, slopeHigh, frq] = mapSlopeSPD(vHiAll, fsVid, [40,40], 20, fisheyeIntrinsics);
 
+figure
 % compute slope map for LOW‐AS
-    if nnz(loIdx) >= max(window)
-        [~, ~, ~, sL, ~] = mapSlopeSPD( ...
-            Vid(loIdx,:,:), fsVid, window, step, channel, fisheyeIntrinsics);
-        slopeLowAll(:,:,i) = sL;
-    end
-end
-
-% average across chunks
-slopeHighMean = nanmean(slopeHighAll, 3);
-slopeLowMean  = nanmean(slopeLowAll,  3);
+[Xl, Yl, Zl, slopeLow, frq] = mapSlopeSPD(vLoAll, fsVid, [40,40], 20, fisheyeIntrinsics);
