@@ -78,7 +78,7 @@ legend({files.name},'Interpreter','none','Location','best');
 % Use a nominal 10 s block from chunk 1 to get its frequency bins
 tmp      = load(fullfile(files(1).folder,files(1).name),'chunk');
 Vid0     = tmp.chunk.W.v;
-[~, frq0] = calcTemporalSPD( Vid0(1:round(2*Twin*fsVid),:,:), fsVid, false );
+[~, frq0] = calcTemporalSPD( Vid0(1:round(2*Twin*fsVid),:,:), fsVid, 'lineResolution', false );
 f_min    = min(frq0(frq0>0));
 % bounds
 f_start = ceil(f_min); 
@@ -118,7 +118,7 @@ for i = 1:N
         fprintf('Chunk %d | t0 = %.2f | nnz(idx) = %d\n', i, t0, nnz(idx));
 
         % compute & trim PSD
-        [P,f] = calcTemporalSPD(Vid(idx,:,:), fsVid, false);
+        [P,f] = calcTemporalSPD(Vid(idx,:,:), fsVid, 'lineResolution', false);
         fprintf(' → PSD size = [%d %d], freq range = [%.2f %.2f]\n', size(P), min(f), max(f));
 
         keep  = f>0 & f<=fMax;
