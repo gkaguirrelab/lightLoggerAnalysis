@@ -90,6 +90,7 @@ f_int   = (f_start : f_end)';
 allHi = nan(N, numel(f_int));
 allLo = nan(N, numel(f_int));
 
+% chunk loop
 for i = 1:N
     % load
     C     = load(fullfile(files(i).folder,files(i).name),'chunk');
@@ -103,7 +104,7 @@ for i = 1:N
     AS_if   = interp1(tAS, AS7, W_t, 'pchip', NaN);
     t0s     = (W_t(1)+Twin):hop:(W_t(end)-Twin);
     
-    % collect each window's PSD
+    % PSD window loop
     spdHi = [];
     spdLo = [];
     for t0 = t0s
@@ -126,6 +127,9 @@ for i = 1:N
 
         frqLoc = f(keep);
         spdLoc = P(keep);
+
+        % 30HZ CENSOR
+        spdLoc(frqLoc==30) = NaN;
 
         if numel(frqLoc) < 2 || numel(spdLoc) < 2
             fprintf(' → Too few points for interp1, skipping\n');
@@ -185,3 +189,64 @@ ticks = round(logspace(log10(0.2),log10(59),nticks), 2);
 xticks(ticks)
 xticklabels(ticks)
 legend('High AS','Low AS','Location','best');
+
+%% SLOPE MAPS
+
+% get image size from first chunk
+C0 = load(fullfile(files(1).folder, files(1).name), 'chunk');
+[~, nRows, nCols] = size(C0.chunk.W.v);
+
+% preallocate
+slopeHighAll = nan(nRows, nCols, N);
+slopeLowAll  = nan(nRows, nCols, N);
+
+% chunk loop
+for i = 1:N
+    % load
+    C   = load(fullfile(files(i).folder, files(i).name), 'chunk');
+    ch  = C.chunk;
+    Vid = ch.W.v;
+    tAS = ch.M.t.AS(:);
+    AS7 = ch.M.v.AS(:,7);
+    Wt  = ch.W.t(:);
+
+    % interpolate AS onto each video frame time
+    AS_if = interp1(tAS, AS7, Wt, 'pchip', NaN);
+
+    % split into high vs low
+    hiIdx = AS_if >  thr;
+    loIdx = AS_if <= thr;
+
+    % compute slope map for HIGH‐AS
+    if nnz(hiIdx) >= max(window)
+        [X, Y, Z, sH, ~] = mapSlopeSPD( ...
+            Vid(hiIdx,:,:), fsVid, window, step, channel, fisheyeIntrinsics);
+        slopeHighAll(:,:,i) = sH;
+    end
+
+    % compute slope map for LOW‐AS
+    if nnz(loIdx) >= max(window)
+        [~, ~, ~, sL, ~] = mapSlopeSPD( ...
+            Vid(loIdx,:,:), fsVid, window, step, channel, fisheyeIntrinsics);
+        slopeLowAll(:,:,i) = sL;
+    end
+end
+
+% average across chunks
+slopeHighMean = nanmean(slopeHighAll, 3);
+slopeLowMean  = nanmean(slopeLowAll,  3);
+
+% plot
+figure;
+surf(X, Y, Z, slopeHighMean, 'EdgeColor', 'none');
+axis equal off;
+camlight; lighting gouraud;
+colormap jet; colorbar;
+title('Mean 1/f SPD Slope – HIGH AS');
+
+figure;
+surf(X, Y, Z, slopeLowMean, 'EdgeColor', 'none');
+axis equal off;
+camlight; lighting gouraud;
+colormap jet; colorbar;
+title('Mean 1/f SPD Slope – LOW AS');

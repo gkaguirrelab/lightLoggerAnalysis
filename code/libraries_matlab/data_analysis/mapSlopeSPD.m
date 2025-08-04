@@ -58,6 +58,10 @@ for row = 1:step:(nRows - window(1) + 1)
 
         spd = spd(:);
         frq = frq(:);
+
+        % 30HZ CENSOR
+        spd(frq == 30) = NaN;
+
         validIdx = frq > 0 & spd > 0;
         validIdx(frq >= 52 & frq <= 71) = false;
 
