@@ -233,48 +233,61 @@ vmaxInt = max( [interceptHigh(:); interceptLow(:)] );
 
 % re-apply caxis and add titles
 figure(hFigHighSlope);    caxis([vminSlope vmaxSlope]); title('1/f Slope Map - High AS');
-figure(hFigHighIntercept);caxis([vminInt vmaxInt]); title('1/f Intercept Map - High AS');
+figure(hFigHighIntercept);caxis([vminInt vmaxInt]);     title('1/f Intercept Map - High AS');
 figure(hFigLowSlope);     caxis([vminSlope vmaxSlope]); title('1/f Slope Map - Low AS');
-figure(hFigLowIntercept); caxis([vminInt vmaxInt]); title('1/f Intercept Map - Low AS');
+figure(hFigLowIntercept); caxis([vminInt vmaxInt]);     title('1/f Intercept Map - Low AS');
 
 %% LOAD & PROJECT CALIBRATION DOTS
-calibFile = '/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_data/lightLogger/HERO_sm/SophiaGazeCalib2/W.avi';
+% Load video
+calibFile = '/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_data/lightLogger/HERO_sm/SophiaGazeCalib2/W_converted.avi';
 vr = VideoReader(calibFile);
-maxDotImg = [];
-while hasFrame(vr)
+
+% Video parameters
+fps = vr.FrameRate;
+startSec = 24;    % Start at 2:42 from the end (which is 24s from the start)
+endSec   = 177;   % End at 0:09 from the end (which is 177s from start)
+
+% Move to start time
+vr.CurrentTime = startSec;
+
+% Prepare max brightness mask
+maxBright = [];
+while hasFrame(vr) && vr.CurrentTime <= endSec
     frm = readFrame(vr);
     g   = rgb2gray(frm);
-    maxDotImg = isempty(maxDotImg) ? double(g) : max(maxDotImg, double(g));
-end
-maxDotImg = uint8(maxDotImg);
-[nR,nC]   = size(Xh);                % match high‐AS grid
-maxDotImg = imresize(maxDotImg, [nR nC]);
+    
+    % Only keep pixels brighter than a threshold
+    % Normalize and threshold
+    g = double(g);
+    g(g < 220) = 0; % Adjust this threshold as needed (try 220, 240, etc.)
 
-% overlay
-figs   = [hFigHighSlope, hFigHighIntercept, hFigLowSlope, hFigLowIntercept];
-Xs     = {Xh, Xh, Xl, Xl};
-Ys     = {Yh, Yh, Yl, Yl};
-Zs     = {Zh, Zh, Zl, Zl};
+    % Combine max
+    if isempty(maxBright)
+        maxBright = g;
+    else
+        maxBright = max(maxBright, g);
+    end
+end
+
+% Convert to uint8 for display
+maxBright = uint8(maxBright);
+
+% Resize to match calibration data
+[nR, nC] = size(Xh); % Use size of one of your calibration surfaces
+maxBright = imresize(maxBright, [nR, nC]);
+
+% Overlay on calibration figures
+figs = [hFigHighSlope, hFigHighIntercept, hFigLowSlope, hFigLowIntercept];
+Xs = {Xh, Xh, Xl, Xl};
+Ys = {Yh, Yh, Yl, Yl};
+Zs = {Zh, Zh, Zl, Zl};
+
 for k = 1:4
     figure(figs(k));
     hold on;
-    hTex = surf( Xs{k}, Ys{k}, Zs{k}, ...
-        'CData', repmat(maxDotImg,1,1,3), ...
-        'FaceColor','texturemap','EdgeColor','none' );
-    alpha(hTex,0.6);
+    hTex = surf(Xs{k}, Ys{k}, Zs{k}, ...
+        'CData', repmat(maxBright, 1, 1, 3), ...
+        'FaceColor', 'texturemap', 'EdgeColor', 'none');
+    alpha(hTex, 0.6);
     hold off;
 end
-
-
-
-
-
-
-
-
-
-
-
-
-
-
