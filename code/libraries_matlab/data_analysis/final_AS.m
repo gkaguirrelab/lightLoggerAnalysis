@@ -218,9 +218,11 @@ for i = 1:N
     vLoAll = cat(1, vLoAll, ch.W.v(loIdx,:,:));
 end
 
+
+
 % compute slope map for HIGH‐AS
 [Xh, Yh, Zh, slopeHigh, frq] = mapSlopeSPD(vHiAll, fsVid, [40,40], 20, fisheyeIntrinsics);
 
-figure
+figure;
 % compute slope map for LOW‐AS
 [Xl, Yl, Zl, slopeLow, frq] = mapSlopeSPD(vLoAll, fsVid, [40,40], 20, fisheyeIntrinsics);
