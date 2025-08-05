@@ -218,24 +218,63 @@ for i = 1:N
     vLoAll = cat(1, vLoAll, ch.W.v(loIdx,:,:));
 end
 
-% compute slope map for HIGH‐AS
-figure;  
-[Xh, Yh, Zh, slopeHigh, frq] = mapSlopeSPD(vHiAll, fsVid, [40,40], 20, fisheyeIntrinsics);
-hHighFig = gcf;
+% compute & plot high AS
+[Xh,Yh,Zh, slopeHigh, interceptHigh, frq, hFigHighSlope, hFigHighIntercept] = mapSlopeSPD(vHiAll, fsVid, [40,40], 20, fisheyeIntrinsics);
 
-% compute slope map for LOW‐AS
-figure;
-[Xl, Yl, Zl, slopeLow, ~] = mapSlopeSPD(vLoAll, fsVid, [40,40], 20, fisheyeIntrinsics);
-hLowFig = gcf;
+% compute & plot low AS
+[Xl,Yl,Zl, slopeLow,  interceptLow, ~, hFigLowSlope, hFigLowIntercept] = mapSlopeSPD(vLoAll, fsVid, [40,40], 20, fisheyeIntrinsics);
 
 % find common limits
-vmin = min( [slopeHigh(:); slopeLow(:)] );
-vmax = max( [slopeHigh(:); slopeLow(:)] );
+vminSlope = min( [slopeHigh(:); slopeLow(:)] );
+vmaxSlope = max( [slopeHigh(:); slopeLow(:)] );
 
-% apply
-figure(hHighFig);
-caxis([vmin vmax]);
+vminInt = min( [interceptHigh(:); interceptLow(:)] );
+vmaxInt = max( [interceptHigh(:); interceptLow(:)] );
 
-figure(hLowFig);
-caxis([vmin vmax]);
+% re-apply caxis and add titles
+figure(hFigHighSlope);    caxis([vminSlope vmaxSlope]); title('1/f Slope Map - High AS');
+figure(hFigHighIntercept);caxis([vminInt vmaxInt]); title('1/f Intercept Map - High AS');
+figure(hFigLowSlope);     caxis([vminSlope vmaxSlope]); title('1/f Slope Map - Low AS');
+figure(hFigLowIntercept); caxis([vminInt vmaxInt]); title('1/f Intercept Map - Low AS');
+
+%% LOAD & PROJECT CALIBRATION DOTS
+calibFile = '/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_data/lightLogger/HERO_sm/SophiaGazeCalib2/W.avi';
+vr = VideoReader(calibFile);
+maxDotImg = [];
+while hasFrame(vr)
+    frm = readFrame(vr);
+    g   = rgb2gray(frm);
+    maxDotImg = isempty(maxDotImg) ? double(g) : max(maxDotImg, double(g));
+end
+maxDotImg = uint8(maxDotImg);
+[nR,nC]   = size(Xh);                % match high‐AS grid
+maxDotImg = imresize(maxDotImg, [nR nC]);
+
+% overlay
+figs   = [hFigHighSlope, hFigHighIntercept, hFigLowSlope, hFigLowIntercept];
+Xs     = {Xh, Xh, Xl, Xl};
+Ys     = {Yh, Yh, Yl, Yl};
+Zs     = {Zh, Zh, Zl, Zl};
+for k = 1:4
+    figure(figs(k));
+    hold on;
+    hTex = surf( Xs{k}, Ys{k}, Zs{k}, ...
+        'CData', repmat(maxDotImg,1,1,3), ...
+        'FaceColor','texturemap','EdgeColor','none' );
+    alpha(hTex,0.6);
+    hold off;
+end
+
+
+
+
+
+
+
+
+
+
+
+
+
 
