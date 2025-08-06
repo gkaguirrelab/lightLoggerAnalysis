@@ -241,19 +241,19 @@ figure(hFigLowIntercept); caxis([vminInt vmaxInt]);     title('1/f Intercept Map
 
 
 %% LOAD & PROJECT CALIBRATION DOTS
-% Load video
+
 calibFile = '/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_data/lightLogger/HERO_sm/SophiaGazeCalib2/W_converted.avi';
 vr = VideoReader(calibFile);
 
-% Video parameters
+% wideo parameters
 fps = vr.FrameRate;
 startSec = 24;    % Start at 2:42 from the end (which is 24s from the start)
 endSec   = 177;   % End at 0:09 from the end (which is 177s from start)
 
-% Move to start time
+% move to start time
 vr.CurrentTime = startSec;
 
-% Prepare max brightness mask
+% prepare max brightness mask
 maxBright = [];
 while hasFrame(vr) && vr.CurrentTime <= endSec
     frm = readFrame(vr);
@@ -272,25 +272,46 @@ while hasFrame(vr) && vr.CurrentTime <= endSec
     end
 end
 
-% Convert to uint8 for display
+% convert to uint8 for display
 maxBright = uint8(maxBright);
-
-% Resize to match calibration data
+a
+% resize to match calibration data
 [nR, nC] = size(Xh); % Use size of one of your calibration surfaces
 maxBright = imresize(maxBright, [nR, nC]);
 
-% Overlay on calibration figures
-figs = [hFigHighSlope, hFigHighIntercept, hFigLowSlope, hFigLowIntercept];
-Xs = {Xh, Xh, Xl, Xl};
-Ys = {Yh, Yh, Yl, Yl};
-Zs = {Zh, Zh, Zl, Zl};
+% extract dot centroids
+BW = imbinarize(maxBright, graythresh(maxBright));  
+BW = bwareaopen(BW, 20);          % drop tiny specks
+stats = regionprops(BW, 'Centroid');
+imgPts = vertcat(stats.Centroid); % k×2 [x y] in pixel coords
 
+% world point coords
+worldPts = [ ...
+        0,  0;  -20, 20;   -20, -20;   20, 20;   20, -20; ...
+        0, 20;   0, -20;   -20,   0;   20, 0; ...
+        -15, 15;  15, 15;   -15, -15;   15, -15; ...
+
+        -10,  10;   -10, -10;    10,  10;    10, -10; ...
+        0,  10;    0, -10;   -10,   0;     10,   0; ...
+        -5,   5; 5,   5;   -5,  -5;     5,  -5;     0,   0];
+
+% affine transformation
+tform = fitgeotrans(imgPts, worldPts, 'affine');
+
+% map centroids
+[horA, verA] = transformPointsForward(tform, imgPts(:,1), imgPts(:,2));
+
+% convert to fisheye coords
+phi   = deg2rad(horA);
+theta = pi/2 - deg2rad(verA);
+Xs    = sin(theta).*cos(phi);
+Ys    = sin(theta).*sin(phi);
+Zs    = cos(theta);
+
+% overlay
+figs = [hFigHighSlope, hFigHighIntercept, hFigLowSlope, hFigLowIntercept];
 for k = 1:4
-    figure(figs(k));
-    hold on;
-    hTex = surf(Xs{k}, Ys{k}, Zs{k}, ...
-        'CData', repmat(maxBright, 1, 1, 3), ...
-        'FaceColor', 'texturemap', 'EdgeColor', 'none');
-    alpha(hTex, 0.6);
+    figure(figs(k)); hold on;
+    scatter3(Xs, Ys, Zs, 60, 'm', 'filled');
     hold off;
 end
