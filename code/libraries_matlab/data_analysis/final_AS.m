@@ -237,6 +237,9 @@ figure(hFigHighIntercept);caxis([vminInt vmaxInt]);     title('1/f Intercept Map
 figure(hFigLowSlope);     caxis([vminSlope vmaxSlope]); title('1/f Slope Map - Low AS');
 figure(hFigLowIntercept); caxis([vminInt vmaxInt]);     title('1/f Intercept Map - Low AS');
 
+% apply meridians 
+
+
 %% LOAD & PROJECT CALIBRATION DOTS
 % Load video
 calibFile = '/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_data/lightLogger/HERO_sm/SophiaGazeCalib2/W_converted.avi';
