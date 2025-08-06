@@ -237,78 +237,54 @@ figure(hFigHighIntercept);caxis([vminInt vmaxInt]);     title('1/f Intercept Map
 figure(hFigLowSlope);     caxis([vminSlope vmaxSlope]); title('1/f Slope Map - Low AS');
 figure(hFigLowIntercept); caxis([vminInt vmaxInt]);     title('1/f Intercept Map - Low AS');
 
-% apply meridians 
-
-
 %% LOAD & PROJECT CALIBRATION DOTS
 
-calibFile = '/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_data/lightLogger/HERO_sm/SophiaGazeCalib2/W_converted.avi';
-vr = VideoReader(calibFile);
+calibFile = '/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_data/lightLogger/HERO_sm/SophiaGazeCalib2/W.avi';
 
-% wideo parameters
-fps = vr.FrameRate;
-startSec = 24;    % Start at 2:42 from the end (which is 24s from the start)
-endSec   = 177;   % End at 0:09 from the end (which is 177s from start)
-
-% move to start time
-vr.CurrentTime = startSec;
-
-% prepare max brightness mask
-maxBright = [];
-while hasFrame(vr) && vr.CurrentTime <= endSec
-    frm = readFrame(vr);
-    g   = rgb2gray(frm);
-    
-    % Only keep pixels brighter than a threshold
-    % Normalize and threshold
-    g = double(g);
-    g(g < 220) = 0; % Adjust this threshold as needed (try 220, 240, etc.)
-
-    % Combine max
-    if isempty(maxBright)
-        maxBright = g;
-    else
-        maxBright = max(maxBright, g);
-    end
+% 1) read metadata & all frames raw
+info   = aviinfo(calibFile);
+frames = aviread(calibFile);         % struct array with .cdata for each frame
+fps    = info.FramesPerSecond;
+% 2) define crop window in seconds
+startSec = 82;   % 1 m22 s
+endSec   = 276;  % 4 m36 s
+% 3) convert to frame indices
+startF = max(1, floor(startSec*fps) + 1);
+endF   = min(info.NumFrames, floor(endSec*fps));
+% 4) build max‐brightness mask over that slice
+gray0     = rgb2gray(frames(startF).cdata);
+maxBright = double(gray0);
+for k = startF+1 : endF
+    g = rgb2gray(frames(k).cdata);
+    maxBright = max(maxBright, double(g));
 end
-
-% convert to uint8 for display
 maxBright = uint8(maxBright);
-a
-% resize to match calibration data
-[nR, nC] = size(Xh); % Use size of one of your calibration surfaces
-maxBright = imresize(maxBright, [nR, nC]);
-
-% extract dot centroids
-BW = imbinarize(maxBright, graythresh(maxBright));  
-BW = bwareaopen(BW, 20);          % drop tiny specks
+% 5) resize to your slope‐map grid
+[nR,nC]   = size(Xh);
+maxBright = imresize(maxBright, [nR nC]);
+% 6) extract dot centroids
+BW    = imbinarize(maxBright, graythresh(maxBright));
+BW    = bwareaopen(BW, 20);
 stats = regionprops(BW, 'Centroid');
-imgPts = vertcat(stats.Centroid); % k×2 [x y] in pixel coords
-
-% world point coords
+imgPts = vertcat(stats.Centroid);  % k×2 [x y] in pixel coords
+% 7) your fixed worldPts (26×2)
 worldPts = [ ...
-        0,  0;  -20, 20;   -20, -20;   20, 20;   20, -20; ...
-        0, 20;   0, -20;   -20,   0;   20, 0; ...
-        -15, 15;  15, 15;   -15, -15;   15, -15; ...
-
-        -10,  10;   -10, -10;    10,  10;    10, -10; ...
-        0,  10;    0, -10;   -10,   0;     10,   0; ...
-        -5,   5; 5,   5;   -5,  -5;     5,  -5;     0,   0];
-
-% affine transformation
+    0,  0;  -20, 20;   -20, -20;   20, 20;   20, -20; ...
+    0, 20;   0, -20;   -20,   0;   20, 0; ...
+    -15, 15;  15, 15;   -15, -15;   15, -15; ...
+    -10,  10;   -10, -10;    10,  10;    10, -10; ...
+    0,  10;    0, -10;   -10,   0;     10,   0; ...
+    -5,   5;    5,   5;   -5,  -5;     5,  -5];
+% 8) fit & apply affine
 tform = fitgeotrans(imgPts, worldPts, 'affine');
-
-% map centroids
 [horA, verA] = transformPointsForward(tform, imgPts(:,1), imgPts(:,2));
-
-% convert to fisheye coords
+% 9) project into fisheye space
 phi   = deg2rad(horA);
 theta = pi/2 - deg2rad(verA);
 Xs    = sin(theta).*cos(phi);
 Ys    = sin(theta).*sin(phi);
 Zs    = cos(theta);
-
-% overlay
+% 10) overlay on your four figures
 figs = [hFigHighSlope, hFigHighIntercept, hFigLowSlope, hFigLowIntercept];
 for k = 1:4
     figure(figs(k)); hold on;
