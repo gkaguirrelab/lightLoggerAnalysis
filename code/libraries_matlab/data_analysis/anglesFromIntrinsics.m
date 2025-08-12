@@ -1,5 +1,13 @@
-function [theta, phi, r] = anglesFromIntrinsics(nRows, nCols, fisheyeIntrinsics)
+function [theta, phi, r] = anglesFromIntrinsics(nRows, nCols, xg, yg, fisheyeIntrinsics)
+%
+%
+% Examples:
+%{
+    % Load the fisheyeIntrinsics first
+    nCols = 640; nRows = 480;
     [xg, yg] = meshgrid(1:nCols, 1:nRows);
+    [theta, phi, r] = anglesFromIntrinsics(nRows, nCols, xg, yg, fisheyeIntrinsics)    
+%}
     cx = fisheyeIntrinsics.DistortionCenter(1);
     cy = fisheyeIntrinsics.DistortionCenter(2);
     xC = xg - cx;  yC = yg - cy;
