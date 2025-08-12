@@ -37,9 +37,26 @@ function plotSPD(spd, frq, varargin)
   spd  = spd(keep);
   frq  = frq(keep);
 
-  %--- 4) log–log plot
-  loglog(frq, spd, varargin{:});
-  xlabel('Frequency (Hz)')
-  ylabel('Spectral power density (contrast^2/Hz)')
-  title('Temporal SPD')
+  %--- 3) plot the SPD (log-log)
+  hMain = loglog(frq, spd, varargin{:});
+  holdState = ishold; hold on;
+
+  %--- 4) fit line on log10-log10 domain
+  x = log10(frq);
+  y = log10(spd);
+  p = polyfit(x, y, 1);               % y ≈ p(1)*x + p(2)
+  yfit = polyval(p, x);
+  spdFit = 10.^yfit;
+
+  %--- 5) plot dotted best-fit, same color as main line
+  fitColor = get(hMain, 'Color');
+  hFit = loglog(frq, spdFit, '--', 'Color', fitColor, 'LineWidth', 1.2, ...
+                'HandleVisibility','off');
+
+  %--- 6) cosmetics
+  xlabel('Frequency (Hz)');
+  ylabel('Spectral power density (contrast^2/Hz)');
+  title('Temporal SPD');
+
+  if ~holdState, hold off; end
 end

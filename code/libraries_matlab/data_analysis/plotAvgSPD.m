@@ -30,7 +30,7 @@ ylabel('Power (contrast^2 / Hz)');
 %% SCRIPT TO EXPRESS AVERAGE SPD ACROSS CHUNKS FOR EACH LMS OPERATION; Center & Periphery Analysis
 % Get number of frames
 [nFrames, nRows, nCols] = size(v);
-fps = 184.74;
+fps = 120;
 
 % Filter empty/invalid chunks
 good_chunks = cellfun(@(chunk) ~isempty(chunk) && any(chunk.W.v(:)), chunks);
