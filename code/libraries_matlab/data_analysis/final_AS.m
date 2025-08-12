@@ -394,7 +394,7 @@ phi_w      = deg2rad(azW_deg);
 theta_w    = deg2rad(elW_deg);
 
 % High AS maps on participant-space sphere
-[hFigHighSlope, hFigHighIntercept, frq] = ...
+[hFigHighSlope, hFigHighIntercept, frq] = ... 
     mapSlopeIntSPD(vHiAll, fsVid, [40,40], 20, theta_w, phi_w, r);
 
 % Low AS maps on participant-space sphere
