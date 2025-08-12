@@ -1,4 +1,4 @@
-%% SCRIPT TO PLOT MINISPECT DATA ACROSS MULTIPLE CHUNKS
+%% SCRIPT TO OBTAIN SPD AND LIGHT LEVEL INFO FROM RECORDING ACROSS MULTIPLE CHUNKS
 % 
 % Adjust settings as necessary.
 
@@ -292,63 +292,6 @@ legend({'Center','Surround'}, 'Location','best');
 set(gca, 'FontSize',14, 'TickLength',[0.02 0.02]);
 set(gcf, 'Color','white');
 
-
-%% LOAD CALIBRATION DOTS & CALC AFFINE TRANSFORMATION
-
-calibFile = '/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_data/lightLogger/HERO_sm/SophiaGazeCalib2/W_mjpeg.avi';
-vr = VideoReader(calibFile);
-
-% video parameters
-fps = vr.FrameRate;
-startSec = 82;
-endSec   = 276;
-
-% move to start time
-vr.CurrentTime = startSec;
-
-% prepare max brightness mask
-maxBright = [];
-while hasFrame(vr) && vr.CurrentTime <= endSec
-    frm = readFrame(vr);
-    g   = rgb2gray(frm);
-    
-    % only keep pixels brighter than a threshold
-    % normalize and threshold
-    g = double(g);
-    g(g < 200) = 0; % Adjust this threshold as needed (try 220, 240, etc.)
-
-    % combine max
-    if isempty(maxBright)
-        maxBright = g;
-    else
-        maxBright = max(maxBright, g);
-    end
-end
-
-% convert to uint8 for display
-maxBright = uint8(maxBright);
-
-% extract dot centroids
-BW = imbinarize(maxBright, graythresh(maxBright));  
-stats = regionprops(BW, 'Centroid');
-imgPts = vertcat(stats.Centroid); % k×2 [x y] in pixel coords
-x = imgPts(:,1);
-y = imgPts(:,2);
-r = sqrt(x.^2 + y.^2);
-
-% world point coords
-worldPts = [ ...
-        -20, -20;   -20, 0;   -20, 20;   -15, -15;  -15, 15; ...
-        -10, -10;   -10, 0;   -10, 10;   -5, -5;    -5, 5;   ...
-         0, -20;     0, -10;   0, 0;      0, 10;     0, 20;  ...
-         5, -5;      5, 5;     10, -10;   10, 0;     10, 10; ...
-         15, -15;    15, 15;   20, -20;   20, 0;     20, 20];
-
-% Compute affine transform
-tform = fitgeotrans(imgPts, worldPts, 'affine');
-affineMat = tform.T;
-
-
 %% SLOPE AND INTERCEPT MAPS
 
 % preallocate
@@ -401,7 +344,8 @@ theta_w    = deg2rad(elW_deg);
 [hFigLowSlope,  hFigLowIntercept, ~]  = ...
     mapSlopeIntSPD(vLoAll, fsVid, [40,40], 20, theta_w, phi_w, r);
 
-% find common limits
+% find common limits (COMMENTED OUT FOR COORDINATETRANSFORMUSE)
+%{
 vminSlope = min( [slopeHigh(:); slopeLow(:)] );
 vmaxSlope = max( [slopeHigh(:); slopeLow(:)] );
 vminInt = min( [interceptHigh(:); interceptLow(:)] );
@@ -420,20 +364,4 @@ set(gcf, 'color', 'white')
 figure(hFigLowIntercept); caxis([vminInt vmaxInt]);     title('1/f Intercept Map - Low AS');
 set(gca, 'FontSize', 14);
 set(gcf, 'color', 'white')
-
-
-%% PROJECT DOTS
-
-img_aug   = [imgPts, ones(size(imgPts,1),1)];
-azel_dots = img_aug * affineMat.';          % deg [az el]
-azd = deg2rad(azel_dots(:,1));
-eld = deg2rad(azel_dots(:,2));
-Xd  = sin(eld).*cos(azd);
-Yd  = sin(eld).*sin(azd);
-Zd  = cos(eld);
-
-for f = [hFigHighSlope, hFigHighIntercept, hFigLowSlope, hFigLowIntercept]
-    figure(f); hold on;
-    scatter3(Xd, Yd, Zd, 60, 'k', 'filled');
-    hold off;
-end
+%}
