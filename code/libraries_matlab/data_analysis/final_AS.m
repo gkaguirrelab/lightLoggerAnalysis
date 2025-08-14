@@ -132,23 +132,6 @@ for i = 1:N
     centerMask = false(nRows, nCols);
     centerMask(centerRows, centerCols) = true;
     peripheryMask = ~centerMask;
-
-    % ---------- BUILD TILE SUBMASKS FULLY INSIDE EACH REGION ----------
-    subMasks_center  = {};
-    subMasks_periph  = {};
-    for r = 1:tileSize:nRows
-        rr = r:min(r+tileSize-1, nRows);
-        for c = 1:tileSize:nCols
-            cc = c:min(c+tileSize-1, nCols);
-            if all(centerMask(rr,cc), 'all')
-                M = false(nRows,nCols); M(rr,cc) = true;
-                subMasks_center{end+1} = M;
-            elseif all(peripheryMask(rr,cc), 'all')
-                M = false(nRows,nCols); M(rr,cc) = true;
-                subMasks_periph{end+1} = M; 
-            end
-        end
-    end
     
     % threshold & AS→frame interpolation
     AS_if   = interp1(tAS, AS7, W_t, 'pchip', NaN);
