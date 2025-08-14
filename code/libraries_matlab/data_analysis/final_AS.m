@@ -297,6 +297,7 @@ set(gcf, 'Color','white');
 % preallocate
 vHiAll = [];
 vLoAll = [];
+vAllAll = [];
 
 % chunk loop
 for i = 1:N
@@ -318,6 +319,7 @@ for i = 1:N
     % accumulate frames
     vHiAll = cat(1, vHiAll, ch.W.v(hiIdx,:,:));
     vLoAll = cat(1, vLoAll, ch.W.v(loIdx,:,:));
+    vAllAll = cat(1, vAllAll, Vid); 
 end
 
 % Use the frame size from the video (or from vHiAll)
@@ -344,24 +346,24 @@ theta_w    = deg2rad(elW_deg);
 [hFigLowSlope,  hFigLowIntercept, ~]  = ...
     mapSlopeIntSPD(vLoAll, fsVid, [40,40], 20, theta_w, phi_w, r);
 
-% find common limits (COMMENTED OUT FOR COORDINATETRANSFORMUSE)
+% All AS maps on participant-space sphere
+[hFigAllSlope,  hFigAllIntercept, ~]  = ...
+    mapSlopeIntSPD(vAllAll, fsVid, [40,40], 20, theta_w, phi_w, r);
+
+% find common limits (COMMENTED OUT FOR COORDINATE TRANSFORM USE)
 %{
-vminSlope = min( [slopeHigh(:); slopeLow(:)] );
-vmaxSlope = max( [slopeHigh(:); slopeLow(:)] );
-vminInt = min( [interceptHigh(:); interceptLow(:)] );
-vmaxInt = max( [interceptHigh(:); interceptLow(:)] );
+vminSlope = min( [slopeHigh(:); slopeLow(:); slopeAll(:)] );
+vmaxSlope = max( [slopeHigh(:); slopeLow(:); slopeAll(:)] );
+
+vminInt   = min( [interceptHigh(:); interceptLow(:); interceptAll(:)] );
+vmaxInt   = max( [interceptHigh(:); interceptLow(:); interceptAll(:)] );
 
 % re-apply caxis and add titles
-figure(hFigHighSlope);    caxis([vminSlope vmaxSlope]); title('1/f Slope Map - High AS', FontSize=16);
-set(gca, 'FontSize', 14);
-set(gcf, 'color', 'white')
-figure(hFigHighIntercept);caxis([vminInt vmaxInt]);     title('1/f Intercept Map - High AS');
-set(gca, 'FontSize', 14);
-set(gcf, 'color', 'white')
-figure(hFigLowSlope);     caxis([vminSlope vmaxSlope]); title('1/f Slope Map - Low AS');
-set(gca, 'FontSize', 14);
-set(gcf, 'color', 'white')
-figure(hFigLowIntercept); caxis([vminInt vmaxInt]);     title('1/f Intercept Map - Low AS');
-set(gca, 'FontSize', 14);
-set(gcf, 'color', 'white')
+figure(hFigHighSlope);     caxis([vminSlope vmaxSlope]); title('1/f Slope Map - High AS', 'FontSize',16); set(gca,'FontSize',14); set(gcf,'color','white');
+figure(hFigLowSlope);      caxis([vminSlope vmaxSlope]); title('1/f Slope Map - Low AS',  'FontSize',16); set(gca,'FontSize',14); set(gcf,'color','white');
+figure(hFigAllSlope);      caxis([vminSlope vmaxSlope]); title('1/f Slope Map - All AS',  'FontSize',16); set(gca,'FontSize',14); set(gcf,'color','white');   
+
+figure(hFigHighIntercept); caxis([vminInt   vmaxInt  ]); title('1/f Intercept Map - High AS', 'FontSize',16); set(gca,'FontSize',14); set(gcf,'color','white');
+figure(hFigLowIntercept);  caxis([vminInt   vmaxInt  ]); title('1/f Intercept Map - Low AS',  'FontSize',16); set(gca,'FontSize',14); set(gcf,'color','white');
+figure(hFigAllIntercept);  caxis([vminInt   vmaxInt  ]); title('1/f Intercept Map - All AS',  'FontSize',16); set(gca,'FontSize',14); set(gcf,'color','white'); 
 %}
