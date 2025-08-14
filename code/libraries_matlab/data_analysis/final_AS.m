@@ -132,6 +132,37 @@ for i = 1:N
     centerMask = false(nRows, nCols);
     centerMask(centerRows, centerCols) = true;
     peripheryMask = ~centerMask;
+
+    % ---------- DIAGNOSTIC: check for periphery pixels outside lens ----------
+    [~,~,r_map] = anglesFromIntrinsics(nRows, nCols, fisheyeIntrinsics);
+    validMask   = r_map > 0 & isfinite(r_map);
+    
+    peri_invalid = peripheryMask & ~validMask;
+    nPeri         = nnz(peripheryMask);
+    nPeriInvalid  = nnz(peri_invalid);
+    fprintf('Periphery pixels outside aperture: %d (%.1f%% of periphery)\n', ...
+            nPeriInvalid, 100*nPeriInvalid/max(nPeri,1));
+    
+    % Optional: visualize
+    figure('Name','Periphery outside lens aperture'); 
+    subplot(1,3,1); imagesc(validMask); axis image off; colormap gray;
+    title('Valid aperture (true = inside lens)');
+    subplot(1,3,2); imagesc(peripheryMask); axis image off;
+    title('Your current periphery mask');
+    subplot(1,3,3); imagesc(peri_invalid); axis image off;
+    title('Periphery ∩ OUTSIDE aperture');
+    
+    % Overlay on a mean frame
+    meanFrame = squeeze(mean(double(Vid),1));
+    figure('Name','Overlay on mean frame'); imagesc(meanFrame); axis image off; hold on;
+    contour(peri_invalid,[0.5 0.5],'r','LineWidth',1.5);
+    title('Red = periphery pixels outside lens');
+    set(gcf,'color','w');
+    
+    vals = double(Vid(:, peri_invalid));  % T × (#invalid)
+    fracZero = nnz(vals==0) / numel(vals);
+    fprintf('Fraction of periphery-outside-aperture samples that are zero: %.3f\n', fracZero);
+    % --------------------------------------------------------------------------
     
     % threshold & AS→frame interpolation
     AS_if   = interp1(tAS, AS7, W_t, 'pchip', NaN);
@@ -154,11 +185,11 @@ for i = 1:N
         isHi = as_val > thr;
         fprintf('Chunk %d | t0 = %.2f | nnz(idx) = %d\n', i, t0, nnz(idx));
 
-        % % -------- Whole-frame SPD (existing Hi/Lo path) --------
+        % -------- Whole-frame SPD (existing Hi/Lo path) --------
         [P,f] = calcTemporalSPD(Vid(idx,:,:), fsVid, 'lineResolution', false);
         fprintf(' → PSD size = [%d %d], freq range = [%.2f %.2f]\n', size(P), min(f), max(f));
 
-        keep  = f>0 & f<=fMax;
+        keep = f>0 & f<=fMax;
         fprintf(' → # kept freqs = %d\n', nnz(keep));
         frqLoc = f(keep);
         spdLoc = P(keep);
@@ -177,34 +208,24 @@ for i = 1:N
             end
         end
 
-    % ======== PSD→Avg using regionMatrix with MANY SMALL MASKS ========
-        % Center tiles
-        cen_tile_curves = [];
-        for k = 1:numel(subMasks_center)
-            [Pc, fc] = calcTemporalSPD(Vid(idx,:,:), fsVid, 'lineResolution', false, ...
-                                       'regionMatrix', double(subMasks_center{k}));
-            keepC = fc>0 & fc<=fMax;
-            if nnz(keepC) < 2, continue; end
+        % -------- Center --------
+        [Pc, fc] = calcTemporalSPD(Vid(idx,:,:), fsVid, 'lineResolution', false, ...
+                                   'regionMatrix', double(centerMask));
+        keepC = fc>0 & fc<=fMax;
+        if nnz(keepC) >= 2
             PiC = interp1(fc(keepC), Pc(keepC), f_int, 'pchip')';
             PiC(f_int==30) = NaN;
-            cen_tile_curves(end+1,:) = PiC;
+            spdCen(end+1,:) = PiC;
         end
-        if ~isempty(cen_tile_curves)
-            spdCen(end+1,:) = mean(cen_tile_curves, 1, 'omitnan');
-        end
-        % Periphery tiles
-        per_tile_curves = [];
-        for k = 1:numel(subMasks_periph)
-            [Pp, fp] = calcTemporalSPD(Vid(idx,:,:), fsVid, 'lineResolution', false, ...
-                                       'regionMatrix', double(subMasks_periph{k}));
-            keepP = fp>0 & fp<=fMax;
-            if nnz(keepP) < 2, continue; end
+
+        % -------- Periphery --------
+        [Pp, fp] = calcTemporalSPD(Vid(idx,:,:), fsVid, 'lineResolution', false, ...
+                                   'regionMatrix', double(peripheryMask));
+        keepP = fp>0 & fp<=fMax;
+        if nnz(keepP) >= 2
             PiP = interp1(fp(keepP), Pp(keepP), f_int, 'pchip')';
             PiP(f_int==30) = NaN;
-            per_tile_curves(end+1,:) = PiP;
-        end
-        if ~isempty(per_tile_curves)
-            spdPer(end+1,:) = mean(per_tile_curves, 1, 'omitnan');
+            spdPer(end+1,:) = PiP;
         end
     end
     
@@ -254,7 +275,7 @@ set(gcf, 'Color','white');
 %% PLOT GLOBAL SPD (center vs surround)
 figure;
 
-% Center (red), Surround (blue)
+% Center (magenta), Surround (green)
 plotSPD(globalCen, f_int, 'm');
 hold on;
 plotSPD(globalPer, f_int, 'g');
