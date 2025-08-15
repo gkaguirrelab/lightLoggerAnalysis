@@ -17,7 +17,7 @@ function [SensorFigure, CameraFigure, EyeFigure] = coordinateTransformFinal(fish
     %}
     
     arguments
-        fisheyeIntrinsics
+        fisheyeIntrinsics = []
         myChoice {mustBeMember(myChoice, {'worldImage', 'interceptMap', 'slopeMap'})}
         lightLevel {mustBeMember(lightLevel, {'highAS', 'lowAS', 'allAS'})} = 'allAS'
     end
@@ -46,59 +46,33 @@ function [SensorFigure, CameraFigure, EyeFigure] = coordinateTransformFinal(fish
             I = imread('/Users/zacharykelly/Downloads/exampleWorldImage.png');
             I = imresize(I,[480,640]);
             I = mean(I,3);
-            myMap = 'gray';
-            barRange = [0,255];
-            gazePlotFlag = true;
+            myMap = 'gray'; barRange = [0,255]; gazePlotFlag = true;
         case 'interceptMap'
-            switch lightLevel
-                case 'highAS'
-                    I = hFigHighIntercept;
-                    myMap = 'hot';
-                    barRange = [-3.5,-2];
-                    gazePlotFlag = false;
-                case 'lowAS'
-                    I = hFigLowIntercept;
-                    myMap = 'hot';
-                    barRange = [-3.5,-2];
-                    gazePlotFlag = false;
-                case 'allAS'
-                    I = hFigAllIntercept;
-                    myMap = 'hot';
-                    barRange = [-3.5,-2];
-                    gazePlotFlag = false;
+            if ~isfield(maps,'intercept') || ~isfield(maps.intercept,lightLevel)
+                error('maps.intercept.%s is missing or empty.', lightLevel);
             end
+            I = maps.intercept.(lightLevel);             % numeric matrix
+            myMap = 'hot';  barRange = [-3.5,-2]; gazePlotFlag = false;
+
         case 'slopeMap'
-            switch lightLevel
-                case 'highAS'
-                    I = hFigHighSlope;
-                    myMap = 'hot';
-                    barRange = [-2.5,-2];
-                    gazePlotFlag = false;
-                case 'lowAS'
-                    I = hFigLowSlope;
-                    myMap = 'hot';
-                    barRange = [-2.5,-2];
-                    gazePlotFlag = false;
-                case 'allAS'
-                    I = hFigAllSlope;
-                    myMap = 'hot';
-                    barRange = [-2.5,-2];
-                    gazePlotFlag = false;
+            if ~isfield(maps,'slope') || ~isfield(maps.slope,lightLevel)
+                error('maps.slope.%s is missing or empty.', lightLevel);
             end
+            I = maps.slope.(lightLevel);                 % numeric matrix
+            myMap = 'hot';  barRange = [-2.5,-2]; gazePlotFlag = false;
     end
     
     % Get the camera visual field positions corresponding to positions of all
     % locations on the camera sensor
-    nCols = 640; nRows = 480;
-    [xg, yg] = meshgrid(1:nCols, 1:nRows);
-    sensorPoints = [xg(:),yg(:)];
+    [nRows, nCols]  = size(I);
+    [xg, yg]        = meshgrid(1:nCols, 1:nRows);
+    sensorPoints      = [xg(:),yg(:)];
     visualFieldPoints = anglesFromIntrinsics(sensorPoints, fisheyeIntrinsics);
-    
-    %% PLOTS
+
     % Show what I looks like in the sensor grid coordinate space, and add the
     % gaze targets
     SensorFigure = figure;
-    surf(reshape(sensorPoints(:,1),480,640),reshape(sensorPoints(:,2),480,640),I,'edgeColor','none');
+    surf(reshape(sensorPoints(:,1),480,640), reshape(sensorPoints(:,2),480,640), I, 'edgeColor','none');
     view([0,-90]); % This command rotates the plot so we are looking straight at it
     colormap(myMap)
     hold on
@@ -170,104 +144,85 @@ function [SensorFigure, CameraFigure, EyeFigure] = coordinateTransformFinal(fish
 
 end
 
-% local function to obtain ...
+% local function to obtain gaze calibration dots for affine transform
 function [imgPts, worldPts] = get_calibration_dots(calibFile)
-
-arguments
-    calibFile {mustBeText} = '/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_data/lightLogger/HERO_sm/SophiaGazeCalib2/W_mjpeg.avi';
-end
-
-vr = VideoReader(calibFile);
-
-% video parameters
-fps = vr.FrameRate;
-startSec = 82;
-endSec   = 276;
-
-% move to start time
-vr.CurrentTime = startSec;
-
-% prepare max brightness mask
-maxBright = [];
-while hasFrame(vr) && vr.CurrentTime <= endSec
-    frm = readFrame(vr);
-    g   = rgb2gray(frm);
-    % only keep pixels brighter than a threshold
-    % normalize and threshold
-    g = double(g);
-    g(g < 200) = 0;
-    % combine max
-    if isempty(maxBright)
-        maxBright = g;
-    else
-        maxBright = max(maxBright, g);
+    arguments
+        calibFile {mustBeText} = '/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_data/lightLogger/HERO_sm/SophiaGazeCalib2/W_mjpeg.avi';
     end
-end
-
-% convert to uint8 for display
-maxBright = uint8(maxBright);
-
-% extract dot centroids
-BW = imbinarize(maxBright, graythresh(maxBright));  
-stats = regionprops(BW, 'Centroid');
-imgPts = vertcat(stats.Centroid); % k×2 [x y] in pixel coords
-x = imgPts(:,1);
-y = imgPts(:,2);
-r = sqrt(x.^2 + y.^2);
-
-% world point coords
-worldPts = [ ...
-        -20, -20;   -20, 0;   -20, 20;   -15, -15;  -15, 15; ...
-        -10, -10;   -10, 0;   -10, 10;   -5, -5;    -5, 5;   ...
-         0, -20;     0, -10;   0, 0;      0, 10;     0, 20;  ...
-         5, -5;      5, 5;     10, -10;   10, 0;     10, 10; ...
-         15, -15;    15, 15;   20, -20;   20, 0;     20, 20];
-end
+    
+    vr = VideoReader(calibFile);
+    
+    % video parameters
+    fps = vr.FrameRate;
+    startSec = 82;
+    endSec   = 276;
+    
+    % move to start time
+    vr.CurrentTime = startSec;
+    
+    % prepare max brightness mask
+    maxBright = [];
+    while hasFrame(vr) && vr.CurrentTime <= endSec
+        frm = readFrame(vr);
+        g   = rgb2gray(frm);
+        % only keep pixels brighter than a threshold
+        % normalize and threshold
+        g = double(g);
+        g(g < 200) = 0;
+        % combine max
+        if isempty(maxBright)
+            maxBright = g;
+        else
+            maxBright = max(maxBright, g);
+        end
+    end
+    
+    % convert to uint8 for display
+    maxBright = uint8(maxBright);
+    
+    % extract dot centroids
+    BW = imbinarize(maxBright, graythresh(maxBright));  
+    stats = regionprops(BW, 'Centroid');
+    imgPts = vertcat(stats.Centroid); % k×2 [x y] in pixel coords
+    x = imgPts(:,1);
+    y = imgPts(:,2);
+    r = sqrt(x.^2 + y.^2);
+    
+    % world point coords
+    worldPts = [ ...
+            -20, -20;   -20, 0;   -20, 20;   -15, -15;  -15, 15; ...
+            -10, -10;   -10, 0;   -10, 10;   -5, -5;    -5, 5;   ...
+             0, -20;     0, -10;   0, 0;      0, 10;     0, 20;  ...
+             5, -5;      5, 5;     10, -10;   10, 0;     10, 10; ...
+             15, -15;    15, 15;   20, -20;   20, 0;     20, 20];
+    end
 
 % local function to obtain the theta and phi values from the camera
 % intrinsics
 function visualFieldPoints = anglesFromIntrinsics(sensorPoints, fisheyeIntrinsics)
-%
-%
-% Examples:
-%{
-    % Load the fisheyeIntrinsics first
-    % Then we calculate the visual field angle position of every camera
-    % sensor position
-    nCols = 640; nRows = 480;
-    [xg, yg] = meshgrid(1:nCols, 1:nRows);
-    sensorPoints = [xg(:),yg(:)];
-    visualFieldPoints = anglesFromIntrinsics(sensorPoints, fisheyeIntrinsics);    
-%}
-
-% nRows = fisheyeIntrinsics.ImageSize(1);
-% nCols = fisheyeIntrinsics.ImageSize(2);
-% 
-% [xGrid, yGrid] = meshgrid(1:nCols, 1:nRows);
-cx = fisheyeIntrinsics.DistortionCenter(1);
-cy = fisheyeIntrinsics.DistortionCenter(2);
-xC = sensorPoints(:,1) - cx; yC = sensorPoints(:,2) - cy;
-
-r = sqrt(xC.^2 + yC.^2);
-coeffs = fisheyeIntrinsics.MappingCoefficients;
-a0=coeffs(1); a2=coeffs(2); a3=coeffs(3); a4=coeffs(4);
-
-theta = nan(size(r));
-for k=1:numel(r)
-    func = @(t) a0*t + a2*t^3 + a3*t^4 + a4*t^5 - r(k);
-    theta(k) = fzero(func,[0,pi]);
-end
-
-phi = atan2(yC,xC); R = 1;
-X = R*sin(theta).*cos(phi);
-Y = R*sin(theta).*sin(phi);
-Z = R*cos(theta);
-
-azi = rad2deg(atan(Y./Z));
-ele = rad2deg(atan(X./Z));
-
-visualFieldPoints = [azi,ele];
-
+    cx = fisheyeIntrinsics.DistortionCenter(1);
+    cy = fisheyeIntrinsics.DistortionCenter(2);
+    xC = sensorPoints(:,1) - cx; yC = sensorPoints(:,2) - cy;
+    
+    r = sqrt(xC.^2 + yC.^2);
+    coeffs = fisheyeIntrinsics.MappingCoefficients;
+    a0=coeffs(1); a2=coeffs(2); a3=coeffs(3); a4=coeffs(4);
+    
+    theta = nan(size(r));
+    for k=1:numel(r)
+        func = @(t) a0*t + a2*t^3 + a3*t^4 + a4*t^5 - r(k);
+        theta(k) = fzero(func,[0,pi]);
+    end
+    
+    phi = atan2(yC,xC); R = 1;
+    X = R*sin(theta).*cos(phi);
+    Y = R*sin(theta).*sin(phi);
+    Z = R*cos(theta);
+    
+    azi = rad2deg(atan(Y./Z));
+    ele = rad2deg(atan(X./Z));
+    
+    visualFieldPoints = [azi,ele];
 end
 
 % local function to adjust plot ...
