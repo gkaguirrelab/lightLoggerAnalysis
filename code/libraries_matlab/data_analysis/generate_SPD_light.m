@@ -1,4 +1,4 @@
-%% SCRIPT TO OBTAIN SPD AND LIGHT LEVEL INFO FROM RECORDING ACROSS MULTIPLE CHUNKS
+%% FUNCTION TO OBTAIN SPD AND LIGHT LEVEL INFO FROM RECORDING ACROSS MULTIPLE CHUNKS
 % 
 % Adjust settings as necessary.
 function generate_SPD_light(directory, visualize_results)
@@ -23,7 +23,7 @@ function generate_SPD_light(directory, visualize_results)
     % Ensure if we want to run slope intercept maps, 
     % we also have done MS calculation 
     if(analyses_to_perform(end) && ~analyses_to_perform(1))
-        error("Must perform MS analysis to do slope map analysis"); =
+        error("Must perform MS analysis to do slope map analysis");
     end 
 
     % Analyze the MS-AS data over the course of the video
@@ -41,9 +41,6 @@ function generate_SPD_light(directory, visualize_results)
             plot_SPD_data(globalHi, globalLo, globalCen, globalPer, f_int); 
         end 
     end 
-    
-
-
     
 
     % Iterate over the chunks 
@@ -71,11 +68,11 @@ function generate_SPD_light(directory, visualize_results)
         [~, nRows, nCols] = size(Vid);
 
         % Camera-space angles (radians)
-        [theta_cam, phi_cam, r] = anglesFromIntrinsics(nRows, nCols, fisheyeIntrinsics);
+        visualFieldPoints = anglesFromIntrinsics(nRows, nCols, fisheyeIntrinsics);
 
         % Warp to participant space using affine (apply in DEGREES to [az, el])
-        az_deg = rad2deg(phi_cam);
-        el_deg = rad2deg(theta_cam);
+        az_deg = rad2deg(visualFieldPoints(:,1));
+        el_deg = rad2deg(visualFieldPoints(:,2));
 
         azelW      = [az_deg(:), el_deg(:), ones(numel(az_deg),1)] * affineMat.';  % N×2 deg
         azW_deg    = reshape(azelW(:,1), size(az_deg));
@@ -98,8 +95,6 @@ function generate_SPD_light(directory, visualize_results)
 
 
     end
-
-    
 
     % find common limits (COMMENTED OUT FOR COORDINATE TRANSFORM USE)
     %{
@@ -253,11 +248,11 @@ function  [globalHi, globalLo, globalCen, globalPer, f_int] = obtain_SPD_data(fi
     clear tmp; 
 
     %% SLIDING‐WINDOW SPD SPLIT & AVERAGE ACROSS CHUNKS
+    allAll = nan(N_chunks, numel(f_int));
     allHi = nan(N_chunks, numel(f_int));
     allLo = nan(N_chunks, numel(f_int));
     allCen = nan(N_chunks, numel(f_int));
     allPer = nan(N_chunks, numel(f_int));
-    allAll = nan(N_chunks, numel(f_int));
 
     % Iterate over the chunks of the video 
     for ii = 1:N_chunks
@@ -281,8 +276,9 @@ function  [globalHi, globalLo, globalCen, globalPer, f_int] = obtain_SPD_data(fi
         t0s     = (W_t(1)+Twin):hop:(W_t(end)-Twin);
         
         % accumulators
-        spdHi = [];
-        spdLo = [];
+        spdAll = [];
+        spdHi  = [];
+        spdLo  = [];
         spdCen = [];
         spdPer = [];
         
@@ -307,6 +303,7 @@ function  [globalHi, globalLo, globalCen, globalPer, f_int] = obtain_SPD_data(fi
             if numel(frqLoc) >= 2 && numel(spdLoc) >= 2
                 Pi = interp1(frqLoc, spdLoc, f_int, 'pchip')';
                 if numel(Pi) == numel(f_int)
+                    spdAll(end+1, :) = Pi;
                     if isHi
                         spdHi(end+1,:) = Pi;
                     else
@@ -334,15 +331,19 @@ function  [globalHi, globalLo, globalCen, globalPer, f_int] = obtain_SPD_data(fi
             end
         end
         % store this chunk's mean curves
-        allHi(i,:) = mean(spdHi, 1, 'omitnan');
-        allLo(i,:) = mean(spdLo, 1, 'omitnan');
+        allAll(ii,:)    = mean(spdAll, 1, 'omitnan');
+        % again for high light and low light
+        allHi(ii,:)     = mean(spdHi, 1, 'omitnan');
+        allLo(ii,:)     = mean(spdLo, 1, 'omitnan');
         % again for center and periphery
-        allCen(i,:) = mean(spdCen, 1, 'omitnan');
-        allPer(i,:) = mean(spdPer, 1, 'omitnan');
+        allCen(ii,:)    = mean(spdCen, 1, 'omitnan');
+        allPer(ii,:)    = mean(spdPer, 1, 'omitnan');
+        
         fprintf('[Chunk %d] spdHi windows: %d | spdLo windows: %d\n', ...
-        i, size(spdHi, 1), size(spdLo, 1), size(spdCen, 1), size(spdPer, 1));
+        ii, size(spdAll, 1), size(spdHi, 1), size(spdLo, 1), size(spdCen, 1), size(spdPer, 1));
     end
     % global average across chunks
+    globalAll = nanmean(allAll,1);
     globalHi = nanmean(allHi,1);
     globalLo = nanmean(allLo,1);
     globalCen = nanmean(allCen, 1);
@@ -350,8 +351,23 @@ function  [globalHi, globalLo, globalCen, globalPer, f_int] = obtain_SPD_data(fi
 end 
 
 % Local function to plot the SPD data 
-function plot_SPD_data(globalHi, globalLow, globalCen, globalPer, f_int)
-    %% PLOT GLOBAL SPD (high vs low)
+function plot_SPD_data(globalAll, globalHi, globalLo, globalCen, globalPer, f_int)
+    % PLOT GLOBAL SPD
+    figure;
+    plotSPD(globalAll, f_int);
+    xlabel('Frequency (Hz)', 'FontSize',14);
+    ylabel('Spectral power density (contrast^2/Hz)', 'FontSize',14);
+    title('All Chunks: Avg Windowed SPD (1–90 Hz)', ...
+        'FontSize',16, 'FontWeight','normal');
+    xlim([f_int(1) f_int(end)]);
+    nticks = 10;
+    ticks = round(logspace(log10(0.2),log10(59),nticks), 2);
+    xticks(ticks);
+    xticklabels(ticks);
+    set(gca, 'FontSize',14, 'TickLength',[0.02 0.02]);
+    set(gcf, 'Color','white');
+
+    % PLOT GLOBAL SPD (high vs low)
     figure;
     plotSPD(globalHi, f_int, 'r');
     hold on;
@@ -371,9 +387,8 @@ function plot_SPD_data(globalHi, globalLow, globalCen, globalPer, f_int)
     set(gca, 'FontSize',14, 'TickLength',[0.02 0.02]);
     set(gcf, 'Color','white');
 
-    %% PLOT GLOBAL SPD (center vs surround)
+    % PLOT GLOBAL SPD (center vs surround)
     figure;
-    % Center (red), Surround (blue)
     plotSPD(globalCen, f_int, 'm');
     hold on;
     plotSPD(globalPer, f_int, 'g');
@@ -388,20 +403,6 @@ function plot_SPD_data(globalHi, globalLow, globalCen, globalPer, f_int)
     xticks(ticks);
     xticklabels(ticks);
     legend({'Center','Surround'}, 'Location','best');
-    set(gca, 'FontSize',14, 'TickLength',[0.02 0.02]);
-    set(gcf, 'Color','white');
-
-    %% PLOT GLOBAL SPD
-    figure;
-    plotSPD(globalAll, f_int, 'k');
-    xlabel('Frequency (Hz)', 'FontSize',14);
-    ylabel('Spectral power density (contrast^2/Hz)', 'FontSize',14);
-    title('All Chunks: Avg Windowed SPD — All Light Levels', 'FontSize',16, 'FontWeight','normal');
-    xlim([f_int(1) f_int(end)]);
-    nticks = 10;
-    ticks = round(logspace(log10(0.2),log10(59),nticks), 2);
-    xticks(ticks);
-    xticklabels(ticks);
     set(gca, 'FontSize',14, 'TickLength',[0.02 0.02]);
     set(gcf, 'Color','white');
 
