@@ -44,7 +44,7 @@ function generate_SPD_light(directory, visualize_results)
     
 
 
-    %% SLOPE AND INTERCEPT MAPS
+    
 
     % Iterate over the chunks 
     for ii = 1:N_chunks
