@@ -1,15 +1,17 @@
 function [slopeMap, interceptMap, frq] = ...
-    mapSlopeIntSPD(v, fps, window, step, theta, phi, R)
+    mapSlopeIntSPD(v, fps, window, step, doPlot, theta, phi, R)
 % Computes slope and intercept maps of temporal SPD across image regions
 % and projects them onto a 1 m visual field surface, then plots both maps.
 %
 % Required Inputs:
 %   v                 - [frames x rows x cols] video chunk (double)
 %   fps               - Sampling rate (Hz)
-%   window            - [height width] of square region (e.g., [40 40])
-%   step              - Step size for moving window
+%   window            - [height width] of square region. Defaults to [40 40]
+%   step              - Step size for moving window. Defaults to 20
+%   doPlot            - (boolean) Visualize the SPD maps or not
 %   theta             - (radians) [rows x cols] elevation-from-optical-axis  (optional)
 %   phi               - (radians) [rows x cols] azimuth                      (optional)
+%   R                 - (radians) (scalar) radius                            (optional)
 %
 %
 % Optional:
@@ -21,6 +23,12 @@ function [slopeMap, interceptMap, frq] = ...
 %   frq               - frequency vector used in SPD
 %   hFigSlope         - figure handle for slope map
 %   hFigIntercept     - figure handle for intercept map
+%
+% Example Usage: 
+%{
+    [slopeMap, interceptMap, frq] = mapSlopeIntSPD(v, fps, [40 40], 20, True, theta, phi, R)
+%}
+
 
 [~, nRows, nCols] = size(v);
 
@@ -58,18 +66,24 @@ end
 slopeMap     = mean(slope3D,     3, 'omitnan');
 interceptMap = mean(intercept3D, 3, 'omitnan');
 
-X = reshape(R .*sin(theta) .*cos(phi), nRows, nCols);
-Y = reshape(R .*sin(theta) .*sin(phi), nRows, nCols);
-Z = reshape(R .*cos(theta),         nRows, nCols);
 
-% Plot slope map
-hFigSlope = figure;
-surf(X, Y, Z, slopeMap, 'EdgeColor','none'); shading interp; lighting none;
-axis equal; colormap jet; colorbar; title('1/f SPD Slope Map');
+if ~doPlot 
+end
 
-% Plot intercept map
-hFigIntercept = figure;
-surf(X, Y, Z, interceptMap, 'EdgeColor','none'); shading interp; lighting none;
-axis equal; colormap jet; colorbar; title('1/f SPD Intercept Map');
-
+if doPlot && nargs < 6
+    error("Must provide theta, phi, and R values to visualize.");
+else 
+    X = reshape(R .*sin(theta) .*cos(phi), nRows, nCols);
+    Y = reshape(R .*sin(theta) .*sin(phi), nRows, nCols);
+    Z = reshape(R .*cos(theta),         nRows, nCols);
+    
+    % Plot slope map
+    figure;
+    surf(X, Y, Z, slopeMap, 'EdgeColor','none'); shading interp; lighting none;
+    axis equal; colormap jet; colorbar; title('1/f SPD Slope Map');
+    
+    % Plot intercept map
+    figure;
+    surf(X, Y, Z, interceptMap, 'EdgeColor','none'); shading interp; lighting none;
+    axis equal; colormap jet; colorbar; title('1/f SPD Intercept Map');    
 end
