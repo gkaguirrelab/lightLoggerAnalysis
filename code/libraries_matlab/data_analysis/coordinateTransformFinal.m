@@ -1,4 +1,4 @@
-function [SensorFigure, CameraFigure, EyeFigure] = coordinateTransformFinal(fisheyeIntrinsics, myChoice, lightLevel)
+function [SensorFigure, CameraFigure, EyeFigure] = coordinateTransformFinal(fisheyeIntrinsics, myChoice, lightLevel, maps, calibFile)
 
     % Need to make available to this function the fisheye intrinsics, and the
     % set of "imgPts" and "worldPts".
@@ -20,6 +20,8 @@ function [SensorFigure, CameraFigure, EyeFigure] = coordinateTransformFinal(fish
         fisheyeIntrinsics = []
         myChoice {mustBeMember(myChoice, {'worldImage', 'interceptMap', 'slopeMap'})}
         lightLevel {mustBeMember(lightLevel, {'highAS', 'lowAS', 'allAS'})} = 'allAS'
+        maps struct
+        calibFile {MustBeText}
     end
 
     % Obtain the set of gaze calibration targets as seen by the world camera,
@@ -64,15 +66,15 @@ function [SensorFigure, CameraFigure, EyeFigure] = coordinateTransformFinal(fish
     
     % Get the camera visual field positions corresponding to positions of all
     % locations on the camera sensor
-    [nRows, nCols]  = size(I);
-    [xg, yg]        = meshgrid(1:nCols, 1:nRows);
+    [nRows, nCols]    = size(I);
+    [xg, yg]          = meshgrid(1:nCols, 1:nRows);
     sensorPoints      = [xg(:),yg(:)];
     visualFieldPoints = anglesFromIntrinsics(sensorPoints, fisheyeIntrinsics);
 
     % Show what I looks like in the sensor grid coordinate space, and add the
     % gaze targets
     SensorFigure = figure;
-    surf(reshape(sensorPoints(:,1),480,640), reshape(sensorPoints(:,2),480,640), I, 'edgeColor','none');
+    surf(reshape(sensorPoints(:,1),480,640), reshape(sensorPoints(:,2),nRows,nCols), I, 'edgeColor','none');
     view([0,-90]); % This command rotates the plot so we are looking straight at it
     colormap(myMap)
     hold on
@@ -87,7 +89,7 @@ function [SensorFigure, CameraFigure, EyeFigure] = coordinateTransformFinal(fish
     
     % Now show what I looks like in the camera visual field coordinate space
     CameraFigure = figure;
-    surf(reshape(visualFieldPoints(:,1),480,640),reshape(visualFieldPoints(:,2),480,640),I,'edgeColor','none');
+    surf(reshape(visualFieldPoints(:,1),480,640),reshape(visualFieldPoints(:,2),nRows,nCols),I,'edgeColor','none');
     view([90,90]); % This command rotates the plot so we are looking straight at it
     colormap(myMap)
     hold on
@@ -104,7 +106,7 @@ function [SensorFigure, CameraFigure, EyeFigure] = coordinateTransformFinal(fish
     
     % Now show what I looks like in eye rotation coordinates
     EyeFigure = figure;
-    surf(reshape(eyeRotationCoordinates(:,1),480,640),reshape(eyeRotationCoordinates(:,2),480,640),I,'edgeColor','none');
+    surf(reshape(eyeRotationCoordinates(:,1),480,640),reshape(eyeRotationCoordinates(:,2),nRows,nCols),I,'edgeColor','none');
     view([0,-90]);
     colormap(myMap)
     hold on
@@ -120,7 +122,7 @@ function [SensorFigure, CameraFigure, EyeFigure] = coordinateTransformFinal(fish
     idx = vecnorm(eyeRotationCoordinates,2,2) > 60;
     figure
     subI = I; subI(idx)=nan;
-    surf(reshape(eyeRotationCoordinates(:,1),480,640),reshape(eyeRotationCoordinates(:,2),480,640),subI,'edgeColor','none');
+    surf(reshape(eyeRotationCoordinates(:,1),480,640),reshape(eyeRotationCoordinates(:,2),nRows,nCols),subI,'edgeColor','none');
     view([0,-90]);
     colormap(myMap)
     hold on

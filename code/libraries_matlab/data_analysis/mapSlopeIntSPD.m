@@ -80,27 +80,23 @@ end
 slopeMap     = mean(slope3D,     3, 'omitnan');
 interceptMap = mean(intercept3D, 3, 'omitnan');
 
-if nargin < 5 || ~option.doPlot
-end
+if options.doPlot
+    assert(~isempty(options.theta) && ~isempty(options.phi), ...
+        'To plot, provide options.theta and options.phi.');
+    R = options.R;
+    X = reshape(R .* sin(options.theta) .* cos(options.phi), nRows, nCols);
+    Y = reshape(R .* sin(options.theta) .* sin(options.phi), nRows, nCols);
+    Z = reshape(R .* cos(options.theta),                     nRows, nCols);
+        
+    % Plot slope map
+    figure;
+    surf(X, Y, Z, slopeMap, 'EdgeColor','none'); shading interp; lighting none;
+    axis equal; colormap jet; colorbar; title('1/f SPD Slope Map');
 
-if nargin >= 5
-    if options.doPlot && nargin < 6
-        error("Must provide theta, phi, and R values to visualize.");
-    else 
-        X = reshape(R .*sin(options.theta) .*cos(options.phi), nRows, nCols);
-        Y = reshape(R .*sin(options.theta) .*sin(options.phi), nRows, nCols);
-        Z = reshape(R .*cos(options.theta),         nRows, nCols);
-        
-        % Plot slope map
-        figure;
-        surf(X, Y, Z, slopeMap, 'EdgeColor','none'); shading interp; lighting none;
-        axis equal; colormap jet; colorbar; title('1/f SPD Slope Map');
-        
-        % Plot intercept map
-        figure;
-        surf(X, Y, Z, interceptMap, 'EdgeColor','none'); shading interp; lighting none;
-        axis equal; colormap jet; colorbar; title('1/f SPD Intercept Map');    
-    end
+    % Plot intercept map
+    figure;
+    surf(X, Y, Z, interceptMap, 'EdgeColor','none'); shading interp; lighting none;
+    axis equal; colormap jet; colorbar; title('1/f SPD Intercept Map');
 end
 
 end

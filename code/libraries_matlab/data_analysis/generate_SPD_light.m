@@ -32,11 +32,11 @@ function maps = generate_SPD_light(directory, analyses_to_perform, visualize_res
     end 
 
     % Analyze the MS-AS data over the course of the video
-    thr = NaN; AS7_all_t = [];
+    thr = NaN; t_all = [];
     if analyses_to_perform(1) 
-        [yHigh, yLow, thr, AS7_all_t] = obtain_ms_high_low();
+        [yHigh, yLow, thr, t_all] = obtain_ms_high_low();
         if(visualize_results(1))
-            plot_ms_high_low(yHigh, yLow, AS7_all_t, thr);
+            plot_ms_high_low(yHigh, yLow, t_all, thr);
         end
     end
     if isnan(thr)  % Ensure we have a threshold for hi/lo split
@@ -95,10 +95,10 @@ function maps = generate_SPD_light(directory, analyses_to_perform, visualize_res
     end 
     
     % Local function to plot MS high/ligh 
-    function [yHigh, yLow]  = obtain_ms_high_low(files, N_chunks)
+    function [yHigh, yLow, thr, t_all]  = obtain_ms_high_low(files, N_chunks)
         % Collect all AS7341 values across all chunks
         AS7_all = [];
-        AS7_all_t = []; 
+        t_all = []; 
     
         % GET GLOBAL AVG ACROSS CHUNKS
         for ii = 1:N_chunks
@@ -110,7 +110,7 @@ function maps = generate_SPD_light(directory, analyses_to_perform, visualize_res
             AS7 = ch.M.v.AS(:,7);
             AS7_t = ch.M.t.AS; 
             AS7_all = [AS7_all; AS7(:)];
-            AS7_all_t = [AS7_all_t; AS7_t(:)]; 
+            t_all = [t_all; AS7_t(:)]; 
         end
     
         % Find global min, max, and norm 
@@ -123,27 +123,13 @@ function maps = generate_SPD_light(directory, analyses_to_perform, visualize_res
     
         % convert back
         thr = level_norm*(as_max - as_min) + as_min;
-    
-        %% AS BRIGHTNESS OVER TIME (red = above thr, blue = below thr)
-        figure; hold on;
-    
-        % Legend anchors (so legend doesn’t list every chunk)
-        plot(nan,nan,'r-','LineWidth',1.2,'DisplayName','High (>= thr)');
-        plot(nan,nan,'b-','LineWidth',1.2,'DisplayName','Low (< thr)');
-    
-        % Iterate over all the chunks 
-        % Plot all the AS7 data across all chunks 
-        % distinguish between high and low light level.
-        
-        % Split into above/below threshold (use NaNs to break lines)
-        yHigh = AS7_all;              
-        yHigh(AS7_all <= thr) = NaN;
-        yLow  = AS7_all;              
-        yLow(AS7_all  > thr) = NaN;
-    
+
+        yHigh = AS7_all; yHigh(AS7_all <= thr_out) = NaN;
+        yLow  = AS7_all; yLow(AS7_all  >  thr_out) = NaN;
+
         % Now, we do not need the AS7 all information anymore, clear to save memory 
         clear AS7_all; 
-        clear AS7_all_t; 
+        clear t_all; 
     end 
     
     % Local function to plot the MS high/low results 
@@ -151,9 +137,9 @@ function maps = generate_SPD_light(directory, analyses_to_perform, visualize_res
         figure; 
     
         % Plot; hide handles so legend doesn’t get cluttered
-        plot(AS7_all_t, yHigh, 'r-', 'LineWidth', 1.0, 'HandleVisibility','off');
+        plot(t_all, yHigh, 'r-', 'LineWidth', 1.0, 'HandleVisibility','off');
         hold on; 
-        plot(AS7_all_t, yLow,  'b-', 'LineWidth', 1.0, 'HandleVisibility','off');
+        plot(t_all, yLow,  'b-', 'LineWidth', 1.0, 'HandleVisibility','off');
     
         % Axes, threshold line, labels, legend
         set(gca, 'YScale','log', 'FontSize',14, 'TickLength',[0.02 0.02]);
@@ -169,7 +155,7 @@ function maps = generate_SPD_light(directory, analyses_to_perform, visualize_res
     end 
     
     % Local function to obtain SPD data 
-    function [globalHi, globalLo, globalCen, globalPer, f_int] = obtain_SPD_data(files, N_chunks)
+    function [globalAll, globalHi, globalLo, globalCen, globalPer, f_int] = obtain_SPD_data()
         % BUILD COMMON FREQUENCY GRID
         % Use a nominal 10 s block from chunk 1 to get its frequency bins
         tmp = load(fullfile(files(1).folder,files(1).name),'chunk');
@@ -233,7 +219,7 @@ function maps = generate_SPD_light(directory, analyses_to_perform, visualize_res
                 fprintf(' → # kept freqs = %d\n', nnz(keep));
                 frqLoc = f(keep);
                 spdLoc = P(keep);
-                
+
                 % 30HZ CENSOR
                 spdLoc(frqLoc==30) = NaN;
                 if numel(frqLoc) >= 2 && numel(spdLoc) >= 2
@@ -345,7 +331,7 @@ function maps = generate_SPD_light(directory, analyses_to_perform, visualize_res
     end 
     
     % Local function to obtain slope and intercept maps 
-    function obtain_slope_and_intercept_maps()
+    function mapsOut = obtain_slope_and_intercept_maps()
         % ===== Running means (lazy init after first chunk) ===== *********
         meanSlopeHigh = [];  cntHigh = [];
         meanIntHigh   = [];
@@ -397,12 +383,12 @@ function maps = generate_SPD_light(directory, analyses_to_perform, visualize_res
         end
 
         % Final maps (avoid div-by-zero)
-        maps.slope.highAS   = finalizeMean(meanSlopeHigh, cntHigh);
-        maps.slope.lowAS    = finalizeMean(meanSlopeLow,  cntLow);
-        maps.slope.allAS    = finalizeMean(meanSlopeAll,  cntAll);
-        maps.intercept.highAS = finalizeMean(meanIntHigh, cntHigh);
-        maps.intercept.lowAS  = finalizeMean(meanIntLow,  cntLow);
-        maps.intercept.allAS  = finalizeMean(meanIntAll,  cntAll);
+        mapsOut.slope.highAS   = finalizeMean(meanSlopeHigh, cntHigh);
+        mapsOut.slope.lowAS    = finalizeMean(meanSlopeLow,  cntLow);
+        mapsOut.slope.allAS    = finalizeMean(meanSlopeAll,  cntAll);
+        mapsOut.intercept.highAS = finalizeMean(meanIntHigh, cntHigh);
+        mapsOut.intercept.lowAS  = finalizeMean(meanIntLow,  cntLow);
+        mapsOut.intercept.allAS  = finalizeMean(meanIntAll,  cntAll);
     end
 
     function [meanM, countM] = updateMean(meanM, countM, newM, w)
