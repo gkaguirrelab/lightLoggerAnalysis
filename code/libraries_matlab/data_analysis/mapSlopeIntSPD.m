@@ -1,7 +1,7 @@
 function [slopeMap, interceptMap, frq] = ...
     mapSlopeIntSPD(v, fps, window, step, options)
 % Computes slope and intercept maps of temporal SPD across image regions
-% and projects them onto a 1 m visual field surface, then optionally plots both maps.
+% and projects them onto a 1 m visual field surface, then plots both maps.
 %
 % Required Inputs:
 %   v                 - [frames x rows x cols] video chunk (double)

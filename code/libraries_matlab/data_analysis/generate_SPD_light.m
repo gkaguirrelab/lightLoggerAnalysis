@@ -1,14 +1,12 @@
-%% FUNCTION TO OBTAIN SPD AND LIGHT LEVEL INFO FROM RECORDING ACROSS MULTIPLE CHUNKS
+%% FUNCTION TO OBTAIN SPD MAP INFO FOR/AND MINISPECT LIGHT LEVELS FROM RECORDING ACROSS MULTIPLE CHUNKS
 % 
 % Adjust settings as necessary.
-function maps = generate_SPD_light(directory, analyses_to_perform, visualize_results, options)
+function maps = generate_SPD_light(directory, analyses_to_perform, visualize_results)
 
     arguments
         directory {mustBeText} = '/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_data/lightLogger/HERO_sm/sophia_in_wild_7-22/sophia_in_wild_7-22_chunks'
         analyses_to_perform (1,3) logical = [false, true, false]
         visualize_results   (1,3) logical = [false, true,  false]
-        options.fisheyeIntrinsics = []
-        options.calibFile {mustBeText} = '/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_data/lightLogger/HERO_sm/SophiaGazeCalib2/W_mjpeg.avi'
     end
 
     % Define some constants about our analysis
@@ -19,6 +17,10 @@ function maps = generate_SPD_light(directory, analyses_to_perform, visualize_res
     centerRows = 121:360; 
     centerCols = 161:480; 
 
+    % predictable output shape
+    maps = struct('slope', struct('highAS', [], 'lowAS', [], 'allAS', []), ...
+              'intercept', struct('highAS', [], 'lowAS', [], 'allAS', []));
+
     % Sort the chunks in the directory numerically 
     files = sort_chunk_filenames(directory); 
     N_chunks = numel(files);
@@ -26,7 +28,7 @@ function maps = generate_SPD_light(directory, analyses_to_perform, visualize_res
     % Ensure if we want to run slope intercept maps, 
     % we also have done MS calculation 
     if analyses_to_perform(end) && ~analyses_to_perform(1)
-        error("Must perform MS analysis to do slope map analysis");
+        error("Must perform MS analysis to do slope map analysis.");
     end 
 
     % Analyze the MS-AS data over the course of the video
@@ -49,64 +51,8 @@ function maps = generate_SPD_light(directory, analyses_to_perform, visualize_res
         end 
     end 
 
-    % Iterate over the chunks 
-    for ii = 1:N_chunks
-        % Load in the given chunk 
-        C   = load(fullfile(files(ii).folder, files(ii).name), 'chunk');
-        ch  = C.chunk;
-        Vid = ch.W.v;
-        tAS = ch.M.t.AS(:);
-        AS7 = ch.M.v.AS(:,7);
-        Wt  = ch.W.t(:);
-
-        % interpolate AS onto each video frame time
-        AS_if = interp1(tAS, AS7, Wt, 'pchip', NaN);
-
-        % split into high vs low
-        hiIdx = AS_if >  thr;
-        loIdx = AS_if <= thr;
-
-        % Splice out the desired hi, lo frames 
-        vHi  = Vid(hiIdx,:,:);
-        vLo  = Vid(loIdx,:,:);
-        vAll = Vid;
-
-    end
-
-    % High AS maps on participant-space sphere
-    [slopeH, intH,   ~] = mapSlopeIntSPD(vHi, fsVid, [40,40], 20, 'doPlot', false);
-
-    % Low AS maps on participant-space sphere
-    [slopeL, intL,   ~] = mapSlopeIntSPD(vLo, fsVid, [40,40], 20, 'doPlot', false);
-
-    % All AS maps on participant-space sphere
-    [slopeA, intA,   ~] = mapSlopeIntSPD(Vid, fsVid, [40,40], 20, 'doPlot', false);
-
-    maps.slope     = struct('highAS', slopeH, 'lowAS', slopeL, 'allAS', slopeA);
-    maps.intercept = struct('highAS', intH,   'lowAS', intL,   'allAS', intA);
-
-    [SensorFigure, CameraFigure, EyeFigure] = coordinateTransformFinal( ...
-        options.fisheyeIntrinsics, 'interceptMap', 'highAS', maps, options.calibFile);    
-
-    % find common limits (COMMENTED OUT FOR COORDINATE TRANSFORM USE)
-    %{
-    vminSlope = min( [slopeHigh(:); slopeLow(:); slopeAll(:)] );
-    vmaxSlope = max( [slopeHigh(:); slopeLow(:); slopeAll(:)] );
-
-    vminInt   = min( [interceptHigh(:); interceptLow(:); interceptAll(:)] );
-    vmaxInt   = max( [interceptHigh(:); interceptLow(:); interceptAll(:)] );
-
-    % re-apply caxis and add titles
-    figure(hFigHighSlope);     caxis([vminSlope vmaxSlope]); title('1/f Slope Map - High AS', 'FontSize',16); set(gca,'FontSize',14); set(gcf,'color','white');
-    figure(hFigLowSlope);      caxis([vminSlope vmaxSlope]); title('1/f Slope Map - Low AS',  'FontSize',16); set(gca,'FontSize',14); set(gcf,'color','white');
-    figure(hFigAllSlope);      caxis([vminSlope vmaxSlope]); title('1/f Slope Map - All AS',  'FontSize',16); set(gca,'FontSize',14); set(gcf,'color','white');   
-
-    figure(hFigHighIntercept); caxis([vminInt   vmaxInt  ]); title('1/f Intercept Map - High AS', 'FontSize',16); set(gca,'FontSize',14); set(gcf,'color','white');
-    figure(hFigLowIntercept);  caxis([vminInt   vmaxInt  ]); title('1/f Intercept Map - Low AS',  'FontSize',16); set(gca,'FontSize',14); set(gcf,'color','white');
-    figure(hFigAllIntercept);  caxis([vminInt   vmaxInt  ]); title('1/f Intercept Map - All AS',  'FontSize',16); set(gca,'FontSize',14); set(gcf,'color','white'); 
-    %}
+    maps = obtain_slope_and_intercept_maps();
  
-
     % Local function to sort filenames from the directory 
     function files = sort_chunk_filenames(directory)
         % Retrieve the chunk filepaths for the video  (unsorted)
@@ -182,8 +128,8 @@ function maps = generate_SPD_light(directory, analyses_to_perform, visualize_res
         figure; hold on;
     
         % Legend anchors (so legend doesn’t list every chunk)
-        hHigh = plot(nan,nan,'r-','LineWidth',1.2,'DisplayName','High (>= thr)');
-        hLow  = plot(nan,nan,'b-','LineWidth',1.2,'DisplayName','Low (< thr)');
+        plot(nan,nan,'r-','LineWidth',1.2,'DisplayName','High (>= thr)');
+        plot(nan,nan,'b-','LineWidth',1.2,'DisplayName','Low (< thr)');
     
         % Iterate over all the chunks 
         % Plot all the AS7 data across all chunks 
@@ -253,9 +199,8 @@ function maps = generate_SPD_light(directory, analyses_to_perform, visualize_res
             AS7   = ch.M.v.AS(:,7);
             W_t   = ch.W.t(:);
             Vid   = ch.W.v;
-            [nFrames, nRows, nCols] = size(Vid);
-            fps = fsVid;
-            
+            [~, nRows, nCols] = size(Vid);
+
             % Create central and peripheral mask
             centerMask = false(nRows, nCols);
             centerMask(centerRows, centerCols) = true;
@@ -280,7 +225,7 @@ function maps = generate_SPD_light(directory, analyses_to_perform, visualize_res
                 end
                 as_val = mean(AS_if(idx));
                 isHi = as_val > thr;
-                fprintf('Chunk %d | t0 = %.2f | nnz(idx) = %d\n', i, t0, nnz(idx));
+                fprintf('Chunk %d | t0 = %.2f | nnz(idx) = %d\n', ii, t0, nnz(idx));
                 % -------- Whole-frame SPD (existing Hi/Lo path) --------
                 [P,f] = calcTemporalSPD(Vid(idx,:,:), fsVid, 'lineResolution', false);
                 fprintf(' → PSD size = [%d %d], freq range = [%.2f %.2f]\n', size(P), min(f), max(f));
@@ -288,6 +233,7 @@ function maps = generate_SPD_light(directory, analyses_to_perform, visualize_res
                 fprintf(' → # kept freqs = %d\n', nnz(keep));
                 frqLoc = f(keep);
                 spdLoc = P(keep);
+                
                 % 30HZ CENSOR
                 spdLoc(frqLoc==30) = NaN;
                 if numel(frqLoc) >= 2 && numel(spdLoc) >= 2
@@ -400,7 +346,76 @@ function maps = generate_SPD_light(directory, analyses_to_perform, visualize_res
     
     % Local function to obtain slope and intercept maps 
     function obtain_slope_and_intercept_maps()
+        % ===== Running means (lazy init after first chunk) ===== *********
+        meanSlopeHigh = [];  cntHigh = [];
+        meanIntHigh   = [];
+        meanSlopeLow  = [];  cntLow  = [];
+        meanIntLow    = [];
+        meanSlopeAll  = [];  cntAll  = [];
+        meanIntAll    = [];
 
-end
+        % Iterate over the chunks 
+        for ii = 1:N_chunks
+            % Load in the given chunk 
+            C   = load(fullfile(files(ii).folder, files(ii).name), 'chunk');
+            ch  = C.chunk;
+            Vid = ch.W.v;
+            tAS = ch.M.t.AS(:);
+            AS7 = ch.M.v.AS(:,7);
+            Wt  = ch.W.t(:);
+
+            % interpolate AS onto each video frame time
+            AS_if = interp1(tAS, AS7, Wt, 'pchip', NaN);
+    
+            % split into high vs low
+            hiIdx = AS_if >  thr;
+            loIdx = AS_if <= thr;
+
+            % --- HIGH ---
+            if any(hiIdx)
+                vHi = Vid(hiIdx,:,:);
+                [sH, iH] = mapSlopeIntSPD(vHi, fsVid, [40 40], 20, 'doPlot', false);
+                [meanSlopeHigh, cntHigh] = updateMean(meanSlopeHigh, cntHigh, sH, size(vHi,1));
+                [meanIntHigh,   ~      ] = updateMean(meanIntHigh,   cntHigh, iH, size(vHi,1)); % use same count
+                clear vHi sH iH
+            end
+    
+            % --- LOW ---
+            if any(loIdx)
+                vLo = Vid(loIdx,:,:);
+                [sL, iL] = mapSlopeIntSPD(vLo, fsVid, [40 40], 20, 'doPlot', false);
+                [meanSlopeLow, cntLow] = updateMean(meanSlopeLow, cntLow, sL, size(vLo,1));
+                [meanIntLow,   ~     ] = updateMean(meanIntLow,   cntLow, iL, size(vLo,1));
+                clear vLo sL iL
+            end
+    
+            % --- ALL ---
+            [sA, iA] = mapSlopeIntSPD(Vid, fsVid, [40 40], 20, 'doPlot', false);
+            [meanSlopeAll, cntAll] = updateMean(meanSlopeAll, cntAll, sA, size(Vid,1));
+            [meanIntAll,   ~     ] = updateMean(meanIntAll,   cntAll, iA, size(Vid,1));
+            clear sA iA Vid C ch
+        end
+
+        % Final maps (avoid div-by-zero)
+        maps.slope.highAS   = finalizeMean(meanSlopeHigh, cntHigh);
+        maps.slope.lowAS    = finalizeMean(meanSlopeLow,  cntLow);
+        maps.slope.allAS    = finalizeMean(meanSlopeAll,  cntAll);
+        maps.intercept.highAS = finalizeMean(meanIntHigh, cntHigh);
+        maps.intercept.lowAS  = finalizeMean(meanIntLow,  cntLow);
+        maps.intercept.allAS  = finalizeMean(meanIntAll,  cntAll);
+    end
+
+    function [meanM, countM] = updateMean(meanM, countM, newM, w)
+        if isempty(newM), return; end
+        if isempty(meanM), meanM=zeros(size(newM)); countM=zeros(size(newM)); end
+        valid = ~isnan(newM);
+        countM(valid) = countM(valid) + w;
+        delta = zeros(size(newM)); delta(valid) = newM(valid) - meanM(valid);
+        meanM(valid) = meanM(valid) + (w .* delta(valid)) ./ countM(valid);
+    end
+    
+    function out = finalizeMean(meanM, countM)
+        out = meanM; out(countM==0) = NaN;
+    end
 
 end
