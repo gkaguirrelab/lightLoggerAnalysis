@@ -4,7 +4,7 @@
 function maps = generate_SPD_light(directory, analyses_to_perform, visualize_results)
 
     arguments
-        directory {mustBeText} = '/Users/sophiamirabal/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_data/lightLogger/HERO_sm/sophia_in_wild_7-22/sophia_in_wild_7-22_chunks'
+        directory {mustBeText} = '/Users/sophiamirabal/Aguirre-Brainard Lab Dropbox/Sophia Mirabal/FLIC_data/lightLogger/HERO_sm/sophia_in_wild_7-22/sophia_in_wild_7-22_chunks'
         analyses_to_perform (1,3) logical = [false, true, false]
         visualize_results   (1,3) logical = [false, true,  false]
     end
@@ -40,7 +40,7 @@ function maps = generate_SPD_light(directory, analyses_to_perform, visualize_res
         end
     end
     if isnan(thr)  % Ensure we have a threshold for hi/lo split
-        [~,~,thr] = obtain_ms_high_low();
+        [~,~,thr,~] = obtain_ms_high_low(files, N_chunks);
     end 
     
     % Obtain the SPD data over all the chunks 
@@ -65,7 +65,7 @@ function maps = generate_SPD_light(directory, analyses_to_perform, visualize_res
     
         % Iterate over the filepaths and find the number 
         % per chunk 
-        for ii = 1:N_chunks
+        for ii = 2:N_chunks
             % Attempt to find the number in the chunk name
             match = regexp(files(ii).name, '^chunk_(\d+)\.mat$', 'tokens');
     
@@ -96,15 +96,14 @@ function maps = generate_SPD_light(directory, analyses_to_perform, visualize_res
     end 
     
     % Local function to plot MS high/ligh 
-    function [yHigh, yLow, thr, t_all] = obtain_ms_high_low(files, N_chunks, channelIdx)
-        if nargin < 3, channelIdx = 7; end
+    function [yHigh, yLow, thr, t_all] = obtain_ms_high_low(files, N_chunks)
         AS_all  = [];
         t_all   = [];
         
-        for ii = 1:N_chunks
+        for ii = 2:N_chunks
             C  = load(fullfile(files(ii).folder, files(ii).name), 'chunk');
             ch = C.chunk;
-            AS = ch.M.v.AS(:, channelIdx);
+            AS = ch.M.v.AS(:, 7);
             t  = ch.M.t.AS(:);
             AS_all = [AS_all; AS(:)];
             t_all  = [t_all;  t(:)];
@@ -169,7 +168,7 @@ function maps = generate_SPD_light(directory, analyses_to_perform, visualize_res
         allPer = nan(N_chunks, numel(f_int));
     
         % Iterate over the chunks of the video 
-        for ii = 1:N_chunks
+        for ii = 2:N_chunks
             % Load in the given chunk 
             C     = load(fullfile(files(ii).folder,files(ii).name),'chunk');
             ch    = C.chunk;
@@ -336,7 +335,7 @@ function maps = generate_SPD_light(directory, analyses_to_perform, visualize_res
         meanIntAll    = [];
 
         % Iterate over the chunks 
-        for ii = 1:N_chunks
+        for ii = 2:N_chunks
             % Load in the given chunk 
             C   = load(fullfile(files(ii).folder, files(ii).name), 'chunk');
             ch  = C.chunk;
