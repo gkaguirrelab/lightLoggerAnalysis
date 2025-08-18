@@ -34,18 +34,19 @@ function maps = generate_SPD_light(directory, analyses_to_perform, visualize_res
     % Analyze the MS-AS data over the course of the video
     thr = NaN; t_all = [];
     if analyses_to_perform(1) 
-        [yHigh, yLow, thr, t_all] = obtain_ms_high_low();
+        [yHigh, yLow, thr, t_all] = obtain_ms_high_low(files, N_chunks);
         if(visualize_results(1))
             plot_ms_high_low(yHigh, yLow, t_all, thr);
         end
     end
     if isnan(thr)  % Ensure we have a threshold for hi/lo split
-    [~,~,thr] = obtain_ms_high_low();
+        [~,~,thr] = obtain_ms_high_low();
     end 
     
     % Obtain the SPD data over all the chunks 
     if analyses_to_perform(2)
-        [globalAll, globalHi, globalLo, globalCen, globalPer, f_int] = obtain_SPD_data(); 
+        [globalAll, globalHi, globalLo, globalCen, globalPer, f_int] = ...
+            obtain_SPD_data(files, N_chunks, Twin, hop, fsVid, fMax, centerRows, centerCols, thr); 
         if(visualize_results(2))
             plot_SPD_data(globalAll, globalHi, globalLo, globalCen, globalPer, f_int); 
         end 
@@ -95,67 +96,57 @@ function maps = generate_SPD_light(directory, analyses_to_perform, visualize_res
     end 
     
     % Local function to plot MS high/ligh 
-    function [yHigh, yLow, thr, t_all]  = obtain_ms_high_low(files, N_chunks)
-        % Collect all AS7341 values across all chunks
-        AS7_all = [];
-        t_all = []; 
-    
-        % GET GLOBAL AVG ACROSS CHUNKS
+    function [yHigh, yLow, thr, t_all] = obtain_ms_high_low(files, N_chunks, channelIdx)
+        if nargin < 3, channelIdx = 7; end
+        AS_all  = [];
+        t_all   = [];
+        
         for ii = 1:N_chunks
-            % Load in the chunk 
-            C = load(fullfile(files(ii).folder, files(ii).name), 'chunk');
+            C  = load(fullfile(files(ii).folder, files(ii).name), 'chunk');
             ch = C.chunk;
-            
-            % Retrieve all the readings of the 7th channel of the AS chip and concat 
-            AS7 = ch.M.v.AS(:,7);
-            AS7_t = ch.M.t.AS; 
-            AS7_all = [AS7_all; AS7(:)];
-            t_all = [t_all; AS7_t(:)]; 
+            AS = ch.M.v.AS(:, channelIdx);
+            t  = ch.M.t.AS(:);
+            AS_all = [AS_all; AS(:)];
+            t_all  = [t_all;  t(:)];
         end
-    
-        % Find global min, max, and norm 
-        as_min = min(AS7_all);
-        as_max = max(AS7_all);
-        as_norm = (AS7_all - as_min) / (as_max - as_min);
-    
-        % Find a global threshold from all of the AS readings 
-        level_norm = graythresh(as_norm);  
-    
-        % convert back
-        thr = level_norm*(as_max - as_min) + as_min;
-
-        yHigh = AS7_all; yHigh(AS7_all <= thr_out) = NaN;
-        yLow  = AS7_all; yLow(AS7_all  >  thr_out) = NaN;
-
-        % Now, we do not need the AS7 all information anymore, clear to save memory 
-        clear AS7_all; 
-        clear t_all; 
+        
+        % global Otsu threshold in ORIGINAL SCALE
+        as_min   = min(AS_all);
+        as_max   = max(AS_all);
+        as_range = max(eps, as_max - as_min);
+        as_norm  = (AS_all - as_min) / as_range;
+        level    = graythresh(as_norm);
+        thr      = level * as_range + as_min;
+        
+        % split into high/low traces
+        yHigh = AS_all;  yHigh(AS_all <= thr) = NaN;
+        yLow  = AS_all;  yLow(AS_all  > thr)  = NaN;
     end 
     
     % Local function to plot the MS high/low results 
     function plot_ms_high_low(yHigh, yLow)
-        figure; 
+        figure; hold on;
     
         % Plot; hide handles so legend doesn’t get cluttered
-        plot(t_all, yHigh, 'r-', 'LineWidth', 1.0, 'HandleVisibility','off');
-        hold on; 
-        plot(t_all, yLow,  'b-', 'LineWidth', 1.0, 'HandleVisibility','off');
+        plot(t_all, yHigh, 'r-', 'LineWidth', 1.0); 
+        plot(t_all, yLow,  'b-', 'LineWidth', 1.0);
     
         % Axes, threshold line, labels, legend
         set(gca, 'YScale','log', 'FontSize',14, 'TickLength',[0.02 0.02]);
-        yline(thr, 'k--', 'HandleVisibility','off');
+        yline(thr, 'k--');
     
         xlabel('Time (s)', 'FontSize',14);
         ylabel('AS channel 7 (brightness)', 'FontSize',14);
         title('AS Brightness over Time (log scale)', 'FontSize',16, 'FontWeight','normal');
-        legend([hHigh hLow], 'Location','best');  % only two entries
+        legend([hHigh hLow], 'Location','best');
         set(gcf, 'color','white');
         hold off;
     
     end 
     
     % Local function to obtain SPD data 
-    function [globalAll, globalHi, globalLo, globalCen, globalPer, f_int] = obtain_SPD_data()
+    function [globalAll, globalHi, globalLo, globalCen, globalPer, f_int] = ...
+            obtain_SPD_data(files, N_chunks, Twin, hop, fsVid, fMax, centerRows, centerCols, thr)
         % BUILD COMMON FREQUENCY GRID
         % Use a nominal 10 s block from chunk 1 to get its frequency bins
         tmp = load(fullfile(files(1).folder,files(1).name),'chunk');
@@ -165,6 +156,7 @@ function maps = generate_SPD_light(directory, analyses_to_perform, visualize_res
         f_start = ceil(f_min);
         f_end = floor(fsVid / 2) - 1;
         f_int = (f_start : f_end)';
+        nFreq = numel(f_int);
     
         % We no longer need tmp, so clear it to save memory
         clear tmp; 
@@ -197,11 +189,11 @@ function maps = generate_SPD_light(directory, analyses_to_perform, visualize_res
             t0s     = (W_t(1)+Twin):hop:(W_t(end)-Twin);
             
             % accumulators
-            spdAll = [];
-            spdHi  = [];
-            spdLo  = [];
-            spdCen = [];
-            spdPer = [];
+            spdAll = zeros(0, nFreq);
+            spdHi  = zeros(0, nFreq);
+            spdLo  = zeros(0, nFreq);
+            spdCen = zeros(0, nFreq);
+            spdPer = zeros(0, nFreq);
             
             % PSD window loop. Loop over each t0 in t0s
             for t0 = t0s
@@ -212,6 +204,7 @@ function maps = generate_SPD_light(directory, analyses_to_perform, visualize_res
                 as_val = mean(AS_if(idx));
                 isHi = as_val > thr;
                 fprintf('Chunk %d | t0 = %.2f | nnz(idx) = %d\n', ii, t0, nnz(idx));
+                
                 % -------- Whole-frame SPD (existing Hi/Lo path) --------
                 [P,f] = calcTemporalSPD(Vid(idx,:,:), fsVid, 'lineResolution', false);
                 fprintf(' → PSD size = [%d %d], freq range = [%.2f %.2f]\n', size(P), min(f), max(f));
@@ -233,6 +226,7 @@ function maps = generate_SPD_light(directory, analyses_to_perform, visualize_res
                         end
                     end
                 end
+                
                 % -------- Center --------
                 [Pc, fc] = calcTemporalSPD(Vid(idx,:,:), fsVid, 'lineResolution', false, ...
                                         'regionMatrix', double(centerMask));
@@ -242,6 +236,7 @@ function maps = generate_SPD_light(directory, analyses_to_perform, visualize_res
                     PiC(f_int==30) = NaN;
                     spdCen(end+1,:) = PiC;
                 end
+                
                 % -------- Periphery --------
                 [Pp, fp] = calcTemporalSPD(Vid(idx,:,:), fsVid, 'lineResolution', false, ...
                                         'regionMatrix', double(peripheryMask));
