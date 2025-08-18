@@ -4,7 +4,7 @@
 function maps = generate_SPD_light(directory, analyses_to_perform, visualize_results)
 
     arguments
-        directory {mustBeText} = '/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_data/lightLogger/HERO_sm/sophia_in_wild_7-22/sophia_in_wild_7-22_chunks'
+        directory {mustBeText} = '/Users/sophiamirabal/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_data/lightLogger/HERO_sm/sophia_in_wild_7-22/sophia_in_wild_7-22_chunks'
         analyses_to_perform (1,3) logical = [false, true, false]
         visualize_results   (1,3) logical = [false, true,  false]
     end
