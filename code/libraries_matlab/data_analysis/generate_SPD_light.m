@@ -4,7 +4,7 @@
 function maps = generate_SPD_light(directory, analyses_to_perform, visualize_results)
 
     arguments
-        directory {mustBeText} = '/Users/sophiamirabal/Aguirre-Brainard Lab Dropbox/Sophia Mirabal/FLIC_data/lightLogger/HERO_sm/sophia_in_wild_7-22/sophia_in_wild_7-22_chunks'
+        directory {mustBeText} = '/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_data/lightLogger/HERO_sm/sophia_in_wild_7-22/sophia_in_wild_7-22_chunks'
         analyses_to_perform (1,3) logical = [false, true, false]
         visualize_results   (1,3) logical = [false, true,  false]
     end
@@ -61,11 +61,11 @@ function maps = generate_SPD_light(directory, analyses_to_perform, visualize_res
         N_chunks = numel(files); 
     
         % Preallocate cell array for storing (number, file) pairs
-        file_info = []; 
+        file_info = struct('number', {}, 'file', {}); 
     
         % Iterate over the filepaths and find the number 
         % per chunk 
-        for ii = 2:N_chunks
+        for ii = 1:N_chunks
             % Attempt to find the number in the chunk name
             match = regexp(files(ii).name, '^chunk_(\d+)\.mat$', 'tokens');
     
@@ -100,7 +100,7 @@ function maps = generate_SPD_light(directory, analyses_to_perform, visualize_res
         AS_all  = [];
         t_all   = [];
         
-        for ii = 2:N_chunks
+        for ii = 1:N_chunks
             C  = load(fullfile(files(ii).folder, files(ii).name), 'chunk');
             ch = C.chunk;
             AS = ch.M.v.AS(:, 7);
@@ -123,7 +123,7 @@ function maps = generate_SPD_light(directory, analyses_to_perform, visualize_res
     end 
     
     % Local function to plot the MS high/low results 
-    function plot_ms_high_low(yHigh, yLow)
+    function plot_ms_high_low(yHigh, yLow, t_all, thr)
         figure; hold on;
     
         % Plot; hide handles so legend doesn’t get cluttered
@@ -137,7 +137,7 @@ function maps = generate_SPD_light(directory, analyses_to_perform, visualize_res
         xlabel('Time (s)', 'FontSize',14);
         ylabel('AS channel 7 (brightness)', 'FontSize',14);
         title('AS Brightness over Time (log scale)', 'FontSize',16, 'FontWeight','normal');
-        legend([hHigh hLow], 'Location','best');
+        legend([yHigh yLow], 'Location','best');
         set(gcf, 'color','white');
         hold off;
     
@@ -168,7 +168,7 @@ function maps = generate_SPD_light(directory, analyses_to_perform, visualize_res
         allPer = nan(N_chunks, numel(f_int));
     
         % Iterate over the chunks of the video 
-        for ii = 2:N_chunks
+        for ii = 1:N_chunks
             % Load in the given chunk 
             C     = load(fullfile(files(ii).folder,files(ii).name),'chunk');
             ch    = C.chunk;
@@ -335,7 +335,7 @@ function maps = generate_SPD_light(directory, analyses_to_perform, visualize_res
         meanIntAll    = [];
 
         % Iterate over the chunks 
-        for ii = 2:N_chunks
+        for ii = 1:N_chunks
             % Load in the given chunk 
             C   = load(fullfile(files(ii).folder, files(ii).name), 'chunk');
             ch  = C.chunk;
