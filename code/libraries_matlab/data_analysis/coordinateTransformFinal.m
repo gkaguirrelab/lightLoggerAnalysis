@@ -1,4 +1,4 @@
-function [SensorFigure, CameraFigure, EyeFigure] = coordinateTransformFinal(fisheyeIntrinsics, myChoice, lightLevel, maps, calibFile)
+function [SensorFigure, CameraFigure, EyeFigure] = coordinateTransformFinal(fisheyeIntrinsics, maps, calibFile, myChoice, lightLevel)
 
     % Need to make available to this function the fisheye intrinsics, and the
     % set of "imgPts" and "worldPts".
@@ -17,11 +17,11 @@ function [SensorFigure, CameraFigure, EyeFigure] = coordinateTransformFinal(fish
     %}
     
     arguments
-        fisheyeIntrinsics = []
-        myChoice {mustBeMember(myChoice, {'worldImage', 'interceptMap', 'slopeMap'})}
+        fisheyeIntrinsics
+        maps 
+        calibFile
+        myChoice {mustBeMember(myChoice, {'worldImage', 'interceptMap', 'slopeMap'})} = 'interceptMap'
         lightLevel {mustBeMember(lightLevel, {'highAS', 'lowAS', 'allAS'})} = 'allAS'
-        maps struct
-        calibFile {MustBeText}
     end
 
     % Obtain the set of gaze calibration targets as seen by the world camera,
@@ -54,7 +54,7 @@ function [SensorFigure, CameraFigure, EyeFigure] = coordinateTransformFinal(fish
                 error('maps.intercept.%s is missing or empty.', lightLevel);
             end
             I = maps.intercept.(lightLevel);             % numeric matrix
-            myMap = 'hot';  barRange = [-3.5,-2]; gazePlotFlag = false;
+            myMap = 'hot';  barRange = [-3.5,-2.5]; gazePlotFlag = false;
 
         case 'slopeMap'
             if ~isfield(maps,'slope') || ~isfield(maps.slope,lightLevel)
@@ -191,6 +191,7 @@ function [imgPts, worldPts] = get_calibration_dots(calibFile)
     r = sqrt(x.^2 + y.^2);
     
     % world point coords
+    %% 
     worldPts = [ ...
             -20, -20;   -20, 0;   -20, 20;   -15, -15;  -15, 15; ...
             -10, -10;   -10, 0;   -10, 10;   -5, -5;    -5, 5;   ...
