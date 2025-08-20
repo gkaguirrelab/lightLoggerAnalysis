@@ -6,7 +6,7 @@ cal_data_path = '/FLIC_data/LightLogger_RadCal/W1P1M1/';
 
 %% 1. Plot AS & TS linearity
 % load the AS data
-light_logger_calibration_data = load([drop_box_base_dir, cal_data_path, 'MSOnly_TS_range_slightly_weird/ms_linearity_data.mat']);
+light_logger_calibration_data = load([drop_box_base_dir, cal_data_path, 'MS_linearity_data_rerun/ms_linearity_data.mat']);
 % Struct that has both metadata and parsed readings from the experiment
 
 % First, extract the broad subfields of the calibration information and the parsed readings
