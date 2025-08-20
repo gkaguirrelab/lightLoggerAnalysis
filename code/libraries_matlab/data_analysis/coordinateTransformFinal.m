@@ -48,13 +48,13 @@ function [SensorFigure, CameraFigure, EyeFigure] = coordinateTransformFinal(fish
             I = imread('/Users/zacharykelly/Downloads/exampleWorldImage.png');
             I = imresize(I,[480,640]);
             I = mean(I,3);
-            myMap = 'gray'; barRange = [0,255]; gazePlotFlag = true;
+            myMap = 'gray'; barRange = [0,255]; gazePlotFlag = false;
         case 'interceptMap'
             if ~isfield(maps,'intercept') || ~isfield(maps.intercept,lightLevel)
                 error('maps.intercept.%s is missing or empty.', lightLevel);
             end
             I = maps.intercept.(lightLevel);             % numeric matrix
-            myMap = 'hot';  barRange = [-3.5,-2.5]; gazePlotFlag = false;
+            myMap = 'hot';  barRange = [-3.5,-2]; gazePlotFlag = false;
 
         case 'slopeMap'
             if ~isfield(maps,'slope') || ~isfield(maps.slope,lightLevel)
@@ -85,7 +85,7 @@ function [SensorFigure, CameraFigure, EyeFigure] = coordinateTransformFinal(fish
     xlabel('sensor position [pixels]');
     ylabel('sensor position [pixels]');
     colorbar
-    clim(barRange);
+    %clim(barRange);
     
     % Now show what I looks like in the camera visual field coordinate space
     CameraFigure = figure;
@@ -98,7 +98,7 @@ function [SensorFigure, CameraFigure, EyeFigure] = coordinateTransformFinal(fish
     end
     title('Camera Image in Camera Visual Angle Coordinates')
     colorbar
-    clim(barRange);
+    %clim(barRange);
     
     % Transform the camera visual field points to eye rotation coordinate space
     % using the previously calculated tform
@@ -116,7 +116,7 @@ function [SensorFigure, CameraFigure, EyeFigure] = coordinateTransformFinal(fish
     end
     title('camera image in eye rotation coords')
     colorbar
-    clim(barRange);
+    %clim(barRange);
     
     % Plot this for 60 degree of eccentricity
     idx = vecnorm(eyeRotationCoordinates,2,2) > 60;
@@ -142,7 +142,7 @@ function [SensorFigure, CameraFigure, EyeFigure] = coordinateTransformFinal(fish
     xlabel('Visual angle [deg]');
     ylabel('Visual angle [deg]');
     colorbar
-    clim(barRange);
+    %clim(barRange);
 
 end
 

@@ -9,9 +9,9 @@ function [slopeMap, interceptMap, frq] = ...
 %   window            - [height width] of square region. Defaults to [40 40]
 %   step              - Step size for moving window. Defaults to 20
 %   doPlot            - (boolean) Visualize the SPD maps or not
-%   theta             - (radians) [rows x cols] elevation-from-optical-axis  (optional)
-%   phi               - (radians) [rows x cols] azimuth                      (optional)
-%   R                 - (radians) (scalar) radius                            (optional)
+%   theta             - (radians) [rows x cols] elevation-from-optical-axis
+%   phi               - (radians) [rows x cols] azimuth                    
+%   R                 - (radians) (scalar) radius                       
 %
 %
 % Optional:
@@ -75,7 +75,6 @@ for row = 1:step:(nRows - window(1) + 1)
             intercept3D(row:row+window(1)-1, col:col+window(2)-1, layer) = C(2);
         end
     end
-end
 
 slopeMap     = mean(slope3D,     3, 'omitnan');
 interceptMap = mean(intercept3D, 3, 'omitnan');
@@ -87,7 +86,7 @@ if options.doPlot
     X = reshape(R .* sin(options.theta) .* cos(options.phi), nRows, nCols);
     Y = reshape(R .* sin(options.theta) .* sin(options.phi), nRows, nCols);
     Z = reshape(R .* cos(options.theta),                     nRows, nCols);
-        
+
     % Plot slope map
     figure;
     surf(X, Y, Z, slopeMap, 'EdgeColor','none'); shading interp; lighting none;
@@ -100,4 +99,3 @@ if options.doPlot
 end
 
 end
-
