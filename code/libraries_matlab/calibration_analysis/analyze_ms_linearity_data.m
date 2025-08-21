@@ -341,7 +341,7 @@ for cc = 1:numel(chips)
 
         % Plot the data
         if opts.plotAllNDF
-            n_ndfs_to_plot = numel(calibration_metadata.NDFs)
+            n_ndfs_to_plot = numel(calibration_metadata.NDFs);
         else
             n_ndfs_to_plot = 5;
         end
