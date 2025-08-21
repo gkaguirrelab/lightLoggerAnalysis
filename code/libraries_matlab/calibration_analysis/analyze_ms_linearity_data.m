@@ -461,12 +461,15 @@ min_num_readings = inf;
 n_channels = 0;
 for ss = 1:num_settings_levels
     for nn = 1:n_measures
+
         % Extract this measurement struct
         measurement = measurements{NDF_num, ss, nn};
+        measurement_counts = 0;
 
         % Add the number of readings
         if(chip == "ASM7341")
-            min_num_readings = min(min_num_readings, size(measurement.M.v.AS, 1));
+            measurement_counts = measurement.M.v.AS; 
+
 
             % Save the total number of channels if we have not already
             if(n_channels == 0)
@@ -474,7 +477,7 @@ for ss = 1:num_settings_levels
             end
 
         else
-            min_num_readings = min(min_num_readings, size(measurement.M.v.TS, 1));
+            measurement_counts = measurement.M.v.TS; 
 
             % Save the total number of channels if we have not already
             if(n_channels == 0)
@@ -482,6 +485,124 @@ for ss = 1:num_settings_levels
             end
 
         end
+            
+        % Calculate the number of readings 
+        num_readings = size(measurement_counts, 1); 
+        if(num_readings == 0)
+            % Output a warning, because if this happens, it's evil and
+            % scary and we should probably fix the light logger to make
+            % this not happen, and also should know the data is synthetic. 
+            warning("Settings Level: %d | Measurement: %d has no readings. Generating synthetic datapoint from average", ss, nn); 
+            
+            % Collect the readings that are not missing. 
+            
+            % First, create a set of the number of measures
+            measurement_index_set = unique(1:n_measures); 
+
+            % Now, remove the definitely bad one from this set
+            good_candidates_idx = setdiff(measurement_index_set, nn);
+            good_candidates = measurements{NDF_num, ss, good_candidates_idx};
+                
+            % However, if our definitely bad one is number 1, 
+            % let's check to make sure the candidates are good themselves.
+            % Missing 1 datapoint is okay, more than 1, we should error 
+             
+
+            % First, let's go over the candidates and find the minimum 
+            % number of examples that they share between themselves 
+            min_shared_candidate_readings = inf; 
+            for candidate_idx_idx = 1:numel(good_candidates_idx)
+                 % Retrieve the index of the candidate 
+                candidate_idx = good_candidates_idx(candidate_idx_idx); 
+
+                % Retrieve the candidate measurement
+                candidate_measurement = measurements{NDF_num, ss, candidate_idx};
+
+                 % Initialize variable to hold good candidates readings 
+                candidate_counts = 0; 
+                
+                % Retrieve the readings for the chip 
+                if(chip == "ASM7341")
+                    candidate_counts = candidate_measurement.M.v.AS; 
+
+                else 
+                    candidate_counts = candidate_measurement.M.v.TS; 
+                end 
+
+                % If another example has no readings, this is really bad 
+                % so let's error 
+                if(size(candidate_counts, 1) == 0)
+                    error("Recording for settings level %d has multiple measurements without readings", ss); 
+                end
+
+                % Otherwise, calculate the new minimum shared size 
+                min_shared_candidate_readings = min(min_shared_candidate_readings, size(candidate_counts, 1)); 
+                    
+            end
+
+            % Initialize synthetic example. We will fill this in
+            % with the first good candidate and then sum the rest to this. 
+            % Then, we will element wise divide to make the average. 
+            synthetic_example = []; 
+
+            % Iterate over the candidates 
+            for candidate_idx_idx = 1:numel(good_candidates_idx)
+                % Retrieve the index of the candidate 
+                candidate_idx = good_candidates_idx(candidate_idx_idx); 
+                    
+                % Initialize variable to hold good candidates readings 
+                candidate_counts = 0; 
+
+                candidate_measurement = measurements{NDF_num, ss, candidate_idx};
+                   
+                % Retrieve the readings for the chip 
+                if(chip == "ASM7341")
+                    candidate_counts = candidate_measurement.M.v.AS; 
+
+                else 
+                    candidate_counts = candidate_measurement.M.v.TS; 
+                end 
+                
+                % If we are on the first index, simply save the matrix 
+                if(candidate_idx_idx == 1)
+                    synthetic_example = candidate_counts(1:min_shared_candidate_readings, :);    
+                    continue ; 
+                end 
+
+                 % Otherwise, we can start constructing the average between 
+                 % the candidates. So, let's add the readings from this 
+                 % candidate to the growing list                     
+                 synthetic_example = synthetic_example + candidate_counts(1:min_shared_candidate_readings, :);
+                   
+            end 
+
+            % Now, take the average of all channels for the synthetic 
+            % example 
+            synthetic_example  = synthetic_example ./ numel(good_candidates_idx);
+            
+            % Assign the synthetic example to this datapoint
+            measurement_counts = synthetic_example; 
+
+            % Now, we need to save this back into the measurements array 
+            % because we iterate over it again 
+            if(chip == "ASM7341")
+               measurement.M.v.AS = measurement_counts; 
+            else 
+               measurement.M.v.TS = measurement_counts; 
+            end 
+            
+            % Resave the edited measurement. 
+            measurements{NDF_num, ss, nn} = measurement;
+                
+
+        end 
+
+        % Recalculate the number of readings, now that we have 
+        % potentially filled in with a synthetic example
+        num_readings = size(measurement_counts, 1); 
+
+        % Calculate the min number of readings 
+        min_num_readings = min(min_num_readings, num_readings);
     end
 end
 
