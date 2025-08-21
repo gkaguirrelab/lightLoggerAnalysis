@@ -39,10 +39,11 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements, opts)
 %                                 ms linearity readings
 %                              
 %   opts                        - struct for options.
-%                                    plotSettingLevel - bool for whether to
+%                                    -plotSettingLevel - bool for whether to
 %                                    plot all the mod settings for each
 %                                    channel.
-% Examples:
+%                                   -plotAllNDF - bool for whether to plot
+%                                   all NDFs(true) or just 0-5(false)
 %{
     path_to_experiment = "/example/path"; 
     converted_light_logger_data = convert_light_logger_calibration_data(path_to_experiment, true, true true, true); 
@@ -52,6 +53,7 @@ arguments
     calibration_metadata; % Struct representing the metadata for the ms_linearity calibration measurement
     measurements; % Parsed and converted recordings from the light logger
     opts.plotSettingLevel logical = false;
+    opts.plotAllNDF logical = true;
 end
 
     % Save the path to CombiExperiments. We will use this as a relative
@@ -338,7 +340,12 @@ for cc = 1:numel(chips)
         NDF_data = zeros(1, numel(calibration_metadata.NDFs));
 
         % Plot the data
-        for nn = 1:numel(calibration_metadata.NDFs)
+        if opts.plotAllNDF
+            n_ndfs_to_plot = numel(calibration_metadata.NDFs)
+        else
+            n_ndfs_to_plot = 5;
+        end
+        for nn = 1:n_ndfs_to_plot
             NDF_measured_predicted = measured_predicted_by_NDF{nn};
             measured = NDF_measured_predicted{1};
             predicted = NDF_measured_predicted{2} * pi; % converts radiance to irradiance
@@ -492,7 +499,7 @@ for ss = 1:num_settings_levels
             % Output a warning, because if this happens, it's evil and
             % scary and we should probably fix the light logger to make
             % this not happen, and also should know the data is synthetic. 
-            warning("Settings Level: %d | Measurement: %d has no readings. Generating synthetic datapoint from average", ss, nn); 
+            warning("NDF: %d | Settings Level: %d | Measurement: %d has no readings. Generating synthetic datapoint from average", NDF_num-1, ss, nn); 
             
             % Collect the readings that are not missing. 
             
