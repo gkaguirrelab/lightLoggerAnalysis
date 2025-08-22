@@ -28,9 +28,13 @@ def extract_eye_features(video: str | np.ndarray,
                          visualize_results: bool=False,
                         ) -> list[dict]:
     # First, read in the video and extract it as frames (if not already provided as frames)
-    if(not isinstance(video, np.ndarray)):
+    if(isinstance(video, str)):
         video: np.ndarray = Pi_util.destruct_video(video, is_grayscale=is_grayscale)
 
+    # If video is not np.array, make it one 
+    if(not isinstance(video, np.ndarray)):
+        video: np.ndarray = np.array(video, dtype=np.uint8)
+        
     # If the video is not grayscale, convert to grayscale 
     if(len(video.shape) > 3):
         pass 
