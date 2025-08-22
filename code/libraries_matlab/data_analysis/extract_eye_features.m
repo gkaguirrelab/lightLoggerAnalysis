@@ -5,12 +5,13 @@ function eye_features = extract_eye_features(video, is_grayscale, visualize_resu
 %   eye_features = extract_eye_features(video, is_grayscale, visualize_results)
 %t
 % Description:
-%   TODO 
+%   Given a path to a video or an array of the frames of a video, 
+%   extract eye features from each frame (pupil position, gaze angle, etc).  
 %
 % Inputs:
-%   video                 - tx480x640 array of 8 bit unsigned integers.
-%                           This is a "chunk" of the world camera video
-%   is_grayscale          - Logical. TODO
+%   video                 - Text or Double. Path to the video to analyze 
+%                           or the video as an array of frames. 
+%   is_grayscale          - Logical. If the video is grayscale 
 %   visualize_results     - Logical. TODO 
 %
 % Outputs:
@@ -56,7 +57,7 @@ function converted = convert_feature_dict(feature_dict_py)
     fields_to_convert = {"sphere", "projected_sphere", "circle_3d", "ellipse"};
     for ff = 1:numel(fields_to_convert)
         % Retrieve the field name 
-        field_name = fields_to_convert{ff};
+        field_name = fields_to_convert{ff}; 
 
         % Retrive the field (which is a subdict)
         field = struct(converted.(field_name));

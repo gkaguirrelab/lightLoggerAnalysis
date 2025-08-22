@@ -70,7 +70,7 @@ function convert_recording_to_matlab(path_to_recording, output_path,...
     use_mean_frame = false; 
     convert_time_units = true; 
     convert_to_floats = true; 
-    convert_recording_to_matlab(path_to_recording, output_path, apply_digital_gain, use_mean_frame, convert_time_units, convert_to_floats, mean_axes, contains_agc_metadata, password)
+    convert_recording_to_matlab(path_to_experiment, output_path, apply_digital_gain, use_mean_frame, convert_time_units, convert_to_floats)
 %}                                    
     arguments 
         path_to_recording {mustBeText}; % Path to the recording file full of chunks 

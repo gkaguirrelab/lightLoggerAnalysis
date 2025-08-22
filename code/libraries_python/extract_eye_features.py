@@ -1,5 +1,6 @@
 import sys 
 import os
+import cv2
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import numpy as np
@@ -34,10 +35,14 @@ def extract_eye_features(video: str | np.ndarray,
     # If video is not np.array, make it one 
     if(not isinstance(video, np.ndarray)):
         video: np.ndarray = np.array(video, dtype=np.uint8)
-        
+
     # If the video is not grayscale, convert to grayscale 
     if(len(video.shape) > 3):
-        pass 
+        video = np.array([cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) 
+                          for frame in video
+                         ], 
+                         dtype=np.uint8
+                        )
 
     # Create 2D detector from pupil labs 
     detector_2d: object = Detector2D()
