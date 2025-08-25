@@ -1,5 +1,5 @@
 function chunks = parse_chunks(path_to_experiment,...
-                               apply_digital_gain, use_mean_frame, convert_time_units, convert_to_floats,...
+                               apply_digital_gain, use_mean_frame, convert_time_units, convert_to_floats, apply_phase_correction,...
                                time_ranges, chunk_ranges, mean_axes, contains_agc_metadata,...
                                verbose, password...
                               )
@@ -7,7 +7,7 @@ function chunks = parse_chunks(path_to_experiment,...
 %
 % Syntax:
 % chunks = parse_chunks(path_to_experiment, ...
-%                                apply_digital_gain, use_mean_frame, convert_time_units, convert_to_floats,...
+%                                apply_digital_gain, use_mean_frame, convert_time_units, convert_to_floats, apply_phase_correction,...
 %                                time_ranges, chunk_ranges, mean_axes, contains_agc_metadata,...
 %                                password...
 %                               )
@@ -19,58 +19,62 @@ function chunks = parse_chunks(path_to_experiment,...
 %   with all data converted to native MATLAB types. 
 %
 % Inputs:
-%   path_to_experiment    - String. The path to the suprafile 
-%                           containing all of the chunks 
+%   path_to_experiment     - String. The path to the suprafile 
+%                            containing all of the chunks 
 %
 %
-%   apply_digital_gain    - Logical. Whether or not to apply 
-%                           each frame's associated digital gain
-%                           scalar
+%   apply_digital_gain     - Logical. Whether or not to apply 
+%                            each frame's associated digital gain
+%                            scalar
 %
-%   use_mean_frame        - Logical. Whether to only use the mean 
-%                           pixel value from each frame for each 
-%                           of the camera-based sensors.
+%   use_mean_frame         - Logical. Whether to only use the mean 
+%                            pixel value from each frame for each 
+%                            of the camera-based sensors.
 %
-%   convert_time_units    - Logical. Whether to convert the 
-%                           timestamps from different sensors 
-%                           all into the same units (s).
+%   convert_time_units     - Logical. Whether to convert the 
+%                            timestamps from different sensors 
+%                            all into the same units (s).
 % 
-%   convert_to_floats     - Logical. Whether to convert all 
-%                           of the Python np.arrays to float types. 
-%                           Can make things easier coming to MATLAB
+%   convert_to_floats      - Logical. Whether to convert all 
+%                            of the Python np.arrays to float types. 
+%                            Can make things easier coming to MATLAB
 %
-%   time_ranges           - Struct. Represents the selected 
-%                           range of time to parse. Form is 
-%                           a struct with fields (WPM)
-%                           where each field is a tuple 
-%                           of a range [start, end). 
+%   apply_phase_correction - Logical. Whether or not to apply
+%                            our calculated offsets between sensors 
+%                            to their time vectors. 
 %
-%   chunk_ranges          - Struct. Represents the selected 
-%                           range of chunks to parse. Form is 
-%                           a struct with fields (WPM)
-%                           where each field is a tuple 
-%                           of a range [start, end). Note:
-%                           the use of this and time_ranges is
-%                           exclusively OR. 0-indexed. 
+%   time_ranges            - Struct. Represents the selected 
+%                            range of time to parse. Form is 
+%                            a struct with fields (WPM)
+%                            where each field is a tuple 
+%                            of a range [start, end). 
 %
-%   mean_axes             - Struct. Represents the axes to mean 
-%                           over when use_mean_frame is true. 
-%                           Only applies to camera senors. Form
-%                           is a struct with fields (WPM) 
-%                           where each field is a tuple of axes. 
-%                           0-indexed.
+%   chunk_ranges           - Struct. Represents the selected 
+%                            range of chunks to parse. Form is 
+%                            a struct with fields (WPM)
+%                            where each field is a tuple 
+%                            of a range [start, end). Note:
+%                            the use of this and time_ranges is
+%                            exclusively OR. 0-indexed. 
 %
-%   contains_agc_metdata  - Struct. Represents whether a sensor 
-%                           has or does not have AGC metadata
-%                           for a given recording. Form is 
-%                           a struct with fields (WPM) where 
-%                           each field is a boolean.
+%   mean_axes              - Struct. Represents the axes to mean 
+%                            over when use_mean_frame is true. 
+%                            Only applies to camera senors. Form
+%                            is a struct with fields (WPM) 
+%                            where each field is a tuple of axes. 
+%                            0-indexed.
 %
-%   verbose               - Logical. Whether or not to print progress 
-%                           to the terminal. 
+%   contains_agc_metdata   - Struct. Represents whether a sensor 
+%                            has or does not have AGC metadata
+%                            for a given recording. Form is 
+%                            a struct with fields (WPM) where 
+%                            each field is a boolean.
+%
+%   verbose                - Logical. Whether or not to print progress 
+%                            to the terminal. 
 %
 %   password               - String. Represents the password 
-%                            used to encrypt the data (if encrypted)
+%                             used to encrypt the data (if encrypted)
 %
 % Outputs:
 %
@@ -85,8 +89,9 @@ function chunks = parse_chunks(path_to_experiment,...
     use_mean_frame = false; 
     convert_time_units = true; 
     convert_to_floats = true; 
+    apply_phase_correction = true; 
     time_ranges = false; 
-    chunks = parse_chunks(path_to_experiment, apply_digital_gain, use_mean_frame, convert_time_units, convert_to_floats, time_ranges); 
+    chunks = parse_chunks(path_to_experiment, apply_digital_gain, use_mean_frame, convert_time_units, convert_to_floats, apply_phase_correction, time_ranges); 
 %}
 
     % Parse and validate the input arguments
@@ -96,6 +101,7 @@ function chunks = parse_chunks(path_to_experiment,...
         use_mean_frame {mustBeNumericOrLogical} = false; % Whether to use the mean frame from the camera sensors or the entire frames 
         convert_time_units {mustBeNumericOrLogical} = false; % Whether to convert different time units from the different sensors all to seconds 
         convert_to_floats {mustBeNumericOrLogical} = false; % Whether to convert the Python np.arrays to float types. Can make things easier coming to MATLAB
+        apply_phase_correction {mustBeNumericOrLogical} = false; % Whether or not to apply our calculated phase offsets to the sensor's t vectors
         time_ranges = false; % The timestamps to splice out of a video in the form [start, end) (relative to start of the video)
         chunk_ranges = false; % The chunk numbers to splice out of a video in the form [start, end] (0-indexed)
         mean_axes = false; % The axes per sensor to apply mean over if we want to take some sort of mean. Note: ONLY for camera sensors  
@@ -168,7 +174,7 @@ function chunks = parse_chunks(path_to_experiment,...
 
     % Parse the experiment using Python and return as py.list
     chunks_as_py = Pi_util.parse_chunks(path_to_experiment,...
-                                        apply_digital_gain, use_mean_frame, convert_time_units, convert_to_floats,...
+                                        apply_digital_gain, use_mean_frame, convert_time_units, convert_to_floats, apply_phase_correction,...
                                         time_ranges, chunk_ranges, mean_axes, contains_agc_metadata,...
                                         password...
                                        );
