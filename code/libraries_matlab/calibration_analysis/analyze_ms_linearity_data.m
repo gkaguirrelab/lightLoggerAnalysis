@@ -27,17 +27,17 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements, opts)
 % Outputs:
 %
 %   NONE
-%   Given the parsed and converted metadata for an ms linearity 
-%   calibration measurement, analyze the data and plot the MS 
-%   linearity across NDF levels. 
-%   
+%   Given the parsed and converted metadata for an ms linearity
+%   calibration measurement, analyze the data and plot the MS
+%   linearity across NDF levels.
+%
 % Inputs:
-%   calibration_metadata        - Struct. Converted metadata for 
-%                                 the ms linearity reading 
-%   
-%   measurements                - Cell. The parsed + converted 
+%   calibration_metadata        - Struct. Converted metadata for
+%                                 the ms linearity reading
+%
+%   measurements                - Cell. The parsed + converted
 %                                 ms linearity readings
-%                              
+%
 %   opts                        - struct for options.
 %                                    -plotSettingLevel - bool for whether to
 %                                    plot all the mod settings for each
@@ -54,11 +54,13 @@ arguments
     measurements; % Parsed and converted recordings from the light logger
     opts.plotSettingLevel logical = false;
     opts.plotAllNDF logical = true;
+    opts.plotIllum logical = false;
+    opts.save_illum_to_MS logical = false;
 end
 
-    % Save the path to CombiExperiments. We will use this as a relative
-    % path to find other files
-    combiExperiments_path = getpref('lightLoggerAnalysis', 'combiExperiments_path');
+% Save the path to CombiExperiments. We will use this as a relative
+% path to find other files
+combiExperiments_path = getpref('lightLoggerAnalysis', 'combiExperiments_path');
 
 % Load the minispect SPDs
 spectral_sensitivity_map = containers.Map({'ASM7341', 'TSL2591'},...
@@ -136,10 +138,11 @@ wls_CIE_Y2 = SToWls(S_CIE_Y2); % convert to wavelength
 % First, let's iterate over the chips
 chips = keys(spectral_sensitivity_map);
 for cc = 1:numel(chips)
+
     % Retrieve the name of the chip we are analyzing
     chip = chips{cc};
 
-    % Grab the channels of the chip we are fitting;
+    % Grab the channels of the chip we are fitting
     n_detector_channels = n_channels_map(chip);
 
     % Retrieve the limits for this chip
@@ -154,8 +157,7 @@ for cc = 1:numel(chips)
         title(counts_by_NDF_tiled, sprintf("Counts by NDF Level | C: %s", chip), 'FontWeight', 'Bold');
 
         % Create a tabbed figure with one tab per NDF level.
-        % Each tab will have all of a given chip's channels on it
-        % for that NDF
+        % Each tab will have all of a given chip's channels on it for that NDF
         uif = uifigure('Name', sprintf("%s Channel Linearity Per NDF", chip));
         tab_group = uitabgroup(uif);
     end
@@ -163,13 +165,14 @@ for cc = 1:numel(chips)
     % Initialize a cell array that will hold the measured/predicted value by NDF
     measured_predicted_by_NDF = {};
 
-    % Next, iterate over the NDF levels
+    % Iterate over the NDF levels
     for nn = 1:numel(calibration_metadata.NDFs)
+
         % Retrieve the current NDF
         NDF = calibration_metadata.NDFs(nn);
 
         if opts.plotSettingLevel
-            % Creat a new tab for this NDF for measured/predicted plot
+            % Create a new tab for this NDF for measured/predicted plot
             tab = uitab(tab_group, 'Title', sprintf("NDF %.2f", NDF));
 
             % Define a tiled layout that will go in this tab
@@ -177,238 +180,192 @@ for cc = 1:numel(chips)
             measured_predicted_tiled = tiledlayout(tab, rows, cols);
         end
 
-        % Let's retrieve the cal file for this NDF
+        % Retrieve the cal file for this NDF
         cal = calibration_metadata.cal_files{nn};
 
-        % Get the source from the cal file, as we need this to resample the
-        % detector spectral sensitivity functions
-        % TO DO update code so rawData is available
-        %sourceS = cal.rawData.S; % This is the baseCal adjusted for transmitence
-        %in the meantime, hardcoded
+        % Get the source from the cal file
         sourceS = [380 2 201];
-
-        % Extract information regarding the light source that was used to
-        % calibrate the minispect
         sourceP_abs = cal.processedData.P_device;
 
         % Retrieve the wavelengths
         wls = SToWls(sourceS);
 
-        % Reformat the minispect SPDs to be in the space of
-        % the source SPDs
+        % Reformat minispect SPDs
         minipspectP_rels_map = reformat_SPDs(spectral_sensitivity_map, sourceS);
 
-        % Initialize a summation variable for the detector counts
-        % as we are going to average them over the reps
+        % Initialize detector counts
         sum_detector_counts = 0;
-
-        % Initialize the predictedCounts variable to some value.
-        % this is to have it in scope for use later.
         predictedCounts = 0;
 
-        % Find the associated detectorP_rel for this chip
+        % Find associated detectorP_rel
         detectorP_rel = minipspectP_rels_map(chip);
 
-        % Extract all of the counts from the sorted measurements
-        % This gives you a settings x measurement x readings x channels
-        % matrix
+        % Extract detector counts
         detector_counts = extract_detector_counts(nn, measurements, chip);
 
-        % Now, let's take the mean across measurements (the number of times)
-        % we exposed this settings level as well as the mean across readings
-        % the number of readings at each measurement. We may later be
-        % interested in the variability across the set of measures.
-        % This gives you a mat of settings level x count
+        % Average across measurements and readings
         detector_counts = squeeze(mean(detector_counts, [2, 3]));
 
         if opts.plotSettingLevel
-            % Plot the detector counts across settings levels
-            counts_ax = nexttile(counts_by_NDF_tiled) ;
-
+            % Plot detector counts across settings levels
+            counts_ax = nexttile(counts_by_NDF_tiled);
             title(counts_ax, sprintf("Averaged Counts by Settings Level | NDF %.3f", NDF));
             hold(counts_ax, 'on');
+
             for ch = 1:n_detector_channels
                 plot(counts_ax, background_scalars, detector_counts(:, ch), "-x", 'DisplayName', sprintf("Ch%d", ch));
             end
 
-            % Label the plot
             xlabel(counts_ax, "Settings Level");
             ylabel(counts_ax, "Averged Count");
-
-            % Show the legend for the plot
             legend(counts_ax, 'Location', 'best');
             hold(counts_ax, 'off');
         end
 
-        % Initialize variables to calculate the predicted counts
+        % Initialize predicted counts and illuminance
         sphereSPDs = nan(n_settings_levels, sourceS(3));
         predictedCounts = nan(n_settings_levels, n_detector_channels);
-
-        %resample luminous efficacy function in same space as S (wavelengths)
         T_CIE_Y2_resamp = interp1(wls_CIE_Y2, T_CIE_Y2, wls, 'linear', 0);
 
-        % Iterate over the primary steps, that is, the number of scalars
-        % in radiance
         for ss = 1:n_settings_levels
-            % Get the source settings by multiplying background
-            % by the scalar value at primaryStep kk
             source_settings = background * background_scalars(ss);
+            sphereSPDs(ss,:) = ( (sourceP_abs*source_settings') / sourceS(2) );
 
-            % Derive the sphereSPD for this step in units of W/m2/sr/nm. We divide
-            % by the nanometer sampling given in S to cast the units as nm, as
-            % opposed to (e.g.) per 2 nm.
-            sphereSPDs(ss,:) = ( (sourceP_abs*source_settings')/sourceS(2) );
-
-            %Calc illuminance
-            %first, convert to irradiance
-            sphereIrrad(ss,:) = sphereSPDs(ss,:).*pi;
+            sphereIrrad(ss,:) = sphereSPDs(ss,:) .* pi;
             irradXCIE(ss,:) = sphereIrrad(ss,:) .* T_CIE_Y2_resamp';
             integratedIrradXCIE(ss) = sum(irradXCIE(ss,:));
-            % Multiply this integrated value by the “maximum luminous efficacy” value,
-            % which converts from Watts to lumens. This value is 683 lumen/Watt.
-            %result is the illuminance in units of lux (lumen / m2).
-            illum(ss) = integratedIrradXCIE(ss)*683;
+            illum(ss) = integratedIrradXCIE(ss) * 683;
 
-            % Derive the prediction of the relative counts based upon the sphereSPD
-            % and the minispectP_rel.
-            predictedCounts(ss,:) = sphereSPDs(ss,:)*detectorP_rel;
+            predictedCounts(ss,:) = sphereSPDs(ss,:) * detectorP_rel;
+        end
 
-        end % End n_primary steps
-
-        % Retrieve the measured/predicted counts for this chip
-        % at this NDF level
         measured = detector_counts;
         predicted = predictedCounts;
 
         if opts.plotSettingLevel
-            % Next, we will plot the measured and predicted counts per channel
             for ch = 1:n_detector_channels
-                % Retrieve the ax to plot on
                 measured_predicted_ax = nexttile(measured_predicted_tiled);
 
-                % Plot the measured vs predicted data
                 plot(measured_predicted_ax, log10((predicted(:, ch)).*pi), log10(measured(:, ch)), '-x', 'DisplayName', 'Data');
                 hold(measured_predicted_ax, 'on');
 
-                % Fit a linear model, but only to the "good" points (i.e., those
-                % that are finite and not at the ceiling or floor. We also exclude
-                % the points measured using the ND6 filter, as we do not have an
-                % independent measure of the spectral transmittance of these.
                 p = polyfit(log10(predicted(:, ch)), log10(measured(:, ch)), 1);
                 fitY = polyval(p, log10(predicted(:, ch)));
-                plot(measured_predicted_ax, (log10(predicted(:, ch)).*pi), fitY, '-r', 'DisplayName', 'Fit');
+                plot(measured_predicted_ax, log10(predicted(:, ch)).*pi, fitY, '-r', 'DisplayName', 'Fit');
 
-                % Add a reference line
-                plot(measured_predicted_ax, [limits(1),limits(2)],[limits(1),limits(2)],':k', "DisplayName", "ReferenceLine");
+                plot(measured_predicted_ax, [limits(1), limits(2)], [limits(1), limits(2)], ':k', "DisplayName", "ReferenceLine");
 
-                % Pretty up the plot
                 xlim(measured_predicted_ax, limits);
                 xlabel(measured_predicted_ax, sprintf('%s predicted irradiance [log]', chip));
                 ylim(measured_predicted_ax, limits);
                 ylabel(measured_predicted_ax, sprintf('%s measured counts [log]', chip));
 
                 legend(measured_predicted_ax, 'Location','best');
-
-                title(measured_predicted_ax, sprintf('channel %d, [slope intercept] = %2.2f, %2.2f',ch, p));
-
+                title(measured_predicted_ax, sprintf('channel %d, [slope intercept] = %2.2f, %2.2f', ch, p));
                 hold(measured_predicted_ax, 'off');
             end
         end
 
-        % Save the measured and predicted at this NDF
         measured_predicted_by_NDF{nn} = {measured, predicted};
-        predicted_Illum_by_NDF(cc,nn,:) = illum;
+        PR670_Illum_by_NDF(cc,nn,:) = illum;
 
-    end  % NDF loop
+    end % NDF loop
 
-    % Now, plot linearity across all NDF levels for a given chip
+    % Plot linearity across all NDF levels for a given chip
     [rows, cols] = find_min_figsize(n_detector_channels);
-    % figure;
-    % across_NDF_figure = tiledlayout(rows, cols);
-    % title(sprintf("Measured vs Predicted across NDF | C: %s", chip), 'FontWeight', 'Bold');
+    % channeels we care about, coeffs(slope, intercept)
+    if cc ==1
+        illum_to_MS = nan((n_detector_channels - 1), 2);
+    end
 
-
-    % Iterate over the channels
     for ch = 1:n_detector_channels
         figure;
-        % Retrieve the axes to plot on
-        %across_NDF_channel_ax = nexttile(across_NDF_figure);
         across_NDF_channel_ax = axes;
         hold(across_NDF_channel_ax, 'on');
 
-        % Retrieve the values per NDF level
-        NDF_data = zeros(1, numel(calibration_metadata.NDFs));
-
-        % Plot the data
         if opts.plotAllNDF
             n_ndfs_to_plot = numel(calibration_metadata.NDFs);
         else
             n_ndfs_to_plot = 5;
         end
-        for nn = 1:n_ndfs_to_plot
-            NDF_measured_predicted = measured_predicted_by_NDF{nn};
-            measured = NDF_measured_predicted{1};
-            predicted = NDF_measured_predicted{2} * pi; % converts radiance to irradiance
 
-            h = scatter(across_NDF_channel_ax,...
-                log10(predicted(:, ch)), log10(measured(:, ch)),...
-                'o','MarkerFaceColor', colorList(nn,:), 'DisplayName', sprintf("NDF%.1g (%.2f lux)", calibration_metadata.NDFs(nn), round(predicted_Illum_by_NDF(cc,nn,5),2,"significant"))...
-                );
+        if ~opts.plotIllum
+            for nn = 1:n_ndfs_to_plot
+                NDF_measured_predicted = measured_predicted_by_NDF{nn};
+                measured = NDF_measured_predicted{1};
+                predicted = NDF_measured_predicted{2} * pi;
 
-            h.MarkerFaceAlpha = 0.4;
-            h.MarkerEdgeAlpha = 0.4;
-            hold(across_NDF_channel_ax, 'on');
+                h = scatter(across_NDF_channel_ax, ...
+                    log10(predicted(:, ch)), log10(measured(:, ch)), ...
+                    'o', 'MarkerFaceColor', colorList(nn,:), ...
+                    'DisplayName', sprintf("NDF%.1g (%.2f lux)", calibration_metadata.NDFs(nn), round(PR670_Illum_by_NDF(cc,nn,5), 2, "significant")));
+
+                h.MarkerFaceAlpha = 0.4;
+                h.MarkerEdgeAlpha = 0.4;
+            end
+
+            plot(across_NDF_channel_ax, [limits(1), limits(2)], [limits(1), limits(2)], ':k', "DisplayName", "IdentityLine");
+
+            title(across_NDF_channel_ax, sprintf("Channel %d", ch));
+            xlim(across_NDF_channel_ax, limits);
+            xlabel(across_NDF_channel_ax, sprintf('%s predicted irradiance [log]', chip));
+            ylim(across_NDF_channel_ax, limits);
+            ylabel(across_NDF_channel_ax, sprintf('%s measured counts [log]', chip));
+
+            legend(across_NDF_channel_ax, 'Location', 'bestoutside');
+            set(gca, 'box', 'off', 'color', 'none');
+            set(gcf, 'color', 'w');
+        else
+            for nn = 1:n_ndfs_to_plot
+                NDF_measured_predicted = measured_predicted_by_NDF{nn};
+                measured = NDF_measured_predicted{1};
+                measured_all_NDF_this_chip(nn,:) = measured(:, ch);
+
+                p = scatter(across_NDF_channel_ax, ...
+                    squeeze(log10(PR670_Illum_by_NDF(cc,nn,:))), ...
+                    squeeze(log10(measured(:, ch))), ...
+                    'o', 'MarkerFaceColor', colorList(nn,:), ...
+                    'DisplayName', sprintf("NDF%.1g (%.2f lux)", calibration_metadata.NDFs(nn), round(PR670_Illum_by_NDF(cc,nn,5), 2, "significant")));
+
+                p.MarkerFaceAlpha = 0.4;
+                p.MarkerEdgeAlpha = 0.4;
+            end
+
+            set(across_NDF_channel_ax, 'YLim', limits);
+            set(across_NDF_channel_ax, 'XLimMode', 'auto');
+            xlabel(across_NDF_channel_ax, 'log Illuminance [lux]');
+            ylabel(across_NDF_channel_ax, 'log measured sensor count');
         end
 
-        % Add a reference line
-        plot(across_NDF_channel_ax, [limits(1),limits(2)],[limits(1),limits(2)],':k', "DisplayName", "IdentityLine");
-
-        % Label the plot
-        title(across_NDF_channel_ax, sprintf("Channel %d", ch));
-
-        xlim(across_NDF_channel_ax, limits);
-        xlabel(across_NDF_channel_ax, sprintf('%s predicted irradiance [log]', chip));
-        ylim(across_NDF_channel_ax, limits);
-        ylabel(across_NDF_channel_ax, sprintf('%s measured counts [log]', chip));
-
-        legend(across_NDF_channel_ax, 'Location', 'bestoutside');
-        set(gca,'box','off', 'color', 'none');
-        set(gcf, 'color', 'w')
-        %Add a second x-axis for: Illuminance vs Measured Counts
-        % Create overlay axes (top x-axis, same Y, transparent background)
-        % illum_ax = axes('Position', get(across_NDF_channel_ax, 'Position'), ...
-        %     'Color', 'none', ...
-        %     'XAxisLocation', 'top', ...
-        %     'YAxisLocation', 'right', ...
-        %     'XColor', [0.2 0.2 1], ...
-        %     'YColor', 'none',...
-        %     'Box', 'off',...
-        %     'Parent', gcf);
-        % hold(illum_ax, 'on');
-
-        % % Plot the same data using illuminance
-        % for nn = 1:numel(calibration_metadata.NDFs)
-        %     NDF_measured_predicted = measured_predicted_by_NDF{nn};
-        %     measured = NDF_measured_predicted{1};
-        %     p = scatter(illum_ax, log10(predicted_Illum_by_NDF(ch,nn,:)), log10(measured(:, ch)), ...
-        %         'o','MarkerFaceColor', colorList(nn,:));
-        %     p.MarkerFaceAlpha = 0.2;
-        %     p.MarkerEdgeAlpha = 0.2;
-        % end
-        %
-        % %Set axis limits to match original Y
-        % set(illum_ax, 'YLim', get(across_NDF_channel_ax, 'YLim'));
-        % set(illum_ax, 'XLimMode', 'auto');  % independent x-limits OK
-        % xlabel(illum_ax, 'log Illuminance [lux]');
-
         hold(across_NDF_channel_ax, 'off');
-        % hold(illum_ax, 'off');
 
+        x = squeeze(log10(PR670_Illum_by_NDF(cc,1:n_ndfs_to_plot,:)));
+        y = squeeze(log10(measured_all_NDF_this_chip(1:n_ndfs_to_plot,:)));
 
-    end
+        x = x(:);
+        y = y(:);
+        valid_idx = isfinite(x) & isfinite(y);
+        x = x(valid_idx);
+        y = y(valid_idx);
 
-end % Chip loop
+        coeffs = polyfit(x, y, 1);
+        %store the coefficients for chip one, all channels except IR
+        if cc ==1 && ch<10
+            illum_to_MS(ch,:) = coeffs;
+        end
 
+        x_fit = linspace(min(x), max(x), 100);
+        y_fit = polyval(coeffs, x_fit);
+
+        hold(across_NDF_channel_ax, 'on');
+        plot(across_NDF_channel_ax, x_fit, y_fit, 'k:', 'LineWidth', 1, "DisplayName", "Fit Line");
+        legend(across_NDF_channel_ax, 'Location', 'bestoutside');
+    end % channel loop
+end % chip loop
+if opts.save_illum_to_MS
+    filename = [combiExperiments_path, '/data/PR670_illum_to_MS_fits'];
+    save(filename, "illum_to_MS");
+end
 end % function loop
 
 % Local function to reformat the minispect SPDs to be in the space of
@@ -475,7 +432,7 @@ for ss = 1:num_settings_levels
 
         % Add the number of readings
         if(chip == "ASM7341")
-            measurement_counts = measurement.M.v.AS; 
+            measurement_counts = measurement.M.v.AS;
 
 
             % Save the total number of channels if we have not already
@@ -484,7 +441,7 @@ for ss = 1:num_settings_levels
             end
 
         else
-            measurement_counts = measurement.M.v.TS; 
+            measurement_counts = measurement.M.v.TS;
 
             % Save the total number of channels if we have not already
             if(n_channels == 0)
@@ -492,123 +449,123 @@ for ss = 1:num_settings_levels
             end
 
         end
-            
-        % Calculate the number of readings 
-        num_readings = size(measurement_counts, 1); 
+
+        % Calculate the number of readings
+        num_readings = size(measurement_counts, 1);
         if(num_readings == 0)
             % Output a warning, because if this happens, it's evil and
             % scary and we should probably fix the light logger to make
-            % this not happen, and also should know the data is synthetic. 
-            warning("NDF: %d | Settings Level: %d | Measurement: %d has no readings. Generating synthetic datapoint from average", NDF_num-1, ss, nn); 
-            
-            % Collect the readings that are not missing. 
-            
+            % this not happen, and also should know the data is synthetic.
+            warning("NDF: %d | Settings Level: %d | Measurement: %d has no readings. Generating synthetic datapoint from average", NDF_num-1, ss, nn);
+
+            % Collect the readings that are not missing.
+
             % First, create a set of the number of measures
-            measurement_index_set = unique(1:n_measures); 
+            measurement_index_set = unique(1:n_measures);
 
             % Now, remove the definitely bad one from this set
             good_candidates_idx = setdiff(measurement_index_set, nn);
             good_candidates = measurements{NDF_num, ss, good_candidates_idx};
-                
-            % However, if our definitely bad one is number 1, 
-            % let's check to make sure the candidates are good themselves.
-            % Missing 1 datapoint is okay, more than 1, we should error 
-             
 
-            % First, let's go over the candidates and find the minimum 
-            % number of examples that they share between themselves 
-            min_shared_candidate_readings = inf; 
+            % However, if our definitely bad one is number 1,
+            % let's check to make sure the candidates are good themselves.
+            % Missing 1 datapoint is okay, more than 1, we should error
+
+
+            % First, let's go over the candidates and find the minimum
+            % number of examples that they share between themselves
+            min_shared_candidate_readings = inf;
             for candidate_idx_idx = 1:numel(good_candidates_idx)
-                 % Retrieve the index of the candidate 
-                candidate_idx = good_candidates_idx(candidate_idx_idx); 
+                % Retrieve the index of the candidate
+                candidate_idx = good_candidates_idx(candidate_idx_idx);
 
                 % Retrieve the candidate measurement
                 candidate_measurement = measurements{NDF_num, ss, candidate_idx};
 
-                 % Initialize variable to hold good candidates readings 
-                candidate_counts = 0; 
-                
-                % Retrieve the readings for the chip 
+                % Initialize variable to hold good candidates readings
+                candidate_counts = 0;
+
+                % Retrieve the readings for the chip
                 if(chip == "ASM7341")
-                    candidate_counts = candidate_measurement.M.v.AS; 
+                    candidate_counts = candidate_measurement.M.v.AS;
 
-                else 
-                    candidate_counts = candidate_measurement.M.v.TS; 
-                end 
-
-                % If another example has no readings, this is really bad 
-                % so let's error 
-                if(size(candidate_counts, 1) == 0)
-                    error("Recording for settings level %d has multiple measurements without readings", ss); 
+                else
+                    candidate_counts = candidate_measurement.M.v.TS;
                 end
 
-                % Otherwise, calculate the new minimum shared size 
-                min_shared_candidate_readings = min(min_shared_candidate_readings, size(candidate_counts, 1)); 
-                    
+                % If another example has no readings, this is really bad
+                % so let's error
+                if(size(candidate_counts, 1) == 0)
+                    error("Recording for settings level %d has multiple measurements without readings", ss);
+                end
+
+                % Otherwise, calculate the new minimum shared size
+                min_shared_candidate_readings = min(min_shared_candidate_readings, size(candidate_counts, 1));
+
             end
 
             % Initialize synthetic example. We will fill this in
-            % with the first good candidate and then sum the rest to this. 
-            % Then, we will element wise divide to make the average. 
-            synthetic_example = []; 
+            % with the first good candidate and then sum the rest to this.
+            % Then, we will element wise divide to make the average.
+            synthetic_example = [];
 
-            % Iterate over the candidates 
+            % Iterate over the candidates
             for candidate_idx_idx = 1:numel(good_candidates_idx)
-                % Retrieve the index of the candidate 
-                candidate_idx = good_candidates_idx(candidate_idx_idx); 
-                    
-                % Initialize variable to hold good candidates readings 
-                candidate_counts = 0; 
+                % Retrieve the index of the candidate
+                candidate_idx = good_candidates_idx(candidate_idx_idx);
+
+                % Initialize variable to hold good candidates readings
+                candidate_counts = 0;
 
                 candidate_measurement = measurements{NDF_num, ss, candidate_idx};
-                   
-                % Retrieve the readings for the chip 
+
+                % Retrieve the readings for the chip
                 if(chip == "ASM7341")
-                    candidate_counts = candidate_measurement.M.v.AS; 
+                    candidate_counts = candidate_measurement.M.v.AS;
 
-                else 
-                    candidate_counts = candidate_measurement.M.v.TS; 
-                end 
-                
-                % If we are on the first index, simply save the matrix 
+                else
+                    candidate_counts = candidate_measurement.M.v.TS;
+                end
+
+                % If we are on the first index, simply save the matrix
                 if(candidate_idx_idx == 1)
-                    synthetic_example = candidate_counts(1:min_shared_candidate_readings, :);    
-                    continue ; 
-                end 
+                    synthetic_example = candidate_counts(1:min_shared_candidate_readings, :);
+                    continue ;
+                end
 
-                 % Otherwise, we can start constructing the average between 
-                 % the candidates. So, let's add the readings from this 
-                 % candidate to the growing list                     
-                 synthetic_example = synthetic_example + candidate_counts(1:min_shared_candidate_readings, :);
-                   
-            end 
+                % Otherwise, we can start constructing the average between
+                % the candidates. So, let's add the readings from this
+                % candidate to the growing list
+                synthetic_example = synthetic_example + candidate_counts(1:min_shared_candidate_readings, :);
 
-            % Now, take the average of all channels for the synthetic 
-            % example 
+            end
+
+            % Now, take the average of all channels for the synthetic
+            % example
             synthetic_example  = synthetic_example ./ numel(good_candidates_idx);
-            
+
             % Assign the synthetic example to this datapoint
-            measurement_counts = synthetic_example; 
+            measurement_counts = synthetic_example;
 
-            % Now, we need to save this back into the measurements array 
-            % because we iterate over it again 
+            % Now, we need to save this back into the measurements array
+            % because we iterate over it again
             if(chip == "ASM7341")
-               measurement.M.v.AS = measurement_counts; 
-            else 
-               measurement.M.v.TS = measurement_counts; 
-            end 
-            
-            % Resave the edited measurement. 
+                measurement.M.v.AS = measurement_counts;
+            else
+                measurement.M.v.TS = measurement_counts;
+            end
+
+            % Resave the edited measurement.
             measurements{NDF_num, ss, nn} = measurement;
-                
 
-        end 
 
-        % Recalculate the number of readings, now that we have 
+        end
+
+        % Recalculate the number of readings, now that we have
         % potentially filled in with a synthetic example
-        num_readings = size(measurement_counts, 1); 
+        num_readings = size(measurement_counts, 1);
 
-        % Calculate the min number of readings 
+        % Calculate the min number of readings
         min_num_readings = min(min_num_readings, num_readings);
     end
 end
