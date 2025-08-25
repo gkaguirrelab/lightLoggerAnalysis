@@ -72,6 +72,11 @@ setpref(projectName, 'pupil_util_path', pupil_util_path);
 ms_util_path = fullfile(light_logger_path, "ms", "ms_util.py"); 
 setpref(projectName, 'ms_util_path', ms_util_path); 
 
-% Add all functions in the current directory to the path 
+% Add all functions in the current directory to the path and save the path to lightLogger analysis 
 light_logger_analysis_path = tbLocateProject('lightLoggerAnalysis');
+setpref(projectName, "light_logger_analysis_path", light_logger_analysis_path);
 addpath(genpath(light_logger_analysis_path));
+
+% Save the path to light logger analysis libraries python 
+light_logger_analysis_libraries_python_path = fullfile(light_logger_analysis_path, "code", "libraries_python"); 
+setpref(projectName, "light_logger_analysis_libraries_python_path", light_logger_analysis_libraries_python_path); 
