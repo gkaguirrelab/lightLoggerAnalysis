@@ -30,7 +30,7 @@ function analyze_phase_fit_data(calibration_metadata, measurements)
 
     % Specify the number of measurements to discard from the start of the pupil
     % recording (as there is a start-up effect on the signal here)
-    nPupilFramesToDiscard = 5;
+    nPupilFramesToDiscard = 120;
 
     % Retrieve the frequencies and contrast levels used to make the measurements
     % as well as the number of measurements made at each level (this should be 1 here)
