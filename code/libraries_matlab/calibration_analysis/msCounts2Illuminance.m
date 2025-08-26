@@ -1,4 +1,4 @@
-function MS2illum_lux = msCounts2Illuminance(ms_counts, illum_to_MS)
+function MS2illum_lux = msCounts2Illuminance(ms_counts)
 % msCountsToIlluminance - Converts MiniSpectrometer readings to illuminance
 % (lux) using fits saved from linear fit of illuminance to MS readings
 % during calibration. Averages across all channels.
@@ -8,13 +8,16 @@ function MS2illum_lux = msCounts2Illuminance(ms_counts, illum_to_MS)
 %
 % Inputs:
 %   ms_counts    - [nSamples x nChannels] matrix of MS counts (can be linear or log10)
-%   illum_to_MS  - [nChannels x 2] fit coefficients [slope, intercept] from MS-vs-Illuminance
 %
 % Output:
 %   illum_lux    - [nSamples x nChannels] estimated illuminance in lux
 %
 
-% TO DO make it load illum_to_MS instead of passing
+% load coefficients for converting MS chip values to illuminance
+combiExperiments_path = getpref('lightLoggerAnalysis', 'combiExperiments_path');
+MS_illumfile = [combiExperiments_path, '/data/PR670_illum_to_MS_fits'];
+load(MS_illumfile, 'illum_to_MS');
+
 % Ensure data is in log10 space
 if any(ms_counts(:) <= 0)
     error('ms_counts must be strictly positive to apply log10.');
