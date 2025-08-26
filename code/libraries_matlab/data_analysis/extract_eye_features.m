@@ -12,10 +12,12 @@ function eye_features = extract_eye_features(video, is_grayscale, visualize_resu
 %   video                 - Text or Double. Path to the video to analyze 
 %                           or the video as an array of frames. 
 %   is_grayscale          - Logical. If the video is grayscale 
-%   visualize_results     - Logical. TODO 
+%
+%   visualize_results     - Logical. Display plots of the tracked 
+%                           pupil per frame. 
 %
 % Outputs:
-%   eye_features          - Cell. The spectral power density in units of
+%   eye_features          - Cell. Extarcted eye features per frame
 % 
 % Examples:
 %{
