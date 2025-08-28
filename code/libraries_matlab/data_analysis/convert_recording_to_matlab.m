@@ -1,6 +1,7 @@
 function convert_recording_to_matlab(path_to_recording, output_path,...
                                      apply_digital_gain, use_mean_frame,...
                                      convert_time_units, convert_to_floats, apply_phase_correction,...
+                                     apply_RGB_correction, apply_fielding_function,...
                                      mean_axes,...
                                      contains_agc_metadata,...
                                      password...
@@ -10,7 +11,8 @@ function convert_recording_to_matlab(path_to_recording, output_path,...
 % Syntax:
 %   convert_recording_to_matlab(path_to_recording, output_path,...
 %                               apply_digital_gain, use_mean_frame,...
-%                               convert_time_units, convert_to_floats, apply_phase_correction,...
+%                               convert_time_units, convert_to_floats, apply_phase_correction,
+%                               apply_RGB_correction, apply_fielding_function,...
 %                               mean_axes,...
 %                               contains_agc_metadata,...
 %                               password...
@@ -22,42 +24,46 @@ function convert_recording_to_matlab(path_to_recording, output_path,...
 %   converted to MATLAB type in output_path. 
 %
 % Inputs:
-%   path_to_recording      - String. The path to the suprafile 
-%                            containing all of the chunks 
+%   path_to_recording       - String. The path to the suprafile 
+%                             containing all of the chunks 
 %
+%   apply_digital_gain      - Logical. Whether or not to apply 
+%                             each frame's associated digital gain
+%                             scalar
 %
-%   apply_digital_gain     - Logical. Whether or not to apply 
-%                            each frame's associated digital gain
-%                            scalar
+%   use_mean_frame          - Logical. Whether to only use the mean 
+%                             pixel value from each frame for each 
+%                             of the camera-based sensors.
 %
-%   use_mean_frame         - Logical. Whether to only use the mean 
-%                            pixel value from each frame for each 
-%                            of the camera-based sensors.
-%
-%   convert_time_units     - Logical. Whether to convert the 
-%                            timestamps from different sensors 
-%                            all into the same units (s).
+%   convert_time_units      - Logical. Whether to convert the 
+%                             timestamps from different sensors 
+%                             all into the same units (s).
 % 
-%   convert_to_floats      - Logical. Whether to convert all 
-%                            of the Python np.arrays to float types. 
-%                            Can make things easier coming to MATLAB
+%   convert_to_floats       - Logical. Whether to convert all 
+%                             of the Python np.arrays to float types. 
+%                             Can make things easier coming to MATLAB
 %
-%   apply_phase_correction - Logical. Whether or not to apply
-%                            our calculated offsets between sensors 
-%                            to their time vectors. 
+%   apply_phase_correction  - Logical. Whether or not to apply
+%                             our calculated offsets between sensors 
+%                             to their time vectors. 
+% 
+%   apply_RGB_correction    - Logcal. Whether or not to apply 
+%                             our calculated RGB scalars to world 
+%   
+%   apply_fielding_function - Logical. Whether or not to apply
 %
-%   mean_axes              - Struct. Represents the axes to mean 
-%                            over when use_mean_frame is true. 
-%                            Only applies to camera senors. Form
-%                            is a struct with fields (WPM) 
-%                            where each field is a tuple of axes. 
-%                            0-indexed.
+%   mean_axes               - Struct. Represents the axes to mean 
+%                             over when use_mean_frame is true. 
+%                             Only applies to camera senors. Form
+%                             is a struct with fields (WPM) 
+%                             where each field is a tuple of axes. 
+%                             0-indexed.
 %
-%   contains_agc_metdata   - Struct. Represents whether a sensor 
-%                            has or does not have AGC metadata
-%                            for a given recording. Form is 
-%                            a struct with fields (WPM) where 
-%                            each field is a boolean.
+%   contains_agc_metdata    - Struct. Represents whether a sensor 
+%                             has or does not have AGC metadata
+%                             for a given recording. Form is 
+%                             a struct with fields (WPM) where 
+%                             each field is a boolean.
 %
 %   password                - String. Represents the password 
 %                             used to encrypt the data (if encrypted)
@@ -75,7 +81,9 @@ function convert_recording_to_matlab(path_to_recording, output_path,...
     convert_time_units = true; 
     convert_to_floats = true; 
     apply_phase_correction = true; 
-    convert_recording_to_matlab(path_to_experiment, output_path, apply_digital_gain, use_mean_frame, convert_time_units, convert_to_floats, apply_phase_correction);
+    apply_RGB_correction = true; 
+    apply_fielding_function = true; 
+    convert_recording_to_matlab(path_to_experiment, output_path, apply_digital_gain, use_mean_frame, convert_time_units, convert_to_floats, apply_phase_correction, apply_RGB_correction, apply_fielding_function);
 %}                                    
     arguments 
         path_to_recording {mustBeText}; % Path to the recording file full of chunks 
@@ -85,6 +93,8 @@ function convert_recording_to_matlab(path_to_recording, output_path,...
         convert_time_units {mustBeNumericOrLogical} = false; % Whether to convert different time units from the different sensors all to seconds 
         convert_to_floats {mustBeNumericOrLogical} = false; % Whether to convert the Python np.arrays to float types. Can make things easier coming to MATLAB
         apply_phase_correction {mustBeNumericOrLogical} = false; % Whether or not to apply our calculated phase offsets to the sensor's t vectors
+        apply_RGB_correction {mustBeNumericOrLogical} = false; % Whether or not to apply our RGB scalars to world
+        apply_fielding_function {mustBeNumericOrLogical} = false; % Whether or not to apply the fielding function to world
         mean_axes = false; % The axes per sensor to apply mean over if we want to take some sort of mean. Note: ONLY for camera sensors  
         contains_agc_metadata = false; % Flags for each sensor if its metadata matrix contains AGC data
         password {mustBeText} = "1234"; % The password needed to decrypt encrypted + compressed files (.blosc files)
@@ -92,6 +102,11 @@ function convert_recording_to_matlab(path_to_recording, output_path,...
     
     % Begin timing the function 
     tic; 
+
+    % Create the output directory if it does not exist
+    if ~exist(output_path, 'dir')
+        mkdir(output_path);
+    end
 
     % Apply the default time ranges to splice out of the video (the entire video)
     % Default is a 1x2 None tuple. This signifies the entire video
@@ -190,7 +205,7 @@ function convert_recording_to_matlab(path_to_recording, output_path,...
         chunks_cell = parse_chunks(path_to_recording, ...
                                    apply_digital_gain, use_mean_frame,...
                                    convert_time_units, convert_to_floats, apply_phase_correction,...
-                                   time_ranges, chunk_ranges,...
+                                   apply_RGB_correction, apply_fielding_function, time_ranges, chunk_ranges,...
                                    mean_axes,...
                                    contains_agc_metadata,...
                                    false,...
