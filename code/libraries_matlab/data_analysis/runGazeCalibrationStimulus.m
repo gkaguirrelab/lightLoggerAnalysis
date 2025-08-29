@@ -24,8 +24,8 @@
         experiment_name = "GazeCalibration";
     end
 
-    % Hard-coded parameters
-    viewingDistCm = 30;
+    % Hard-coded parametersk
+    viewingDistCm = 100;
     dotRadiusDeg = 0.8;
     dotTime = 1; 
     repetitions = 3;
