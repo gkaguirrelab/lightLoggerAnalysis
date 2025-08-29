@@ -101,6 +101,7 @@ def pylids_analyze_video(video: str,
 
     # First, let's find out how many frames we had 
     num_frames: int = len(pylids_out['dlc_confidence'])
+    # TODO: This number actually is not equal to what pylids outputs as METADATA so check this
     assert all(len(value) == num_frames for key, value in pylids_out.items()), "Pylids output shape mismatch. Unable to determine num frames"
 
     return
