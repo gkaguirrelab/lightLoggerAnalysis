@@ -50,8 +50,11 @@ def pupil_labs_analyze_video(video: str | np.ndarray,
         
     # Next, splice out the ROI of the video if desired 
     if(roi is not None):
-        # TODO: finish this. Extract the coordinates from the ROI 
-        raise NotImplementedError("TODO: Implement roi splicing")
+        # Format of the defined RR should be [ (BOTTOM LEFT y/x), TOP RIGHT (y/x)]
+        bottom_left, top_right = roi
+        
+        # Splice out the desired content from all frames 
+        v = v[:, bottom_left[0]:top_right[0], bottom_left[1]:top_right[1]]
 
     # Create 2D detector from pupil labs 
     detector_2d: object = Detector2D()
@@ -96,7 +99,9 @@ def pylids_analyze_video(video: str,
 
     # Next, convert format from dict[str, list[dict]] to a list of dictionaries
 
-
+    # First, let's find out how many frames we had 
+    num_frames: int = len(pylids_out['dlc_confidence'])
+    assert all(len(value) == num_frames for key, value in pylids_out.items()), "Pylids output shape mismatch. Unable to determine num frames"
 
     return
 
