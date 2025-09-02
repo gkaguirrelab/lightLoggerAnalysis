@@ -1,4 +1,4 @@
- function runGazeCalibrationStimulus(simulation_mode, device_num, agc_convergence_wait_s, experiment_name)
+function runGazeCalibrationStimulus(simulation_mode, device_num, agc_convergence_wait_s, experiment_name, heightMm, widthMm)
 % Displays 26-dot gaze calibration stimulus at fixed visual angles, with a brief beep signaling each dot onset.
 % 
 % Description: 
@@ -10,10 +10,12 @@
 %   device_num                  - Numeric. The device number to use when recording from a real device.
 %   agc_convergence_wait_s      - Numeric. The time in seconds to wait for the AGC to converge to appropriate settings.
 %   experiment_name             - String. The filename the recording will be saved under on the light logger. 
+%   heightMm                    - Numeric. Display screen height in mm.
+%   widthMm                     - Numeric. Display screen width in mm.
 % 
 % Example:
 %{
-    runGazeCalibrationStimulus(true)
+
     runGazeCalibrationStimulus(false, 2, 60, GazeCalib_Run1)
 %}
                           
@@ -22,6 +24,8 @@
         device_num {mustBeNumeric} = 1;
         agc_convergence_wait_s {mustBeNumeric} = 60;
         experiment_name = "GazeCalibration";
+        heightMm = 1067; % 2nd floor LGTV
+        widthMm = 1924; % 2nd floor LGTV 
     end
 
     % Hard-coded parametersk
@@ -51,7 +55,10 @@
     PsychPortAudio('FillBuffer', pahandle, beep);
 
     % Query physical display size (mm) and convert to cm
-    [widthMm, heightMm] = Screen('DisplaySize', screenNum);
+    if ~exist('widthMm', 'var')
+        [widthMm, heightMm] = Screen('DisplaySize', screenNum);
+        warning('Using DisplaySize, which may incorrectly estimate screen height and width.')
+    end
     widthCm  = widthMm / 10;
     heightCm = heightMm / 10;
 
@@ -69,7 +76,7 @@
     pxPerCmX = winWidthPx  / widthCm;
     pxPerCmY = winHeightPx / heightCm;
 
-    % Degree→pixel conversion lambdas
+    % çree→pixel conversion lambdas
     deg2pxX = @(deg) viewingDistCm * tand(deg) * pxPerCmX;
     deg2pxY = @(deg) viewingDistCm * tand(deg) * pxPerCmY;
     dotRadiusPx = viewingDistCm * tand(dotRadiusDeg) * pxPerCmX;
@@ -268,6 +275,7 @@ function message = generate_light_logger_recording_message(bluetooth_central, ex
     % Retrieve a low ND filter initial settings for the world camera 
     % so that it starts closer to the convergence target 
     initial_settings = double(world_util.WORLD_NDF_LEVEL_SETTINGS{3});
+    
 
     sensors.W.Again = initial_settings(1); 
     sensors.W.Dgain = initial_settings(2); 
