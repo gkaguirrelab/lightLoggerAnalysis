@@ -375,7 +375,7 @@ def extract_eyelid_features(video: str | np.ndarray,
                 visualize_pupil(frame, 
                                 frame_eyelid_features, 
                                 ax=axes
-                            )
+                               )
                 
                 # Close the figure generated 
                 plt.close(fig)
