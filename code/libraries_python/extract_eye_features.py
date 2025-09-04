@@ -7,7 +7,8 @@ import numpy as np
 from pupil_detectors import Detector2D
 from pye3d.detector_3d import CameraModel, Detector3D, DetectorMode
 from typing import Literal
-
+import queue
+import multiprocessing as mp
 
 # Import relevant custom libraries with helper functions and constants 
 light_logger_dir_path: str = os.path.expanduser("~/Documents/MATLAB/projects/lightLogger")
@@ -34,18 +35,6 @@ def pupil_labs_analyze_video(video: str | np.ndarray,
     # First, read in the video and extract it as frames (if not already provided as frames)
     if(isinstance(video, str)):
         video: np.ndarray = Pi_util.destruct_video(video, is_grayscale=is_grayscale)
-
-    # If video is not np.array, make it one 
-    if(not isinstance(video, np.ndarray)):
-        video: np.ndarray = np.array(video, dtype=np.uint8)
-
-    # If the video is not grayscale, convert to grayscale 
-    if(len(video.shape) > 3):
-        video = np.array([cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) 
-                          for frame in video
-                         ], 
-                         dtype=np.uint8
-                        )
         
     # Create 2D detector from pupil labs 
     detector_2d: object = Detector2D()
@@ -58,7 +47,51 @@ def pupil_labs_analyze_video(video: str | np.ndarray,
     eye_features_by_frame: list[dict] = []
     
     # Iterate over the frames of the video 
-    for frame_idx, frame in enumerate(video):
+    # when passed in as a numpy array 
+    if(isinstance(video, np.ndarray)):
+        # If the video is not grayscale, convert to grayscale 
+        if(len(video.shape) > 3):
+            video = np.array([cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) 
+                              for frame in video
+                             ], 
+                             dtype=np.uint8
+                            )
+
+        for frame_idx, frame in enumerate(video):
+            # Run a 2D detector on the video frame 
+            result_2d = detector_2d.detect(frame)
+            result_2d["timestamp"] = frame_idx / pupil_util.PUPIL_CAM_FPS
+
+            # Pass 2D detection result to 3D detector
+            result_3d = detector_3d.update_and_detect(result_2d, frame)
+
+            # Append the eye features for this frame to the growing list 
+            eye_features_by_frame.append(result_3d)        
+
+        return eye_features_by_frame
+    
+    # Otherwise, we must iterate over the frames of the video 
+    # only having one in memory at a time, so that we do not blow up our memory 
+    frame_queue: mp.Queue = mp.Queue(maxsize=5)
+
+    # Initialize a second process to stream frames from the video 
+    frame_stream_process: object = mp.Process(target=Pi_util.destruct_video, 
+                                              args=(video, 0, float("inf"), is_grayscale, frame_queue)
+                                             )
+    # Start the subprocess 
+    frame_stream_process.start()
+
+    # Parse frames from the video, gathering their features
+    while(True):
+        # Attempt to retrieve a frame from the frame queue 
+        frame: np.ndarray | None = frame_queue.get()
+
+        # If no frame arrived, then we are done 
+        if(frame is None):
+            break
+        
+        # Otherwise, analyze the frame
+
         # Run a 2D detector on the video frame 
         result_2d = detector_2d.detect(frame)
         result_2d["timestamp"] = frame_idx / pupil_util.PUPIL_CAM_FPS
@@ -67,7 +100,10 @@ def pupil_labs_analyze_video(video: str | np.ndarray,
         result_3d = detector_3d.update_and_detect(result_2d, frame)
 
         # Append the eye features for this frame to the growing list 
-        eye_features_by_frame.append(result_3d)        
+        eye_features_by_frame.append(result_3d) 
+
+    # Join the subprocess 
+    frame_stream_process.join()   
 
     return eye_features_by_frame
 
@@ -189,38 +225,88 @@ def extract_pupil_features(video: str | np.ndarray,
 
     # If we want to visualize the results 
     if(visualize_results is True):
-        # First, read in the video and extract it as frames (if not already provided as frames)
-        if(isinstance(video, str)):
-            video: np.ndarray = Pi_util.destruct_video(video, is_grayscale=is_grayscale)
+        # If the video is an np.ndarray, simply 
+        # iterate over the frames and visualize
+        if(isinstance(video, np.ndarray)):
+            # If the video is not grayscale, convert to grayscale 
+            if(len(video.shape) > 3):
+                video = np.array([cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) 
+                                for frame in video
+                                ], 
+                                dtype=np.uint8
+                                )        
+        
+            # Iterate over the frames of the video and display the results 
+            for frame_num, (frame, frame_pupil_features) in enumerate( zip(video, pupil_features) ):
+                # Generate a figure to display the results on 
+                fig, axes = plt.subplots()
+                fig.suptitle(f"Frame: {frame_num} | Eye Features")
 
-        # If video is not np.array, make it one 
-        if(not isinstance(video, np.ndarray)):
-            video: np.ndarray = np.array(video, dtype=np.uint8)
+                # Plot the pupil features 
+                visualize_pupil(frame, 
+                                frame_pupil_features, 
+                                method=method,
+                                ax=axes[0]
+                            )
+                
+                # Show the figure 
+                plt.show()
 
-        # If the video is not grayscale, convert to grayscale 
-        if(len(video.shape) > 3):
-            video = np.array([cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) 
-                            for frame in video
-                            ], 
-                            dtype=np.uint8
-                            )        
+                # Close the figure generated 
+                plt.close(fig)
+
+            return pupil_features     
+  
+        # Check to ensure that the video is well formed
+        assert Pi_util.inspect_video_frame_count(video) == len(pupil_features), "Video framecount not equal to analyzed frames by pylids. Some frames may be corrupted"
+    
+        # Otherwise, we must iterate over the frames of the video 
+        # only having one in memory at a time, so that we do not blow up our memory 
+        frame_queue: mp.Queue = mp.Queue(maxsize=5)
+
+        # Initialize a second process to stream frames from the video 
+        stop_event: object = mp.Event()
+        frame_stream_process: object = mp.Process(target=Pi_util.destruct_video, 
+                                                  args=(video, 0, float("inf"), is_grayscale, 
+                                                        frame_queue, stop_event
+                                                       )
+                                                 )
+        # Start the subprocess 
+        frame_stream_process.start()
+
+        # Parse frames from the video, gathering their features
+        frame_num: int = 0
+        while(True):
+            # Attempt to retrieve a frame from the frame queue 
+            frame: np.ndarray | None = frame_queue.get()
+
+            # If no frame arrived, then we are done 
+            if(frame is None):
+                break
             
-
-        # Iterate over the frames of the video and display the results 
-        for frame_num, (frame, frame_pupil_features) in enumerate( zip(video, pupil_features) ):
+            # Otherwise, visualize the frame and pupil features 
             # Generate a figure to display the results on 
             fig, axes = plt.subplots()
             fig.suptitle(f"Frame: {frame_num} | Eye Features")
 
             # Plot the pupil features 
             visualize_pupil(frame, 
-                            frame_pupil_features, 
-                            method=frame_pupil_features,
-                            ax=axes[0]
-                           )
+                            pupil_features[frame_num], 
+                            method=method,
+                            ax=axes
+                        )
             
+            # Show the desired figure 
+            plt.show()
+
             # Close the figure generated 
             plt.close(fig)
+
+            # Increment the frame number
+            frame_num += 1
+
+        # Join the subprocess 
+        frame_stream_process.join()   
 
     return pupil_features
 
@@ -267,37 +353,84 @@ def extract_eyelid_features(video: str | np.ndarray,
 
     # Visualize results if desired 
     if(visualize_results is True):
-        # First, read in the video and extract it as frames (if not already provided as frames)
-        if(isinstance(video, str)):
-            video: np.ndarray = Pi_util.destruct_video(video, is_grayscale=is_grayscale)
+        # If passed in a numpy array of frames, 
+        # simply iterate over them and visualize 
+        if(isinstance(video, np.ndarray)):
+            # If the video is not grayscale, convert to grayscale 
+            if(len(video.shape) > 3):
+                video = np.array([cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) 
+                                for frame in video
+                                ], 
+                                dtype=np.uint8
+                                )        
+                
 
-        # If video is not np.array, make it one 
-        if(not isinstance(video, np.ndarray)):
-            video: np.ndarray = np.array(video, dtype=np.uint8)
+            # Iterate over the frames of the video and display the results 
+            for frame_num, (frame, frame_eyelid_features) in enumerate( zip(video, eyelid_features) ):
+                # Generate a figure to display the results on 
+                fig, axes = plt.subplots()
+                fig.suptitle(f"Frame: {frame_num} | Eye Features")
 
-        # If the video is not grayscale, convert to grayscale 
-        if(len(video.shape) > 3):
-            video = np.array([cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) 
-                            for frame in video
-                            ], 
-                            dtype=np.uint8
-                            )        
+                # Plot the pupil features 
+                visualize_pupil(frame, 
+                                frame_eyelid_features, 
+                                ax=axes
+                            )
+                
+                # Close the figure generated 
+                plt.close(fig)
+
+            return eyelid_features
+        
+        # Check to ensure that the video is well formed
+        assert Pi_util.inspect_video_frame_count(video) == len(eyelid_features), "Video framecount not equal to analyzed frames by pylids. Some frames may be corrupted"
+
+        # Otherwise, we must iterate over the frames of the video 
+        # only having one in memory at a time, so that we do not blow up our memory 
+        frame_queue: mp.Queue = mp.Queue(maxsize=5)
+
+        # Initialize a second process to stream frames from the video 
+        stop_event: object = mp.Event()
+        frame_stream_process: object = mp.Process(target=Pi_util.destruct_video, 
+                                                  args=(video, 0, float("inf"), is_grayscale, 
+                                                        frame_queue, stop_event
+                                                       )
+                                                 )
+        # Start the subprocess 
+        frame_stream_process.start()
+
+        # Parse frames from the video, gathering their features
+        frame_num: int = 0
+        while(True):
+            # Attempt to retrieve a frame from the frame queue 
+            frame: np.ndarray | None = frame_queue.get()
+
+            # If no frame arrived, then we are done 
+            if(frame is None):
+                break
             
-
-        # Iterate over the frames of the video and display the results 
-        for frame_num, (frame, frame_eyelid_features) in enumerate( zip(video, eyelid_features) ):
+            # Otherwise, visualize the frame and pupil features 
             # Generate a figure to display the results on 
             fig, axes = plt.subplots()
             fig.suptitle(f"Frame: {frame_num} | Eye Features")
 
             # Plot the pupil features 
-            visualize_pupil(frame, 
-                            frame_eyelid_features, 
-                            ax=axes[0]
-                           )
+            visualize_eyelids(frame, 
+                              eyelid_features[frame_num], 
+                              ax=axes[0]
+                             )
             
+            # Show the desired figure 
+            plt.show()
+
             # Close the figure generated 
             plt.close(fig)
+
+            # Increment the frame number
+            frame_num += 1
+
+        # Join the subprocess 
+        frame_stream_process.join()   
 
     return eyelid_features
 
@@ -337,47 +470,109 @@ def extract_eye_features(video: str | np.ndarray,
 
     # Visualize features if desired 
     if(visualize_results is True):
-        # First, read in the video and extract it as frames (if not already provided as frames)
-        if(isinstance(video, str)):
-            video: np.ndarray = Pi_util.destruct_video(video, is_grayscale=is_grayscale)
 
-        # If video is not np.array, make it one 
-        if(not isinstance(video, np.ndarray)):
-            video: np.ndarray = np.array(video, dtype=np.uint8)
+        # If passed in a numpy array of frames, iterate 
+        # over them as normal 
+        if(isinstance(video, np.ndarray)):
+            # If the video is not grayscale, convert to grayscale 
+            if(len(video.shape) > 3):
+                video = np.array([cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) 
+                                for frame in video
+                                ], 
+                                dtype=np.uint8
+                                )        
+                
 
-        # If the video is not grayscale, convert to grayscale 
-        if(len(video.shape) > 3):
-            video = np.array([cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) 
-                            for frame in video
-                            ], 
-                            dtype=np.uint8
-                            )        
-            
+            # Iterate over the frames of the video and display the results 
+            for frame_num, (frame, frame_eye_features) in enumerate( zip(video, eye_features) ):
+                # Generate a figure to display the results on 
+                fig, axes = plt.subplots(1, 2)
+                fig.suptitle(f"Frame: {frame_num} | Eye Features")
 
-        # Iterate over the frames of the video and display the results 
-        for frame_num, (frame, frame_eye_features) in enumerate( zip(video, eye_features) ):
-            # Generate a figure to display the results on 
-            fig, axes = plt.subplots(1, 2)
-            fig.suptitle(f"Frame: {frame_num} | Eye Features")
+                # Plot the pupil features 
+                visualize_pupil(frame, 
+                                frame_eye_features["pupil"], 
+                                method=pupil_feature_method,
+                                ax=axes[0]
+                            )
 
-            # Plot the pupil features 
-            visualize_pupil(frame, 
-                            frame_eye_features["pupil"], 
-                            method=pupil_feature_method,
-                            ax=axes[0]
-                           )
-
-            # Plot the eyelid features 
-            visualize_eyelids(frame, 
-                              frame_eye_features["eyelids"],
-                              ax=axes[1]
-                             )
+                # Plot the eyelid features 
+                visualize_eyelids(frame, 
+                                frame_eye_features["eyelids"],
+                                ax=axes[1]
+                                )
 
             # Show the plot 
             plt.show()
 
             # Close the figure and free the memory 
             plt.close(fig)
+
+            return eye_features
+
+        # Check to ensure that the video is well formed
+        assert Pi_util.inspect_video_frame_count(video) == len(eye_features), "Video framecount not equal to analyzed frames by pylids. Some frames may be corrupted"
+
+        # Otherwise, we must iterate over the frames of the video 
+        # only having one in memory at a time, so that we do not blow up our memory 
+        frame_queue: object = mp.Queue(maxsize=5)
+
+        # Initialize a second process to stream frames from the video 
+        stop_event: object = mp.Event()
+        frame_stream_process: object = mp.Process(target=Pi_util.destruct_video, 
+                                                  args=(video, 0, float("inf"), is_grayscale, 
+                                                        frame_queue, stop_event
+                                                       )
+                                                 )
+        # Start the subprocess 
+        frame_stream_process.start()
+
+        # Parse frames from the video, gathering their features
+        frame_num: int = 0
+        while(True):
+            # Attempt to retrieve a frame from the frame queue 
+            try:
+                frame: np.ndarray | None = frame_queue.get(timeout=5)
+            except queue.Empty:
+                stop_event.set()
+                break 
+
+            # If no frame arrived, then we are done 
+            if(frame is None):
+                break
+            
+            # Otherwise, visualize the frame and pupil features 
+            # Generate a figure to display the results on 
+            fig, axes = plt.subplots(1, 2)
+            fig.suptitle(f"Frame: {frame_num} | Eye Features")
+
+            # Plot the pupil features 
+            visualize_pupil(frame, 
+                            eye_features[frame_num]["pupil"], 
+                            method=pupil_feature_method,
+                            ax=axes[0]
+                        )
+
+            # Plot the eyelid features 
+            visualize_eyelids(frame, 
+                              eye_features[frame_num]["eyelids"],
+                              ax=axes[1]
+                             )
+            
+            # Make sure no empty space 
+            plt.tight_layout()
+
+            # Show the desired figure 
+            plt.show()
+
+            # Close the figure generated 
+            plt.close(fig)
+
+            # Increment the frame number
+            frame_num += 1
+
+        # Join the subprocess 
+        frame_stream_process.join()   
 
     return eye_features
 
