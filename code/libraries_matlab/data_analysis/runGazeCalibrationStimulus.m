@@ -15,8 +15,8 @@ function runGazeCalibrationStimulus(simulation_mode, device_num, agc_convergence
 % 
 % Example:
 %{
-
-    runGazeCalibrationStimulus(false, 2, 60, GazeCalib_Run1)
+    runGazeCalibrationStimulus(true)
+    runGazeCalibrationStimulus(false, 2, 60, 'GazeCalib_Run1', 1067, 1924)
 %}
                           
     arguments 
