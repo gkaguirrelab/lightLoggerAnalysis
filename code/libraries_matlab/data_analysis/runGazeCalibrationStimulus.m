@@ -1,4 +1,4 @@
-function runGazeCalibrationStimulus(simulation_mode, device_num, agc_convergence_wait_s, experiment_name, heightMm, widthMm)
+function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, agc_convergence_wait_s, experiment_name, heightMm, widthMm)
 % Displays 26-dot gaze calibration stimulus at fixed visual angles, with a brief beep signaling each dot onset.
 % 
 % Description: 

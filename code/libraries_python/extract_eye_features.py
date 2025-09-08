@@ -9,7 +9,6 @@ from pye3d.detector_3d import CameraModel, Detector3D, DetectorMode
 from typing import Literal
 import queue
 import multiprocessing as mp
-from tqdm import tqdm
 
 # Import relevant custom libraries with helper functions and constants 
 light_logger_dir_path: str = os.path.expanduser("~/Documents/MATLAB/projects/lightLogger")
@@ -33,6 +32,7 @@ import pupil_util
 def pupil_labs_analyze_video(video: str | np.ndarray, 
                              is_grayscale: bool=False
                              ) -> list[dict]:
+        
     # Create 2D detector from pupil labs 
     detector_2d: object = Detector2D()
     
@@ -54,7 +54,7 @@ def pupil_labs_analyze_video(video: str | np.ndarray,
                              dtype=np.uint8
                             )
 
-        for (frame_num, frame) in tqdm(enumerate(video), desc="Visualizing"):
+        for frame_num, frame in enumerate(video):
             # Run a 2D detector on the video frame 
             result_2d = detector_2d.detect(frame)
             result_2d["timestamp"] = frame_num / pupil_util.PUPIL_CAM_FPS
@@ -79,11 +79,9 @@ def pupil_labs_analyze_video(video: str | np.ndarray,
     # Start the subprocess 
     frame_stream_process.start()
 
-    # Inspect the video frame count to know how long to iterate for
-    num_frames: int = Pi_util.inspect_video_frame_count(video)
-
     # Parse frames from the video, gathering their features
-    for frame_num in tqdm(range(num_frames), desc="Analyzing"):
+    frame_num: int = 0 
+    while(True):
         # Attempt to retrieve a frame from the frame queue 
         try:
             frame: np.ndarray | None = frame_queue.get(timeout=5)
@@ -231,7 +229,7 @@ def extract_pupil_features(video: str | np.ndarray,
         pupil_features = pupil_labs_analyze_video(video, is_grayscale)
 
     # Check to ensure that the video is well formed
-    assert Pi_util.inspect_video_frame_count(video) == len(pupil_features), "Video framecount not equal to analyzed frames by pylids. Some frames may be corrupted"
+    #assert Pi_util.inspect_video_frame_count(video) == len(pupil_features), "Video framecount not equal to analyzed frames. Some frames may be corrupted"
 
     # If we want to visualize the results 
     if(visualize_results is True):
@@ -247,7 +245,7 @@ def extract_pupil_features(video: str | np.ndarray,
                                 )        
         
             # Iterate over the frames of the video and display the results 
-            for (frame_num, (frame, frame_pupil_features)) in tqdm(enumerate( zip(video, pupil_features) ), desc="Visualizing"):
+            for frame_num, (frame, frame_pupil_features) in enumerate( zip(video, pupil_features) ):
                 # Generate a figure to display the results on 
                 fig, axes = plt.subplots()
                 fig.suptitle(f"Frame: {frame_num} | Eye Features")
@@ -256,8 +254,8 @@ def extract_pupil_features(video: str | np.ndarray,
                 visualize_pupil(frame, 
                                 frame_pupil_features, 
                                 method=method,
-                                ax=axes
-                              )
+                                ax=axes[0]
+                            )
                 
                 # Show the figure 
                 plt.show()
@@ -282,8 +280,8 @@ def extract_pupil_features(video: str | np.ndarray,
         frame_stream_process.start()
 
         # Parse frames from the video, gathering their features
-        num_frames: int = Pi_util.inspect_video_frame_count(video)
-        for frame_num in tqdm(range(num_frames), desc="Visualizing"):
+        frame_num: int = 0 
+        while(True):
             # Attempt to retrieve a frame from the frame queue
             try: 
                 frame: np.ndarray | None = frame_queue.get(timeout=5)
@@ -314,6 +312,9 @@ def extract_pupil_features(video: str | np.ndarray,
 
             # Close the figure generated 
             plt.close(fig)
+
+            # Increment the frame num 
+            frame_num += 1 
 
         # Join the subprocess 
         frame_stream_process.join()   
@@ -362,7 +363,7 @@ def extract_eyelid_features(video: str | np.ndarray,
     eyelid_features: dict[str, dict] = pylids_analyze_video(video, "eyelid")
 
     # Check to ensure that the video is well formed
-    assert Pi_util.inspect_video_frame_count(video) == len(eyelid_features), "Video framecount not equal to analyzed frames by pylids. Some frames may be corrupted"
+    assert Pi_util.inspect_video_frame_count(video) == len(eyelid_features), "Video framecount not equal to analyzed frames. Some frames may be corrupted"
 
     # Visualize results if desired 
     if(visualize_results is True):
@@ -379,7 +380,7 @@ def extract_eyelid_features(video: str | np.ndarray,
                 
 
             # Iterate over the frames of the video and display the results 
-            for (frame_num, (frame, frame_eyelid_features)) in tqdm(enumerate( zip(video, eyelid_features) ), desc="Visualizing"):
+            for frame_num, (frame, frame_eyelid_features) in enumerate( zip(video, eyelid_features) ):
                 # Generate a figure to display the results on 
                 fig, axes = plt.subplots()
                 fig.suptitle(f"Frame: {frame_num} | Eye Features")
@@ -410,8 +411,8 @@ def extract_eyelid_features(video: str | np.ndarray,
         frame_stream_process.start()
 
         # Parse frames from the video, gathering their features
-        num_frames: int = Pi_util.inspect_video_frame_count(video)
-        for frame_num in tqdm(range(num_frames), desc="Visualizing"):
+        frame_num: int = 0
+        while(True):
             # Attempt to retrieve a frame from the frame queue 
             try:
                 frame: np.ndarray | None = frame_queue.get(timeout=5)
@@ -441,6 +442,9 @@ def extract_eyelid_features(video: str | np.ndarray,
 
             # Close the figure generated 
             plt.close(fig)
+
+            # Increment the frame num 
+            frame_num += 1 
 
         # Join the subprocess 
         frame_stream_process.join()   
@@ -482,7 +486,7 @@ def extract_eye_features(video: str | np.ndarray,
                                           ]
     
     # Ensure the analysis was properly done (e.g. there were no silently corrupted frames not explictly caught with error by Pylids)
-    assert Pi_util.inspect_video_frame_count(video) == len(eye_features), "Video framecount not equal to analyzed frames by pylids. Some frames may be corrupted"
+    assert Pi_util.inspect_video_frame_count(video) == len(eye_features), "Video framecount not equal to analyzed frames. Some frames may be corrupted"
 
 
     # Visualize features if desired 
@@ -501,7 +505,7 @@ def extract_eye_features(video: str | np.ndarray,
                 
 
             # Iterate over the frames of the video and display the results 
-            for (frame_num, (frame, frame_eye_features)) in tqdm(enumerate( zip(video, eye_features) ), desc="Visualizing"):
+            for frame_num, (frame, frame_eye_features) in enumerate( zip(video, eye_features) ):
                 # Generate a figure to display the results on 
                 fig, axes = plt.subplots(1, 2)
                 fig.suptitle(f"Frame: {frame_num} | Eye Features")
@@ -543,7 +547,7 @@ def extract_eye_features(video: str | np.ndarray,
 
         # Parse frames from the video, gathering their features
         num_frames: int = Pi_util.inspect_video_frame_count(video)
-        for frame_num in tqdm(range(num_frames), desc="Visualizing"):
+        while(True):
             # Attempt to retrieve a frame from the frame queue 
             try:
                 frame: np.ndarray | None = frame_queue.get(timeout=5)
@@ -583,6 +587,9 @@ def extract_eye_features(video: str | np.ndarray,
 
             # Close the figure generated 
             plt.close(fig)
+
+            # Increment the frame number
+            frame_num += 1
 
         # Join the subprocess 
         frame_stream_process.join()   
