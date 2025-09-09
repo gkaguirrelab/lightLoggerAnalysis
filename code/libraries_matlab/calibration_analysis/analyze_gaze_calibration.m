@@ -19,12 +19,8 @@ function analyze_gaze_calibration()
 
 
     % Retrieve the features we want to analyze 
-    [gaze_angles, confidence_measures] = flatten_features(pupil_features);
+    [gaze_angles, confidence_measures, pupil_t] = flatten_features(pupil_features);
     
-    % Generate the t vector for both of these 
-    pupil_fps = 120; 
-    pupil_t = ((0: size(gaze_angles, 1) - 1) / pupil_fps )'; 
-
     % Ensure we generated the correct number of points 
     assert(size(gaze_angles, 1) == size(pupil_t, 1), "Incorrect number of t values for datapoints"); 
 
@@ -42,17 +38,21 @@ end
 
 
 % Local function to extract the desired features from the list 
-function [gaze_angles, confidence_measures] = flatten_features(pupil_features)
+function [gaze_angles, confidence_measures, pupil_t] = flatten_features(pupil_features)
     % Initialize return arrays for the features we will 
     % flatten
     gaze_angles = nan(size(pupil_features, 1), 2); 
     confidence_measures = nan(size(pupil_features, 1), 2); 
+    pupil_t = nan(size(pupil_features, 1), 1); 
 
     % Iterate over the pupil features structs 
     % and extract the ones we care about 
     for ii = 1:numel(pupil_features)
         % Retrieve a given frame's features 
         frame_features = pupil_features{ii};
+
+        % Extract timestamp 
+        pupil_t(ii, :) = frame_features.timestamp; 
         
         % Save phi and theta
         gaze_angles(ii, :) = rad2deg([frame_features.phi, frame_features.theta]); 
@@ -132,17 +132,19 @@ function display_adjusted_results(gaze_angles, confidence_measures, pupil_t, deg
     gaze_angles = gaze_angles(start_idx:end_idx, :); 
     confidence_measures = confidence_measures(start_idx:end_idx, :); 
 
-    % 2. Subtract the mean theta from the theta vector, and the mean phi from the phi vector
-    mean_phi_theta = mean(gaze_angles, 1); 
+    % Initialize variable for transforming gaze angles
     gaze_angles_transformed = gaze_angles;
-    gaze_angles_transformed(:, 1) = gaze_angles_transformed(:, 1) - mean_phi_theta(1);
-    gaze_angles_transformed(:, 2) = gaze_angles_transformed(:, 2) - mean_phi_theta(2); 
 
-    % 3. Remove low confidence frames
+    % 2. Remove low confidence frames
     good_idx = (confidence_measures(:, 1) > 0.90) & (confidence_measures(:, 2) > 0.9);
     gaze_angles_transformed = gaze_angles_transformed(good_idx, :);
     confidence_measures = confidence_measures(good_idx, :);
     pupil_t = pupil_t(good_idx, :); 
+
+    % 3. Subtract the mean theta from the theta vector, and the mean phi from the phi vector
+    mean_phi_theta = mean(gaze_angles, 1); 
+    gaze_angles_transformed(:, 1) = gaze_angles_transformed(:, 1) - mean_phi_theta(1);
+    gaze_angles_transformed(:, 2) = gaze_angles_transformed(:, 2) - mean_phi_theta(2); 
 
 
     % Move to the first tile

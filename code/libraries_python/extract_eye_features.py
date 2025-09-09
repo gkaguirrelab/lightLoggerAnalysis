@@ -107,6 +107,9 @@ def pupil_labs_analyze_video(video: str | np.ndarray,
         # Append the eye features for this frame to the growing list 
         eye_features_by_frame.append(result_3d) 
 
+        # Increment the frame number 
+        frame_num += 1
+
     # Join the subprocess 
     frame_stream_process.join()   
 
