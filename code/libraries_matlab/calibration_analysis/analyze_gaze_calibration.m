@@ -19,14 +19,21 @@ function analyze_gaze_calibration()
 
 
     % Retrieve the features we want to analyze 
-    [gaze_angles, confidence_measures] = flatten_features(pupil_features); 
+    [gaze_angles, confidence_measures] = flatten_features(pupil_features);
+    
+    % Generate the t vector for both of these 
+    pupil_fps = 120; 
+    pupil_t = ((0: size(gaze_angles, 1) - 1) / pupil_fps )'; 
+
+    % Ensure we generated the correct number of points 
+    assert(size(gaze_angles, 1) == size(pupil_t, 1), "Incorrect number of t values for datapoints"); 
 
     % Display the features in their raw state 
-    display_raw_results(gaze_angles, deg_positions, confidence_measures);
+    display_raw_results(gaze_angles, confidence_measures, pupil_t, deg_positions);
 
     % Display the data after making desired transformations 
     % (splicing out extra parts of video, mean center, remove low confidence points)
-    display_adjusted_results(gaze_angles, deg_positions, confidence_measures); 
+    display_adjusted_results(gaze_angles, confidence_measures, pupil_t, deg_positions); 
 
 
     return ; 
@@ -58,7 +65,7 @@ function [gaze_angles, confidence_measures] = flatten_features(pupil_features)
 end 
 
 % Local function to display raw results before adjustments
-function display_raw_results(gaze_angles, deg_positions, confidence_measures)
+function display_raw_results(gaze_angles, confidence_measures, pupil_t, deg_positions)
     % First, make a plot of the raw features. No clipping, no confidence threshold, no mean subtraction 
     figure; 
     tiled_fig_handle = tiledlayout(1, 3); 
@@ -69,11 +76,11 @@ function display_raw_results(gaze_angles, deg_positions, confidence_measures)
     % and plot the gaze angles over time and the degree positions
     % of the targets 
     nexttile; 
-    title("Gaze Angle by Frame"); 
+    title("Gaze Angle by Time"); 
     hold on; 
-    plot(gaze_angles(:, 1), 'x', 'DisplayName', 'Phi'); 
-    plot(gaze_angles(:, 2), 'x', 'DisplayName', 'Theta');
-    xlabel("Time [frame]")
+    plot(pupil_t(:, 1), gaze_angles(:, 1), '-o', 'DisplayName', 'Phi'); 
+    plot(pupil_t(:, 1), gaze_angles(:, 2), '-o', 'DisplayName', 'Theta');
+    xlabel("Time [s]")
     ylabel("Angle [deg]")
     legend show; 
     hold off; 
@@ -96,9 +103,9 @@ function display_raw_results(gaze_angles, deg_positions, confidence_measures)
     nexttile; 
     title("Pupil Detection Confidence"); 
     hold on; 
-    plot(confidence_measures(:, 1), 'x', 'DisplayName', 'Confidence');
-    plot(confidence_measures(:, 2), 'x', 'DisplayName', 'Model Confidence');
-    xlabel("Time [frame]"); 
+    plot(pupil_t(:, 1), confidence_measures(:, 1), 'x', 'DisplayName', 'Confidence');
+    plot(pupil_t(:, 1), confidence_measures(:, 2), 'x', 'DisplayName', 'Model Confidence');
+    xlabel("Time [s]"); 
     ylabel("Confidence"); 
     ylim([0, 1]);
     legend show; 
@@ -111,16 +118,17 @@ end
 % only gaze calibration period
 % mean centering
 % removing low confidence points
-function display_adjusted_results(gaze_angles, deg_positions, confidence_measures)
+function display_adjusted_results(gaze_angles, confidence_measures, pupil_t, deg_positions)
     % Now, plot the adjusted features after transformation has been applied
     figure; 
     tiled_fig_handle = tiledlayout(1, 3); 
-    tiled_fig_handle.Title.String = "Raw Data (No splicing, thresholding, or value adjustment)"; 
+    tiled_fig_handle.Title.String = "Transformed Data"; 
     tiled_fig_handle.Title.FontWeight = "bold"; 
 
     % 1. Trim out just the gaze calibration portion of the video 
     start_idx = 10800; 
     end_idx = size(gaze_angles, 1) - 3600; 
+    pupil_t = pupil_t(start_idx:end_idx, :); 
     gaze_angles = gaze_angles(start_idx:end_idx, :); 
     confidence_measures = confidence_measures(start_idx:end_idx, :); 
 
@@ -134,6 +142,7 @@ function display_adjusted_results(gaze_angles, deg_positions, confidence_measure
     good_idx = (confidence_measures(:, 1) > 0.90) & (confidence_measures(:, 2) > 0.9);
     gaze_angles_transformed = gaze_angles_transformed(good_idx, :);
     confidence_measures = confidence_measures(good_idx, :);
+    pupil_t = pupil_t(good_idx, :); 
 
 
     % Move to the first tile
@@ -142,9 +151,9 @@ function display_adjusted_results(gaze_angles, deg_positions, confidence_measure
     nexttile; 
     title("Gaze Angle by Frame"); 
     hold on; 
-    plot(gaze_angles_transformed(:, 1), 'x', 'DisplayName', 'Phi'); 
-    plot(gaze_angles_transformed(:, 2), 'x', 'DisplayName', 'Theta');
-    xlabel("Time [frame]")
+    plot(pupil_t(:, 1), gaze_angles_transformed(:, 1), '-o', 'DisplayName', 'Phi'); 
+    plot(pupil_t(:, 1), gaze_angles_transformed(:, 2), '-o', 'DisplayName', 'Theta');
+    xlabel("Time [s]")
     ylabel("Angle [deg]")
     legend show; 
     hold off; 
@@ -167,9 +176,9 @@ function display_adjusted_results(gaze_angles, deg_positions, confidence_measure
     nexttile; 
     title("Pupil Detection Confidence"); 
     hold on; 
-    plot(confidence_measures(:, 1), 'x', 'DisplayName', 'Confidence');
-    plot(confidence_measures(:, 2), 'x', 'DisplayName', 'Model Confidence');
-    xlabel("Time [frame]"); 
+    plot(pupil_t(:, 1), confidence_measures(:, 1), 'x', 'DisplayName', 'Confidence');
+    plot(pupil_t(:, 1), confidence_measures(:, 2), 'x', 'DisplayName', 'Model Confidence');
+    xlabel("Time [s]"); 
     ylabel("Confidence"); 
     ylim([0, 1]);
     legend show; 
