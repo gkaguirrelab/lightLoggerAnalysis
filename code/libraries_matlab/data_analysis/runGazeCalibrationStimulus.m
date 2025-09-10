@@ -1,4 +1,4 @@
-function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, agc_convergence_wait_s, experiment_name, heightMm, widthMm)
+function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, agc_convergence_wait_s, experiment_name, heightCm, widthCm, viewingDistCm)
 % Displays 26-dot gaze calibration stimulus at fixed visual angles, with a brief beep signaling each dot onset.
 % 
 % Description: 
@@ -10,8 +10,9 @@ function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, 
 %   device_num                  - Numeric. The device number to use when recording from a real device.
 %   agc_convergence_wait_s      - Numeric. The time in seconds to wait for the AGC to converge to appropriate settings.
 %   experiment_name             - String. The filename the recording will be saved under on the light logger. 
-%   heightMm                    - Numeric. Display screen height in mm.
-%   widthMm                     - Numeric. Display screen width in mm.
+%   heightCm                    - Numeric. Display screen height in cm.
+%   widthCm                     - Numeric. Display screen width in cm.
+%   viewingDistCm               - Numeric. Distance from participant to the screen in cm.
 % 
 % Example:
 %{
@@ -24,23 +25,21 @@ function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, 
         device_num {mustBeNumeric} = 1;
         agc_convergence_wait_s {mustBeNumeric} = 60;
         experiment_name = "GazeCalibration";
-        heightMm = 1067; % 2nd floor LGTV
-        widthMm = 1924; % 2nd floor LGTV 
+        heightCm = 106.7; % 2nd floor LGTV
+        widthCm = 192.4; % 2nd floor LGTV
+        viewingDistCm = 100; % 1 meter standard
     end
-
     % Hard-coded parametersk
-    viewingDistCm = 100;
+   
     dotRadiusDeg = 0.8;
-    dotTime = 1; 
+    dotTime = 2; % sec 
     repetitions = 3;
     bgColor = [0 0 0];
     fgColor = [255 255 255];
     redColor  = [255   0   0];
     innerFrac = 0.3;
-
     AssertOpenGL;
     screenNum = max(Screen('Screens'));
-
     % Initialize PsychPortAudio for beep
     InitializePsychSound(1);
     sampleRate = 44100;
@@ -53,66 +52,53 @@ function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, 
     pahandle = PsychPortAudio('Open', [], 1, 1, sampleRate, nrchannels);
     % Fill buffer with beep waveform
     PsychPortAudio('FillBuffer', pahandle, beep);
-
     % Query physical display size (mm) and convert to cm
-    if ~exist('widthMm', 'var')
-        [widthMm, heightMm] = Screen('DisplaySize', screenNum);
+    if ~exist('widthCm', 'var')
+        [widthCm, heightCm] = Screen('DisplaySize', screenNum);
         warning('Using DisplaySize, which may incorrectly estimate screen height and width.')
     end
-    widthCm  = widthMm / 10;
-    heightCm = heightMm / 10;
-
     % Open window and get its pixel resolution
     [win, winRect] = Screen('OpenWindow', screenNum, bgColor);
     [xCen, yCen] = RectCenter(winRect);
     winWidthPx = winRect(3) - winRect(1);
     winHeightPx = winRect(4) - winRect(2);
-
     % Print physical size and pixels to confirm display
     fprintf('→ Screen %d: %.1f×%.1f cm physical → %d×%d px window\n', ...
             screenNum, widthCm, heightCm, winWidthPx, winHeightPx);
-
     % Compute pixels-per-cm from actual window
     pxPerCmX = winWidthPx  / widthCm;
     pxPerCmY = winHeightPx / heightCm;
-
     % çree→pixel conversion lambdas
     deg2pxX = @(deg) viewingDistCm * tand(deg) * pxPerCmX;
     deg2pxY = @(deg) viewingDistCm * tand(deg) * pxPerCmY;
     dotRadiusPx = viewingDistCm * tand(dotRadiusDeg) * pxPerCmX;
-
     % Define 13 calibration positions in degrees [xDeg, yDeg]
     degPositions = [ ...
         0,  0;  -20, 20;   -20, -20;   20, 20;   20, -20; ...
         0, 20;   0, -20;   -20,   0;   20, 0; ...
         -15, 15;  15, 15;   -15, -15;   15, -15; ...
-
         -10,  10;   -10, -10;    10,  10;    10, -10; ...
         0,  10;    0, -10;   -10,   0;     10,   0; ...
-        -5,   5;   5,   5;   -5,  -5;     5,  -5;     0,   0];
+        -5,   5;   5,   5;   -5,  -5;     5,  -5];
     nDots = size(degPositions, 1);
-
     % Check CM distance
     xCm = viewingDistCm * tand(degPositions(:,1));
     yCm = viewingDistCm * tand(degPositions(:,2));
     rCm = hypot(xCm, yCm);
-
     fprintf(' Dot |  x°   |  y°   |   x_cm   |   y_cm   |  r_cm\n');
     fprintf('-----+-------+-------+----------+----------+--------\n');
-    for ii = 1:nDots
+    for iDot = 1:nDots
     fprintf('%4d | %5.1f° | %5.1f° | %7.2f  | %7.2f  | %6.2f\n', ...
-        ii, degPositions(ii,1), degPositions(ii,2), xCm(ii), yCm(ii), rCm(ii));
+        iDot, degPositions(iDot,1), degPositions(iDot,2), xCm(iDot), yCm(iDot), rCm(iDot));
     end
     fprintf('\n');
-
     % Convert to pixel coordinates
     positions = zeros(nDots, 2);
-    for ii = 1:nDots
-        xOff = deg2pxX(degPositions(ii,1));
-        yOff = deg2pxY(degPositions(ii,2));
-        positions(ii,:) = [xCen + xOff, yCen - yOff];
+    for iDot = 1:nDots
+        xOff = deg2pxX(degPositions(iDot,1));
+        yOff = deg2pxY(degPositions(iDot,2));
+        positions(iDot,:) = [xCen + xOff, yCen - yOff];
     end
-
     % Instruction text
     text = [
         'You will see 26 calibration dots appear one by one on the screen,' newline ...
@@ -131,64 +117,99 @@ function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, 
     
     % Wait for key press
     KbWait(-1);
-
     % First, import the bluetooth library for light logger communication 
     bluetooth_central = import_pyfile(getpref("lightLoggerAnalysis", "bluetooth_central_path")); 
-
     % If a key has been pressed and we are not in simulation mode, 
     % start recording on the light logger 
     if(~simulation_mode)
         disp("Main | Starting recording on light logger..."); 
-
         % We will attempt to start the light logger recording 
         success = start_recording_light_logger(bluetooth_central, experiment_name, device_num);
         if(~success)
             Screen('CloseAll'); 
             error('Error starting light logger recording'); 
         end 
-
         % If the light logger was properly started, we need to leave some time for the AGC to converge 
         % to the appropriate settings 
-        fprintf("Main | Recording started. Waiting %f seconds for AGC convergence...\n", agc_convergence_wait_s); 
-        pause(agc_convergence_wait_s); 
-
+        fprintf("Main | Recording started. Waiting %f seconds for AGC convergence...\n", agc_convergence_wait_s);
+        start_rec_time = GetSecs;
+        pause(agc_convergence_wait_s);
+    else
+        start_rec_time = GetSecs;
     end
-
-    disp('AGC done converging. Press any key to continue.')
-    KbWait(-1);
-
-    % Draw loop with beep on each dot onset
+    % Play beep (single repetition)
+    PsychPortAudio('Start', pahandle, 1, 0, 0);
+    disp('AGC done converging. Task will begin in 3 seconds!')
+    WaitSecs(2);
     HideCursor;
     Priority(MaxPriority(win));
-    for rep = 1:repetitions
-        for ii = 1:nDots
-            % Play beep (single repetition)
-            PsychPortAudio('Start', pahandle, 1, 0, 0);
-            
-            % Draw dot
-            pos  = positions(ii,:);
-            % Outer (white) circle
-            outerRect = [pos(1)-dotRadiusPx, pos(2)-dotRadiusPx, ...
-                         pos(1)+dotRadiusPx, pos(2)+dotRadiusPx];
-            Screen('FillOval', win, fgColor, outerRect);
-            
-            % Inner (red) circle
-            innerRadiusPx = dotRadiusPx * innerFrac;
-            innerRect = [pos(1)-innerRadiusPx, pos(2)-innerRadiusPx, ...
-                         pos(1)+innerRadiusPx, pos(2)+innerRadiusPx];
-            Screen('FillOval', win, redColor, innerRect);
-            WaitSecs(dotTime);
     
-            Screen('Flip', win);
-            WaitSecs(dotTime);
-        end
-        Screen('Flip', win);
-        WaitSecs(dotTime);
+    % Get refresh rate
+    ifi = Screen('GetFlipInterval', win); % Inter-frame interval
+    
+    % --- Pre-calculate all rectangle positions before the loop ---
+    outerRects = cell(nDots, 1);
+    innerRects = cell(nDots, 1);
+    for iDot = 1:nDots
+        pos = positions(iDot,:);
+        outerRects{iDot} = [pos(1)-dotRadiusPx, pos(2)-dotRadiusPx, ...
+            pos(1)+dotRadiusPx, pos(2)+dotRadiusPx];
+        innerRadiusPx = dotRadiusPx * innerFrac;
+        innerRects{iDot} = [pos(1)-innerRadiusPx, pos(2)-innerRadiusPx, ...
+            pos(1)+innerRadiusPx, pos(2)+innerRadiusPx];
     end
+    
+    % Get initial time to base all future timings on
+    start_task_time = GetSecs + 1; %add one sec because we will do some math below and we don't want to miss the first dot
+    task_start_delay = start_task_time - start_rec_time;
+    fprintf("Task start delay is %f seconds.", task_start_delay);
+
+    % --- Timing setup using a CPU-based wait loop as requested ---
+    totalDots = nDots * repetitions;
+    actualDurations = zeros(totalDots, 1);
+    
+    % The total duration a dot is on screen before the next one appears
+    dotTotalTime = 2.0; 
+    
+    startTime = cputime; % Use cputime for consistent, CPU-based timing
+    prevDotStartTime = startTime;
+    
+    % Draw loop with beep on each dot onset
+    for rep = 1:repetitions
+        for iDot = 1:nDots
+            linear_index = (rep - 1) * nDots + iDot;
+            
+            % Draw stimulus
+            Screen('FillOval', win, fgColor, outerRects{iDot});
+            Screen('FillOval', win, redColor, innerRects{iDot});
+            Screen('Flip', win);
+            
+            % Wait for the total dot duration before drawing the next one
+            dotDoneTime = cputime + dotTotalTime;
+            waitUntil(dotDoneTime);
+            
+            % Calculate and store the actual duration of the *previous* dot
+            % The first dot's duration can't be measured this way.
+            if linear_index > 1
+                actualDurations(linear_index - 1) = cputime - prevDotStartTime;
+            end
+            prevDotStartTime = cputime;
+        end
+    end
+    
+    % Final flip to clear the screen
+    Screen('Flip', win);
+    
+    % The last dot's duration
+    actualDurations(end) = cputime - prevDotStartTime;
+    
+    disp('Actual dot durations:')
+    disp(actualDurations)
+    
     Priority(0);
     ShowCursor;
     Screen('CloseAll');
-
+    
     % If we are not in simulation mode, stop recording from the light logger 
     if(~simulation_mode)
         success = stop_recording_light_logger(bluetooth_central, device_num);
@@ -196,8 +217,16 @@ function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, 
             error("Error stopping light logger recording"); 
         end 
     end
-
 end
+
+% Local function to perform a busy-wait until a specified time
+function waitUntil(stopTimeSeconds)
+    while cputime() < stopTimeSeconds
+        % Busy-wait loop
+    end
+end
+
+
 
 % Local function to start recording on the light logger 
 function success = start_recording_light_logger(bluetooth_central,... 

@@ -168,21 +168,6 @@ function display_adjusted_results(gaze_angles, confidence_measures, pupil_t, deg
     hold off; 
 
     % Move to the second tile
-    % and average gaze angle for 2-second time-bins
-    nexttile
-    title('Avg. Gaze Angle in window');
-    hold on;
-    window_duration = 2; % seconds, for now
-    [midpoints, avg_gaze_angles] = average_gaze_middle_segment(gaze_angles_transformed, pupil_t_corrected, window_duration);
-    
-    plot(midpoints, avg_gaze_angles(:, 1), 'ro-', 'LineWidth', 1.5, 'DisplayName', 'Phi');
-    plot(midpoints(:, 1), avg_gaze_angles(:, 2), 'bo-', 'LineWidth', 1.5, 'DisplayName', 'Theta');
-    xlabel("Time [s]")
-    ylabel("Angle [deg]")
-    legend show;
-    hold off;
-
-    % Move to the third tile
     % and plot the gaze angles over time and the degree positions
     % of the targets
     nexttile;
@@ -191,9 +176,10 @@ function display_adjusted_results(gaze_angles, confidence_measures, pupil_t, deg
     positionsRepeated = repmat(deg_positions, repeats, 1);
 
     % Create time vector: each point lasts 1 second
-    dotTime = 1; %seconds (as defined in runGazeCalibrationStimulus, but the timing was actually 2x this and then another 1 between repeats) 
+    dotDuration = 2.2; %seconds approximately. measured from world camera recording 
     nDotsPerRep = size(deg_positions,1);
-    appearanceTimes = getDotAppearanceTimes(dotTime, nDotsPerRep, repeats);
+    interRepDelay = 2; % seconds between repetitions, blank screen.
+    appearanceTimes = getDotAppearanceTimes(dotDuration, nDotsPerRep, repeats, interRepDelay);
 
     % Plot
     title("Target Position");
@@ -203,6 +189,21 @@ function display_adjusted_results(gaze_angles, confidence_measures, pupil_t, deg
     xlabel('Time (s)');
     ylabel('Angle (degrees)');
     legend('Phi', 'Theta');
+    hold off;
+
+     % Move to the third tile
+    % and average gaze angle for middle of when dots should have been
+    % presented
+    nexttile
+    title('Avg. Gaze Angle in window');
+    hold on;
+    [midpoints, avg_gaze_angles] = average_gaze_middle_segment(gaze_angles_transformed, pupil_t_corrected, appearanceTimes, dotDuration);
+    
+    plot(midpoints, avg_gaze_angles(:, 1), 'ro-', 'LineWidth', 1.5, 'DisplayName', 'Phi');
+    plot(midpoints(:, 1), avg_gaze_angles(:, 2), 'bo-', 'LineWidth', 1.5, 'DisplayName', 'Theta');
+    xlabel("Time [s]")
+    ylabel("Angle [deg]")
+    legend show;
     hold off;
 
     % Move to the last tile and plot the confidence of fits
@@ -220,77 +221,72 @@ function display_adjusted_results(gaze_angles, confidence_measures, pupil_t, deg
     return ;
 end 
 
-function appearanceTimes = getDotAppearanceTimes(dotTime, nDots, repetitions)
+function appearanceTimes = getDotAppearanceTimes(dotDuration, nDotsPerRep, repeats, interRepDelay)
 % getDotAppearanceTimes returns a vector of timestamps when each dot appears on screen
 %
 % Inputs:
-%   dotTime     - time in seconds for each wait period (pre-flip and post-flip)
-%   nDots       - number of dots per repetition
-%   repetitions - number of repetitions
+%   dotDuration   - duration (in seconds) each dot is visible (~2.15s)
+%   nDots         - number of dots per repetition
+%   repetitions   - number of repetitions
+%   interRepDelay - delay (in seconds) between repetitions (e.g., 2 seconds)
 %
 % Output:
 %   appearanceTimes - (nDots * repetitions) x 1 vector of appearance times in seconds
 
-    totalDots = nDots * repetitions;
+    totalDots = nDotsPerRep * repeats;
     appearanceTimes = zeros(totalDots, 1);
 
     time = 0;  % initialize time counter
 
-    for rep = 1:repetitions
-        for ii = 1:nDots
-            time = time + dotTime;  % wait before flip (dot drawn but not visible yet)
-            appearanceTimes((rep-1)*nDots + ii) = time;  % dot appears (flip time)
-            time = time + dotTime;  % wait after flip (dot visible)
+    for rep = 1:repeats
+        for ii = 1:nDotsPerRep
+            appearanceTimes((rep-1)*nDotsPerRep + ii) = time;  % dot appears at current time
+            time = time + dotDuration;                   % advance time by dot duration
         end
-        time = time + dotTime;  % wait between repetitions
+        time = time + interRepDelay;                      % add delay between repetitions
     end
 end
 
-function [midpoints, avg_gaze_angles] = average_gaze_middle_segment(gaze_angles_transformed, pupil_t_corrected, window_duration)
-    % average_gaze_middle_segment averages gaze angles over the middle segment of time windows
+function [midpoints, avg_gaze_angles] = average_gaze_middle_segment(gaze_angles_transformed, pupil_t_corrected, appearanceTimes, dotDuration)
+    % average_gaze_middle_segment_updated averages gaze angles over the middle 1-second segment of each dot's appearance
     %
     % Inputs:
     %   gaze_angles_transformed: Nx2 matrix of gaze angles [phi, theta]
     %   pupil_t_corrected: Nx1 vector of timestamps (seconds)
-    %   window_duration: duration of the full time window in seconds (default 2s)
+    %   appearanceTimes: Mx1 vector of timestamps when each dot appears
+    %   dotDuration: duration (in seconds) each dot is visible
     %
     % Outputs:
-    %   midpoints: Mx1 vector of midpoint times for each averaged window
+    %   midpoints: Mx1 vector of midpoint times for each averaged segment
     %   avg_gaze_angles: Mx2 matrix of average gaze angles [phi, theta] per middle segment
     
-    if nargin < 3
-        window_duration = 2; % default 2-second windows
-    end
-
-    start_time = pupil_t_corrected(1);
-    end_time = pupil_t_corrected(end);
-
-    % Define full window edges
-    edges = start_time:window_duration:end_time;
-
-    n_windows = length(edges) - 1;
-    avg_gaze_angles = nan(n_windows, 2);
-    midpoints = nan(n_windows, 1);
-
-    for ii = 1:n_windows
-        % Full window boundaries
-        t_start = edges(ii);
-        t_end = edges(ii+1);
-
-        % Define middle 1-second segment within the full window
-        segment_start = t_start + (window_duration - 1)/2; % 0.5 sec after start if window_duration=2
-        segment_end = segment_start + 1;
-
-        % Midpoint time of the middle segment
+    n_targets = length(appearanceTimes);
+    avg_gaze_angles = nan(n_targets, 2);
+    midpoints = nan(n_targets, 1);
+    
+    % Define the middle 1-second segment
+    middle_segment_duration = 1;
+    % Calculate the offset to find the middle of the dot's appearance
+    % For a dotDuration of 2.15s, the middle 1s segment starts at (2.15-1)/2 = 0.575s
+    start_offset = (dotDuration - middle_segment_duration) / 2;
+    
+    for ii = 1:n_targets
+        % Calculate the start and end of the middle 1-second segment for the current dot
+        segment_start = appearanceTimes(ii) + start_offset;
+        segment_end = segment_start + middle_segment_duration;
+        
+        % Calculate the midpoint of the segment
         midpoints(ii) = (segment_start + segment_end) / 2;
-
-        % Find indices within the middle 1-second segment
+        
+        % Find indices of gaze data within this segment
         idx_in_segment = pupil_t_corrected >= segment_start & pupil_t_corrected < segment_end;
-
+        
         if any(idx_in_segment)
+            % Average the gaze angles for the data in the segment
             avg_gaze_angles(ii, :) = mean(gaze_angles_transformed(idx_in_segment, :), 1);
         else
-            avg_gaze_angles(ii, :) = [NaN, NaN]; % no data for that segment
+            % If no data is found, set the average to NaN
+            avg_gaze_angles(ii, :) = [NaN, NaN];
         end
     end
 end
