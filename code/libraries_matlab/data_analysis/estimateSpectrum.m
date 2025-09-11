@@ -50,7 +50,6 @@ tMS_all_cumulative = [];
 wCam_all_cumulative = nan(3,0);
 tCam_all_cumulative = [];
 BGR_norm_all_cumulative = nan(0,3);
-
 % Option to run all chunks or just a subset
 run_all_chunks = false; % Set to true to process all chunks
 if run_all_chunks
@@ -72,19 +71,10 @@ for fileIdx = 1:num_chunks_to_process
     vCam_chunk = chunk.W.v;
     nFrames_chunk = size(vCam_chunk, 1);
     
-    % --------process all MS data for the current chunk-------
-    wCam_chunk = nan(3, nMSReadings);
-    for MSidx = 1:nMSReadings
-        wMS = chunk.M.v.AS(MSidx,1:8)';
-        S_hat = pinv(M)*wMS;
-        wCam = J*S_hat;
-        wCam = wCam / wCam(3);
-        wCam_chunk(:,MSidx) = wCam;
-    end
-    
     % --------process all world camera data for the current chunk-------
     resCam = size(vCam_chunk, 2,3);
-    BGR_norm_chunk = nan(nFrames_chunk,3);
+    % We will store the raw BGR means to normalize and plot later
+    BGR_raw_chunk = nan(nFrames_chunk, 3);
     [rows, cols] = ndgrid(1:resCam(1), 1:resCam(2));
     R_mask = mod(rows, 2) == 0 & mod(cols, 2) == 0;
     G_mask = (mod(rows, 2) == 0 & mod(cols, 2) == 1) | ...
@@ -96,15 +86,48 @@ for fileIdx = 1:num_chunks_to_process
         R_mean = mean(thisFrame(R_mask))*WORLD_RGB_SCALARS(1);
         G_mean = mean(thisFrame(G_mask))*WORLD_RGB_SCALARS(2);
         B_mean = mean(thisFrame(B_mask))*WORLD_RGB_SCALARS(3);
-        % normalize and save
-        BGR_norm_chunk(iFrame,:) = [B_mean/R_mean, G_mean/R_mean, R_mean/R_mean];
+        % Store the raw mean values
+        BGR_raw_chunk(iFrame,:) = [B_mean, G_mean, R_mean];
     end
     
-    % Append data to cumulative arrays with the time offset
+    % --------process and normalize MS data based on camera red channel-------
+    wCam_chunk = nan(3, nMSReadings);
+    for MSidx = 1:nMSReadings
+        wMS = chunk.M.v.AS(MSidx,1:8)';
+        S_hat = pinv(M)*wMS;
+        wCam = J*S_hat;
+        
+        % Get the time for the MS reading
+        tMS_current = tMS_chunk(MSidx);
+        if MSidx < nMSReadings
+            tMS_next = tMS_chunk(MSidx + 1);
+        else
+            % For the last reading, assume the interval is the same as the previous one
+            tMS_next = tMS_current + (tMS_current - tMS_chunk(MSidx - 1));
+        end
+        
+        % Find all camera frames within this MS time interval
+        cam_indices = find(tCam_chunk >= tMS_current & tCam_chunk < tMS_next);
+        
+        if ~isempty(cam_indices)
+            % Calculate the mean of the camera's raw red channel for this interval
+            camera_red_mean = mean(BGR_raw_chunk(cam_indices, 3));
+            
+            % Scale the MS-estimated values so their red channel matches the camera's mean
+            scale_factor = camera_red_mean / wCam(3);
+            wCam = wCam * scale_factor;
+        else
+            % If no camera data exists for the interval, normalize by max
+            wCam = wCam / max(wCam);
+        end
+        wCam_chunk(:,MSidx) = wCam;
+    end
+    
+    % Append data to cumulative arrays
     tMS_all_cumulative = [tMS_all_cumulative, tMS_chunk];
     wCam_all_cumulative = [wCam_all_cumulative, wCam_chunk];
     tCam_all_cumulative = [tCam_all_cumulative, tCam_chunk];
-    BGR_norm_all_cumulative = [BGR_norm_all_cumulative; BGR_norm_chunk];
+    BGR_norm_all_cumulative = [BGR_norm_all_cumulative; BGR_raw_chunk];
 end
 % Initialize a new figure for plotting all data
 figure;
