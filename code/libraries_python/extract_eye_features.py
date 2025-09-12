@@ -217,7 +217,8 @@ def visualize_pupil(frame: np.ndarray,
 def extract_pupil_features(video: str | np.ndarray,
                            is_grayscale: bool=False, 
                            visualize_results: bool=False, 
-                           method: Literal["pupil-labs", "pylids"]="pupil-labs"
+                           method: Literal["pupil-labs", "pylids"]="pupil-labs",
+			   safe_execution: bool=True
                           ) -> list[dict]:
 
     # Initialize eye features variable 
@@ -232,7 +233,7 @@ def extract_pupil_features(video: str | np.ndarray,
         pupil_features = pupil_labs_analyze_video(video, is_grayscale)
 
     # Check to ensure that the video is well formed
-    #assert Pi_util.inspect_video_frame_count(video) == len(pupil_features), "Video framecount not equal to analyzed frames. Some frames may be corrupted"
+    if(safe_execution is True): assert Pi_util.inspect_video_frame_count(video) == len(pupil_features), "Video framecount not equal to analyzed frames. Some frames may be corrupted"
 
     # If we want to visualize the results 
     if(visualize_results is True):
@@ -360,13 +361,14 @@ def visualize_eyelids(frame: np.ndarray,
 """
 def extract_eyelid_features(video: str | np.ndarray,
                             is_grayscale: bool=False,
-                            visualize_results: bool=False, 
+                            visualize_results: bool=False,
+			    safe_execution: bool=True
                            )-> list[dict]:
     # Extract eyelid features with pylids
     eyelid_features: dict[str, dict] = pylids_analyze_video(video, "eyelid")
 
     # Check to ensure that the video is well formed
-    assert Pi_util.inspect_video_frame_count(video) == len(eyelid_features), "Video framecount not equal to analyzed frames. Some frames may be corrupted"
+    if(safe_execution is True): assert Pi_util.inspect_video_frame_count(video) == len(eyelid_features), "Video framecount not equal to analyzed frames. Some frames may be corrupted"
 
     # Visualize results if desired 
     if(visualize_results is True):
@@ -463,20 +465,23 @@ def extract_eyelid_features(video: str | np.ndarray,
 def extract_eye_features(video: str | np.ndarray, 
                          is_grayscale: bool=True,
                          visualize_results: bool=False,
-                         pupil_feature_method: Literal["pupil-labs", "pylids"]="pupil-labs"
+                         pupil_feature_method: Literal["pupil-labs", "pylids"]="pupil-labs",
+			 safe_execution: bool=True
                         ) -> list[dict]:
     
     # First, extract the pupil features of the video 
     pupil_features: list[dict] = extract_pupil_features(video, 
                                                         is_grayscale, # Do not visualize single features if we want all features  
                                                         not visualize_results if visualize_results is True else visualize_results, 
-                                                        method=pupil_feature_method
+                                                        method=pupil_feature_method,
+							safe_execution=safe_execution
                                                        )
     
     # Then, extract the eyelid features 
     eyelid_features: list[dict] = extract_eyelid_features(video, 
                                                           is_grayscale,# Do not visualize single features if we want all features  
                                                           not visualize_results if visualize_results is True else visualize_results,
+							  safe_execution=safe_execution
                                                          )
     
     # Assert we have the same number of features for both eyelid and pupil features 
@@ -489,7 +494,7 @@ def extract_eye_features(video: str | np.ndarray,
                                           ]
     
     # Ensure the analysis was properly done (e.g. there were no silently corrupted frames not explictly caught with error by Pylids)
-    assert Pi_util.inspect_video_frame_count(video) == len(eye_features), "Video framecount not equal to analyzed frames. Some frames may be corrupted"
+    if(safe_execution is True): assert Pi_util.inspect_video_frame_count(video) == len(eye_features), "Video framecount not equal to analyzed frames. Some frames may be corrupted"
 
 
     # Visualize features if desired 
