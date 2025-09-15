@@ -218,7 +218,7 @@ def extract_pupil_features(video: str | np.ndarray,
                            is_grayscale: bool=False, 
                            visualize_results: bool=False, 
                            method: Literal["pupil-labs", "pylids"]="pupil-labs",
-			   safe_execution: bool=True
+			               safe_execution: bool=True
                           ) -> list[dict]:
 
     # Initialize eye features variable 
@@ -362,7 +362,7 @@ def visualize_eyelids(frame: np.ndarray,
 def extract_eyelid_features(video: str | np.ndarray,
                             is_grayscale: bool=False,
                             visualize_results: bool=False,
-			    safe_execution: bool=True
+			                safe_execution: bool=True
                            )-> list[dict]:
     # Extract eyelid features with pylids
     eyelid_features: dict[str, dict] = pylids_analyze_video(video, "eyelid")
@@ -466,7 +466,7 @@ def extract_eye_features(video: str | np.ndarray,
                          is_grayscale: bool=True,
                          visualize_results: bool=False,
                          pupil_feature_method: Literal["pupil-labs", "pylids"]="pupil-labs",
-			 safe_execution: bool=True
+			             safe_execution: bool=True
                         ) -> list[dict]:
     
     # First, extract the pupil features of the video 
@@ -474,14 +474,14 @@ def extract_eye_features(video: str | np.ndarray,
                                                         is_grayscale, # Do not visualize single features if we want all features  
                                                         not visualize_results if visualize_results is True else visualize_results, 
                                                         method=pupil_feature_method,
-							safe_execution=safe_execution
+							                            safe_execution=safe_execution
                                                        )
     
     # Then, extract the eyelid features 
     eyelid_features: list[dict] = extract_eyelid_features(video, 
                                                           is_grayscale,# Do not visualize single features if we want all features  
                                                           not visualize_results if visualize_results is True else visualize_results,
-							  safe_execution=safe_execution
+							                              safe_execution=safe_execution
                                                          )
     
     # Assert we have the same number of features for both eyelid and pupil features 
@@ -554,7 +554,7 @@ def extract_eye_features(video: str | np.ndarray,
         frame_stream_process.start()
 
         # Parse frames from the video, gathering their features
-        num_frames: int = Pi_util.inspect_video_frame_count(video)
+        frame_num: int = 0
         while(True):
             # Attempt to retrieve a frame from the frame queue 
             try:
