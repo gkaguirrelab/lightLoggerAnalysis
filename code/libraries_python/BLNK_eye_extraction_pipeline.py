@@ -13,11 +13,24 @@ sys.path.append("/Users/zacharykelly/Documents/MATLAB/projects/lightLogger/raspb
 import Pi_util
 import matplotlib.pyplot as plt
 
+"""Use this command to copy data off of the linux laptop to the analysis machine"""
+"""
+while true; do
+  /opt/homebrew/bin/rsync -av --partial --append-verify --info=progress2 --timeout=60 --compress-level=1 \
+    --bwlimit=60000 \
+    -e 'ssh -p 22 -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -o TCPKeepAlive=yes -o IPQoS=throughput -o RekeyLimit=4G -o Compression=no' \
+    gka@10.30.8.122:/media/gka/EYEVIDEOS/lightLevel/HERO_gka/  ./HERO_gka/ && break
+  echo "Retrying in 10s…"; sleep 10
+done
+
+"""
+
+
 """Predict eye features (pupil and eyelid) for a given BLNK video"""
-def predict_eye_features(filepath: str, 
-                         crop_box: tuple[int], 
-                         target_size: tuple[int],  
+def predict_eye_features(filepath: str,
                          output_folder_path: str, 
+                         crop_box: tuple[int]=(140, 275, 190, 425), 
+                         target_size: tuple[int]=(480, 640),   
                          temp_dir_path: str="./BLNK_temp", 
                          threshold_value: int=225
                         ) -> None:
@@ -87,68 +100,7 @@ def predict_eye_features(filepath: str,
     # Remvove the temp avi video 
     os.remove(temp_video_path)
 
-
-
-"""
-    Uses scp to copy all files from remote_dir to local_dir.
-    Assumes no subdirectories and no spaces in paths. For paths with spaces,
-    prefer the Paramiko version above.
-"""
-def scp_download_dir(
-    remote_dir: str,
-    local_dir: str,
-    host: str,
-    username: str,
-    port: int = 22,
-    password: str | None = None,
-):
-    """
-    Copy *each file* from `remote_dir` on the remote host to `local_dir` locally,
-    iterating file-by-file instead of using a wildcard.
-
-    Assumptions:
-      - No subdirectories
-      - No spaces or odd characters in filenames (for spaces, use Paramiko/SFTP)
-    Requires:
-      - `sshpass` if you provide `password`
-    Returns:
-      (downloaded_paths, failed_filenames)
-    """
-    os.makedirs(local_dir, exist_ok=True)
-
-    # 1) List plain files on the remote (filenames only, one per line)
-    list_cmd = ["ssh", "-p", str(port), f"{username}@{host}",
-                "find", remote_dir, "-maxdepth", "1", "-type", "f", "-printf", "%f\n"]
-    if password is not None:
-        list_cmd = ["sshpass", "-p", password] + list_cmd
-
-    try:
-        out = subprocess.check_output(list_cmd, text=True)
-    except subprocess.CalledProcessError as e:
-        raise RuntimeError(f"Could not list files in {remote_dir!r} on {host}: {e}") from e
-
-    filenames = [line.strip() for line in out.splitlines() if line.strip()]
-
-    downloaded, failed = [], []
-
-    # 2) Copy each file individually
-    for name in filenames:
-        remote_path = f"{remote_dir.rstrip('/')}/{name}"
-        remote_spec = f"{username}@{host}:{remote_path}"
-
-        scp_cmd = ["scp", "-P", str(port), remote_spec, local_dir]
-        if password is not None:
-            scp_cmd = ["sshpass", "-p", password] + scp_cmd
-
-        print(f"Downloading {name}...")
-        try:
-            subprocess.run(scp_cmd, check=True)
-            downloaded.append(os.path.join(local_dir, name))
-        except subprocess.CalledProcessError:
-            failed.append(name)
-
-    return downloaded, failed
-
+    return 
 
 def main():
     pass 
