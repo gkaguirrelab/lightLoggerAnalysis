@@ -31,8 +31,7 @@ import pupil_util
 def generate_playable_video(video: str | np.ndarray, eye_features: list[dict],
                             output_path: str="visualized_eyefeatures.avi",
                             is_grayscale: bool=False,
-                            safe_execution: bool=True,
-                            pupil_method: Literal["pylids", "pupil-labs"]="pylids"
+                            safe_execution: bool=True
                            ) -> None:
   
     # Capture the actual framecount of the video. This will be used for safeguarding 
@@ -95,15 +94,23 @@ def generate_playable_video(video: str | np.ndarray, eye_features: list[dict],
             write_queue.put(None)
             break    
 
-        # Otherwise, draw the visualizations on the image 
-        if('pupil' in eye_features):
-            # Visualize the pupil image on this frame 
-            visualized_frame = visualize_pupil(frame, eye_features['pupil'][frame_num], method=pupil_method)
+        # Otherwise, draw the visualizations on the image
+        assert frame.dtype == np.uint8, f"Frame read with wrong dtype. Is {frame.dtype}, should be np.uint8"
 
-        if('eyelids' in eye_features):
-            visualized_frame = visualize_eyelids(frame, eye_features["eylids"][frame_num])
+        # Retrieve the eye features for this frame 
+        frame_eye_features: dict = eye_features[frame_num]
+
+        # Apply the ransformations onto the frame 
+        visualized_frame = frame.copy() 
+        if('pupil' in frame_eye_features):
+            # Visualize the pupil image on this frame 
+            visualized_frame = visualize_pupil(visualized_frame, frame_eye_features['pupil'])
+
+        if('eyelids' in frame_eye_features):
+            visualized_frame = visualize_eyelids(visualized_frame, frame_eye_features["eyelids"])
 
         # Send the frame to the writer to be written 
+        assert visualized_frame.dtype == np.uint8, f"Visualized frame is wrong dtype. Is {visualized_frame.dtype}, should be np.uint8"
         write_queue.put(visualized_frame)
      
         # Increment the frame num 
@@ -248,11 +255,8 @@ def visualize_pupil(frame: np.ndarray,
                     plot_output: bool=False, 
                    ) -> None | tuple:
     
-    # Assert the frame is 2D grayscale
-    assert(len(frame.shape) == 2)
-
-    # Initialize a copy frame to work on and ensure that it's colored 
-    frame_colored: np.ndarray = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+    # Convert to color if not colored already 
+    frame_colored: np.ndarray = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR) if frame.ndim == 2 else frame.copy()
 
     # Retrieve the information about the ellipse to plot 
     cx = cy = None 
@@ -273,13 +277,16 @@ def visualize_pupil(frame: np.ndarray,
                 thickness=2,
                 lineType=cv2.LINE_AA
                )
+    
+    # Ensure we are back in uint8 space
+    frame_colored = frame_colored.astype(np.uint8)
 
     if(plot_output is True):
         # Generate a figure ot show the plto
         fig, ax = plt.subplots()
 
         # Show the frame on the axis
-        ax.imshow(frame_colored)
+        ax.imshow(ax.imshow(cv2.cvtColor(frame_colored, cv2.COLOR_BGR2RGB)))
 
         # Pretty the plot 
         ax.set_title("Pupil")
@@ -325,18 +332,19 @@ def visualize_eyelids(frame: np.ndarray,
                       plot_output: bool=False 
                      ) -> None:
     
-    # Assert the frame is 2D grayscale
-    assert(len(frame.shape) == 2)
+
+    # Convert to color if not already 
+    frame_colored: np.ndarray = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR) if frame.ndim == 2 else frame.copy()
+
 
     # Apply the visualization to the frame
-    frame_colored: np.ndarray = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR) if frame.ndim == 2 else frame.copy()
     pts_lo: np.ndarray = np.column_stack((frame_eyelid_features['eyelid_x'], frame_eyelid_features['eyelid_lo_y'])).astype(np.int32)
     pts_up: np.ndarray = np.column_stack((frame_eyelid_features['eyelid_x'], frame_eyelid_features['eyelid_up_y'])).astype(np.int32)
     cv2.polylines(frame_colored, [pts_lo], isClosed=False, color=(0,0,255), thickness=2, lineType=cv2.LINE_AA)
     cv2.polylines(frame_colored, [pts_up], isClosed=False, color=(0,0,255), thickness=2, lineType=cv2.LINE_AA)
-    
-    # Converted from BGR to RGB 
-    frame_colored = cv2.cvtColor(frame_colored, cv2.COLOR_BGR2RGB) 
+
+    # Ensure we are back to uint 8 
+    frame_colored = frame_colored.astype(np.uint8)
 
     # Generate a figure if not given an axis 
     # (if we want to show output)
@@ -344,7 +352,7 @@ def visualize_eyelids(frame: np.ndarray,
         fig, ax = plt.subplots()
 
         # Show the frame on the axis
-        ax.imshow(frame_colored)
+        ax.imshow(cv2.cvtColor(frame_colored, cv2.COLOR_BGR2RGB))
 
         # Pretty the plot 
         ax.set_title("Eyelids")
