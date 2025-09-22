@@ -64,7 +64,7 @@ def generate_playable_video(video: str | np.ndarray, eye_features: list[dict],
     # Initialize a process to stream frames to be written
     video_fps: float = Pi_util.inspect_video_FPS(video)
     write_process: object = mp.Process(target=Pi_util.frames_to_video, 
-                                       args=(write_queue, output_path, video_fps, write_stop_event)
+                                       args=(write_queue, output_path, video_fps, write_stop_event, 60)
                                       )
     
     # Assemble processes/stop events into lists
@@ -98,7 +98,19 @@ def generate_playable_video(video: str | np.ndarray, eye_features: list[dict],
         assert frame.dtype == np.uint8, f"Frame read with wrong dtype. Is {frame.dtype}, should be np.uint8"
 
         # Retrieve the eye features for this frame 
-        frame_eye_features: dict = eye_features[frame_num]
+        try:
+            frame_eye_features: dict = eye_features[frame_num]
+
+        # If safe mode was disabled and there are more frames 
+        # than those analyzed, simply quit now
+        except IndexError as e:
+            write_queue.put(None)
+            
+            # Close the subprocesses on error 
+            for process, stop_event in zip(processes[::-1], stop_events[::-1]):
+                stop_event.set() 
+
+            break 
 
         # Apply the ransformations onto the frame 
         visualized_frame = frame.copy() 
@@ -122,6 +134,10 @@ def generate_playable_video(video: str | np.ndarray, eye_features: list[dict],
             stop_event.set() 
 
         process.join() 
+
+    # Ensure the queues are empty for clean exit
+    for q in (read_queue, write_queue):
+        Pi_util.clear_mp_queue(q)
 
     return 
 
@@ -301,6 +317,7 @@ def extract_pupil_features(video: str | np.ndarray,
                            is_grayscale: bool=False, 
                            visualize_results: bool=False, 
                            method: Literal["pupil-labs", "pylids"]="pupil-labs",
+                           visualization_output_filepath: str="visualized_pupilfeatures.avi",
 			               safe_execution: bool=True
                           ) -> list[dict]:
 
@@ -322,7 +339,12 @@ def extract_pupil_features(video: str | np.ndarray,
 
     # If we want to visualize the results 
     if(visualize_results is True):
-        raise NotImplementedError()
+        generate_playable_video(video, 
+                                [ {"pupil": pupil_features[frame]} for frame in range(len(pupil_features))], 
+                                visualization_output_filepath, 
+                                is_grayscale=is_grayscale, 
+                                safe_execution=safe_execution
+                               )
 
     return pupil_features
 
@@ -369,6 +391,7 @@ def visualize_eyelids(frame: np.ndarray,
 def extract_eyelid_features(video: str | np.ndarray,
                             is_grayscale: bool=False,
                             visualize_results: bool=False,
+                            visualization_output_filepath: str="visualized_eyelidfeatures.avi",
 			                safe_execution: bool=True
                            )-> list[dict]:
     # Extract eyelid features with pylids
@@ -381,7 +404,12 @@ def extract_eyelid_features(video: str | np.ndarray,
 
     # Visualize results if desired 
     if(visualize_results is True):
-        raise NotImplementedError()
+        generate_playable_video(video, 
+                                [ {"eyelids": eyelid_features[frame]} for frame in range(len(eyelid_features))], 
+                                visualization_output_filepath, 
+                                is_grayscale=is_grayscale, 
+                                safe_execution=safe_execution
+                               )
 
     return eyelid_features
 
