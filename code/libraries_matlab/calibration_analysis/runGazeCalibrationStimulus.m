@@ -2,7 +2,10 @@ function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, 
 % Displays 26-dot gaze calibration stimulus at fixed visual angles, with a brief beep signaling each dot onset.
 % 
 % Description: 
-%   xxxx
+%   Displays calibration dots on a screen for the subject to fixate. The
+%   dots are at various distances in degrees visual angle from a central
+%   point. The regime also starts the light logger recording if the option
+%   to record is turned on (i.e., not in simulation mode).
 % 
 % Inputs:
 %   simulation_mode             - String & Enum. Choose whether to run full stimulus or simulate 
@@ -22,11 +25,11 @@ function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, 
 % 
 % Example:
 %{
-    runGazeCalibrationStimulus("full", 2, 60, 'GazeCalib_Run1', 1067, 1924)
+    runGazeCalibrationStimulus("full", 2, 60, 'GazeCalib_Run1', 106.7, 192.4)
 %}
                           
     arguments 
-        simulation_mode {mustBeMember(simulation_mode, ["full", "visual", "bluetooth"])} = 0;
+        simulation_mode {mustBeMember(simulation_mode, ["full", "visual", "bluetooth"])} = "full";
         device_num {mustBeNumeric} = 1;
         agc_convergence_wait_s {mustBeNumeric} = 60;
         experiment_name = "GazeCalibration";
