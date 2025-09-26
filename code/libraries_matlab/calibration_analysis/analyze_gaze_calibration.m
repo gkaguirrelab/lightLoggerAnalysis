@@ -143,7 +143,7 @@ function display_adjusted_results(gaze_angles, confidence_measures, pupil_t, deg
     gaze_angles_transformed = gaze_angles;
 
     % 2. Remove low confidence frames
-    good_idx = (confidence_measures(:, 1) > 0.90) & (confidence_measures(:, 2) > 0.9);
+    good_idx = (confidence_measures(:, 1) > 0.90) & (confidence_measures(:, 2) > 0.90);
     gaze_angles_transformed = gaze_angles_transformed(good_idx, :);
     confidence_measures = confidence_measures(good_idx, :);
     pupil_t_corrected = pupil_t_corrected(good_idx, :); 
