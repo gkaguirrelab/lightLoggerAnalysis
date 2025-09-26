@@ -281,18 +281,21 @@ def visualize_pupil(frame: np.ndarray,
 
     # Gather ellipse parameters to plot the pupil
     cx, cy = tuple([ int(v) for v in frame_pupil_features['ellipse']['center']])
-    major, minor = frame_pupil_features['ellipse']['axes']
+    major, minor = [ int(v) for v in frame_pupil_features['ellipse']['axes'] ]
     angle: float = frame_pupil_features['ellipse']['angle']
 
-    cv2.ellipse(frame_colored,
-                center=(int(round(cx)), int(round(cy))),
-                axes=(int(round(major/2)), int(round(minor/2))),  # semi-axes
-                angle=angle,                              
-                startAngle=0, endAngle=360,
-                color=(0, 0, 255), # BGR format
-                thickness=2,
-                lineType=cv2.LINE_AA
-               )
+    
+    # Only print valid ellipses
+    if(all(axis > 0 and axis < (2 * max(frame_colored.shape[:2])) for axis in (major, minor) ) ):
+        cv2.ellipse(frame_colored,
+                    center=(int(round(cx)), int(round(cy))),
+                    axes=(int(round(major/2)), int(round(minor/2))),  # semi-axes
+                    angle=angle,                              
+                    startAngle=0, endAngle=360,
+                    color=(0, 0, 255), # BGR format
+                    thickness=2,
+                    lineType=cv2.LINE_AA
+                    )
     
     # Ensure we are back in uint8 space
     frame_colored = frame_colored.astype(np.uint8)
