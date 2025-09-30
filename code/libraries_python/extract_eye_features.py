@@ -296,7 +296,22 @@ def visualize_pupil(frame: np.ndarray,
                     thickness=2,
                     lineType=cv2.LINE_AA
                     )
-    
+        
+        # If there are key points (like if you used pupil labs), then let's also visualize them 
+        if("dlc_kpts_x" in frame_pupil_features):
+            # Visualize and label the keypoints
+            for point_num, (x, y) in enumerate(zip(frame_pupil_features["dlc_kpts_x"], frame_pupil_features["dlc_kpts_y"])):
+                confidence: int = int(frame_pupil_features["dlc_confidence"][point_num] * 100)
+
+                # We will draw low confidence points with different colors
+                color: tuple[int] = (0, 255, 0) if confidence >= 60 else (0, 0, 255)
+                cv2.circle(frame_colored, center=(int(x), int(y)), radius=3, color=color, thickness=-1, lineType=cv2.LINE_AA)
+                
+            # Draw their confidence measurements over the circles
+            for point_num, (x, y) in enumerate(zip(frame_pupil_features["dlc_kpts_x"], frame_pupil_features["dlc_kpts_y"])):
+                confidence: int = int(frame_pupil_features["dlc_confidence"][point_num] * 100)
+                cv2.putText(frame_colored, str(confidence), (int(x + 6), int(y - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.25, (255, 255, 255), 1, cv2.LINE_AA)
+
     # Ensure we are back in uint8 space
     frame_colored = frame_colored.astype(np.uint8)
 
