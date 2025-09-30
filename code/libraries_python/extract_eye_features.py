@@ -31,7 +31,8 @@ import pupil_util
 def generate_playable_video(video: str | np.ndarray, eye_features: list[dict],
                             output_path: str="visualized_eyefeatures.avi",
                             is_grayscale: bool=False,
-                            safe_execution: bool=True
+                            safe_execution: bool=True,
+                            keypoint_threshold: float=0.65
                            ) -> None:
   
     # Capture the actual framecount of the video. This will be used for safeguarding 
@@ -116,10 +117,15 @@ def generate_playable_video(video: str | np.ndarray, eye_features: list[dict],
         visualized_frame = frame.copy() 
         if('pupil' in frame_eye_features):
             # Visualize the pupil image on this frame 
-            visualized_frame = visualize_pupil(visualized_frame, frame_eye_features['pupil'])
+            visualized_frame = visualize_pupil(visualized_frame, 
+                                               frame_eye_features['pupil'], 
+                                               keypoint_threshold=keypoint_threshold
+                                              )
 
         if('eyelids' in frame_eye_features):
-            visualized_frame = visualize_eyelids(visualized_frame, frame_eye_features["eyelids"])
+            visualized_frame = visualize_eyelids(visualized_frame, 
+                                                 frame_eye_features["eyelids"]
+                                                )
 
         # Send the frame to the writer to be written 
         assert visualized_frame.dtype == np.uint8, f"Visualized frame is wrong dtype. Is {visualized_frame.dtype}, should be np.uint8"
@@ -269,6 +275,7 @@ def pylids_analyze_video(video: str,
 def visualize_pupil(frame: np.ndarray, 
                     frame_pupil_features: dict[str, object], 
                     plot_output: bool=False, 
+                    keypoint_threshold: float = 0.65 
                    ) -> None | tuple:
     
     # Convert to color if not colored already 
@@ -304,7 +311,7 @@ def visualize_pupil(frame: np.ndarray,
                 confidence: int = int(frame_pupil_features["dlc_confidence"][point_num] * 100)
 
                 # We will draw low confidence points with different colors
-                color: tuple[int] = (0, 255, 0) if confidence >= 60 else (0, 0, 255)
+                color: tuple[int] = (0, 255, 0) if confidence > keypoint_threshold else (0, 0, 255)
                 cv2.circle(frame_colored, center=(int(x), int(y)), radius=3, color=color, thickness=-1, lineType=cv2.LINE_AA)
                 
             # Draw their confidence measurements over the circles
@@ -336,7 +343,8 @@ def extract_pupil_features(video: str | np.ndarray,
                            visualize_results: bool=False, 
                            method: Literal["pupil-labs", "pylids"]="pupil-labs",
                            visualization_output_filepath: str="visualized_pupilfeatures.avi",
-			               safe_execution: bool=True
+			               safe_execution: bool=True,
+                           keypoint_threshold: float=0.65
                           ) -> list[dict]:
 
     # Initialize eye features variable 
@@ -355,16 +363,36 @@ def extract_pupil_features(video: str | np.ndarray,
         actual_video_framecount: int = Pi_util.inspect_video_frame_count(video) if isinstance(video, str) else len(video)
         assert actual_video_framecount == len(pupil_features), f"Video framecount ({actual_video_framecount}) not equal to analyzed frames ({len(pupil_features)}). Some frames may be corrupted"
 
+    # Populate the perimeter info dict 
+    # which we will use to massage data into 
+    # the existing code's MATLAB readable formatb 
+    perimeter_info_dict: dict = {"size": tuple([]), 
+                                 "data": [], 
+                                 "meta": {}
+                                }
+    if(method == "pylids"):
+        # Retrieve the frame shape 
+        perimeter_info_dict["size"] = Pi_util.inspect_video_framesize(video) if isinstance(video, str) else video.shape[1:3]
+
+        # Reformat the data into a list of dicts with X/Y points of valid perimeter points 
+        perimeter_info_dict["data"] = [ {"Xp": [ x for point_num, x in enumerate(frame_features["dlc_kpts_x"]) if frame_features["dlc_confidence"][point_num] > keypoint_threshold ], 
+                                         "Yp": [ y for point_num, y in enumerate(frame_features["dlc_kpts_y"]) if frame_features["dlc_confidence"][point_num] > keypoint_threshold ]
+                                        } 
+                                        for frame_features in pupil_features
+                                      ]
+
+
     # If we want to visualize the results 
     if(visualize_results is True):
         generate_playable_video(video, 
                                 [ {"pupil": pupil_features[frame]} for frame in range(len(pupil_features))], 
                                 visualization_output_filepath, 
                                 is_grayscale=is_grayscale, 
-                                safe_execution=safe_execution
+                                safe_execution=safe_execution,
+                                keypoint_threshold=keypoint_threshold
                                )
 
-    return pupil_features
+    return pupil_features, perimeter_info_dict
 
 """Plot detected eyelids on a given frame"""
 def visualize_eyelids(frame: np.ndarray, 
@@ -450,12 +478,12 @@ def extract_eye_features(video: str | np.ndarray,
     actual_video_framecount: int = Pi_util.inspect_video_frame_count(video) if isinstance(video, str) else len(video)
 
     # First, extract the pupil features of the video 
-    pupil_features: list[dict] = extract_pupil_features(video, 
-                                                        is_grayscale, # Do not visualize single features if we want all features  
-                                                        not visualize_results if visualize_results is True else visualize_results, 
-							                            safe_execution=safe_execution,
-                                                        method=pupil_feature_method
-                                                       )
+    pupil_features, perimeter_info_dict = extract_pupil_features(video, 
+                                                                 is_grayscale, # Do not visualize single features if we want all features  
+                                                                 not visualize_results if visualize_results is True else visualize_results, 
+							                                     safe_execution=safe_execution,
+                                                                 method=pupil_feature_method
+                                                                )
     
     # Ensure the analysis was properly done (e.g. there were no silently corrupted frames not explictly caught with error by Pylids)
     if(safe_execution is True): 
