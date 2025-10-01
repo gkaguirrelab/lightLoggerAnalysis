@@ -311,7 +311,7 @@ def visualize_pupil(frame: np.ndarray,
                 confidence: int = int(frame_pupil_features["dlc_confidence"][point_num] * 100)
 
                 # We will draw low confidence points with different colors
-                color: tuple[int] = (0, 255, 0) if confidence > keypoint_threshold else (0, 0, 255)
+                color: tuple[int] = (0, 255, 0) if confidence >= keypoint_threshold else (0, 0, 255)
                 cv2.circle(frame_colored, center=(int(x), int(y)), radius=3, color=color, thickness=-1, lineType=cv2.LINE_AA)
                 
             # Draw their confidence measurements over the circles
@@ -375,11 +375,15 @@ def extract_pupil_features(video: str | np.ndarray,
         perimeter_info_dict["size"] = Pi_util.inspect_video_framesize(video) if isinstance(video, str) else video.shape[1:3]
 
         # Reformat the data into a list of dicts with X/Y points of valid perimeter points 
-        perimeter_info_dict["data"] = [ {"Xp": [ x for point_num, x in enumerate(frame_features["dlc_kpts_x"]) if frame_features["dlc_confidence"][point_num] > keypoint_threshold ], 
-                                         "Yp": [ y for point_num, y in enumerate(frame_features["dlc_kpts_y"]) if frame_features["dlc_confidence"][point_num] > keypoint_threshold ]
+        perimeter_data_arr: np.ndarray = np.empty( (len(pupil_features), 1) , dtype=object)
+        perimeter_data_arr[:, 0] = [ {"Xp": [ x for point_num, x in enumerate(frame_features["dlc_kpts_x"]) if frame_features["dlc_confidence"][point_num] >= keypoint_threshold ], 
+                                         "Yp": [ y for point_num, y in enumerate(frame_features["dlc_kpts_y"]) if frame_features["dlc_confidence"][point_num] >= keypoint_threshold ], 
+                                         "confidence": [confidence_value for confidence_value in frame_features["dlc_confidence"] if confidence_value >= keypoint_threshold]
                                         } 
                                         for frame_features in pupil_features
                                       ]
+
+        perimeter_info_dict["data"] = perimeter_data_arr
 
 
     # If we want to visualize the results 
