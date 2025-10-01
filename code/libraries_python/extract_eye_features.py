@@ -344,7 +344,8 @@ def extract_pupil_features(video: str | np.ndarray,
                            method: Literal["pupil-labs", "pylids"]="pupil-labs",
                            visualization_output_filepath: str="visualized_pupilfeatures.avi",
 			               safe_execution: bool=True,
-                           keypoint_threshold: float=0.65
+                           keypoint_threshold: float=0.65,
+                           correct_rotation: bool=False
                           ) -> list[dict]:
 
     # Initialize eye features variable 
@@ -376,12 +377,16 @@ def extract_pupil_features(video: str | np.ndarray,
 
         # Reformat the data into a list of dicts with X/Y points of valid perimeter points 
         perimeter_data_arr: np.ndarray = np.empty( (len(pupil_features), 1) , dtype=object)
-        perimeter_data_arr[:, 0] = [ {"Xp": [ x for point_num, x in enumerate(frame_features["dlc_kpts_x"]) if frame_features["dlc_confidence"][point_num] >= keypoint_threshold ], 
-                                         "Yp": [ y for point_num, y in enumerate(frame_features["dlc_kpts_y"]) if frame_features["dlc_confidence"][point_num] >= keypoint_threshold ], 
-                                         "confidence": [confidence_value for confidence_value in frame_features["dlc_confidence"] if confidence_value >= keypoint_threshold]
-                                        } 
-                                        for frame_features in pupil_features
-                                      ]
+        for frame_num, frame_features in enumerate(pupil_features):
+            # First, we will extract the X points and Y points of the pupil fit 
+            Xp: np.ndarray = np.array([ x for point_num, x in enumerate(frame_features["dlc_kpts_x"]) if frame_features["dlc_confidence"][point_num] >= keypoint_threshold ]) 
+            Yp: np.ndarray = np.array([ y for point_num, y in enumerate(frame_features["dlc_kpts_y"]) if frame_features["dlc_confidence"][point_num] >= keypoint_threshold ])
+            confidence: np.ndarray = np.array([ confidence_value for confidence_value in frame_features["dlc_confidence"] if confidence_value >= keypoint_threshold ])
+
+            perimeter_data_arr[frame_num, 0] = {"Xp": Xp,
+                                                "Yp": Yp,
+                                                "confidence": confidence
+                                               }
 
         perimeter_info_dict["data"] = perimeter_data_arr
 
