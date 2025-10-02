@@ -23,6 +23,30 @@ import Pi_util
 # Import pupil_util for constants 
 import pupil_util
 
+"""Given a dict of detected gaze targets and an image to display 
+   on, visualize the results 
+"""
+def visualize_targets(background: np.ndarray, targets: dict[int, np.ndarray]) -> object:
+    # Initialize a figure 
+    fig, ax = plt.subplots() 
+
+    # Imshow the background 
+    ax.imshow(background, cmap="gray")
+
+    # Draw the targets onto the background 
+    for target_num, (cx, cy, r) in targets.items():
+        circle = plt.Circle((cx, cy), r, fill=False, color='red', linewidth=2, label=f"Target: {target_num}")
+        ax.add_patch(circle)
+
+    # Ensure the figure is pretty 
+    ax.set_title("Gaze Calibration Targets")
+    ax.legend()
+
+    # Display the figure 
+    plt.show()
+
+    return fig
+
 """Calculate the euclidean distance between circles in pixel space"""
 def calculate_euclidean_distance(a: tuple[int], b: tuple[int]):
     return math.sqrt( (b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2)
@@ -93,7 +117,8 @@ def extract_target_circles(video: str,
                            is_grayscale: bool=False,
                            threshold_value: int=127,
                            radius_range: Iterable=range(4, 7, 1),
-                           min_intercircle_distance: float=8
+                           min_intercircle_distance: float=8,
+                           visualize_results: bool=False 
                           ) -> np.ndarray:
     # If given a np.ndarray, simply take the average frame 
     if(isinstance(video, np.ndarray)):
@@ -116,6 +141,7 @@ def extract_target_circles(video: str,
     circles: dict[tuple | None] = {}
 
     # Parse frames from the video, gathering their features
+    num_detected_circles: int = 0
     while(True):
         # Attempt to retrieve a frame from the frame queue 
         try:
@@ -148,31 +174,48 @@ def extract_target_circles(video: str,
         frame_circles: list[tuple] =  [ tuple([int(cx), int(cy), int(radius)])
                                         for cx, cy, radius in zip(cxs, cys, radii_found)
                                       ] 
-        most_prominent_circle: tuple = frame_circles[0]                                
+        
+        # Skip frames that have no circles 
+        if(len(frame_circles) == 0):
+            continue        
+        most_prominent_circle: tuple = frame_circles[0]  
 
         # If we have detected no circles before  
         if(len(circles) == 0):
-            circles[most_prominent_circle] = np.array(most_prominent_circle) 
+            circles[num_detected_circles] = np.array(most_prominent_circle) 
+            num_detected_circles += 1 
             continue
         
         # If this circle has basically been detected before, 
         # then we skip 
-        for previously_detected_circle in circles:
+        previously_detected_circles: list = list(circles.items())
+
+        # First, check if this circle has not been seen before 
+        if(all( calculate_euclidean_distance(previously_detected_circle, most_prominent_circle) > min_intercircle_distance for circle_num, previously_detected_circle in previously_detected_circles)):
+            circles[num_detected_circles] = np.array(most_prominent_circle) 
+            num_detected_circles += 1 
+            continue
+
+        # Otherwise, average the ones its close to 
+        for circle_num, previously_detected_circle in previously_detected_circles:
             # Determine if the previously detected circle is approximately 
             # equal to the current circle 
 
-            # If they are different circles, simply just add 
-            if(calculate_euclidean_distance(previously_detected_circle, most_prominent_circle) > min_intercircle_distance):
-                circles[most_prominent_circle] = np.array(most_prominent_circle) 
-                continue 
-                
-            # Otherwise, average them 
-            circles[previously_detected_circle] = np.array([ int(v) for v in (circles[previously_detected_circle] + np.array(most_prominent_circle)) / 2 ])
+            # If they are different circles, simply just add to the dict 
+            if(calculate_euclidean_distance(previously_detected_circle, most_prominent_circle) < min_intercircle_distance):
+                # Otherwise, average them 
+                circles[circle_num] = np.array([ int(v) for v in (previously_detected_circle + np.array(most_prominent_circle)) / 2 ])
 
     # Join the subprocess 
     frame_stream_process.join()   
 
-    return circles
+    # Visualize the results if desired
+    fig: object | None = None
+    if(visualize_results is True):
+        fig = visualize_results(background_img, circles)
+        return circles, fig
+
+    return circles 
 
 """Extract the position of gaze calibration targets 
    from a video per frame 
