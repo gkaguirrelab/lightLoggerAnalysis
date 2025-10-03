@@ -383,9 +383,9 @@ def extract_pupil_features(video: str | np.ndarray,
             Yp: np.ndarray = np.array([ y for point_num, y in enumerate(frame_features["dlc_kpts_y"]) if frame_features["dlc_confidence"][point_num] >= keypoint_threshold ])
             confidence: np.ndarray = np.array([ confidence_value for confidence_value in frame_features["dlc_confidence"] if confidence_value >= keypoint_threshold ])
 
-            perimeter_data_arr[frame_num, 0] = {"Xp": Xp,
-                                                "Yp": Yp,
-                                                "confidence": confidence
+            perimeter_data_arr[frame_num, 0] = {"Xp": Xp.reshape(len(Xp), 1).astype(np.float64),
+                                                "Yp": Yp.reshape(len(Yp), 1).astype(np.float64),
+                                                "confidence": confidence.reshape(len(confidence), 1).astype(np.float64)
                                                }
 
         perimeter_info_dict["data"] = perimeter_data_arr
