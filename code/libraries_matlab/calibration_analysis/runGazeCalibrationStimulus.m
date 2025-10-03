@@ -118,7 +118,7 @@ function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, 
             'You will see dots appear one by one on the screen,' newline ...
             'each signaled by a brief beep. Please fix your gaze on each dot when it appears,' newline ...
             'and do not try to anticipate the location of the next dot.' newline newline ...
-            'Press any key to begin.'
+            'Press any key to begin and close your eyes until you hear the computer beep.'
         ];
         Screen('TextSize', win, 24);
         DrawFormattedText(win, text, 'center', 'center', fgColor);
@@ -162,10 +162,9 @@ function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, 
     actualDurations = zeros(totalDots, 1);
     
     if(simulation_mode == "full" || simulation_mode == "visual")
-        % Play beep (single repetition)
-        PsychPortAudio('Start', pahandle, 1, 0, 0);
-        disp('AGC done converging. Task will begin in 3 seconds!')
-        WaitSecs(2);
+        
+        disp('AGC done converging. Task will begin in about 10 seconds!')
+        WaitSecs(10);
         HideCursor;
         Priority(MaxPriority(win));
         
@@ -184,6 +183,18 @@ function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, 
                 pos(1)+innerRadiusPx, pos(2)+innerRadiusPx];
         end
         
+        % Play beep (single repetition)
+        PsychPortAudio('Start', pahandle, 1, 0, 0);
+        % Flash the screen red so we know when the task starts ont he world
+        % camera
+        Screen('FillRect', win, redColor, winRect);
+
+        % Flip to display the single-frame marker. The current time is the start of this frame.
+        Screen('Flip', win);
+
+        % Now, immediately clear the back buffer (ready for the first dot)
+        Screen('FillRect', win, bgColor, winRect);
+
         % Get initial time to base all future timings on
         % This is the time when the task officially begins (just before the first dot flip)
         start_task_time = GetSecs + 1; %add one sec because we will do some math below and we don't want to miss the first dot
@@ -227,6 +238,10 @@ function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, 
                 end
             end
         end
+
+        % Flash the screen red so we know when the task ends on the world
+        % camera
+        Screen('FillRect', win, redColor, winRect);
         
         % Final flip to clear the screen
         Screen('Flip', win);
