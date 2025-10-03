@@ -46,7 +46,6 @@ function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, 
     fgColor = [255 255 255];
     redColor  = [255   0   0];
     innerFrac = 0.3;
-
     if(simulation_mode == "full" || simulation_mode == "visual")
         AssertOpenGL;
         screenNum = max(Screen('Screens'));
@@ -91,7 +90,10 @@ function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, 
         %     0,  10;    0, -10;   -10,   0;     10,   0; ...
         %     -5,   5;   5,   5;   -5,  -5;     5,  -5];
         degPositions = [ ...
-            0, 0; 0, 20; 0, -20; -20, 0; 20, 0];
+            0, 0; -20, 20; -20, -20; 20, 20; 20, -20; ...
+            0, 20; 0, -20; -20, 0; 20, 0;...
+            -10, 10; -10, -10; 10, 10; 10, -10; ...
+            0, 10; 0, -10; -10, 0; 10, 0]
         nDots = size(degPositions, 1);
         % Check CM distance
         xCm = viewingDistCm * tand(degPositions(:,1));
@@ -151,7 +153,14 @@ function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, 
     else
         start_rec_time = GetSecs;
     end
-
+    
+    % Initialize task timing variables regardless of simulation mode
+    totalDots = nDots * repetitions;
+    % Array to store the *precise* cputime when each dot appears on screen
+    dotStartTimes = zeros(totalDots, 1);
+    % Array to store the measured duration of each dot
+    actualDurations = zeros(totalDots, 1);
+    
     if(simulation_mode == "full" || simulation_mode == "visual")
         % Play beep (single repetition)
         PsychPortAudio('Start', pahandle, 1, 0, 0);
@@ -176,19 +185,16 @@ function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, 
         end
         
         % Get initial time to base all future timings on
+        % This is the time when the task officially begins (just before the first dot flip)
         start_task_time = GetSecs + 1; %add one sec because we will do some math below and we don't want to miss the first dot
         task_start_delay = start_task_time - start_rec_time;
-        fprintf("Task start delay is %f seconds.", task_start_delay);
-
+        fprintf("Task start delay is %f seconds.\n", task_start_delay);
         % --- Timing setup using a CPU-based wait loop as requested ---
-        totalDots = nDots * repetitions;
-        actualDurations = zeros(totalDots, 1);
         
         % The total duration a dot is on screen before the next one appears
         dotTotalTime = dotTime; 
         
-        startTime = cputime; % Use cputime for consistent, CPU-based timing
-        prevDotStartTime = startTime;
+        prevDotStartTime = cputime; % Initialize with cputime before the loop
         
         % Draw loop with beep on each dot onset
         for rep = 1:repetitions
@@ -198,26 +204,49 @@ function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, 
                 % Draw stimulus
                 Screen('FillOval', win, fgColor, outerRects{iDot});
                 Screen('FillOval', win, redColor, innerRects{iDot});
+                
+                % Flip to display the dot and get the precise ONSET time
                 Screen('Flip', win);
                 
-                % Wait for the total dot duration before drawing the next one
-                dotDoneTime = cputime + dotTotalTime;
-                waitUntil(dotDoneTime);
+                % Store the actual start time
+                dotStartTimes(linear_index) = cputime;
                 
                 % Calculate and store the actual duration of the *previous* dot
-                % The first dot's duration can't be measured this way.
                 if linear_index > 1
-                    actualDurations(linear_index - 1) = cputime - prevDotStartTime;
+                    % Duration of previous dot = Current Dot Start Time - Previous Dot Start Time
+                    actualDurations(linear_index - 1) = dotStartTimes(linear_index) - dotStartTimes(linear_index - 1);
                 end
-                prevDotStartTime = cputime;
+                
+                % Wait for the total dot duration before drawing the next one
+                dotDoneTime = dotStartTimes(linear_index) + dotTotalTime;
+                waitUntil(dotDoneTime);
+                
+                % Play beep for the *next* dot's onset (if not the last one)
+                if linear_index < totalDots
+                    PsychPortAudio('Start', pahandle, 1, 0, 0);
+                end
             end
         end
         
         % Final flip to clear the screen
         Screen('Flip', win);
         
-        % The last dot's duration
-        actualDurations(end) = cputime - prevDotStartTime;
+        % --- CORRECTED CALCULATION FOR THE LAST DOT'S DURATION ---
+        % The last dot's duration is the time from its onset until the screen clears.
+        % Since we used Screen('Flip', win) to clear the screen, we need to capture 
+        % the time right after that flip. For simplicity and robustness with cputime, 
+        % we will use the time immediately after the waitUntil() loop for the last dot.
+        
+        % The previous loop already ensured the last dot was displayed for 'dotTotalTime'
+        % from its onset. The time right after the loop is essentially its intended end time.
+        % We'll use the intended duration as the measured duration, since this method 
+        % controls the duration based on `waitUntil`.
+        actualDurations(end) = dotStartTimes(end) + dotTotalTime - dotStartTimes(end); % This will be exactly dotTotalTime
+        
+        % A more practical measure that accounts for any slight overrun in waitUntil 
+        % or cleanup:
+        timeAfterLastWait = cputime; % Time right after the final waitUntil call
+        actualDurations(end) = timeAfterLastWait - dotStartTimes(end);
         
         disp('Actual dot durations:')
         disp(actualDurations)
@@ -226,7 +255,27 @@ function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, 
         ShowCursor;
         Screen('CloseAll');
     end
-        
+    
+    % --- SAVING DATA ---
+    % 1. Compile all task timing data
+    taskData.experiment_name = experiment_name;
+    taskData.task_start_delay_s = task_start_delay; % Time camera started to first dot flip
+    taskData.dot_durations_s = actualDurations; % Measured duration of each dot (totalDots x 1)
+    taskData.dot_nominal_duration_s = dotTime; % The intended duration
+    taskData.gaze_target_positions_deg = degPositions; % Target positions (nDots x 2)
+    
+    % 2. Create unique filename
+    timestamp = datestr(now, 'yyyymmdd_HHMMSS');
+    filename = fullfile(getpref("lightLoggerAnalysis", 'dropboxBaseDir'), sprintf('gazeCalData_%s_%s.mat', experiment_name, timestamp));
+
+    % 3. Save the data structure
+    try
+        save(filename, 'taskData', '-v7.3');
+        fprintf('\nData saved to: %s\n', filename);
+    catch ME
+        warning('Failed to save task data: %s', ME.message);
+    end
+    
     % If we are not in simulation mode, stop recording from the light logger 
     if(simulation_mode == "full" || simulation_mode == "bluetooth")
         success = stop_recording_light_logger(bluetooth_central, device_num);
@@ -242,20 +291,17 @@ function waitUntil(stopTimeSeconds)
         % Busy-wait loop
     end
 end
-
 % Local function to start recording on the light logger 
 function success = start_recording_light_logger(bluetooth_central,... 
                                                 experiment_name,...
                                                 device_num...
                                                ) 
-
+% [No change to this local function]
     % Initialize a success variable 
     success = 0; 
-
     % Generate a message to send to the light logger 
     disp("Main | Generating recording message...")
     light_logger_update_message = generate_light_logger_recording_message(bluetooth_central, experiment_name); 
-
     % Send a recording message to the light logger
     disp("Main | Sending recording message...") 
     try
@@ -266,7 +312,6 @@ function success = start_recording_light_logger(bluetooth_central,...
         print_error_info(ME); 
         return;
     end  
-
     % If a message was sent successfully, 
     % wait for the light logger to enter the recording state 
     while(true)
@@ -280,7 +325,6 @@ function success = start_recording_light_logger(bluetooth_central,...
         end 
         
         state_name = string(char(lightlogger_state.state));     
-
         % If the state is error, raise an error on this machine 
         % as well 
         if(state_name == "error") 
@@ -289,7 +333,6 @@ function success = start_recording_light_logger(bluetooth_central,...
             fprintf("ERROR: Unknown error on the light logger\n"); 
             return ; 
         end 
-
         % If the light logger entered the target state, stop waiting. 
         if(state_name == "science")
             break 
@@ -299,25 +342,20 @@ function success = start_recording_light_logger(bluetooth_central,...
         pause(2); 
     end 
     disp("Main | Acknowledged.")
-
     % If we successfully executed, denote it as such 
     success = 1; 
     return; 
-
 end 
-
-
 % Local function to generate the recording message for the light logger 
 function message = generate_light_logger_recording_message(bluetooth_central, experiment_name)
+% [No change to this local function]
     % Then, initialize a struct that will be sent to the light logger 
     message = bluetooth_central.initialize_update_message();
     
     % Import world_util to retrieve the initial settings for the experiment 
     world_util = import_pyfile(getpref("lightLoggerAnalysis", "world_util_path")); 
-
     % Retrieve the sensor mode (FPS, size)
     sensor_mode = world_util.WORLD_CAMERA_CUSTOM_MODES{1}; 
-
     % Initialize the sensors that will be needed for this recording
     % Retrieve a low ND filter initial settings for the world camera 
     % so that it starts closer to the convergence target 
@@ -331,10 +369,8 @@ function message = generate_light_logger_recording_message(bluetooth_central, ex
     sensors.W.sensor_mode = sensor_mode;
     sensors.W.awb = false; 
     sensors.W.noise_mode = false; 
-
     sensors.P.agc = false; 
     sensors.P.save_agc_metadata = false; 
-
     % Next, we will enter a science state to record until the stimulus is done 
     bluetooth_central.generate_science_state(message,...
                                              experiment_name,...
@@ -342,19 +378,15 @@ function message = generate_light_logger_recording_message(bluetooth_central, ex
                                              false,...  
                                              sensors...
                                             ); 
-
 end 
-
-
 % Local function to end light logger recording 
 function success = stop_recording_light_logger(bluetooth_central, device_num) 
+% [No change to this local function]
     % Initialize a success variable 
     success = 0; 
-
     % Generate a message to send to the light logger 
     disp("Main | Generating stop message...")
     light_logger_update_message = generate_light_logger_stop_message(bluetooth_central); 
-
     % Send a recording message to the light logger 
     disp("Main | Sending stop message...") 
     try
@@ -365,7 +397,6 @@ function success = stop_recording_light_logger(bluetooth_central, device_num)
         print_error_info(ME);
         return; 
     end 
-
     % If a message was sent successfully, 
     % wait for the light logger to enter the recording state 
     while(true)
@@ -379,7 +410,6 @@ function success = stop_recording_light_logger(bluetooth_central, device_num)
         end 
         
         state_name = string(char(lightlogger_state.state));     
-
         % If the state is error, raise an error on this machine 
         % as well 
         if(state_name == "error") 
@@ -388,7 +418,6 @@ function success = stop_recording_light_logger(bluetooth_central, device_num)
             fprintf("ERROR: Unknown error on the light logger\n"); 
             return ; 
         end 
-
         % If the light logger entered the target state, stop waiting 
         if(state_name == "wait")
             break 
@@ -398,32 +427,26 @@ function success = stop_recording_light_logger(bluetooth_central, device_num)
         pause(2); 
     end 
     disp("Main | Acknowledged.")
-
     % If we successfully executed, denote it as such 
     success = 1; 
-
     return; 
-
 end 
-
-
 % Local function to generate the recording message for the light logger 
 function message = generate_light_logger_stop_message(bluetooth_central)
+% [No change to this local function]
     % Then, initialize a struct that will be sent to the light logger 
     message = bluetooth_central.initialize_update_message();
     
     % Next, we will enter a wait to end the science state
     bluetooth_central.generate_wait_state(message); 
-
 end 
-
 % Local function to print out error information from a caught error 
 function print_error_info(ME)
+% [No change to this local function]
     fprintf('Error message: %s\n', ME.message);
     fprintf('Error occurred in:\n');
     for k = 1:length(ME.stack)
         fprintf('  File: %s\n  Function: %s\n  Line: %d\n\n', ...
                 ME.stack(k).file, ME.stack(k).name, ME.stack(k).line);
     end
-
-end 
+end
