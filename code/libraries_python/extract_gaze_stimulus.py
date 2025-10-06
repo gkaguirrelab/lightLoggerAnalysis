@@ -10,6 +10,7 @@ from skimage.transform import hough_circle, hough_circle_peaks
 from typing import Iterable
 import math
 import heapq
+import matplotlib.patches as patches
 from scipy.signal import find_peaks
 
 # Import relevant custom libraries with helper functions and constants 
@@ -119,8 +120,10 @@ def find_stimulus_period(video: str | np.ndarray,
                               distance=peak_min_distance             
                              )
     
-    # Find the approximate start/end 
-    peaks[1] += 1
+    # Find the approximate start/end (add a small delta)
+    # to get out of the peak positions
+    delta: int = 200 
+    peaks += delta
     start, end = red_intensities[peaks, 0][:2] 
 
     # Visualize results if desired 
@@ -146,7 +149,8 @@ def find_stimulus_period(video: str | np.ndarray,
 """
 def find_background_image(video: str | np.ndarray,
                           start_frame: int, end_frame: int | None=None,
-                          is_grayscale: bool=False
+                          is_grayscale: bool=False,
+                          visualize_results: bool=False, 
                          ) -> np.ndarray:
     # If given a np.ndarray, simply take the average frame 
     if(isinstance(video, np.ndarray)):
@@ -170,7 +174,7 @@ def find_background_image(video: str | np.ndarray,
     frame_stream_process.start()
 
     # Parse frames from the video, gathering their features
-    frame_num: int = 1
+    frame_num: int = 0
     while(True):
         # Attempt to retrieve a frame from the frame queue 
         try:
@@ -184,6 +188,11 @@ def find_background_image(video: str | np.ndarray,
         # If no frame arrived, then we are done 
         if(frame is None):
             break
+
+        # If frame is an empty frame (such as when chunks)
+        # are being written, discard this 
+        if( (frame == 0).all()):
+            continue
         
         # Otherwise, we have a frame, 
         # so we let's add it to the running average
@@ -195,7 +204,19 @@ def find_background_image(video: str | np.ndarray,
     # Join the subprocess 
     frame_stream_process.join()   
 
-    return ( np.clip(frame_sum / frame_num, 0, 255) ).astype(np.uint8) 
+    # Calculate the backgroudn image 
+    background_img: np.ndarray = ( np.clip(frame_sum / frame_num, 0, 255) ).astype(np.uint8) 
+
+    # Visualize the results if desired 
+    if(visualize_results is True):
+        fig, ax = plt.subplots() 
+        ax.imshow(background_img, cmap='gray')
+        ax.set_title("Background")
+        plt.show()
+
+        return background_img, fig
+    
+    return background_img 
 
 """From a given frame, threshold the frame and return 
    the circles from the frame
@@ -231,6 +252,7 @@ def extract_target_circles(video: str,
 
     # Parse frames from the video, gathering their features
     num_detected_circles: int = 0
+    frame_num: int = 0
     while(True):
         # Attempt to retrieve a frame from the frame queue 
         try:
@@ -244,6 +266,9 @@ def extract_target_circles(video: str,
         # If no frame arrived, then we are done 
         if(frame is None):
             break
+
+        # Increment the frame num 
+        frame_num += 1
         
         # Subtract the background from the frame
         background_subtracted: np.ndarray = np.clip(frame.astype(np.float64) - background_img.astype(np.float64), 0, 255).astype(np.uint8)
@@ -252,7 +277,7 @@ def extract_target_circles(video: str,
         thresholded: np.ndarray = background_subtracted > threshold_value
 
         # Skip NULL frames 
-        if(frame == 0).all():
+        if(thresholded == 0).all():
             continue
 
         edges: np.ndarray = canny(thresholded, sigma=2.0)
@@ -320,7 +345,7 @@ def extract_gaze_stimulus(video: str | np.ndarray,
     
     # First find the background image. We will use this to background subtract from 
     # the entire video 
-    background, stimulus_period = find_background_image(video, 
+    background = find_background_image(video, 
                                                         start_frame, 
                                                         end_frame
                                                        )
