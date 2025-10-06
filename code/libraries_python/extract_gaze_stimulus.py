@@ -9,6 +9,8 @@ from skimage.feature import canny
 from skimage.transform import hough_circle, hough_circle_peaks
 from typing import Iterable
 import math
+import heapq
+from scipy.signal import find_peaks
 
 # Import relevant custom libraries with helper functions and constants 
 light_logger_dir_path: str = os.path.expanduser("~/Documents/MATLAB/projects/lightLogger")
@@ -50,6 +52,93 @@ def visualize_targets(background: np.ndarray, targets: dict[int, np.ndarray]) ->
 """Calculate the euclidean distance between circles in pixel space"""
 def calculate_euclidean_distance(a: tuple[int], b: tuple[int]):
     return math.sqrt( (b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2)
+
+"""Find the start and end of the stimulus period
+   Denoted by the screen flashing a single frame of RED 
+"""
+def find_stimulus_period(video: str | np.ndarray,
+                         visualize_results: bool=False, 
+                         peak_height: float=100,
+                         peak_prominence: int=5,
+                         peak_min_distance: int=240
+                        ) -> tuple[int]:
+    # If np.ndarray, not yet implemeneted 
+    if(isinstance(video, np.ndarray)):
+        raise NotImplementedError
+    
+    # Otherwise, we will go through the frames 
+    # of the video and find the peaks in average red channel 
+    # intensity of each frame
+     # Stream frames in and add them to the per pixel sum 
+    frame_queue: mp.Queue = mp.Queue(maxsize=5)
+    stop_event: object = mp.Event()
+    frame_stream_process: object = mp.Process(target=Pi_util.destruct_video, 
+                                              args=(video, 0, float("inf"), 
+                                                    False, frame_queue, stop_event)
+                                             )
+    # Start the subprocess 
+    frame_stream_process.start()
+
+    # Parse frames from the video, finding their average red 
+    # channel and saving their frame num + average red channel
+    red_intensities: list[int] = []
+    frame_num: int = 0 
+    while(True):
+        # Attempt to retrieve a frame from the frame queue 
+        try:
+            frame: np.ndarray | None = frame_queue.get(timeout=5)
+        except queue.Empty:
+            # Stop the subprocess
+            stop_event.set()
+            frame_stream_process.join()   
+            raise Exception("Did not recieve frame in time")
+
+        # If no frame arrived, then we are done 
+        if(frame is None):
+            break
+        
+        # Otherwise, we have a frame, 
+        # Let's find its red intensity and 
+        # save it to the list # Note (cv2 reads in as BGR)
+        red_intensities.append( [frame_num, np.mean(frame[:, :, 2])] )
+
+        # Increment the frame number 
+        frame_num += 1
+
+    # Join the subprocess 
+    frame_stream_process.join()     
+
+    # Convert red intensities to np.ndarray 
+    red_intensities = np.array(red_intensities)
+
+    # Find the positive peaks in the signal corresponding 
+    # to the start/end
+    peaks, props = find_peaks(red_intensities[:, 1],
+                              height=peak_height,                
+                              prominence=peak_prominence,              
+                              distance=peak_min_distance             
+                             )
+    
+    # Find the approximate start/end 
+    peaks[1] += 1
+    start, end = red_intensities[peaks, 0][:2] 
+
+    # Visualize results if desired 
+    if(visualize_results is True):
+        fig, ax = plt.subplots() 
+        ax.plot(red_intensities[:, 0], red_intensities[:, 1], '-x', label="Red Intensity by Frame")
+        ax.plot(peaks, red_intensities[peaks][:, 1], 'x', label="Peaks")
+        ax.plot(peaks[:2], red_intensities[peaks[:2], 1], 'x', label="Start/End")
+        ax.set_title("Stimulus Start/End")
+        ax.set_xlabel("Frame #")
+        ax.set_ylabel("Intensity")
+        ax.legend() 
+        
+        plt.show()
+
+        return start, end, fig
+
+    return start, end
 
 
 """Find the background image of a video.
@@ -221,18 +310,35 @@ def extract_target_circles(video: str,
    from a video per frame 
 """
 def extract_gaze_stimulus(video: str | np.ndarray, 
-                          start_frame: int=0, end_frame: int | None=None
-                         ) -> np.ndarray:
+                          start_frame: int=0, end_frame: int | None=None,
+                          is_grayscale: bool=False,
+                          threshold_value: int=127,
+                          radius_range: Iterable=range(4, 7, 1),
+                          min_intercircle_distance: float=8,
+                          visualize_results: bool=False 
+                         ) -> dict:
     
-    background: np.ndarray = find_background_image(video, 
-                                                   start_frame, 
-                                                   end_frame
-                                                  )
+    # First find the background image. We will use this to background subtract from 
+    # the entire video 
+    background, stimulus_period = find_background_image(video, 
+                                                        start_frame, 
+                                                        end_frame
+                                                       )
+    
+    # Next extract the unique circles from the video
+    # (location averaged for nearby circles)
+    circles: dict = extract_target_circles(video,
+                                           background,
+                                           start_frame,
+                                           end_frame,
+                                           is_grayscale,
+                                           threshold_value,
+                                           radius_range,
+                                           min_intercircle_distance,
+                                           visualize_results)
 
 
-    return background
-
-    return 
+    return circles 
 
 def main() -> None:
     pass 
