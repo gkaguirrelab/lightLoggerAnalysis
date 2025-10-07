@@ -1,6 +1,7 @@
 function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, agc_convergence_wait_s, experiment_name, heightCm, widthCm, viewingDistCm)
 % Displays 26-dot gaze calibration stimulus at fixed visual angles, with a brief beep signaling each dot onset.
 % 
+% TO DO: figure out why dots are displaying for ~3.433 seconds!!!
 % Description: 
 %   Displays calibration dots on a screen for the subject to fixate. The
 %   dots are at various distances in degrees visual angle from a central
