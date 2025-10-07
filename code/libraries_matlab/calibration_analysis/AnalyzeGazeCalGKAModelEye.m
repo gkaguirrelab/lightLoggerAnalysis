@@ -29,8 +29,8 @@ repeat2Color = [0.5 0.0 0.0];     % Dark red for Repeat 2 (Dots 6-10)
 badRMSEIdx = pupilData.sceneConstrained.ellipses.RMSE > RMSECutoff;
 badFitAtBoundIdx = pupilData.sceneConstrained.eyePoses.fitAtBound > 0;
 badIdx = badRMSEIdx | badFitAtBoundIdx; 
-fullGazeX = pupilData.sceneConstrained.eyePoses.values(:, 1);
-fullGazeY = pupilData.sceneConstrained.eyePoses.values(:, 2);
+filteredGazeX = pupilData.sceneConstrained.eyePoses.values(:, 1);
+filteredGazeY = pupilData.sceneConstrained.eyePoses.values(:, 2);
 
 % 2. Define the plotting range based on the startFrame and cutoff
 framesBeforeStart = round(preTaskCutoff_s * fps);
@@ -52,8 +52,8 @@ else % Default to 'seconds'
 end
 
 % 5. Slice the actual gaze data and the bad data mask to the new time range
-gazeX_full_sliced = fullGazeX(plotStartFrame:nTotalFrames);
-gazeY_full_sliced = fullGazeY(plotStartFrame:nTotalFrames);
+gazeX_full_sliced = filteredGazeX(plotStartFrame:nTotalFrames);
+gazeY_full_sliced = filteredGazeY(plotStartFrame:nTotalFrames);
 badIdx_sliced = badIdx(plotStartFrame:nTotalFrames);
 
 % --- Prepare Gaze Target Data ---
@@ -119,8 +119,8 @@ for i = 1:nTotalDots
     windowIndices = windowStart_abs : windowEnd_abs;
     
     % Get raw data for the window
-    gazeX_window = fullGazeX(windowIndices);
-    gazeY_window = fullGazeY(windowIndices);
+    gazeX_window = filteredGazeX(windowIndices);
+    gazeY_window = filteredGazeY(windowIndices);
     
     % Get bad data flags for the window
     badIdx_window = badIdx(windowIndices);
