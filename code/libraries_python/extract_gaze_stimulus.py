@@ -267,14 +267,20 @@ def extract_target_circles(video: str,
         if(frame is None):
             break
 
-        # Increment the frame num 
-        frame_num += 1
-        
         # Subtract the background from the frame
         background_subtracted: np.ndarray = np.clip(frame.astype(np.float64) - background_img.astype(np.float64), 0, 255).astype(np.uint8)
 
         # Then, threshold to just leave the circle remaining 
         thresholded: np.ndarray = background_subtracted > threshold_value
+
+        if(frame_num % 120 == 0 and frame_num >= 120):
+            plt.imshow(thresholded)
+            plt.title(f"Frame Num: {frame_num}")
+            plt.show()
+
+
+        # Increment the frame num 
+        frame_num += 1
 
         # Skip NULL frames 
         if(thresholded == 0).all():
@@ -300,6 +306,10 @@ def extract_target_circles(video: str,
             num_detected_circles += 1 
             continue
         
+        plt.imshow(thresholded)
+        plt.show()
+
+
         # If this circle has basically been detected before, 
         # then we skip 
         previously_detected_circles: list = list(circles.items())
@@ -326,7 +336,7 @@ def extract_target_circles(video: str,
     # Visualize the results if desired
     fig: object | None = None
     if(visualize_results is True):
-        fig = visualize_results(background_img, circles)
+        fig = visualize_targets(background_img, circles)
         return circles, fig
 
     return circles 
