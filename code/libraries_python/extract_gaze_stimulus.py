@@ -13,6 +13,8 @@ import matplotlib.patches as patches
 from scipy.signal import find_peaks
 from typing import Literal
 import cv2
+from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+import shutil
 
 # Import relevant custom libraries with helper functions and constants 
 light_logger_dir_path: str = os.path.expanduser("~/Documents/MATLAB/projects/lightLogger")
@@ -227,12 +229,24 @@ def extract_target_circles(video: str,
                            start_frame: int=0, end_frame: int | None=None,
                            is_grayscale: bool=False,
                            threshold_value: int=127,
-                           radius_range: Iterable=range(4, 7, 1),
+                           radius_range: Iterable=range(3, 7, 1),
                            min_intercircle_distance: float=8,
                            visualize_results: Literal["None", "Circles", "Video"]="None", 
                            visualization_output_path: str | None=None
                           ) -> list[tuple] | tuple[list, object]:
   
+
+    # If we want to visualize as video, first we will make a temp dir 
+    # in which to store the frames that will compose this video
+    # TODO: Obviously, this is not the most idea way to do this, 
+    #       but I could not get simply writing to a video writer 
+    #       to work ehre
+    if(visualize_results == "Video"):
+        tempdir_path: str = os.path.append(os.path.dirname(__file__), "TEMPDIR") 
+        if(os.path.exists(tempdir_path)):
+            shutil.rmtree(tempdir_path)
+            
+
     # Stream frames in 
     read_queue: mp.Queue = mp.Queue(maxsize=5)
     read_stop: object = mp.Event()
@@ -240,17 +254,6 @@ def extract_target_circles(video: str,
                                               args=(video, start_frame, float("inf") if end_frame is None else end_frame, 
                                                     is_grayscale, read_queue, read_stop)
                                              )
-
-    
-    # If we desired to write frames, let's initialize a writer 
-    video_writer: cv2.VideoWriter | None = None 
-    if(visualize_results == "Video"):
-        video_writer = cv2.VideoWriter(visualization_output_path if visualization_output_path is not None else "./target_circles_visualized.avi", 
-                                       0, 
-                                       Pi_util.inspect_video_FPS(video), 
-                                       Pi_util.inspect_video_framesize(video)[::-1],
-                                       isColor=not is_grayscale
-                                      )
 
     # Start the subprocesses 
     read_process.start()
@@ -285,7 +288,7 @@ def extract_target_circles(video: str,
         fig: object | None = None 
         axes: np.ndarray | None = None
         if(visualize_results == "Video"):
-            fig, axes = plt.subplots(1, 2)
+            fig, axes = plt.subplots(1, 2, figsize=(10, 10), dpi=100)
             axes = axes.flatten() 
             
             # Generate supra title for the figure
@@ -300,8 +303,6 @@ def extract_target_circles(video: str,
             axes[1].imshow(background_subtracted, cmap='gray')
             axes[1].imshow(thresholded, cmap='Reds', alpha=0.25)
 
-
-
         # Increment the frame num 
         frame_num += 1
 
@@ -309,13 +310,20 @@ def extract_target_circles(video: str,
         if(thresholded == 0).all():
             # write to the video now if no circle detected
             if(visualize_results == "Video"):
-                
-                plt.close(fig)
+                canvas: object = FigureCanvas(fig)      
+                canvas.draw()
+                rendered_figure: np.ndarray = np.frombuffer(canvas.tostring_rgb(), dtype=np.uint8)
+                rendered_figure: np.ndarray = rendered_figure.reshape(canvas.get_width_height()[::-1] + (3,))  # (H, W, 3)
+                rendered_figure_bgr: np.ndarray = cv2.cvtColor(rendered_figure, cv2.COLOR_RGB2BGR)
+
+
 
             continue
 
-        edges: np.ndarray = canny(thresholded, sigma=2.0)
-        hough_res: object = hough_circle(edges, range(2, 5, 1))
+
+
+        edges: np.ndarray = canny(thresholded, sigma=1.5)
+        hough_res: object = hough_circle(edges, radius_range)
         accums, cxs, cys, radii_found = hough_circle_peaks(hough_res, radius_range, total_num_peaks=1)
 
         # Compact the circles together for easy plotting in the future 
@@ -327,9 +335,22 @@ def extract_target_circles(video: str,
         if(len(frame_circles) == 0):
             # write to the video now if no circle detected
             if(visualize_results == "Video"):
-                plt.close(fig)
+                canvas: object = FigureCanvas(fig)      
+                canvas.draw()
+                rendered_figure: np.ndarray = np.frombuffer(canvas.tostring_rgb(), dtype=np.uint8)
+                rendered_figure: np.ndarray = rendered_figure.reshape(canvas.get_width_height()[::-1] + (3,))  # (H, W, 3)
+                rendered_figure_bgr: np.ndarray = cv2.cvtColor(rendered_figure, cv2.COLOR_RGB2BGR)
+                plt.close(fig)  
+
+
+                if(rendered_figure_bgr.shape != (1000, 1000, 3)):
+                    print("NOT EQUAL")
                 
+                # Write the figure to the video 
+                video_writer.write(rendered_figure_bgr)
+            
             continue        
+        
         most_prominent_circle: tuple = frame_circles[0] 
 
         # Apply most prominent circle to the visualization 
@@ -345,11 +366,21 @@ def extract_target_circles(video: str,
             axes[1].add_patch(circle_patch)
             axes[1].legend() 
 
-            plt.tight_layout()
-            plt.show()
+            # Retrieve the rendered image from the canvas
+            canvas: object = FigureCanvas(fig)      
+            canvas.draw()
+            rendered_figure: np.ndarray = np.frombuffer(canvas.tostring_rgb(), dtype=np.uint8)
+            rendered_figure: np.ndarray = rendered_figure.reshape(canvas.get_width_height()[::-1] + (3,))  # (H, W, 3)
+            rendered_figure_bgr: np.ndarray = cv2.cvtColor(rendered_figure, cv2.COLOR_RGB2BGR)
+
+            if(rendered_figure_bgr.shape != (1000, 1000, 3)):
+                print("NOT EQUAL")
+
+            # Close the figure 
             plt.close(fig)
 
-
+            # Write the figure to the video 
+            video_writer.write(rendered_figure_bgr)
 
         # If we have detected no circles before  
         if(len(circles) == 0):
@@ -391,7 +422,7 @@ def extract_target_circles(video: str,
 
         # If output path given, save the figure 
         if(visualization_output_path is not None):
-            plt.savefig(visualization_output_path, fig)
+            plt.savefig(visualization_output_path)
 
         return circles.items(), fig
     
