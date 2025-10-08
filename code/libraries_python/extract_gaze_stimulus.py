@@ -9,9 +9,10 @@ from skimage.feature import canny
 from skimage.transform import hough_circle, hough_circle_peaks
 from typing import Iterable
 import math
-import heapq
 import matplotlib.patches as patches
 from scipy.signal import find_peaks
+from typing import Literal
+import cv2
 
 # Import relevant custom libraries with helper functions and constants 
 light_logger_dir_path: str = os.path.expanduser("~/Documents/MATLAB/projects/lightLogger")
@@ -62,7 +63,7 @@ def find_stimulus_period(video: str | np.ndarray,
                          peak_height: float=100,
                          peak_prominence: int=5,
                          peak_min_distance: int=240
-                        ) -> tuple[int]:
+                        ) -> tuple[int | object]:
     # If np.ndarray, not yet implemeneted 
     if(isinstance(video, np.ndarray)):
         raise NotImplementedError
@@ -151,7 +152,7 @@ def find_background_image(video: str | np.ndarray,
                           start_frame: int, end_frame: int | None=None,
                           is_grayscale: bool=False,
                           visualize_results: bool=False, 
-                         ) -> np.ndarray:
+                         ) -> np.ndarray | tuple[np.ndarray, object]:
     # If given a np.ndarray, simply take the average frame 
     if(isinstance(video, np.ndarray)):
         return np.average(video[start_frame:end_frame], axis=(0,))
@@ -228,24 +229,31 @@ def extract_target_circles(video: str,
                            threshold_value: int=127,
                            radius_range: Iterable=range(4, 7, 1),
                            min_intercircle_distance: float=8,
-                           visualize_results: bool=False 
-                          ) -> np.ndarray:
-    # If given a np.ndarray, simply take the average frame 
-    if(isinstance(video, np.ndarray)):
-        raise NotImplementedError
-    
-    # Otherwise, if given a video, need to stream frames 
-    # and take the average later 
-
-    # Stream frames in and add them to the per pixel sum 
-    frame_queue: mp.Queue = mp.Queue(maxsize=5)
-    stop_event: object = mp.Event()
-    frame_stream_process: object = mp.Process(target=Pi_util.destruct_video, 
+                           visualize_results: Literal["None", "Circles", "Video"]="None", 
+                           visualization_output_path: str | None=None
+                          ) -> list[tuple] | tuple[list, object]:
+  
+    # Stream frames in 
+    read_queue: mp.Queue = mp.Queue(maxsize=5)
+    read_stop: object = mp.Event()
+    read_process: object = mp.Process(target=Pi_util.destruct_video, 
                                               args=(video, start_frame, float("inf") if end_frame is None else end_frame, 
-                                                    is_grayscale, frame_queue, stop_event)
+                                                    is_grayscale, read_queue, read_stop)
                                              )
-    # Start the subprocess 
-    frame_stream_process.start()
+
+    
+    # If we desired to write frames, let's initialize a writer 
+    video_writer: cv2.VideoWriter | None = None 
+    if(visualize_results == "Video"):
+        video_writer = cv2.VideoWriter(visualization_output_path if visualization_output_path is not None else "./target_circles_visualized.avi", 
+                                       0, 
+                                       Pi_util.inspect_video_FPS(video), 
+                                       Pi_util.inspect_video_framesize(video)[::-1],
+                                       isColor=not is_grayscale
+                                      )
+
+    # Start the subprocesses 
+    read_process.start()
 
     # Define the circles array 
     circles: dict[tuple | None] = {}
@@ -256,11 +264,11 @@ def extract_target_circles(video: str,
     while(True):
         # Attempt to retrieve a frame from the frame queue 
         try:
-            frame: np.ndarray | None = frame_queue.get(timeout=5)
+            frame: np.ndarray | None = read_queue.get(timeout=5)
         except queue.Empty:
             # Stop the subprocess
-            stop_event.set()
-            frame_stream_process.join()   
+            read_stop.set()
+            read_process.join()   
             raise Exception("Did not recieve frame in time")
 
         # If no frame arrived, then we are done 
@@ -273,10 +281,25 @@ def extract_target_circles(video: str,
         # Then, threshold to just leave the circle remaining 
         thresholded: np.ndarray = background_subtracted > threshold_value
 
-        if(frame_num % 120 == 0 and frame_num >= 120):
-            plt.imshow(thresholded)
-            plt.title(f"Frame Num: {frame_num}")
-            plt.show()
+        # Make plots for visualization 
+        fig: object | None = None 
+        axes: np.ndarray | None = None
+        if(visualize_results == "Video"):
+            fig, axes = plt.subplots(1, 2)
+            axes = axes.flatten() 
+            
+            # Generate supra title for the figure
+            fig.suptitle(f"Frame: {frame_num}", fontsize=12, y=0.8)
+
+            # Display the original frame 
+            axes[0].set_title(f"Orignal Frame")
+            axes[0].imshow(frame, cmap='gray')
+
+            # Display the background subtracted image and thresholded 
+            axes[1].set_title(f"Background Subtracted + Thresholded")
+            axes[1].imshow(background_subtracted, cmap='gray')
+            axes[1].imshow(thresholded, cmap='Reds', alpha=0.25)
+
 
 
         # Increment the frame num 
@@ -284,6 +307,11 @@ def extract_target_circles(video: str,
 
         # Skip NULL frames 
         if(thresholded == 0).all():
+            # write to the video now if no circle detected
+            if(visualize_results == "Video"):
+                
+                plt.close(fig)
+
             continue
 
         edges: np.ndarray = canny(thresholded, sigma=2.0)
@@ -297,18 +325,37 @@ def extract_target_circles(video: str,
         
         # Skip frames that have no circles 
         if(len(frame_circles) == 0):
+            # write to the video now if no circle detected
+            if(visualize_results == "Video"):
+                plt.close(fig)
+                
             continue        
-        most_prominent_circle: tuple = frame_circles[0]  
+        most_prominent_circle: tuple = frame_circles[0] 
+
+        # Apply most prominent circle to the visualization 
+        # video if desired 
+        if(visualize_results == "Video"):
+            circle_patch = patches.Circle(most_prominent_circle[:2], most_prominent_circle[2], 
+                                          edgecolor='green', 
+                                          facecolor='none', 
+                                          linewidth=1,
+                                          fill=False,
+                                          label="Detected Circle"
+                                        )
+            axes[1].add_patch(circle_patch)
+            axes[1].legend() 
+
+            plt.tight_layout()
+            plt.show()
+            plt.close(fig)
+
+
 
         # If we have detected no circles before  
         if(len(circles) == 0):
             circles[num_detected_circles] = np.array(most_prominent_circle) 
             num_detected_circles += 1 
             continue
-        
-        plt.imshow(thresholded)
-        plt.show()
-
 
         # If this circle has basically been detected before, 
         # then we skip 
@@ -331,49 +378,24 @@ def extract_target_circles(video: str,
                 circles[circle_num] = np.array([ int(v) for v in (previously_detected_circle + np.array(most_prominent_circle)) / 2 ])
 
     # Join the subprocess 
-    frame_stream_process.join()   
+    read_process.join()   
 
-    # Visualize the results if desired
-    fig: object | None = None
-    if(visualize_results is True):
+    # Close video visualizaiton if desired
+    if(visualize_results == "Video"):
+        video_writer.release() 
+
+    # Visualized only the detected circles if desired
+    if(visualize_results == "Circles"):
+        fig: object | None = None
         fig = visualize_targets(background_img, circles)
-        return circles, fig
 
-    return circles 
+        # If output path given, save the figure 
+        if(visualization_output_path is not None):
+            plt.savefig(visualization_output_path, fig)
 
-"""Extract the position of gaze calibration targets 
-   from a video per frame 
-"""
-def extract_gaze_stimulus(video: str | np.ndarray, 
-                          start_frame: int=0, end_frame: int | None=None,
-                          is_grayscale: bool=False,
-                          threshold_value: int=127,
-                          radius_range: Iterable=range(4, 7, 1),
-                          min_intercircle_distance: float=8,
-                          visualize_results: bool=False 
-                         ) -> dict:
+        return circles.items(), fig
     
-    # First find the background image. We will use this to background subtract from 
-    # the entire video 
-    background = find_background_image(video, 
-                                                        start_frame, 
-                                                        end_frame
-                                                       )
-    
-    # Next extract the unique circles from the video
-    # (location averaged for nearby circles)
-    circles: dict = extract_target_circles(video,
-                                           background,
-                                           start_frame,
-                                           end_frame,
-                                           is_grayscale,
-                                           threshold_value,
-                                           radius_range,
-                                           min_intercircle_distance,
-                                           visualize_results)
-
-
-    return circles 
+    return circles.items()  
 
 def main() -> None:
     pass 

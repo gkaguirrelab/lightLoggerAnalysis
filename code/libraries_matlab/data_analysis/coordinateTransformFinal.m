@@ -1,4 +1,4 @@
-function [SensorFigure, CameraFigure, EyeFigure] = coordinateTransformFinal(fisheyeIntrinsics, maps, calibFile, myChoice, lightLevel)
+function [SensorFigure, CameraFigure, EyeFigure] = coordinateTransformFinal(calibFile, fisheyeIntrinsics, myChoice, maps, lightLevel)
 
     % Need to make available to this function the fisheye intrinsics, and the
     % set of "imgPts" and "worldPts".
@@ -17,10 +17,10 @@ function [SensorFigure, CameraFigure, EyeFigure] = coordinateTransformFinal(fish
     %}
     
     arguments
-        fisheyeIntrinsics
-        maps 
         calibFile
+        fisheyeIntrinsics
         myChoice {mustBeMember(myChoice, {'worldImage', 'interceptMap', 'slopeMap'})} = 'interceptMap'
+        maps = 0; 
         lightLevel {mustBeMember(lightLevel, {'highAS', 'lowAS', 'allAS'})} = 'allAS'
     end
 
@@ -28,6 +28,9 @@ function [SensorFigure, CameraFigure, EyeFigure] = coordinateTransformFinal(fish
     % expressed in sensor coordinate locations
     % Obtain the set of eye rotations that correspond to these gaze target
     % locations
+
+
+    % ZACH: { This is getting the gaze target positions on the sensor and then the intended degrees they should be from center }
     [gazeTargetSensorCoord, veridicalEyeRotations] = get_calibration_dots(calibFile);
     
     %% AFFINE TRANSFORM
