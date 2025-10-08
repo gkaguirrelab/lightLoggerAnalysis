@@ -26,7 +26,6 @@ done
 
 """
 
-
 """Predict eye features (pupil and eyelid) for a given BLNK video"""
 def predict_eye_features(filepath: str,
                          output_folder_path: str, 
@@ -38,7 +37,7 @@ def predict_eye_features(filepath: str,
                          is_grayscale: bool=False,
                          safe_execution: bool=True,
                          pupil_feature_method: Literal["pylids", "pupil-labs"] = "pylids"
-                        ) -> None:
+                        ) -> list[dict]:
 
     # Define the portion of the video to crop out 
     t, b, l, r = crop_box
@@ -105,7 +104,7 @@ def predict_eye_features(filepath: str,
     # Remvove the temp avi video 
     os.remove(temp_video_path)
 
-    return 
+    return eye_features_dict
 
 
 """Predict eyelid features for a given BLNK video"""
@@ -118,7 +117,7 @@ def predict_eyelid_features(filepath: str,
                             visualize_results: bool=False,
                             is_grayscale: bool=False,
                             safe_execution: bool=True,
-                          ) -> None:
+                          ) -> list[dict]:
 
     # Define the portion of the video to crop out 
     t, b, l, r = crop_box
@@ -184,7 +183,7 @@ def predict_eyelid_features(filepath: str,
     # Remvove the temp avi video 
     os.remove(temp_video_path)
 
-    return 
+    return eyelid_features_dict
 
 def main():
     pass 

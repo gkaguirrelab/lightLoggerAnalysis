@@ -413,6 +413,8 @@ def visualize_eyelids(frame: np.ndarray,
     # Convert to color if not already 
     frame_colored: np.ndarray = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR) if frame.ndim == 2 else frame.copy()
 
+    # NOTE: For some reason, applying these back onto the original video as opposed to the cropped 
+    #       video we were using with the BLNK pipeline, we had to apply offset -30 to y and -5 to x
 
     # Apply the visualization to the frame
     pts_lo: np.ndarray = np.column_stack((frame_eyelid_features['eyelid_x'], frame_eyelid_features['eyelid_lo_y'])).astype(np.int32)
