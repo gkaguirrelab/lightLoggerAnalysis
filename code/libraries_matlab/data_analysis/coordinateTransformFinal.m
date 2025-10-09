@@ -1,4 +1,4 @@
-function [SensorFigure, CameraFigure, EyeFigure] = coordinateTransformFinal(calibFile, fisheyeIntrinsics, myChoice, maps, lightLevel)
+function  coordinateTransformFinal(I, fisheyeIntrinsics, transformation)
 
     % Need to make available to this function the fisheye intrinsics, and the
     % set of "imgPts" and "worldPts".
@@ -16,13 +16,6 @@ function [SensorFigure, CameraFigure, EyeFigure] = coordinateTransformFinal(cali
         [SensorFigure, CameraFigure, EyeFigure] = coordinateTransformFinal(fisheyeIntrinsics, myChoice, lightLevel)
     %}
     
-    arguments
-        calibFile
-        fisheyeIntrinsics
-        myChoice {mustBeMember(myChoice, {'worldImage', 'interceptMap', 'slopeMap'})} = 'interceptMap'
-        maps = 0; 
-        lightLevel {mustBeMember(lightLevel, {'highAS', 'lowAS', 'allAS'})} = 'allAS'
-    end
 
     % Obtain the set of gaze calibration targets as seen by the world camera,
     % expressed in sensor coordinate locations
@@ -30,42 +23,18 @@ function [SensorFigure, CameraFigure, EyeFigure] = coordinateTransformFinal(cali
     % locations
 
 
-    % ZACH: { This is getting the gaze target positions on the sensor and then the intended degrees they should be from center }
-    [gazeTargetSensorCoord, veridicalEyeRotations] = get_calibration_dots(calibFile);
-    
-    %% AFFINE TRANSFORM
-    
-    % Transform these points to visual field locations as seen by the world camera,
-    % and then calculate the affine transform between these locations and the
-    % eye angles of rotation
-    gazeTargetCameraFieldCoord = anglesFromIntrinsics( gazeTargetSensorCoord, fisheyeIntrinsics );
-    tform = fitgeotform2d( gazeTargetCameraFieldCoord, veridicalEyeRotations, 'projective' );
     
     % Transform the gaze targets as seen by the camera into the eye rotation
     % coordinate space
-    gazeTargetEyeRotation = transformPointsForward( tform, gazeTargetCameraFieldCoord );
+    %gazeTargetEyeRotation = transformPointsForward( tform, gazeTargetCameraFieldCoord );
     
     % Obtain the data map in the sensor (u,v) space.
-    switch myChoice
-        case 'worldImage'
-            I = imread('/Users/zacharykelly/Downloads/exampleWorldImage.png');
-            I = imresize(I,[480,640]);
-            I = mean(I,3);
-            myMap = 'gray'; barRange = [0,255]; gazePlotFlag = false;
-        case 'interceptMap'
-            if ~isfield(maps,'intercept') || ~isfield(maps.intercept,lightLevel)
-                error('maps.intercept.%s is missing or empty.', lightLevel);
-            end
-            I = maps.intercept.(lightLevel);             % numeric matrix
-            myMap = 'hot';  barRange = [-3.5,-2]; gazePlotFlag = false;
+    I = imresize(I,[480,640]);
+    I = mean(I,3);
+    myMap = 'gray'; 
+    barRange = [0,255]; 
+    gazePlotFlag = false;
 
-        case 'slopeMap'
-            if ~isfield(maps,'slope') || ~isfield(maps.slope,lightLevel)
-                error('maps.slope.%s is missing or empty.', lightLevel);
-            end
-            I = maps.slope.(lightLevel);                 % numeric matrix
-            myMap = 'hot';  barRange = [-2.5,-2]; gazePlotFlag = false;
-    end
     
     % Get the camera visual field positions corresponding to positions of all
     % locations on the camera sensor
@@ -81,13 +50,13 @@ function [SensorFigure, CameraFigure, EyeFigure] = coordinateTransformFinal(cali
     view([0,-90]); % This command rotates the plot so we are looking straight at it
     colormap(myMap)
     hold on
-    if gazePlotFlag
-        plot3(gazeTargetSensorCoord(:,1),gazeTargetSensorCoord(:,2),repmat(0,size(gazeTargetSensorCoord(:,1))),'xr');
-    end
+    %if gazePlotFlag
+    %    plot3(gazeTargetSensorCoord(:,1),gazeTargetSensorCoord(:,2),repmat(0,size(gazeTargetSensorCoord(:,1))),'xr');
+    %end
     title('Camera Image in Sensor Coordinates')
     xlabel('sensor position [pixels]');
     ylabel('sensor position [pixels]');
-    colorbar
+    %colorbar
     %clim(barRange);
     
     % Now show what I looks like in the camera visual field coordinate space
@@ -96,29 +65,30 @@ function [SensorFigure, CameraFigure, EyeFigure] = coordinateTransformFinal(cali
     view([90,90]); % This command rotates the plot so we are looking straight at it
     colormap(myMap)
     hold on
-    if gazePlotFlag
-        plot3(gazeTargetCameraFieldCoord(:,1),gazeTargetCameraFieldCoord(:,2),repmat(255,size(gazeTargetCameraFieldCoord(:,1))),'xr');
-    end
+    %if gazePlotFlag
+    %    plot3(gazeTargetCameraFieldCoord(:,1),gazeTargetCameraFieldCoord(:,2),repmat(255,size(gazeTargetCameraFieldCoord(:,1))),'xr');
+    %end
     title('Camera Image in Camera Visual Angle Coordinates')
-    colorbar
+    %colorbar
     %clim(barRange);
     
     % Transform the camera visual field points to eye rotation coordinate space
     % using the previously calculated tform
-    eyeRotationCoordinates = transformPointsForward(tform,visualFieldPoints);
+    eyeRotationCoordinates = transformPointsForward(transformation, visualFieldPoints);
     
     % Now show what I looks like in eye rotation coordinates
     EyeFigure = figure;
     surf(reshape(eyeRotationCoordinates(:,1),480,640),reshape(eyeRotationCoordinates(:,2),nRows,nCols),I,'edgeColor','none');
     view([0,-90]);
-    colormap(myMap)
+    axis ij;    
+    %colormap(myMap)
     hold on
-    if gazePlotFlag
-        plot3(gazeTargetEyeRotation(:,1),gazeTargetEyeRotation(:,2),repmat(0,size(gazeTargetEyeRotation(:,1))),'xr');
-        plot3(veridicalEyeRotations(:,1),veridicalEyeRotations(:,2),repmat(0,size(veridicalEyeRotations(:,1))),'xb');
-    end
+    %if gazePlotFlag
+    %    plot3(gazeTargetEyeRotation(:,1),gazeTargetEyeRotation(:,2),repmat(0,size(gazeTargetEyeRotation(:,1))),'xr');
+    %    plot3(veridicalEyeRotations(:,1),veridicalEyeRotations(:,2),repmat(0,size(veridicalEyeRotations(:,1))),'xb');
+    %end
     title('camera image in eye rotation coords')
-    colorbar
+    %colorbar
     %clim(barRange);
     
     % Plot this for 60 degree of eccentricity
@@ -127,12 +97,13 @@ function [SensorFigure, CameraFigure, EyeFigure] = coordinateTransformFinal(cali
     subI = I; subI(idx)=nan;
     surf(reshape(eyeRotationCoordinates(:,1),480,640),reshape(eyeRotationCoordinates(:,2),nRows,nCols),subI,'edgeColor','none');
     view([0,-90]);
-    colormap(myMap)
+    axis ij;    % NEED TO DO THIS OTHERWISE THE THING IS ROTATED (FIGURE OUT WHY BETTER)
+    %colormap(myMap)
     hold on
-    if gazePlotFlag
-        plot3(gazeTargetEyeRotation(:,1),gazeTargetEyeRotation(:,2),repmat(-5,size(gazeTargetEyeRotation(:,1))),'xr');
-        plot3(veridicalEyeRotations(:,1),veridicalEyeRotations(:,2),repmat(-5,size(veridicalEyeRotations(:,1))),'xb');
-    end
+    %if gazePlotFlag
+    %    plot3(gazeTargetEyeRotation(:,1),gazeTargetEyeRotation(:,2),repmat(-5,size(gazeTargetEyeRotation(:,1))),'xr');
+    %    plot3(veridicalEyeRotations(:,1),veridicalEyeRotations(:,2),repmat(-5,size(veridicalEyeRotations(:,1))),'xb');
+    %end
     axis square
     grid off
     % Add some polar angle coordinate grids
