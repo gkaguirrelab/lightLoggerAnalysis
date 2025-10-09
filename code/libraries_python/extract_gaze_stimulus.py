@@ -15,6 +15,7 @@ from typing import Literal
 import cv2
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 import shutil
+import argparse
 
 # Import relevant custom libraries with helper functions and constants 
 light_logger_dir_path: str = os.path.expanduser("~/Documents/MATLAB/projects/lightLogger")
@@ -28,6 +29,18 @@ import Pi_util
 
 # Import pupil_util for constants 
 import pupil_util
+
+def parse_args() -> str:
+    # Initialize argument parser 
+    parser: argparse.ArgumentParser = argparse.ArgumentParser(description="Extract gaze targets from world gaze calibration video")
+
+    # Add the path to video argument 
+    parser.add_argument("path_to_video", type=str, help="Path to world camera video from gaze calibration")
+
+    # Parse the args
+    args: object = parser.parse_args()
+
+    return args.path_to_video
 
 """Given a dict of detected gaze targets and an image to display 
    on, visualize the results 
@@ -236,16 +249,16 @@ def rasterize_figure(matplotlib_figure: object) -> np.ndarray:
 """From a given frame, threshold the frame and return 
    the circles from the frame
 """
-def extract_target_circles(video: str, 
-                           background_img: np.ndarray, 
-                           start_frame: int=0, end_frame: int | None=None,
-                           is_grayscale: bool=False,
-                           threshold_value: int=127,
-                           radius_range: Iterable=range(3, 7, 1),
-                           min_intercircle_distance: float=8,
-                           visualize_results: Literal["None", "Circles", "Video"]="None", 
-                           visualization_output_path: str | None=None
-                          ) -> list[tuple] | tuple[list, object]:
+def auto_extract_target_circles(video: str, 
+                                background_img: np.ndarray, 
+                                start_frame: int=0, end_frame: int | None=None,
+                                is_grayscale: bool=False,
+                                threshold_value: int=127,
+                                radius_range: Iterable=range(3, 7, 1),
+                                min_intercircle_distance: float=8,
+                                visualize_results: Literal["None", "Circles", "Video"]="None", 
+                                visualization_output_path: str | None=None
+                               ) -> list[tuple] | tuple[list, object]:
   
 
     # Subfunction to init the output stream 
@@ -484,8 +497,43 @@ def extract_target_circles(video: str,
     
     return circles.items()  
 
+"""Manually extract"""
+def manual_extract_target_circles(background_img: np.ndarray) -> np.ndarray:    
+    # Display the background image to choose points off of 
+    plt.imshow(background_img, cmap=None if background_img.ndim == 3 else "gray")
+    plt.title("Background Img")
+    plt.axis('on')  
+
+    # Click until enter is pressed
+    points: list[tuple] = plt.ginput(0, timeout=0)
+    
+    return np.array(points)
+
 def main() -> None:
-    pass 
+    # Parse arguments
+    print("---Parsing Args---")
+    video_path: str = parse_args()
+
+    # Find the start end of stimulus
+    print("---Finding stimulus start/end---") 
+    start, end = find_stimulus_period(video_path)
+
+    # Calculate the background image 
+    print("---Finding background image---")
+    background_gray: np.ndarray = find_background_image(video_path, 
+                                            is_grayscale=True,
+                                            start_frame=start,
+                                            end_frame=end,
+                                            visualize_results=False
+                                           )
+    
+    # Manually select gaze target poinst 
+    print("---Selecting targets---")
+    gaze_target_points: np.ndarray = manual_extract_target_circles(background_gray)
+
+    print("---Saving selections---")
+    np.save("testpoints.npy", gaze_target_points)
+
 
 if(__name__ == "__main__"):
     main() 
