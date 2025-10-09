@@ -1,4 +1,4 @@
-function  coordinateTransformFinal(I, fisheyeIntrinsics, transformation)
+function  coordinateTransformFinal(I, fisheyeIntrinsics, transformation, center_offset)
 
     % Need to make available to this function the fisheye intrinsics, and the
     % set of "imgPts" and "worldPts".
@@ -41,7 +41,7 @@ function  coordinateTransformFinal(I, fisheyeIntrinsics, transformation)
     [nRows, nCols]    = size(I);
     [xg, yg]          = meshgrid(1:nCols, 1:nRows);
     sensorPoints      = [xg(:),yg(:)];
-    visualFieldPoints = anglesFromIntrinsics(sensorPoints, fisheyeIntrinsics);
+    visualFieldPoints = anglesFromIntrinsics(sensorPoints, fisheyeIntrinsics, center_offset);
 
     % Show what I looks like in the sensor grid coordinate space, and add the
     % gaze targets
@@ -173,34 +173,6 @@ function [imgPts, worldPts] = get_calibration_dots(calibFile)
              5, -5;      5, 5;     10, -10;   10, 0;     10, 10; ...
              15, -15;    15, 15;   20, -20;   20, 0;     20, 20];
     end
-
-% local function to obtain the theta and phi values from the camera
-% intrinsics
-function visualFieldPoints = anglesFromIntrinsics(sensorPoints, fisheyeIntrinsics)
-    cx = fisheyeIntrinsics.DistortionCenter(1);
-    cy = fisheyeIntrinsics.DistortionCenter(2);
-    xC = sensorPoints(:,1) - cx; yC = sensorPoints(:,2) - cy;
-    
-    r = sqrt(xC.^2 + yC.^2);
-    coeffs = fisheyeIntrinsics.MappingCoefficients;
-    a0=coeffs(1); a2=coeffs(2); a3=coeffs(3); a4=coeffs(4);
-    
-    theta = nan(size(r));
-    for k=1:numel(r)
-        func = @(t) a0*t + a2*t^3 + a3*t^4 + a4*t^5 - r(k);
-        theta(k) = fzero(func,[0,pi]);
-    end
-    
-    phi = atan2(yC,xC); R = 1;
-    X = R*sin(theta).*cos(phi);
-    Y = R*sin(theta).*sin(phi);
-    Z = R*cos(theta);
-    
-    azi = rad2deg(atan(Y./Z));
-    ele = rad2deg(atan(X./Z));
-    
-    visualFieldPoints = [azi,ele];
-end
 
 % local function to adjust plot ...
 function plotCircle3d(center,normal,radius)
