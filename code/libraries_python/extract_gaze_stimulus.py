@@ -221,6 +221,24 @@ def find_background_image(video: str | np.ndarray,
     
     return background_img 
 
+"""Given a matplotlib figure, render the figure as an image
+   figure and return it as a numpy array
+"""
+def rasterize_figure(matplotlib_figure: object) -> np.ndarray:
+    # Rasterize the image
+    canvas: object = FigureCanvas(matplotlib_figure)
+    canvas.draw()
+    
+    # Retrieve the rasterized image
+    width, height = matplotlib_figure.canvas.get_width_height()
+    visualized_rgb: np.ndarray = np.frombuffer(matplotlib_figure.canvas.tostring_rgb(), dtype=np.uint8)
+    visualized_rgb: np.ndarray = visualized_rgb.reshape((height, width, 3))
+
+    # If you’re writing video with OpenCV, convert to BGR
+    visualized_bgr = cv2.cvtColor(visualized_rgb, cv2.COLOR_RGB2BGR).astype(np.uint8)
+
+    return visualized_bgr
+
 """From a given frame, threshold the frame and return 
    the circles from the frame
 """
@@ -236,17 +254,19 @@ def extract_target_circles(video: str,
                           ) -> list[tuple] | tuple[list, object]:
   
 
-    # If we want to visualize as video, first we will make a temp dir 
-    # in which to store the frames that will compose this video
-    # TODO: Obviously, this is not the most idea way to do this, 
-    #       but I could not get simply writing to a video writer 
-    #       to work ehre
-    if(visualize_results == "Video"):
-        tempdir_path: str = os.path.join(os.path.dirname(__file__), "TEMPDIR") 
-        if(os.path.exists(tempdir_path)):
-            shutil.rmtree(tempdir_path)
-        os.mkdir(tempdir_path)    
+    # Subfunction to init the output stream 
+    def _init_output_stream(output_path: str, output_fps: float, output_frame_size_w_h: tuple[int]) -> cv2.VideoWriter:
+        # Initialize the video writer
+        output_stream: cv2.VideoWriter = cv2.VideoWriter(output_path,
+                                                         0,
+                                                         output_fps,
+                                                         output_frame_size_w_h,
+                                                         isColor=True
+                                                        )
+        
+        return output_stream
 
+    
     # Stream frames in 
     read_queue: mp.Queue = mp.Queue(maxsize=5)
     read_stop: object = mp.Event()
@@ -260,6 +280,13 @@ def extract_target_circles(video: str,
 
     # Define the circles array 
     circles: dict[tuple | None] = {}
+
+    # Initialize the video visualization writer variables. This will be 
+    # assigned a value later if we want to actually use video visualization
+    video_writer: cv2.VideoWriter | None = None 
+    visualization_frame_size: tuple[int] | None = None 
+    visualization_fps: int = Pi_util.inspect_video_FPS(video)
+    visualized_bgr: np.ndarray | None = None
 
     # Parse frames from the video, gathering their features
     num_detected_circles: int = 0
@@ -284,11 +311,11 @@ def extract_target_circles(video: str,
         # Then, threshold to just leave the circle remaining 
         thresholded: np.ndarray = background_subtracted > threshold_value
 
-        # Make plots for visualization 
+        # Initialize the plots for visualization 
         fig: object | None = None 
         axes: np.ndarray | None = None
         if(visualize_results == "Video"):
-            fig, axes = plt.subplots(1, 2, figsize=(10, 10), dpi=300)
+            fig, axes = plt.subplots(1, 2, figsize=(10, 5), dpi=300)
             axes = axes.flatten() 
             
             # Generate supra title for the figure
@@ -303,6 +330,7 @@ def extract_target_circles(video: str,
             axes[1].imshow(background_subtracted, cmap='gray')
             axes[1].imshow(thresholded, cmap='Reds', alpha=0.25)
 
+
         # Increment the frame num 
         frame_num += 1
 
@@ -310,7 +338,28 @@ def extract_target_circles(video: str,
         if(thresholded == 0).all():
             # write to the video now if no circle detected
             if(visualize_results == "Video"):
-                plt.savefig(os.path.join(tempdir_path, f"{frame_num}.png"))
+                # Rasterize the figure image 
+                visualized_bgr: np.ndarray = rasterize_figure(fig)
+                height, width = visualized_bgr.shape[:2]
+
+                # Initialize the video writer if not already initialized 
+                if(video_writer is None):
+                    video_writer = _init_output_stream(visualization_output_path if visualization_output_path is not None else "./visualized_targets.avi",
+                                                       visualization_fps,
+                                                       (width, height)
+                                                      )
+                    visualization_frame_size = visualized_bgr.shape 
+
+                # Assert the frame size is equal to what we expect 
+                if(visualization_frame_size != visualized_bgr.shape):
+                    print("BIG PROBLEM!!!!", flush=True)
+                    raise RuntimeError(f"Change in shape of visualized output. Expected {visualization_frame_size} got {visualized_bgr.shape}")
+
+                # Write the frame to the video
+                video_writer.write(visualized_bgr)
+
+
+                # Close the figure now that we are done with it
                 plt.close(fig)
 
             continue
@@ -330,7 +379,28 @@ def extract_target_circles(video: str,
         if(len(frame_circles) == 0):
             # write to the video now if no circle detected
             if(visualize_results == "Video"):
-                plt.savefig(os.path.join(tempdir_path, f"{frame_num}.png"))
+                # Rasterize the figure image 
+                visualized_bgr: np.ndarray = rasterize_figure(fig)
+                height, width = visualized_bgr.shape[:2]
+
+                # Initialize the video writer if not already initialized 
+                if(video_writer is None):
+                    video_writer = _init_output_stream(visualization_output_path if visualization_output_path is not None else "./visualized_targets.avi",
+                                                       visualization_fps,
+                                                       (width, height)
+                                                      )
+                    visualization_frame_size = visualized_bgr.shape 
+
+                # Assert the frame size is equal to what we expect 
+                if(visualization_frame_size != visualized_bgr.shape):
+                    print("BIG PROBLEM!!!!", flush=True)
+                    raise RuntimeError(f"Change in shape of visualized output. Expected {visualization_frame_size} got {visualized_bgr.shape}")
+
+
+                # write the frame to the video 
+                video_writer.write(visualized_bgr)
+
+                # Close the figure now that we are done with it
                 plt.close(fig)
 
             continue        
@@ -350,7 +420,27 @@ def extract_target_circles(video: str,
             axes[1].add_patch(circle_patch)
             axes[1].legend() 
 
-            plt.savefig(os.path.join(tempdir_path, f"{frame_num}.png"))
+            # Rasterize the figure image 
+            visualized_bgr: np.ndarray = rasterize_figure(fig)
+            height, width = visualized_bgr.shape[:2]
+
+            # Initialize the video writer if not already initialized 
+            if(video_writer is None):
+                video_writer = _init_output_stream(visualization_output_path if visualization_output_path is not None else "./visualized_targets.avi",
+                                                    visualization_fps,
+                                                    (width, height)
+                                                    )
+                visualization_frame_size = visualized_bgr.shape 
+
+            # Assert the frame size is equal to what we expect 
+            if(visualization_frame_size != visualized_bgr.shape):
+                print("BIG PROBLEM!!!!", flush=True)
+                raise RuntimeError(f"Change in shape of visualized output. Expected {visualization_frame_size} got {visualized_bgr.shape}")
+
+            # Write the frame to the video
+            video_writer.write(visualized_bgr)
+
+            # Close the figure now that we are done with it
             plt.close(fig)
 
         # If we have detected no circles before  
@@ -383,8 +473,9 @@ def extract_target_circles(video: str,
     read_process.join()   
 
     # Close video visualizaiton if desired
+    # and remove the tempdir 
     if(visualize_results == "Video"):
-        pass 
+        video_writer.release()  
 
     # Visualized only the detected circles if desired
     if(visualize_results == "Circles"):
