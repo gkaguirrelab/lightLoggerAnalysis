@@ -155,16 +155,10 @@ def find_background_image(video: str | np.ndarray,
                           is_grayscale: bool=False,
                           visualize_results: bool=False, 
                          ) -> np.ndarray | tuple[np.ndarray, object]:
-    # If given a np.ndarray, simply take the average frame 
-    if(isinstance(video, np.ndarray)):
-        return np.average(video[start_frame:end_frame], axis=(0,))
-    
-    # Otherwise, if given a video, need to stream frames 
-    # and take the average later 
 
     # Allocate the sum frame 
     frame_size: tuple[int] = Pi_util.inspect_video_framesize(video)
-    frame_sum: np.ndarray = np.zeros(frame_size, dtype=np.float64)
+    frame_sum: np.ndarray = np.zeros(frame_size if is_grayscale is True else tuple(list(frame_size)+[3]), dtype=np.float64)
 
     # Stream frames in and add them to the per pixel sum 
     frame_queue: mp.Queue = mp.Queue(maxsize=5)
@@ -213,7 +207,7 @@ def find_background_image(video: str | np.ndarray,
     # Visualize the results if desired 
     if(visualize_results is True):
         fig, ax = plt.subplots() 
-        ax.imshow(background_img, cmap='gray')
+        ax.imshow(background_img, cmap='gray' if is_grayscale is True else None)
         ax.set_title("Background")
         plt.show()
 
