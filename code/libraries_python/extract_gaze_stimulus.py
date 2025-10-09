@@ -242,10 +242,10 @@ def extract_target_circles(video: str,
     #       but I could not get simply writing to a video writer 
     #       to work ehre
     if(visualize_results == "Video"):
-        tempdir_path: str = os.path.append(os.path.dirname(__file__), "TEMPDIR") 
+        tempdir_path: str = os.path.join(os.path.dirname(__file__), "TEMPDIR") 
         if(os.path.exists(tempdir_path)):
             shutil.rmtree(tempdir_path)
-            
+        os.mkdir(tempdir_path)    
 
     # Stream frames in 
     read_queue: mp.Queue = mp.Queue(maxsize=5)
@@ -288,7 +288,7 @@ def extract_target_circles(video: str,
         fig: object | None = None 
         axes: np.ndarray | None = None
         if(visualize_results == "Video"):
-            fig, axes = plt.subplots(1, 2, figsize=(10, 10), dpi=100)
+            fig, axes = plt.subplots(1, 2, figsize=(10, 10), dpi=300)
             axes = axes.flatten() 
             
             # Generate supra title for the figure
@@ -310,13 +310,8 @@ def extract_target_circles(video: str,
         if(thresholded == 0).all():
             # write to the video now if no circle detected
             if(visualize_results == "Video"):
-                canvas: object = FigureCanvas(fig)      
-                canvas.draw()
-                rendered_figure: np.ndarray = np.frombuffer(canvas.tostring_rgb(), dtype=np.uint8)
-                rendered_figure: np.ndarray = rendered_figure.reshape(canvas.get_width_height()[::-1] + (3,))  # (H, W, 3)
-                rendered_figure_bgr: np.ndarray = cv2.cvtColor(rendered_figure, cv2.COLOR_RGB2BGR)
-
-
+                plt.savefig(os.path.join(tempdir_path, f"{frame_num}.png"))
+                plt.close(fig)
 
             continue
 
@@ -335,20 +330,9 @@ def extract_target_circles(video: str,
         if(len(frame_circles) == 0):
             # write to the video now if no circle detected
             if(visualize_results == "Video"):
-                canvas: object = FigureCanvas(fig)      
-                canvas.draw()
-                rendered_figure: np.ndarray = np.frombuffer(canvas.tostring_rgb(), dtype=np.uint8)
-                rendered_figure: np.ndarray = rendered_figure.reshape(canvas.get_width_height()[::-1] + (3,))  # (H, W, 3)
-                rendered_figure_bgr: np.ndarray = cv2.cvtColor(rendered_figure, cv2.COLOR_RGB2BGR)
-                plt.close(fig)  
+                plt.savefig(os.path.join(tempdir_path, f"{frame_num}.png"))
+                plt.close(fig)
 
-
-                if(rendered_figure_bgr.shape != (1000, 1000, 3)):
-                    print("NOT EQUAL")
-                
-                # Write the figure to the video 
-                video_writer.write(rendered_figure_bgr)
-            
             continue        
         
         most_prominent_circle: tuple = frame_circles[0] 
@@ -366,21 +350,8 @@ def extract_target_circles(video: str,
             axes[1].add_patch(circle_patch)
             axes[1].legend() 
 
-            # Retrieve the rendered image from the canvas
-            canvas: object = FigureCanvas(fig)      
-            canvas.draw()
-            rendered_figure: np.ndarray = np.frombuffer(canvas.tostring_rgb(), dtype=np.uint8)
-            rendered_figure: np.ndarray = rendered_figure.reshape(canvas.get_width_height()[::-1] + (3,))  # (H, W, 3)
-            rendered_figure_bgr: np.ndarray = cv2.cvtColor(rendered_figure, cv2.COLOR_RGB2BGR)
-
-            if(rendered_figure_bgr.shape != (1000, 1000, 3)):
-                print("NOT EQUAL")
-
-            # Close the figure 
+            plt.savefig(os.path.join(tempdir_path, f"{frame_num}.png"))
             plt.close(fig)
-
-            # Write the figure to the video 
-            video_writer.write(rendered_figure_bgr)
 
         # If we have detected no circles before  
         if(len(circles) == 0):
@@ -413,7 +384,7 @@ def extract_target_circles(video: str,
 
     # Close video visualizaiton if desired
     if(visualize_results == "Video"):
-        video_writer.release() 
+        pass 
 
     # Visualized only the detected circles if desired
     if(visualize_results == "Circles"):
