@@ -1,4 +1,4 @@
-function perspective_transform = perspective_transform_w2e(world_camera_intrinsics, target_pos_ang_intended, target_pos_screen)
+function perspective_transform = calculate_perspective_transform_w2e(world_camera_intrinsics, target_pos_ang_intended, target_pos_screen)
 
     arguments 
         world_camera_intrinsics; % Struct containing the world camera intrinsics
