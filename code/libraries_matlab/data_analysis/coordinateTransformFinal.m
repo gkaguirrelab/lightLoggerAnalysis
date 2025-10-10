@@ -1,4 +1,11 @@
-function  coordinateTransformFinal(I, fisheyeIntrinsics, transformation, center_offset)
+function virtually_foveated_frame = coordinateTransformFinal(I, fisheyeIntrinsics, transformation, center_offset)
+    % TODO: 
+    %    center_offset is in degrees but not what you expect on the plot 
+    %    first number is somehow y and then x. 
+    %    also, left and up on the image is positive. 
+
+    %
+
 
     % Need to make available to this function the fisheye intrinsics, and the
     % set of "imgPts" and "worldPts".
@@ -29,7 +36,6 @@ function  coordinateTransformFinal(I, fisheyeIntrinsics, transformation, center_
     %gazeTargetEyeRotation = transformPointsForward( tform, gazeTargetCameraFieldCoord );
     
     % Obtain the data map in the sensor (u,v) space.
-    I = imresize(I,[480,640]);
     I = mean(I,3);
     myMap = 'gray'; 
     barRange = [0,255]; 
@@ -95,7 +101,10 @@ function  coordinateTransformFinal(I, fisheyeIntrinsics, transformation, center_
     idx = vecnorm(eyeRotationCoordinates,2,2) > 60;
     figure
     subI = I; subI(idx)=nan;
-    surf(reshape(eyeRotationCoordinates(:,1),480,640),reshape(eyeRotationCoordinates(:,2),nRows,nCols),subI,'edgeColor','none');
+
+    virtually_foveated_X = reshape(eyeRotationCoordinates(:,1),nRows,nCols); 
+    virtually_foveated_Y = reshape(eyeRotationCoordinates(:,2),nRows,nCols); 
+    surf(virtually_foveated_X, virtually_foveated_Y, subI,'edgeColor','none');    
     view([0,-90]);
     axis ij;    % NEED TO DO THIS OTHERWISE THE THING IS ROTATED (FIGURE OUT WHY BETTER)
     %colormap(myMap)
@@ -118,61 +127,29 @@ function  coordinateTransformFinal(I, fisheyeIntrinsics, transformation, center_
     colorbar
     %clim(barRange);
 
-end
+    % Regular query grid (choose resolution = image size)
+    xq = linspace(min(virtually_foveated_X(:)), max(virtually_foveated_X(:)), nCols);
+    yq = linspace(min(virtually_foveated_Y(:)), max(virtually_foveated_Y(:)), nRows);
+    [Xq, Yq] = meshgrid(xq, yq);
 
-% local function to obtain gaze calibration dots for affine transform
-function [imgPts, worldPts] = get_calibration_dots(calibFile)
-    arguments
-        calibFile {mustBeText} = '/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_data/lightLogger/HERO_sm/SophiaGazeCalib2/W_mjpeg.avi';
-    end
-    
-    vr = VideoReader(calibFile);
-    
-    % video parameters
-    fps = vr.FrameRate;
-    startSec = 82;
-    endSec   = 276;
-    
-    % move to start time
-    vr.CurrentTime = startSec;
-    
-    % prepare max brightness mask
-    maxBright = [];
-    while hasFrame(vr) && vr.CurrentTime <= endSec
-        frm = readFrame(vr);
-        g   = rgb2gray(frm);
-        % only keep pixels brighter than a threshold
-        % normalize and threshold
-        g = double(g);
-        g(g < 200) = 0;
-        % combine max
-        if isempty(maxBright)
-            maxBright = g;
-        else
-            maxBright = max(maxBright, g);
-        end
-    end
-    
-    % convert to uint8 for display
-    maxBright = uint8(maxBright);
-    
-    % extract dot centroids
-    BW = imbinarize(maxBright, graythresh(maxBright));  
-    stats = regionprops(BW, 'Centroid');
-    imgPts = vertcat(stats.Centroid); % k×2 [x y] in pixel coords
-    x = imgPts(:,1);
-    y = imgPts(:,2);
-    r = sqrt(x.^2 + y.^2);
-    
-    % world point coords
-    %% 
-    worldPts = [ ...
-            -20, -20;   -20, 0;   -20, 20;   -15, -15;  -15, 15; ...
-            -10, -10;   -10, 0;   -10, 10;   -5, -5;    -5, 5;   ...
-             0, -20;     0, -10;   0, 0;      0, 10;     0, 20;  ...
-             5, -5;      5, 5;     10, -10;   10, 0;     10, 10; ...
-             15, -15;    15, 15;   20, -20;   20, 0;     20, 20];
-    end
+    % Interpolate onto regular grid (vectorize X, Y, Z)
+    Vq = griddata(virtually_foveated_X(:), virtually_foveated_Y(:), subI(:), Xq, Yq);
+
+    % Show rasterized result
+    figure;
+    imagesc(xq, yq, Vq);
+    axis image;
+    set(gca,'YDir','normal');
+    colormap gray;
+    colorbar;
+    title('Rasterized camera image in eye rotation coords');
+    xlabel('Visual angle [deg]');
+    ylabel('Visual angle [deg]');
+
+
+    % Assign the transformed variable 
+    virtually_foveated_frame = Vq; 
+end
 
 % local function to adjust plot ...
 function plotCircle3d(center,normal,radius)
