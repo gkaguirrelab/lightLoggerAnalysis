@@ -51,6 +51,7 @@ function virtually_foveated_frame = coordinateTransformFinal(I, fisheyeIntrinsic
 
     % Show what I looks like in the sensor grid coordinate space, and add the
     % gaze targets
+    %{
     SensorFigure = figure;
     surf(reshape(sensorPoints(:,1),480,640), reshape(sensorPoints(:,2),nRows,nCols), I, 'edgeColor','none');
     view([0,-90]); % This command rotates the plot so we are looking straight at it
@@ -64,10 +65,12 @@ function virtually_foveated_frame = coordinateTransformFinal(I, fisheyeIntrinsic
     ylabel('sensor position [pixels]');
     %colorbar
     %clim(barRange);
-    
+    %}
+
     % Now show what I looks like in the camera visual field coordinate space
+    %{
     CameraFigure = figure;
-    surf(reshape(visualFieldPoints(:,1),480,640),reshape(visualFieldPoints(:,2),nRows,nCols),I,'edgeColor','none');
+    surf(reshape(visualFieldPoints(:,1),nRows,nCols),reshape(visualFieldPoints(:,2),nRows,nCols),I,'edgeColor','none');
     view([90,90]); % This command rotates the plot so we are looking straight at it
     colormap(myMap)
     hold on
@@ -77,12 +80,14 @@ function virtually_foveated_frame = coordinateTransformFinal(I, fisheyeIntrinsic
     title('Camera Image in Camera Visual Angle Coordinates')
     %colorbar
     %clim(barRange);
-    
+    %}
+
     % Transform the camera visual field points to eye rotation coordinate space
     % using the previously calculated tform
     eyeRotationCoordinates = transformPointsForward(transformation, visualFieldPoints);
     
     % Now show what I looks like in eye rotation coordinates
+    %{
     EyeFigure = figure;
     surf(reshape(eyeRotationCoordinates(:,1),480,640),reshape(eyeRotationCoordinates(:,2),nRows,nCols),I,'edgeColor','none');
     view([0,-90]);
@@ -96,14 +101,16 @@ function virtually_foveated_frame = coordinateTransformFinal(I, fisheyeIntrinsic
     title('camera image in eye rotation coords')
     %colorbar
     %clim(barRange);
-    
+    %}
+
     % Plot this for 60 degree of eccentricity
     idx = vecnorm(eyeRotationCoordinates,2,2) > 60;
-    figure
     subI = I; subI(idx)=nan;
 
     virtually_foveated_X = reshape(eyeRotationCoordinates(:,1),nRows,nCols); 
     virtually_foveated_Y = reshape(eyeRotationCoordinates(:,2),nRows,nCols); 
+    
+    figure;     
     surf(virtually_foveated_X, virtually_foveated_Y, subI,'edgeColor','none');    
     view([0,-90]);
     axis ij;    % NEED TO DO THIS OTHERWISE THE THING IS ROTATED (FIGURE OUT WHY BETTER)
@@ -127,6 +134,7 @@ function virtually_foveated_frame = coordinateTransformFinal(I, fisheyeIntrinsic
     colorbar
     %clim(barRange);
 
+    % 
     % Regular query grid (choose resolution = image size)
     xq = linspace(min(virtually_foveated_X(:)), max(virtually_foveated_X(:)), nCols);
     yq = linspace(min(virtually_foveated_Y(:)), max(virtually_foveated_Y(:)), nRows);
@@ -146,9 +154,15 @@ function virtually_foveated_frame = coordinateTransformFinal(I, fisheyeIntrinsic
     xlabel('Visual angle [deg]');
     ylabel('Visual angle [deg]');
 
+    %figure; 
+    M = Vq; 
+    M(isnan(M)) = 0;               % replace NaNs with 0 if needed
+    M = mat2gray(M);               % scale to [0,1]
+    
+   % imshow(M)
 
     % Assign the transformed variable 
-    virtually_foveated_frame = Vq; 
+    virtually_foveated_frame = M; 
 end
 
 % local function to adjust plot ...
