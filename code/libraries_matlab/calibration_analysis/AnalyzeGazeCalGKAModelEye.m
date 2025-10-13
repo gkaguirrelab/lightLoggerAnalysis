@@ -1,5 +1,5 @@
 %% Initial Data Loading and Cleaning
-load('/Users/samanthamontoya/Aguirre-Brainard Lab Dropbox/Sam Montoya/FLIC_data/lightLogger/SM_gaze_cal_pupilData.mat')
+load('/Users/samanthamontoya/Aguirre-Brainard Lab Dropbox/Sam Montoya/FLIC_data/lightLogger/sam_gazecal_106_pupilData.mat')
 
 % --- CONTROL PARAMETER ---
 x_axis_mode = 'seconds'; % Set to 'seconds' or 'frames'
@@ -7,7 +7,7 @@ x_axis_mode = 'seconds'; % Set to 'seconds' or 'frames'
 % --- Fixed Parameters ---
 fps = 120;
 dotTime_s = 3.488;         % Duration of each target
-startFrame = 10510;       % Frame where the targets start (ORIGINAL REFERENCE)
+startFrame = 1.0313e+04;       % Frame where the targets start (ORIGINAL REFERENCE)
 time_offset_s = 0.341667; % TIME OFFSET to set T=0 at the start of the first dot
 preTaskCutoff_s = 1;      % Time to display before the start frame (1 second)
 RMSECutoff = 2;           
@@ -58,7 +58,10 @@ badIdx_sliced = badIdx(plotStartFrame:nTotalFrames);
 
 % --- Prepare Gaze Target Data ---
 % 5-dot sequence repeated twice = 10 total targets
-deg_positions_raw = [0, 0; 0, 20; 0, -20; 20, 0; -20, 0];
+deg_positions_raw = [-1,1].*[0, 0; -20, 20; -20, -20; 20, 20; 20, -20; ...
+            0, 20; 0, -20; -20, 0; 20, 0;...
+            -10, 10; -10, -10; 10, 10; 10, -10; ...
+            0, 10; 0, -10; -10, 0; 10, 0];
 deg_positions = repmat(deg_positions_raw, 2, 1); 
 nTotalDots = size(deg_positions, 1);
 

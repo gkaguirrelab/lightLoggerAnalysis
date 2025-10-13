@@ -40,13 +40,16 @@ function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, 
     end
     % Hard-coded parametersk
    
-    dotRadiusDeg = 0.8;
+    outerDotRadiusDeg = 2;
+    innerDotRadiusDeg = 0.25;
     dotTime = 3; % sec 
+    cheatTime = 0.11; % measured cpu delay (Sam's laptop, connected to 2nd floor conference room)
+    dotTime = dotTime - cheatTime;
     repetitions = 2;
     bgColor = [0 0 0];
-    fgColor = [255 255 255];
+    outerDotColor = [0 0 255];
+    innerDotColor = [255, 255, 255];
     redColor  = [255   0   0];
-    innerFrac = 0.3;
     if(simulation_mode == "full" || simulation_mode == "visual")
         AssertOpenGL;
         screenNum = max(Screen('Screens'));
@@ -81,7 +84,7 @@ function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, 
         % çree→pixel conversion lambdas
         deg2pxX = @(deg) viewingDistCm * tand(deg) * pxPerCmX;
         deg2pxY = @(deg) viewingDistCm * tand(deg) * pxPerCmY;
-        dotRadiusPx = viewingDistCm * tand(dotRadiusDeg) * pxPerCmX;
+        dotRadiusPx = viewingDistCm * tand(outerDotRadiusDeg) * pxPerCmX;
         % Define 13 calibration positions in degrees [xDeg, yDeg]
         % degPositions = [ ...
         %     0,  0;  -20, 20;   -20, -20;   20, 20;   20, -20; ...
@@ -91,10 +94,10 @@ function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, 
         %     0,  10;    0, -10;   -10,   0;     10,   0; ...
         %     -5,   5;   5,   5;   -5,  -5;     5,  -5];
         degPositions = [ ...
-            0, 0; -20, 20; -20, -20; 20, 20; 20, -20; ...
-            0, 20; 0, -20; -20, 0; 20, 0;...
-            -10, 10; -10, -10; 10, 10; 10, -10; ...
-            0, 10; 0, -10; -10, 0; 10, 0]
+            0, 0; -15, 15; -15, -15; 15, 15; 15, -15; ...
+            0, 15; 0, -15; -15, 0; 15, 0;...
+            -7.5, 7.5; -7.5, -7.5; 7.5, 7.5; 7.5, -7.5; ...
+            0, 10; 0, -7.5; -7.5, 0; 7.5, 0];
         nDots = size(degPositions, 1);
         % Check CM distance
         xCm = viewingDistCm * tand(degPositions(:,1));
@@ -122,7 +125,7 @@ function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, 
             'Press any key to begin and close your eyes until you hear the computer beep.'
         ];
         Screen('TextSize', win, 24);
-        DrawFormattedText(win, text, 'center', 'center', fgColor);
+        DrawFormattedText(win, text, 'center', 'center', outerDotColor);
         
         % Unify key names across platforms
         KbName('UnifyKeyNames');
@@ -214,8 +217,8 @@ function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, 
                 linear_index = (rep - 1) * nDots + iDot;
                 
                 % Draw stimulus
-                Screen('FillOval', win, fgColor, outerRects{iDot});
-                Screen('FillOval', win, redColor, innerRects{iDot});
+                Screen('FillOval', win, outerDotColor, outerRects{iDot});
+                Screen('FillOval', win, innerDotColor, innerRects{iDot});
                 
                 % Flip to display the dot and get the precise ONSET time
                 Screen('Flip', win);
@@ -247,16 +250,7 @@ function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, 
         % Final flip to clear the screen
         Screen('Flip', win);
         
-        % --- CORRECTED CALCULATION FOR THE LAST DOT'S DURATION ---
-        % The last dot's duration is the time from its onset until the screen clears.
-        % Since we used Screen('Flip', win) to clear the screen, we need to capture 
-        % the time right after that flip. For simplicity and robustness with cputime, 
-        % we will use the time immediately after the waitUntil() loop for the last dot.
-        
-        % The previous loop already ensured the last dot was displayed for 'dotTotalTime'
-        % from its onset. The time right after the loop is essentially its intended end time.
-        % We'll use the intended duration as the measured duration, since this method 
-        % controls the duration based on `waitUntil`.
+    
         actualDurations(end) = dotStartTimes(end) + dotTotalTime - dotStartTimes(end); % This will be exactly dotTotalTime
         
         % A more practical measure that accounts for any slight overrun in waitUntil 
@@ -282,7 +276,8 @@ function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, 
     
     % 2. Create unique filename
     timestamp = datestr(now, 'yyyymmdd_HHMMSS');
-    filename = fullfile(getpref("lightLoggerAnalysis", 'dropboxBaseDir'), sprintf('gazeCalData_%s_%s.mat', experiment_name, timestamp));
+    folders = '/FLIC_data/lightLogger/GazeCalRunFileData/';
+    filename = fullfile(getpref("lightLoggerAnalysis", 'dropboxBaseDir'), folders, sprintf('gazeCalData_%s_%s.mat', experiment_name, timestamp));
 
     % 3. Save the data structure
     try
