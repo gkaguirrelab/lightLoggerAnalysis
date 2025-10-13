@@ -1,4 +1,4 @@
-function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, agc_convergence_wait_s, experiment_name, heightCm, widthCm, viewingDistCm)
+function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, agc_convergence_wait_s, subjectId, experiment_name, session, heightCm, widthCm, viewingDistCm)
 % Displays 26-dot gaze calibration stimulus at fixed visual angles, with a brief beep signaling each dot onset.
 % 
 % TO DO: figure out why dots are displaying for ~3.433 seconds!!!
@@ -26,14 +26,16 @@ function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, 
 % 
 % Example:
 %{
-    runGazeCalibrationStimulus("full", 2, 60, 'GazeCalib_Run1', 106.7, 192.4)
+    runGazeCalibrationStimulus("full", 2, 60, 'IOLL_0001', 'GazeCalibration',1, 106.7, 192.4)
 %}
                           
     arguments 
         simulation_mode {mustBeMember(simulation_mode, ["full", "visual", "bluetooth"])} = "full";
         device_num {mustBeNumeric} = 1;
         agc_convergence_wait_s {mustBeNumeric} = 60;
+        subjectId = "test";
         experiment_name = "GazeCalibration";
+        session = 1;
         heightCm = 106.7; % 2nd floor LGTV
         widthCm = 192.4; % 2nd floor LGTV
         viewingDistCm = 100; % 1 meter standard
@@ -47,8 +49,8 @@ function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, 
     dotTime = dotTime - cheatTime;
     repetitions = 2;
     bgColor = [0 0 0];
-    outerDotColor = [0 0 255];
-    innerDotColor = [255, 255, 255];
+    outerDotColor = [255 255 255];
+    innerDotColor = [255, 0, 0];
     redColor  = [255   0   0];
     if(simulation_mode == "full" || simulation_mode == "visual")
         AssertOpenGL;
@@ -276,8 +278,12 @@ function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, 
     
     % 2. Create unique filename
     timestamp = datestr(now, 'yyyymmdd_HHMMSS');
-    folders = '/FLIC_data/lightLogger/GazeCalRunFileData/';
-    filename = fullfile(getpref("lightLoggerAnalysis", 'dropboxBaseDir'), folders, sprintf('gazeCalData_%s_%s.mat', experiment_name, timestamp));
+    folders = ['/FLIC_data/lightLogger/GazeCalRunFileData/', subjectId];
+    subjDir = fullfile(getpref("lightLoggerAnalysis", 'dropboxBaseDir'), folders);
+    if ~exist(subjDir, 'dir')
+        mkdir(subjDir)
+    end
+    filename = fullfile(subjDir, sprintf('%s_%s_session%s_%s.mat', subjectId, experiment_name, num2str(session),timestamp));
 
     % 3. Save the data structure
     try
