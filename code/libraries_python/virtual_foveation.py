@@ -64,7 +64,7 @@ def load_intrinsics(intrinsics_filepath: str,
         value: np.ndarray = np.array(matlab_engine.eval(f"intrinsics_struct.{matlab_field_name};", nargout=1), dtype=np.float64)
 
         # Save the value for this field 
-        intrinsics_dict[field] = value
+        intrinsics_dict[field] = value.flatten() if field != "stretch_matrix" else value
 
     # If we started it for just this funciton, close it 
     if(not matlab_pre_initialized):
@@ -111,7 +111,7 @@ def convert_sensor_to_angles(sensor_coordinates: np.ndarray,
                             ) -> np.ndarray:
     
     # First, extract the distortion center of the image 
-    dist_cx, dist_cy = camera_intrinsics["DistortionCenter"]
+    dist_cx, dist_cy = camera_intrinsics["distortion_center"]
 
     # Shift the image coordinates according to the distortion center 
     xC: np.ndarray = sensor_coordinates[:, 0] - dist_cx
@@ -120,7 +120,7 @@ def convert_sensor_to_angles(sensor_coordinates: np.ndarray,
     # Extract the tradius of distortion and mapping coefficents of 
     # the intrincis 
     r: np.ndarray = np.sqrt( xC ** 2 + yC ** 2 )
-    coeffs: np.ndarray = camera_intrinsics["MappingCoefficients"]
+    coeffs: np.ndarray = camera_intrinsics["mapping_coefficients"]
     a1, a2, a3, a4 = coeffs
 
 
@@ -160,13 +160,13 @@ def convert_sensor_to_angles(sensor_coordinates: np.ndarray,
     # Compute elevation (vertical angle) in degrees and apply the vertical offset
     ele: np.ndarray = np.degrees(np.arctan2(X, Z)) + center_offset[1]
 
-    return (azi, ele)
+    return np.column_stack([azi, ele])
 
 """Given a single frame, virtually foveate it"""
 def perspective_transform_frame(frame: np.ndarray, 
                                 center_offset: tuple[float],
-                                camera_intrinsics: dict, 
-                                transformation: dict,
+                                camera_intrinsics: dict[str, np.ndarray], 
+                                transformation: np.ndarray,
                                 degrees_eccentricity: float=60 
                                 ) -> np.ndarray:
 
@@ -183,8 +183,7 @@ def perspective_transform_frame(frame: np.ndarray,
     # Get the camera visual field positions corresponding to positions of all
     # locations on the camera sensor
     gaze_angle_coordinates: np.ndarray = convert_sensor_to_angles(sensor_coordinates, center_offset, camera_intrinsics)
-
-    
+    gaze_angle_coordinates = np.hstack([gaze_angle_coordinates, np.ones((len(gaze_angle_coordinates), 1))]) 
 
     # Transform the camera visual field points to eye rotation coordinate space
     # using the previously calculated tform
@@ -225,7 +224,7 @@ def perspective_transform_frame(frame: np.ndarray,
     Vq: np.ndarray = griddata(points, values, (Xq, Yq), method='linear')
 
     # Finalize the transformation 
-    transformed_frame: np.ndarray = np.nan_to_num(Vq, 0)
+    transformed_frame: np.ndarray = np.flipud(np.nan_to_num(Vq, 0))
 
     return transformed_frame
 
