@@ -4,6 +4,7 @@ import sys
 import scipy.io 
 import multiprocessing as mp
 from scipy.optimize import brentq
+from itertools import repeat
 
 # Import relevant custom libraries with helper functions and constants 
 light_logger_dir_path: str = os.path.expanduser("~/Documents/MATLAB/projects/lightLogger")
@@ -14,6 +15,8 @@ import Pi_util
 import extract_eye_features
 from scipy.interpolate import griddata
 import matlab.engine
+import multiprocessing as mp
+from typing import Iterable
 
 """Load the transformation matrix from the saved MATLAB file"""
 def load_transformation_matrix(transformation_filepath: str, 
@@ -164,12 +167,16 @@ def convert_sensor_to_angles(sensor_coordinates: np.ndarray,
 
 """Given a single frame, virtually foveate it"""
 def perspective_transform_frame(frame: np.ndarray, 
-                                center_offset: tuple[float],
+                                center_offset: np.ndarray,
                                 camera_intrinsics: dict[str, np.ndarray], 
                                 transformation: np.ndarray,
                                 degrees_eccentricity: float=60 
                                 ) -> np.ndarray:
 
+    # If the center offset is nan immediately return empty frame 
+    if(np.any(np.isnan(center_offset))):
+        return np.zeros_like(frame)
+    
     # First, make a meshgrid 
     n_rows, n_cols = frame.shape[:2]   
 
@@ -227,6 +234,68 @@ def perspective_transform_frame(frame: np.ndarray,
     transformed_frame: np.ndarray = np.flipud(np.nan_to_num(Vq, 0))
 
     return transformed_frame
+
+
+"""Helper function to perspective transform a video 
+   passed in as a path to a playable video
+""" 
+def _perspective_transform_video_playable() -> None:
+
+    return 
+
+"""Hepler function to perspective transform a video passed
+   in as an array 
+"""
+def _perspective_transform_video_array(video: np.ndarray,
+                                       gaze_angles: np.ndarray, 
+                                       camera_intrinsics: dict[str, np.ndarray], 
+                                       transformation: np.ndarray,
+                                       degrees_eccentricity: float=60,
+                                       n_processes: int=mp.cpu_count() 
+                                      ) -> None:
+    
+    # First, let's build an iterable of the arguments to each multiprocessing function 
+
+    args: Iterable = zip( (frame for frame in video), 
+                          (tuple(g[:2]) for g in gaze_angles),         
+                          repeat(camera_intrinsics),
+                          repeat(transformation),
+                          repeat(degrees_eccentricity),
+                        )
+    
+    # Paralell process the frames 
+    transformed_frames: np.ndarray = np.array([])
+    with mp.Pool(processes=n_processes) as pool:
+        transformed_frames: np.ndarray = np.array(pool.starmap(perspective_transform_frame, args), dtype=np.uint8)
+
+    return transformed_frames
+
+
+"""Given a video as a series of frames or a path to a video, 
+   generate the perspective transform of said video
+"""
+def perspective_transform_video(video: np.ndarray | str,
+                                gaze_angles: np.ndarray, 
+                                camera_intrinsics: dict[str, np.ndarray], 
+                                transformation: np.ndarray,
+                                degrees_eccentricity: float=60,
+                                n_workers=mp.cpu_count(),
+                                visualization_output_path: str | None=None
+                               ) -> np.ndarray | None:
+
+    # Call the necessary helper functions
+    transformed_frames: np.ndarray = np.array([])
+    if(isinstance(video, np.ndarray)):
+        transformed_frames: np.ndarray = _perspective_transform_video_array(video, 
+                                                                            gaze_angles, 
+                                                                            camera_intrinsics, 
+                                                                            transformation, 
+                                                                            degrees_eccentricity
+                                                                           )
+    else:
+        _perspective_transform_video_playable()
+
+    return transformed_frames
 
 def main():
     pass 
