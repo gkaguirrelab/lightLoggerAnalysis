@@ -344,8 +344,7 @@ def extract_pupil_features(video: str | np.ndarray,
                            method: Literal["pupil-labs", "pylids"]="pupil-labs",
                            visualization_output_filepath: str="visualized_pupilfeatures.avi",
 			               safe_execution: bool=True,
-                           keypoint_threshold: float=0.65,
-                           correct_rotation: bool=False
+                           keypoint_threshold: float=0.65
                           ) -> list[dict]:
 
     # Initialize eye features variable 
@@ -449,7 +448,8 @@ def extract_eyelid_features(video: str | np.ndarray,
                             is_grayscale: bool=False,
                             visualize_results: bool=False,
                             visualization_output_filepath: str="visualized_eyelidfeatures.avi",
-			                safe_execution: bool=True
+			                safe_execution: bool=True,
+                            keypoint_threshold: float=0.65
                            )-> list[dict]:
     # Extract eyelid features with pylids
     eyelid_features: dict[str, dict] = pylids_analyze_video(video, "eyelid")
@@ -465,7 +465,8 @@ def extract_eyelid_features(video: str | np.ndarray,
                                 [ {"eyelids": eyelid_features[frame]} for frame in range(len(eyelid_features))], 
                                 visualization_output_filepath, 
                                 is_grayscale=is_grayscale, 
-                                safe_execution=safe_execution
+                                safe_execution=safe_execution,
+                                keypoint_threshold=keypoint_threshold
                                )
 
     return eyelid_features
@@ -481,7 +482,8 @@ def extract_eye_features(video: str | np.ndarray,
                          visualize_results: bool=False,
                          visualization_output_filepath: str="visualized_eyefeatures.avi",
 			             safe_execution: bool=True, 
-                         pupil_feature_method: Literal["pylids", "pupil-labs"] = "pylids"
+                         pupil_feature_method: Literal["pylids", "pupil-labs"] = "pylids",
+                         keypoint_threshold: float=0.65
                         ) -> list[dict]:
     
     # Retrieve the framecount of the video. We will use this for safeguarding 
@@ -493,7 +495,8 @@ def extract_eye_features(video: str | np.ndarray,
                                                                  is_grayscale, # Do not visualize single features if we want all features  
                                                                  not visualize_results if visualize_results is True else visualize_results, 
 							                                     safe_execution=safe_execution,
-                                                                 method=pupil_feature_method
+                                                                 method=pupil_feature_method,
+                                                                 keypoint_threshold=keypoint_threshold
                                                                 )
     
     # Ensure the analysis was properly done (e.g. there were no silently corrupted frames not explictly caught with error by Pylids)
@@ -504,7 +507,8 @@ def extract_eye_features(video: str | np.ndarray,
     eyelid_features: list[dict] = extract_eyelid_features(video, 
                                                           is_grayscale,# Do not visualize single features if we want all features  
                                                           not visualize_results if visualize_results is True else visualize_results,
-							                              safe_execution=safe_execution
+							                              safe_execution=safe_execution,
+                                                          keypoint_threshold=keypoint_threshold
                                                          )
     
      # Ensure the analysis was properly done (e.g. there were no silently corrupted frames not explictly caught with error by Pylids)
@@ -526,10 +530,11 @@ def extract_eye_features(video: str | np.ndarray,
         generate_playable_video(video, eye_features, 
                                 output_path=visualization_output_filepath,
                                 is_grayscale=is_grayscale,
-                                safe_execution=safe_execution
+                                safe_execution=safe_execution,
+                                keypoint_threshold=keypoint_threshold
                                )
 
-    return eye_features
+    return eye_features, perimeter_info_dict
 
 def main():
     pass 

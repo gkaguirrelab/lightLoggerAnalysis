@@ -9,8 +9,9 @@ import subprocess
 import shlex
 from typing import Literal
 
-# TODO: Make this dynamic
-sys.path.append("/Users/zacharykelly/Documents/MATLAB/projects/lightLogger/raspberry_pi_firmware/utility")
+light_logger_dir_path: str = os.path.expanduser("~/Documents/MATLAB/projects/lightLogger")
+Pi_util_dir_path: str = os.path.join(light_logger_dir_path, "raspberry_pi_firmware", "utility")
+sys.path.append(Pi_util_dir_path)
 import Pi_util
 import matplotlib.pyplot as plt
 

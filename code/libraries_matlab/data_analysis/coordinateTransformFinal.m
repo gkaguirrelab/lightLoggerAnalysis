@@ -1,4 +1,4 @@
-function virtually_foveated_frame = coordinateTransformFinal(I, fisheyeIntrinsics, transformation, center_offset)
+function virtually_foveated_frame = coordinateTransformFinal(I, fisheyeIntrinsicsPath, transformationPath, center_offset)
     % TODO: 
     %    center_offset is in degrees but not what you expect on the plot 
     %    first number is somehow y and then x. 
@@ -28,15 +28,14 @@ function virtually_foveated_frame = coordinateTransformFinal(I, fisheyeIntrinsic
     % expressed in sensor coordinate locations
     % Obtain the set of eye rotations that correspond to these gaze target
     % locations
-
-
+    fisheyeIntrinsics = load(fisheyeIntrinsicsPath).camera_intrinsics_calibration.results.Intrinsics; 
+    transformation = load(transformationPath).perspective_transform.fit.geometric_transform; 
     
     % Transform the gaze targets as seen by the camera into the eye rotation
     % coordinate space
     %gazeTargetEyeRotation = transformPointsForward( tform, gazeTargetCameraFieldCoord );
     
     % Obtain the data map in the sensor (u,v) space.
-    I = mean(I,3);
     myMap = 'gray'; 
     barRange = [0,255]; 
     gazePlotFlag = false;
@@ -110,28 +109,28 @@ function virtually_foveated_frame = coordinateTransformFinal(I, fisheyeIntrinsic
     virtually_foveated_X = reshape(eyeRotationCoordinates(:,1),nRows,nCols); 
     virtually_foveated_Y = reshape(eyeRotationCoordinates(:,2),nRows,nCols); 
     
-    figure;     
-    surf(virtually_foveated_X, virtually_foveated_Y, subI,'edgeColor','none');    
-    view([0,-90]);
-    axis ij;    % NEED TO DO THIS OTHERWISE THE THING IS ROTATED (FIGURE OUT WHY BETTER)
+    %figure;     
+    %surf(virtually_foveated_X, virtually_foveated_Y, subI,'edgeColor','none');    
+    %view([0,-90]);
+    %axis ij;    % NEED TO DO THIS OTHERWISE THE THING IS ROTATED (FIGURE OUT WHY BETTER)
     %colormap(myMap)
-    hold on
+    %hold on
     %if gazePlotFlag
     %    plot3(gazeTargetEyeRotation(:,1),gazeTargetEyeRotation(:,2),repmat(-5,size(gazeTargetEyeRotation(:,1))),'xr');
     %    plot3(veridicalEyeRotations(:,1),veridicalEyeRotations(:,2),repmat(-5,size(veridicalEyeRotations(:,1))),'xb');
     %end
-    axis square
-    grid off
+    %axis square
+    %grid off
     % Add some polar angle coordinate grids
-    plot3([-60,60],[0,0],[-5,-5],'-g');
-    plot3([0,0],[-60,60],[-5,-5],'-g');
-    for r = [15,30,60]
-        plotCircle3d([0 0 -5],[0 0 1],r)
-    end
-    title('camera image in eye rotation coords')
-    xlabel('Visual angle [deg]');
-    ylabel('Visual angle [deg]');
-    colorbar
+    %plot3([-60,60],[0,0],[-5,-5],'-g');
+    %plot3([0,0],[-60,60],[-5,-5],'-g');
+    %for r = [15,30,60]
+    %    plotCircle3d([0 0 -5],[0 0 1],r)
+    %end
+    %title('camera image in eye rotation coords')
+    %xlabel('Visual angle [deg]');
+    %ylabel('Visual angle [deg]');
+    %colorbar
     %clim(barRange);
 
     % 
@@ -144,15 +143,15 @@ function virtually_foveated_frame = coordinateTransformFinal(I, fisheyeIntrinsic
     Vq = griddata(virtually_foveated_X(:), virtually_foveated_Y(:), subI(:), Xq, Yq);
 
     % Show rasterized result
-    figure;
-    imagesc(xq, yq, Vq);
-    axis image;
-    set(gca,'YDir','normal');
-    colormap gray;
-    colorbar;
-    title('Rasterized camera image in eye rotation coords');
-    xlabel('Visual angle [deg]');
-    ylabel('Visual angle [deg]');
+    %figure;
+    %imagesc(xq, yq, Vq);
+    %axis image;
+    %set(gca,'YDir','normal');
+    %colormap gray;
+    %colorbar;
+    %title('Rasterized camera image in eye rotation coords');
+    %xlabel('Visual angle [deg]');
+   % ylabel('Visual angle [deg]');
 
     %figure; 
     M = Vq; 
