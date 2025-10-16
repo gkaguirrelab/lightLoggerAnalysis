@@ -26,7 +26,9 @@ function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, 
 % 
 % Example:
 %{
-    runGazeCalibrationStimulus("full", 2, 60, 'IOLL_0001', 'GazeCalibration',1, 106.7, 192.4)
+    subjectId = 'IOLL_0001';
+    sessionNum = 1;
+    runGazeCalibrationStimulus("full", 2, 60, subjectId, 'GazeCalibration',sessionNum, 106.7, 192.4)
 %}
                           
     arguments 
@@ -42,7 +44,7 @@ function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, 
     end
     % Hard-coded parametersk
    
-    outerDotRadiusDeg = 2;
+    outerDotRadiusDeg = 1.5;
     innerDotRadiusDeg = 0.25;
     dotTime = 3; % sec 
     cheatTime = 0.11; % measured cpu delay (Sam's laptop, connected to 2nd floor conference room)
@@ -87,6 +89,7 @@ function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, 
         deg2pxX = @(deg) viewingDistCm * tand(deg) * pxPerCmX;
         deg2pxY = @(deg) viewingDistCm * tand(deg) * pxPerCmY;
         dotRadiusPx = viewingDistCm * tand(outerDotRadiusDeg) * pxPerCmX;
+        innerDotRadiusPx = viewingDistCm * tand(innerDotRadiusDeg) * pxPerCmX;
         % Define 13 calibration positions in degrees [xDeg, yDeg]
         % degPositions = [ ...
         %     0,  0;  -20, 20;   -20, -20;   20, 20;   20, -20; ...
@@ -184,9 +187,8 @@ function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, 
             pos = positions(iDot,:);
             outerRects{iDot} = [pos(1)-dotRadiusPx, pos(2)-dotRadiusPx, ...
                 pos(1)+dotRadiusPx, pos(2)+dotRadiusPx];
-            innerRadiusPx = dotRadiusPx * innerFrac;
-            innerRects{iDot} = [pos(1)-innerRadiusPx, pos(2)-innerRadiusPx, ...
-                pos(1)+innerRadiusPx, pos(2)+innerRadiusPx];
+            innerRects{iDot} = [pos(1)-innerDotRadiusPx, pos(2)-innerDotRadiusPx, ...
+                pos(1)+innerDotRadiusPx, pos(2)+innerDotRadiusPx];
         end
         
         % Play beep (single repetition)
