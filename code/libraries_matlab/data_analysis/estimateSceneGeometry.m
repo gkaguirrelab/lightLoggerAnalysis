@@ -80,6 +80,7 @@ arguments
     options.setupArgs cell {mustBeVector} = {}
     options.confidenceThreshold double {mustBeScalarOrEmpty} = 0.75
     options.x0 double = [];
+    options.paramSearchSets = {};
 end
 
 % Extract the optional arguments
@@ -91,6 +92,11 @@ load(perimeterFile,'perimeter');
 
 % Use just the selected frames
 perimeter = perimeter.data(frameSet);
+
+% Remove any perimeters that have no points that are above the confidence
+% threshold
+goodIdx = cellfun(@(x) any(x.confidence > confidenceThreshold), perimeter);
+perimeter = perimeter(goodIdx);
 
 % Create the sceneGeometry starting point
 sceneGeometry = createSceneGeometry(setupArgs{:});
@@ -116,8 +122,8 @@ myObj = @(p) calcAngleError(gazeTargets,myEyePoses(p));
 %       azi, ele, tor camera rotation
 %       eye rotation centers (common, differential)
 %       cornea (axial length, k1, k2)
-lb = [-30 -15 40 10 -5 -10 0.8 0.8 10 40 40];
-ub = [-20 -05 50 40  5  20 1.2 1.2 20 50 50];
+lb = [-50 -15 40 10 -5 -10 0.8 0.8 10 40 40];
+ub = [-20 -05 100 40  5  20 1.2 1.2 20 50 50];
 
 % Use passed or built-in x0
 if ~isempty(options.x0)
@@ -127,7 +133,11 @@ else
 end
 
 % Define a progressive search strategy
-paramSearchSets = {1:3,4:6,1:6,7:8,9:11,1:11};
+if isempty(options.paramSearchSets)
+    paramSearchSets = {1:3,4:6,1:6,7:8,9:11,1:11};
+else
+    paramSearchSets = options.paramSearchSets;
+end
 
 % Report the search start point
 fprintf('at start fval = %2.2f\n',myObj(x0));
@@ -245,6 +255,7 @@ for ii = 1:length(perimeter)
             'cameraTransX0',[0;0;0],...
             'cameraTransBounds', [0;0;0]);
     end
+    drawnow
 end
 end
 
