@@ -26,7 +26,7 @@ function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, 
 % 
 % Example:
 %{
-    subjectId = 'IOLL_0001';
+    subjectId = 'FLIC_2002';
     sessionNum = 1;
     runGazeCalibrationStimulus("full", 2, 60, subjectId, 'GazeCalibration',sessionNum, 106.7, 192.4)
 %}
@@ -146,10 +146,11 @@ function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, 
     bluetooth_central = import_pyfile(getpref("lightLoggerAnalysis", "bluetooth_central_path")); 
     % If a key has been pressed and we are not in simulation mode, 
     % start recording on the light logger 
+    fileNameLL = [subjectId, experiment_name, num2str(session)];
     if(simulation_mode == "full" || simulation_mode == "bluetooth")
         disp("Main | Starting recording on light logger..."); 
         % We will attempt to start the light logger recording 
-        success = start_recording_light_logger(bluetooth_central, experiment_name, device_num);
+        success = start_recording_light_logger(bluetooth_central, fileNameLL, device_num);
         if(~success)
             Screen('CloseAll'); 
             error('Error starting light logger recording'); 
