@@ -11,11 +11,15 @@ function [frame_list] = findGazeFrames(start_time, gaze_targets_deg, target_dur_
             0, 0; -15, 15; -15, -15; 15, 15; 15, -15; ...
             0, 15; 0, -15; -15, 0; 15, 0;...
             -7.5, 7.5; -7.5, -7.5; 7.5, 7.5; 7.5, -7.5; ...
+            0, 10; 0, -7.5; -7.5, 0; 7.5, 0;...
+            0, 0; -15, 15; -15, -15; 15, 15; 15, -15; ...
+            0, 15; 0, -15; -15, 0; 15, 0;...
+            -7.5, 7.5; -7.5, -7.5; 7.5, 7.5; 7.5, -7.5; ...
             0, 10; 0, -7.5; -7.5, 0; 7.5, 0];
-    findGazeFrames([1, 23, 683], gaze_targets_deg, 3.267)
+    findGazeFrames([1, 23, 575], gaze_targets_deg, 3.267)
 %}
     arguments
-        start_time (1,1) double      % time of first dot in [minute, second, millisecond] format. Human observer should determine this with IINA for now.
+        start_time (1,3) double      % time of first dot in [minute, second, millisecond] format. Human observer should determine this with IINA for now.
         gaze_targets_deg (:, 2) double         % N x 2 array of target positions [phi, theta] (Used for N, but not position values)
         target_dur_s (1,1) double = 3.43       % Duration (s) each dot was presented (optional, default 3.43s)
     end
@@ -31,7 +35,9 @@ function [frame_list] = findGazeFrames(start_time, gaze_targets_deg, target_dur_
     start_frame = estimateFrameFromTime(FPS, start_time);
     
     % --- 1. DATA LOADING AND PREPARATION ---
-    data_file_path = '/Users/samanthamontoya/Aguirre-Brainard Lab Dropbox/Sam Montoya/FLIC_data/lightLogger/sam_gazecal_106.mat';
+    %data_file_path = '/Users/samanthamontoya/Aguirre-Brainard Lab Dropbox/Sam Montoya/FLIC_data/lightLogger/sam_gazecal_106.mat';
+    data_file_path = '/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Flic Experimenter/FLIC_data/lightLogger/Processing/FLIC_200X_gazeCalibration_session1_perimeter.mat';
+
     
     % UPDATED DATA LOADING based on user feedback
     pupil_features_struct = load(data_file_path, 'perimeter');
