@@ -58,12 +58,67 @@ function [sceneGeometry,p, gazeOffset] = estimateSceneGeometry(perimeterFile, fr
     setupArgs = [sceneArgs observerArgs];
 
     % Define the input variables for this particular gaze cal video
-    perimeterFile = '/Users/aguirre/Aguirre-Brainard Lab Dropbox/Geoffrey Aguirre/FLIC_data/lightLogger/SM_gaze_cal_pupil_features101_dark.mat';
-    frameSet = [10680, 11160, 11520, 12000, 12360 , 12840, 13200, 13680, 14040, 14400];
-    gazeTargets = [0,0; 0,20; 0,-20; 20,0; -20,0; 0,0; 0,20; 0,-20; 20,0; -20,0];
+    perimeterFile = '/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Flic Experimenter/FLIC_data/lightLogger/Processing/FLIC_200X_gazeCalibration_session1_perimeter.mat';
+    
+
+fullFrameSet = [10242
+       10551
+       11038
+       11424
+       11759
+       12138
+       12504
+       13054
+       13361
+       13770
+       14200
+       14508
+       14849
+       15318
+       15695
+       16081
+       16515
+       16896
+       17225
+       17762
+       18113
+       18501
+       18905
+       19282
+       19672
+       20063
+       20368
+       20751
+       21277
+       21585
+       22065
+       22388
+       22830
+       23188]';
+
+fullGazeTargets = [-1, 1].*[ ...
+            0, 0; -15, 15; -15, -15; 15, 15; 15, -15; ...
+            0, 15; 0, -15; -15, 0; 15, 0;...
+            -7.5, 7.5; -7.5, -7.5; 7.5, 7.5; 7.5, -7.5; ...
+            0, 10; 0, -7.5; -7.5, 0; 7.5, 0;...
+            0, 0; -15, 15; -15, -15; 15, 15; 15, -15; ...
+            0, 15; 0, -15; -15, 0; 15, 0;...
+            -7.5, 7.5; -7.5, -7.5; 7.5, 7.5; 7.5, -7.5; ...
+            0, 10; 0, -7.5; -7.5, 0; 7.5, 0]; % where gaze targets are
+            %taken from runGazeCalibration.m (in this original file,
+            %negative x = left, negative y = down. In gka model eye,
+            %negative x = right, negative y = down. So we flip the sign of x).
+
+smallSetIdx = [1, 6, 7, 8, 9];
+
+    %frameSet = fullFrameSet(smallSetIdx);
+    %gazeTargets = fullGazeTargets(smallSetIdx,:);
+
+frameSet = fullFrameSet;
+    gazeTargets = fullGazeTargets;
 
     % This is the x0, in case we want to pass that
-    x0 = [-27.0203  -14.9518   48.2275   25.1258   -1.4769   10.6001    0.9466    1.0197   16.9814   46.7426   41.0230];
+    x0 = [-29.9355  -10.3699   52.3664   24.2541    2.1374   15.5410    0.9895    1.0024   17.6172   43.0417   41.0665];
 
     % Run the routine
     [sceneGeometry,p,gazeOffset] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs);
