@@ -1,4 +1,4 @@
-function [frame_list] = findGazeFrames(start_frame, gaze_targets_deg, target_dur_s)
+function [frame_list] = findGazeFrames(start_time, gaze_targets_deg, target_dur_s)
 %FINDGAZEFRAMES Automated process to identify representative frames from gaze calibration.
 %   Uses the MEDIAN of the Xp/Yp points to find a robust center 
 %   frame for each target, based on a 120 fps rate.
@@ -7,28 +7,28 @@ function [frame_list] = findGazeFrames(start_frame, gaze_targets_deg, target_dur
 %   a detailed diagnostic is printed to the command window.
 % Example
 %{ 
-    gaze_targets_deg = [0, 0; -20, 20; -20, -20; 20, 20; 20, -20; ...
-            0, 20; 0, -20; -20, 0; 20, 0;...
-            -10, 10; -10, -10; 10, 10; 10, -10; ...
-            0, 10; 0, -10; -10, 0; 10, 0;...
-            0, 0; -20, 20; -20, -20; 20, 20; 20, -20; ...
-            0, 20; 0, -20; -20, 0; 20, 0;...
-            -10, 10; -10, -10; 10, 10; 10, -10; ...
-            0, 10; 0, -10; -10, 0; 10, 0];
-    findGazeFrames(10313, gaze_targets_deg)
+    gaze_targets_deg = [ ...
+            0, 0; -15, 15; -15, -15; 15, 15; 15, -15; ...
+            0, 15; 0, -15; -15, 0; 15, 0;...
+            -7.5, 7.5; -7.5, -7.5; 7.5, 7.5; 7.5, -7.5; ...
+            0, 10; 0, -7.5; -7.5, 0; 7.5, 0];
+    findGazeFrames([1, 23, 683], gaze_targets_deg, 3.267)
 %}
     arguments
-        start_frame (1,1) double      % Frame # of task start (first dot onset).
+        start_time (1,1) double      % time of first dot in [minute, second, millisecond] format. Human observer should determine this with IINA for now.
         gaze_targets_deg (:, 2) double         % N x 2 array of target positions [phi, theta] (Used for N, but not position values)
         target_dur_s (1,1) double = 3.43       % Duration (s) each dot was presented (optional, default 3.43s)
     end
     % Hardcoded Parameters
     FPS = 120;
     analysis_window_duration = 1.5; % seconds
-    
+
     % CONFIDENCE PARAMETERS
     confidence_cutoff = 0.7; 
     min_perimeter_points = 8;
+
+    % convert time to frame number
+    start_frame = estimateFrameFromTime(FPS, start_time);
     
     % --- 1. DATA LOADING AND PREPARATION ---
     data_file_path = '/Users/samanthamontoya/Aguirre-Brainard Lab Dropbox/Sam Montoya/FLIC_data/lightLogger/sam_gazecal_106.mat';
