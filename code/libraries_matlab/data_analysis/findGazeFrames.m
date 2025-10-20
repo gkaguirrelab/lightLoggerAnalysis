@@ -1,15 +1,21 @@
 function [frame_list] = findGazeFrames(start_frame, gaze_targets_deg, target_dur_s)
 %FINDGAZEFRAMES Automated process to identify representative frames from gaze calibration.
-%   Uses the MEDIAN of the dlc_kpts points to find a robust center 
+%   Uses the MEDIAN of the Xp/Yp points to find a robust center 
 %   frame for each target, based on a 120 fps rate.
 %
 %   NOTE: When a target fails to yield a valid frame (returns NaN), 
 %   a detailed diagnostic is printed to the command window.
 % Example
 %{ 
-    gaze_targets_deg = [0, 0; 0, 20; 0, -20; -20, 0; 20, 0;...
-        0, 0; 0, 20; 0, -20; -20, 0; 20, 0;];
-    findGazeFrames(10510, gaze_targets_deg)
+    gaze_targets_deg = [0, 0; -20, 20; -20, -20; 20, 20; 20, -20; ...
+            0, 20; 0, -20; -20, 0; 20, 0;...
+            -10, 10; -10, -10; 10, 10; 10, -10; ...
+            0, 10; 0, -10; -10, 0; 10, 0;...
+            0, 0; -20, 20; -20, -20; 20, 20; 20, -20; ...
+            0, 20; 0, -20; -20, 0; 20, 0;...
+            -10, 10; -10, -10; 10, 10; 10, -10; ...
+            0, 10; 0, -10; -10, 0; 10, 0];
+    findGazeFrames(10313, gaze_targets_deg)
 %}
     arguments
         start_frame (1,1) double      % Frame # of task start (first dot onset).
@@ -25,11 +31,11 @@ function [frame_list] = findGazeFrames(start_frame, gaze_targets_deg, target_dur
     min_perimeter_points = 8;
     
     % --- 1. DATA LOADING AND PREPARATION ---
-    data_file_path = '/Users/samanthamontoya/Aguirre-Brainard Lab Dropbox/Sam Montoya/FLIC_data/lightLogger/SM_gaze_cal_pupil_features101_dark.mat';
+    data_file_path = '/Users/samanthamontoya/Aguirre-Brainard Lab Dropbox/Sam Montoya/FLIC_data/lightLogger/sam_gazecal_106.mat';
     
-    % Load the data structure. Access the field that contains the cell array.
-    pupil_features_struct = load(data_file_path, 'pupil_features');
-    pupil_features = pupil_features_struct.pupil_features;
+    % UPDATED DATA LOADING based on user feedback
+    pupil_features_struct = load(data_file_path, 'perimeter');
+    pupil_features = pupil_features_struct.perimeter.data;
     
     % Call flatten_features to filter frames and extract valid data
     [median_pupil_centers, ~, ~, frame_idx] = flatten_features(pupil_features, confidence_cutoff, min_perimeter_points);
@@ -49,7 +55,7 @@ function [frame_list] = findGazeFrames(start_frame, gaze_targets_deg, target_dur
     center_offset_frames = round(target_dur_frames / 2);
     half_window_frames = round(analysis_window_frames / 2);
     window_starts_frame = dot_start_frames + center_offset_frames - half_window_frames;
-    window_ends_frame = window_starts_frame + analysis_window_frames - 1; % Subtract 1 for inclusive range of analysis_window_frames
+    window_ends_frame = window_starts_frame + analysis_window_frames - 1; 
     
     % --- 4. FRAME SELECTION LOOP ---
     for i = 1:N
@@ -57,7 +63,7 @@ function [frame_list] = findGazeFrames(start_frame, gaze_targets_deg, target_dur
         f_end = window_ends_frame(i);
         
         % a) Segment: Find all valid (pre-filtered) frames within the analysis window
-        idx_window = (frame_idx >= f_start) & (frame_idx <= f_end); % Use <= f_end for inclusive window
+        idx_window = (frame_idx >= f_start) & (frame_idx <= f_end); 
         
         centers_window = median_pupil_centers(idx_window, :);
         frame_idx_window = frame_idx(idx_window);
@@ -67,7 +73,6 @@ function [frame_list] = findGazeFrames(start_frame, gaze_targets_deg, target_dur
             warning('No valid detected frames found for target %d in the window [Frame %d to %d].', i, f_start, f_end);
             
             % *** DIAGNOSTIC OUTPUT HERE ***
-            % Print the reason for failure for every frame in the window
             diagnoseFailure(pupil_features, f_start, f_end, confidence_cutoff, min_perimeter_points);
             
             continue;
@@ -87,22 +92,14 @@ function [frame_list] = findGazeFrames(start_frame, gaze_targets_deg, target_dur
 end
 % -------------------------------------------------------------------------
 % --- LOCAL FUNCTIONS ---
-
 function [median_pupil_centers, frame_confidence, pupil_t, frame_idx] = flatten_features(pupil_features, confidence_cutoff, min_perimeter_points)
-    % Extracts median center, only keeping frames where at least min_perimeter_points
-    % have a dlc_confidence greater than confidence_cutoff.
+    % UPDATED: Now assumes pupil_features is the direct cell array of perimeter structs.
     
-    if isempty(pupil_features) || ~iscell(pupil_features) || numel(pupil_features) < 1
+    if ~iscell(pupil_features) 
         return;
     end
     
-    frame_container = pupil_features{1};
-    
-    if ~iscell(frame_container)
-        return;
-    end
-    
-    N_frames = size(frame_container, 2);
+    N_frames = numel(pupil_features);
     
     median_pupil_centers = nan(N_frames, 2);
     frame_confidence = nan(N_frames, 1); 
@@ -110,16 +107,18 @@ function [median_pupil_centers, frame_confidence, pupil_t, frame_idx] = flatten_
     pupil_t = nan(N_frames, 1); 
     frame_idx = nan(N_frames, 1);
     
-    Xp_field = 'dlc_kpts_x';
-    Yp_field = 'dlc_kpts_y';
-    Confidence_field = 'dlc_confidence';
+    % FIELD NAMES
+    Xp_field = 'Xp';
+    Yp_field = 'Yp';
+    Confidence_field = 'confidence';
 
     for ii = 1:N_frames
         
         frame_idx(ii) = ii; 
         
         try
-            frame_data_struct = frame_container{:, ii}; 
+            % SIMPLIFIED ACCESS: pupil_features{ii} is now the data struct.
+            frame_data_struct = pupil_features{ii}; 
         catch
             continue;
         end
@@ -136,10 +135,8 @@ function [median_pupil_centers, frame_confidence, pupil_t, frame_idx] = flatten_
         % --- CONFIDENCE CHECK LOGIC ---
         perimeter_confidences = frame_data_struct.(Confidence_field);
         
-        % Count how many points are above the confidence cutoff
         num_high_confidence_points = sum(perimeter_confidences > confidence_cutoff);
         
-        % Filter: If not enough points are high confidence, skip this frame
         if num_high_confidence_points < min_perimeter_points
             continue;
         end
@@ -151,12 +148,8 @@ function [median_pupil_centers, frame_confidence, pupil_t, frame_idx] = flatten_
         
         median_pupil_centers(ii, :) = [median_x, median_y];
         
-        % b) Extract frame-level metadata (optional)
-        if isfield(frame_data_struct, 'confidence')
-             frame_confidence(ii) = frame_data_struct.confidence;
-        else
-             frame_confidence(ii) = median(perimeter_confidences); 
-        end
+        % b) Extract frame-level metadata (using perimeter confidence since there's no top-level field)
+        frame_confidence(ii) = median(perimeter_confidences); 
     end
     
     % Clean up NaN rows (frames that failed to load OR failed the confidence check)
@@ -172,25 +165,26 @@ end
 function diagnoseFailure(pupil_features, f_start, f_end, confidence_cutoff, min_perimeter_points)
 % Helper function to print detailed reasons for why frames failed the confidence check.
     
-    frame_container = pupil_features{1};
     window_indices = f_start:f_end;
     
     % Get the size of the total data set for bounds checking
-    max_frame_idx = size(frame_container, 2);
+    max_frame_idx = numel(pupil_features);
     
     fprintf('--- Diagnosis for Target Window [Frame %d to %d]: ---\n', f_start, f_end);
-    fprintf('Check: Requires > %d points with dlc_confidence > %.2f\n', min_perimeter_points, confidence_cutoff);
+    fprintf('Check: Requires > %d points with confidence > %.2f\n', min_perimeter_points, confidence_cutoff);
     
-    Confidence_field = 'dlc_confidence';
+    % FIELD NAME
+    Confidence_field = 'confidence';
 
     for ii = window_indices
         if ii > max_frame_idx
              fprintf('Frame %d: Outside of available data range (Max frame in log is %d).\n', ii, max_frame_idx);
              continue;
         end
-
+        
         try
-            frame_data_struct = frame_container{:, ii}; 
+            % SIMPLIFIED ACCESS: pupil_features{ii} is now the data struct.
+            frame_data_struct = pupil_features{ii}; 
         catch
              fprintf('Frame %d: DATA LOAD FAILED (e.g., frame struct is missing or corrupted).\n', ii);
              continue;
@@ -202,7 +196,7 @@ function diagnoseFailure(pupil_features, f_start, f_end, confidence_cutoff, min_
         end
         
         if ~isfield(frame_data_struct, Confidence_field)
-             fprintf('Frame %d: Missing ''dlc_confidence'' field. Cannot perform confidence check.\n', ii);
+             fprintf('Frame %d: Missing ''confidence'' field. Cannot perform confidence check.\n', ii);
              continue;
         end
         
