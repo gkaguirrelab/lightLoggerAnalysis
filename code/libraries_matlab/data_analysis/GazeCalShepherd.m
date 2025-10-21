@@ -1,14 +1,14 @@
 %GazeCalibrationShepherd
 
 % STEP 1: make a perimeter file from raw data
-perimeterFile = []; % path to perimeter file
+perimeterFile = '/Users/samanthamontoya/Aguirre-Brainard Lab Dropbox/Sam Montoya/FLIC_data/lightLogger/Processing/FLIC_2002_gazeCalibration_session1_perimeter.mat'; % path to perimeter file
 
 % STEP 2: find the start frame from the playable pupil camera video using
 %   IINA. Also calculate the duration of the dots from the playable world
 %   camera video. sometimes the first dot is shorter than the rest.
 
 %% STEP 3: find gaze frames to use in scene geometry estimation
-startTime = [1, 23, 683]; % [minutes, seconds, milliseconds]
+startTime = [1, 20, 933]; % [minutes, seconds, milliseconds]
 targetDurSec = 3.267;
 gazeTargetsDeg = [ ...
     0, 0; -15, 15; -15, -15; 15, 15; 15, -15; ...
@@ -20,7 +20,7 @@ gazeTargetsDeg = [ ...
     -7.5, 7.5; -7.5, -7.5; 7.5, 7.5; 7.5, -7.5; ...
     0, 10; 0, -7.5; -7.5, 0; 7.5, 0];
 
-fullFrameSet = findGazeFrames(startTime, gazeTargetsDeg, targetDurSec);
+fullFrameSet = findGazeFrames(startTime, gazeTargetsDeg, perimeterFile, targetDurSec);
 
 %% STEP 4: estimate scene geometry
 % first, use only 5 points and use the p output for your second round of
@@ -29,7 +29,7 @@ fullFrameSet = findGazeFrames(startTime, gazeTargetsDeg, targetDurSec);
 % Define the input variables for this particular gaze cal video
 gazeSubsetIdx = [1,6,7,8,9];
 frameSet = fullFrameSet(gazeSubsetIdx);
-gazeTargets = gazeTargetsDeg(:,gazeTargetsDeg);
+gazeTargets = (gazeTargetsDeg(gazeSubsetIdx,:)).*[-1,1];
 
 % Define some properties of the eye and of the scene that will be fixed
 % for the scene search
@@ -63,7 +63,7 @@ x0 = [-26.8458  -14.9894   48.2704   25.2714   -1.9474    9.5655    0.9503    1.
 
 %% now again with the first half of the gaze targets
 frameSet = fullFrameSet(1:17);
-gazeTargets = gazeTargetsDeg(1:17,:);
+gazeTargets = gazeTargetsDeg(1:17,:).*[-1,1];
 [sceneGeometry,p17] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', p5);
 
 % CHECK the graphs. Do the xs and os overlap well? Is the f value below 4?
@@ -72,7 +72,7 @@ gazeTargets = gazeTargetsDeg(1:17,:);
 %procedure.
 %% now again with the second half of the gaze targets
 frameSet = fullFrameSet(18:end);
-gazeTargets = gazeTargetsDeg(18:end,:);
+gazeTargets = gazeTargetsDeg(18:end,:).*[-1,1];
 [sceneGeometry,p18] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', p5);
 
 % CHECK the graphs. Do the xs and os overlap well? Is the f value below 4?
@@ -84,7 +84,7 @@ gazeTargets = gazeTargetsDeg(18:end,:);
 pMean = mean([p17(:), p18(:)],2);
 
 frameSet = fullFrameSet;
-gazeTargets = gazeTargetsDeg;
+gazeTargets = gazeTargetsDeg.*[-1,1];
 [sceneGeometry,p34] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', pMean);
 
 %% Save things so we could regenerate the scene geometry file if needed!
