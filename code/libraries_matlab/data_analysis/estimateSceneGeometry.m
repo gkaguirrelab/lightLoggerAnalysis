@@ -36,7 +36,7 @@ function [sceneGeometry,p, gazeOffset] = estimateSceneGeometry(perimeterFile, fr
 %
 % Outputs
 %   sceneGeometry         - The resulting sceneGeometry structure.
-%   p                     - The parameters at the solution.
+%   p                     - 1x11 array. The parameters at the solution.
 %   gazeOffset            - 1x2 array that has the offset (in degrees)
 %                           between the primary position of the eye and the
 %                           [0 0] coordinate of the gaze target space.
@@ -173,9 +173,10 @@ switch options.verbosity
         error('Not a valid verbosity setting');
 end
 
-% Define a nested objective function that computes error in estimation of the gaze
-% target angular positions. We discount the error in the mean eye pose. we
-% also support pulling the pBest and fValBest out of the nested function
+% Define a nested objective function that computes error in estimation of
+% the gaze target angular positions. We discount the error in the mean eye
+% pose. We nest the function to support having the pBest and fValBest
+% available to the main function.
 pBest = [];
 fValBest = Inf;
 
@@ -249,16 +250,16 @@ for ss = 1:length(paramSearchSets)
     if fVal > fValBest
         p = pBest;
         fVal = fValBest;
+        % Announce
         if ~strcmp(options.verbosity,'none')
             fprintf('fval = %2.2f (using pBest)\n',fVal);
         end
     else
+        % Announce
         if ~strcmp(options.verbosity,'none')
             fprintf('fval = %2.2f\n',fVal);
         end
     end
-
-    % Announce
 
     % Update the sceneGeometry at the solution
     sceneGeometry = updateSceneGeometry(sceneGeometry,p,setupArgs);
