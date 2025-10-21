@@ -1,4 +1,4 @@
-%GazeCalibrationWrapper
+%GazeCalibrationShepherd
 
 % STEP 1: make a perimeter file from raw data
 perimeterFile = []; % path to perimeter file
@@ -54,9 +54,40 @@ x0 = [-26.8458  -14.9894   48.2704   25.2714   -1.9474    9.5655    0.9503    1.
 [sceneGeometry,p] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs);
 
 % Search again starting from the prior search result
-[sceneGeometry,p] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', p);
+[sceneGeometry,p5] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', p);
 
-% now again with all the gaze targets
+% CHECK the graphs. Do the xs and os overlap well? Is the f value below 4?
+%If no, investigate the playable video of the pupil camera and see if any
+%of the points look poorly outlined. They may need to be omitted from the
+%procedure.
+
+%% now again with the first half of the gaze targets
+frameSet = fullFrameSet(1:17);
+gazeTargets = gazeTargetsDeg(1:17,:);
+[sceneGeometry,p17] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', p5);
+
+% CHECK the graphs. Do the xs and os overlap well? Is the f value below 4?
+%If no, investigate the playable video of the pupil camera and see if any
+%of the points look poorly outlined. They may need to be omitted from the
+%procedure.
+%% now again with the second half of the gaze targets
+frameSet = fullFrameSet(18:end);
+gazeTargets = gazeTargetsDeg(18:end,:);
+[sceneGeometry,p18] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', p5);
+
+% CHECK the graphs. Do the xs and os overlap well? Is the f value below 4?
+%If no, investigate the playable video of the pupil camera and see if any
+%of the points look poorly outlined. They may need to be omitted from the
+%procedure.
+%% now run with all gaze targets
+% use mean x0 from 1st and 2nd half as starting point
+pMean = mean([p17(:), p18(:)],2);
+
 frameSet = fullFrameSet;
 gazeTargets = gazeTargetsDeg;
-[sceneGeometry,p] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', p);
+[sceneGeometry,p34] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', pMean);
+
+%% Save things so we could regenerate the scene geometry file if needed!
+% if everything looks good, save the scene geometry, p34, gaze offset, x0
+% and frames used for this participant in a file!
+
