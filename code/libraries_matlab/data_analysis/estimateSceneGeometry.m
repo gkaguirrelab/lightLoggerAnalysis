@@ -136,6 +136,7 @@ arguments
     options.confidenceThreshold double {mustBeScalarOrEmpty} = 0.75
     options.x0 double = [];
     options.paramSearchSets = {};
+    options.verbosity = 'stage'; % 'none','stage','iter';
 end
 
 % Extract the optional arguments
@@ -162,8 +163,15 @@ if isfield(sceneGeometry.refraction.retinaToCamera.magnification,'spectacle')
     gazeTargets = gazeTargets * sceneGeometry.refraction.retinaToCamera.magnification.spectacle;
 end
 
-% Define some search options
-optimset.Display = 'off';
+% Define some verbosity options
+switch options.verbosity
+    case {'none','stage'}
+        optimset.Display = 'off';
+    case {'iter'}
+        optimset.Display = 'iter';
+    otherwise
+        error('Not a valid verbosity setting');
+end
 
 % Define an objective that minimizes mismatch between targets and eye
 % rotations, and uses updates in camera position
@@ -195,7 +203,9 @@ else
 end
 
 % Report the search start point
-fprintf('at start fval = %2.2f\n',myObj(x0));
+if ~strcmp(options.verbosity,'none')
+    fprintf('at start fval = %2.2f\n',myObj(x0));
+end
 
 % Search across the paramsets
 for ss = 1:length(paramSearchSets)
@@ -206,13 +216,17 @@ for ss = 1:length(paramSearchSets)
     thisLB(paramSet) = lb(paramSet); thisUB(paramSet) = ub(paramSet);
 
     % Announce
-    fprintf('search %d of %d...',ss,length(paramSearchSets));
+    if ~strcmp(options.verbosity,'none')
+        fprintf('search %d of %d...',ss,length(paramSearchSets));
+    end
 
     % Search
     [p,fVal] = bads(myObj,x0, thisLB, thisUB, thisLB, thisUB, [], optimset);
 
     % Announce
-    fprintf('fval = %2.2f\n',fVal);
+    if ~strcmp(options.verbosity,'none')
+        fprintf('fval = %2.2f\n',fVal);
+    end
 
     % Update the sceneGeometry at the solution
     sceneGeometry = updateSceneGeometry(sceneGeometry,p,setupArgs);
