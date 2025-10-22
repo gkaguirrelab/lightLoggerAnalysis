@@ -1,4 +1,4 @@
-function [frame_list] = findGazeFrames(start_time, gaze_targets_deg, target_dur_s)
+function [frame_list] = findGazeFrames(start_time, gaze_targets_deg, perimeterFile, target_dur_s)
 %FINDGAZEFRAMES Automated process to identify representative frames from gaze calibration.
 %   Uses the MEDIAN of the Xp/Yp points to find a robust center 
 %   frame for each target, based on a 120 fps rate.
@@ -21,6 +21,7 @@ function [frame_list] = findGazeFrames(start_time, gaze_targets_deg, target_dur_
     arguments
         start_time (1,3) double      % time of first dot in [minute, second, millisecond] format. Human observer should determine this with IINA for now.
         gaze_targets_deg (:, 2) double         % N x 2 array of target positions [phi, theta] (Used for N, but not position values)
+        perimeterFile char
         target_dur_s (1,1) double = 3.43       % Duration (s) each dot was presented (optional, default 3.43s)
     end
     % Hardcoded Parameters
@@ -36,11 +37,11 @@ function [frame_list] = findGazeFrames(start_time, gaze_targets_deg, target_dur_
     
     % --- 1. DATA LOADING AND PREPARATION ---
     %data_file_path = '/Users/samanthamontoya/Aguirre-Brainard Lab Dropbox/Sam Montoya/FLIC_data/lightLogger/sam_gazecal_106.mat';
-    data_file_path = '/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Flic Experimenter/FLIC_data/lightLogger/Processing/FLIC_200X_gazeCalibration_session1_perimeter.mat';
+    %data_file_path = '/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Flic Experimenter/FLIC_data/lightLogger/Processing/FLIC_200X_gazeCalibration_session1_perimeter.mat';
 
     
     % UPDATED DATA LOADING based on user feedback
-    pupil_features_struct = load(data_file_path, 'perimeter');
+    pupil_features_struct = load(perimeterFile, 'perimeter');
     pupil_features = pupil_features_struct.perimeter.data;
     
     % Call flatten_features to filter frames and extract valid data

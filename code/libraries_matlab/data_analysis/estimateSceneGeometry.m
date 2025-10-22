@@ -36,7 +36,7 @@ function [sceneGeometry,p, gazeOffset] = estimateSceneGeometry(perimeterFile, fr
 %
 % Outputs
 %   sceneGeometry         - The resulting sceneGeometry structure.
-%   p                     - The parameters at the solution.
+%   p                     - 1x11 array. The parameters at the solution.
 %   gazeOffset            - 1x2 array that has the offset (in degrees)
 %                           between the primary position of the eye and the
 %                           [0 0] coordinate of the gaze target space.
@@ -136,6 +136,7 @@ arguments
     options.confidenceThreshold double {mustBeScalarOrEmpty} = 0.75
     options.x0 double = [];
     options.paramSearchSets = {};
+    options.verbosity = 'stage'; % 'none','stage','iter';
 end
 
 % Extract the optional arguments
@@ -162,14 +163,44 @@ if isfield(sceneGeometry.refraction.retinaToCamera.magnification,'spectacle')
     gazeTargets = gazeTargets * sceneGeometry.refraction.retinaToCamera.magnification.spectacle;
 end
 
-% Define some search options
-optimset.Display = 'off';
+% Define some verbosity options
+switch options.verbosity
+    case {'none','stage'}
+        optimset.Display = 'off';
+    case {'iter'}
+        optimset.Display = 'iter';
+    otherwise
+        error('Not a valid verbosity setting');
+end
+
+% Define a nested objective function that computes error in estimation of
+% the gaze target angular positions. We discount the error in the mean eye
+% pose. We nest the function to support having the pBest and fValBest
+% available to the main function.
+pBest = [];
+fValBest = Inf;
+
+    function angleError = calcAngleError(gazeTargets,eyePoses,p)
+        eyePoses = eyePoses(:,1:2);
+        meanEyePoses = mean(eyePoses,'omitmissing');
+        eyePoses = eyePoses - meanEyePoses;
+        meanGazeTargets = mean(gazeTargets);
+        gazeTargets = gazeTargets - meanGazeTargets;
+        idx = ~isnan(eyePoses);
+        angleError = norm(gazeTargets(idx)-eyePoses(idx)) + norm(meanEyePoses)/10;
+        % Store the best solution seen
+        if angleError < fValBest
+            fValBest = angleError;
+            pBest = p;
+        end
+    end
+
 
 % Define an objective that minimizes mismatch between targets and eye
 % rotations, and uses updates in camera position
 myNewScene = @(p) updateSceneGeometry(sceneGeometry,p,setupArgs);
 myEyePoses = @(p) estimateEyePoses(perimeter,myNewScene(p),confidenceThreshold);
-myObj = @(p) calcAngleError(gazeTargets,myEyePoses(p));
+myObj = @(p) calcAngleError(gazeTargets,myEyePoses(p),p);
 
 % Define the X0 and bounds on the search for camera position and eye
 % parameters.
@@ -195,7 +226,9 @@ else
 end
 
 % Report the search start point
-fprintf('at start fval = %2.2f\n',myObj(x0));
+if ~strcmp(options.verbosity,'none')
+    fprintf('at start fval = %2.2f\n',myObj(x0));
+end
 
 % Search across the paramsets
 for ss = 1:length(paramSearchSets)
@@ -206,13 +239,27 @@ for ss = 1:length(paramSearchSets)
     thisLB(paramSet) = lb(paramSet); thisUB(paramSet) = ub(paramSet);
 
     % Announce
-    fprintf('search %d of %d...',ss,length(paramSearchSets));
+    if ~strcmp(options.verbosity,'none')
+        fprintf('search %d of %d...',ss,length(paramSearchSets));
+    end
 
     % Search
     [p,fVal] = bads(myObj,x0, thisLB, thisUB, thisLB, thisUB, [], optimset);
 
-    % Announce
-    fprintf('fval = %2.2f\n',fVal);
+    % Check to make sure that the returned solution is the best
+    if fVal > fValBest
+        p = pBest;
+        fVal = fValBest;
+        % Announce
+        if ~strcmp(options.verbosity,'none')
+            fprintf('fval = %2.2f (using pBest)\n',fVal);
+        end
+    else
+        % Announce
+        if ~strcmp(options.verbosity,'none')
+            fprintf('fval = %2.2f\n',fVal);
+        end
+    end
 
     % Update the sceneGeometry at the solution
     sceneGeometry = updateSceneGeometry(sceneGeometry,p,setupArgs);
@@ -315,14 +362,3 @@ end
 end
 
 
-% An objective function that computes error in estimation of the gaze
-% target angular positions. We discount the error in the mean eye pose.
-function angleError = calcAngleError(gazeTargets,eyePoses)
-eyePoses = eyePoses(:,1:2);
-meanEyePoses = mean(eyePoses,'omitmissing');
-eyePoses = eyePoses - meanEyePoses;
-meanGazeTargets = mean(gazeTargets);
-gazeTargets = gazeTargets - meanGazeTargets;
-idx = ~isnan(eyePoses);
-angleError = norm(gazeTargets(idx)-eyePoses(idx)) + norm(meanEyePoses)/10;
-end
