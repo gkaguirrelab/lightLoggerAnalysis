@@ -1,25 +1,34 @@
 %GazeCalibrationShepherd
+subjectID = 'FLIC_2002';
+dropboxBasedir = fullfile(getpref("lightLoggerAnalysis", 'dropboxBaseDir'));
 
 % STEP 1: make a perimeter file from raw data
-perimeterFile = '/Users/samanthamontoya/Aguirre-Brainard Lab Dropbox/Sam Montoya/FLIC_data/lightLogger/Processing/FLIC_2002_gazeCalibration_session1_perimeter.mat'; % path to perimeter file
+perimeterFile = [dropboxBasedir, '/FLIC_data/lightLogger/Processing/', subjectID '_gazeCalibration_session1_perimeter.mat']; % path to perimeter file
 
 % STEP 2: find the start frame from the playable pupil camera video using
 %   IINA. Also calculate the duration of the dots from the playable world
 %   camera video. sometimes the first dot is shorter than the rest.
 
 %% STEP 3: find gaze frames to use in scene geometry estimation
+% load run file for this participant
+folders = ['/FLIC_data/lightLogger/GazeCalRunFileData/', subjectID];
+searchPattern = [dropboxBasedir, folders, '/', subjectID, '_GazeCalibration_session1*'];
+fileList = dir(searchPattern);
+if isempty(fileList)
+    error('No files found matching the pattern: %s', searchPattern);
+end
+fileName = fileList(1).name;
+runDataPath = fullfile(fileList(1).folder, fileName);
+
+runData = load(runDataPath, 'taskData');
+runData = runData.taskData;
+% pull out gaze target positions from this file
+gazeTargetsDeg = runData.gaze_target_positions_deg;
+
+%check timing inputs (human!)
 startTime = [1, 20, 933]; % [minutes, seconds, milliseconds]
 targetDurSec = 3.267;
-gazeTargetsDeg = [ ...
-    0, 0; -15, 15; -15, -15; 15, 15; 15, -15; ...
-    0, 15; 0, -15; -15, 0; 15, 0;...
-    -7.5, 7.5; -7.5, -7.5; 7.5, 7.5; 7.5, -7.5; ...
-    0, 10; 0, -7.5; -7.5, 0; 7.5, 0;...
-    0, 0; -15, 15; -15, -15; 15, 15; 15, -15; ...
-    0, 15; 0, -15; -15, 0; 15, 0;...
-    -7.5, 7.5; -7.5, -7.5; 7.5, 7.5; 7.5, -7.5; ...
-    0, 10; 0, -7.5; -7.5, 0; 7.5, 0];
-
+%determine frame numbers to analyze
 fullFrameSet = findGazeFrames(startTime, gazeTargetsDeg, perimeterFile, targetDurSec);
 
 %% STEP 4: estimate scene geometry
@@ -47,9 +56,7 @@ setupArgs = [sceneArgs observerArgs];
 
 
 % This is the x0, in case we want to pass that
-% THIS NEEDS TO BE UPDATED 
-x0 = [-26.8458  -14.9894   48.2704   25.2714   -1.9474    9.5655    0.9503    1.0497   13.9882   43.9961   44.9963];
-
+x0 = [-29.9355  -10.3699   52.3664   24.2541    2.1374   15.5410    0.9895    1.0024   17.6172   43.0417   41.0665];
 % Run the routine
 [sceneGeometry,p] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs);
 
