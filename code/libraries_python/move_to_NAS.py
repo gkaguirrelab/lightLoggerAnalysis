@@ -6,10 +6,20 @@ import os
 import shutil
 
 # Define the list of activities for a given experiment 
-experiment_name_dict: dict = {"scriptedIndoorOutdoor"}
-activities_dict: dict = {""}
-modes_dict: dict = {"sf": "spatial_frequency", 
-                    "tf": "temporal_frequency"
+experiment_name_set: set = {"scriptedIndoorOutdoor"}
+activities_set: set = {"lunch", 
+                         "work", 
+                         "chat", 
+                         "phone", 
+                         "walkindoor", 
+                         "walkoutdoor", 
+                         "grocery", 
+                         "cemetery", 
+                         "walkbiopond", 
+                         "sitbiopond"
+                        }
+modes_dict: dict = {"sf": "spatialFrequency", 
+                    "tf": "temporalFrequency"
                    }
 
 """Parse the commandline arguments, returning the source path and the experiment name"""
@@ -18,7 +28,7 @@ def parse_args() -> str:
     parser: argparse.ArgumentParser = argparse.ArgumentParser(description="Move recording files to the NAS")
 
     # Add arguments 
-    parser.add_argument("experiment_name", type="str", choices=experiment_name_dict.keys(), help="Name of the experiment this recording is for")
+    parser.add_argument("experiment_name", type="str", choices=experiment_name_set, help="Name of the experiment this recording is for")
     parser.add_argument("recording_path", type=str, help="Path to the recording file")
 
     # Parse the arguments 
@@ -32,7 +42,7 @@ def parse_args() -> str:
           /session_1/cemetary/FLIC_2002/sf
 
 """
-def scripted_indoor_outdoor_recording_name_to_filestructure(experiment_name: str, recording_name: str) -> str:
+def scripted_indoor_outdoor_recording_name_to_filestructure(recording_name: str) -> str:
     # Let's find the subject ID, activity, mode, and session number 
 
     # First, we will tokenize the string 
@@ -46,7 +56,7 @@ def scripted_indoor_outdoor_recording_name_to_filestructure(experiment_name: str
 
     # Activity is the next token 
     activity: str = tokens[2].lower()
-    assert activity in activities_dict, f"Activity: {activity} unrecognized. Potentially a typo? Valid activites are {activities_dict.keys()}"
+    assert activity in activities_set, f"Activity: {activity} unrecognized. Potentially a typo? Valid activites are {activities_set}"
 
     # Mode is the next token 
     mode: str = tokens[3]
@@ -56,7 +66,7 @@ def scripted_indoor_outdoor_recording_name_to_filestructure(experiment_name: str
     session_num: str = "session_" + "".join([char for char in tokens[-1] if char.isnumeric()])
 
     # Construct a path from this 
-    return os.path.join(session_num, activity, project_subject_ID, modes_dict[mode])
+    return os.path.join(project_subject_ID, activity, modes_dict[mode])
 
 """Given a path to a recording directory and an experiment name, 
    move the file to the NAS.
@@ -68,37 +78,34 @@ def move_to_NAS(experiment_name: str, recording_path: str) -> str:
 
     # Parse the input path of a recording file 
     # and the experiment name 
-    assert experiment_name in experiment_name_dict, f"Experiment name: {experiment_name} unrecognized. Do you have a typo? Valid names are: {experiment_name_dict.keys()}"
+    assert experiment_name in experiment_name_set, f"Experiment name: {experiment_name} unrecognized. Do you have a typo? Valid names are: {experiment_name_set}"
     assert os.path.exists(recording_path), f"Recording path {recording_path} does not exist. Do you have a typo?"
     assert os.path.isdir(recording_path), f"Recording path {recording_path} is not a recording folder."
 
     # Parse the source recording filename into the hierarchical structure 
     # we will use to put it on the NAS
-    local_filestructure: str = scripted_indoor_outdoor_recording_name_to_filestructure(experiment_name, 
-                                                                                       os.path.basename(recording_path.rstrip("/"))
-                                                                                      )
+    local_filestructure: str = scripted_indoor_outdoor_recording_name_to_filestructure(os.path.basename(recording_path.rstrip("/")))
 
     # If we are on MacOS 
-    network_dive_path: str = ""
+    network_drive_path: str = ""
     if(operating_system == "Darwin"):
         # Construct the path to the network drive and ensure it exists 
-        network_drive_path: str = "/Volumes/Aguirre-Brainard Lab NAS Shared/FLIC_raw"
+        network_drive_path = "/Volumes/Aguirre-Brainard Lab NAS Shared/FLIC_raw"
     else:
         raise NotImplementedError()
 
     # Assert that we have a path to the raw video folder on the network drive 
-    assert os.path.exists(network_drive_path), f"Network drivep path: {network_drive_path} does not exist. Are you connected on the same Network?"
+    assert os.path.exists(network_drive_path), f"Network drive path: {network_drive_path} does not exist. Are you connected on the same Network?"
 
     # Next, we will append the light logger project and the experiment name 
-    network_dive_path = os.path.join(network_dive_path, "lightLogger", experiment_name)
-    assert os.path.exists(network_drive_path), f"Network drivep path: {network_drive_path} does not exist. Are you connected on the same Network?"
+    network_drive_path = os.path.join(network_drive_path, "lightLogger", experiment_name)
+    assert os.path.exists(network_drive_path), f"Network drive path: {network_drive_path} does not exist. Are you connected on the same Network?"
 
     # Next, we will append the local filestructure 
-    video_output_path: str = os.path.join(network_dive_path, local_filestructure)
+    video_output_path: str = os.path.join(network_drive_path, local_filestructure)
 
     # Make the directory structure if it doesn't already exist 
-    #os.makedirs(video_output_path, exist_ok=True)
-
+    os.makedirs(video_output_path, exist_ok=True)
 
     # Next, we will move the files to the NAS 
     filenames: list[str] = [filename for filename in os.listdir(recording_path)]
@@ -108,7 +115,7 @@ def move_to_NAS(experiment_name: str, recording_path: str) -> str:
         dst: str = os.path.join(video_output_path, filenames[file_num])
 
         # Move the file to the target location 
-        # shutil.move(src, dst)
+        shutil.copy(src, dst)
 
     return video_output_path
 
