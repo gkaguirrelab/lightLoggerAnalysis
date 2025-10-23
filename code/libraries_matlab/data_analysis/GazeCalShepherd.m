@@ -36,7 +36,7 @@ fullFrameSet = findGazeFrames(startTime, gazeTargetsDeg, perimeterFile, targetDu
 % searching
 
 % Define the input variables for this particular gaze cal video
-gazeSubsetIdx = [1,6,7,8,9];
+gazeSubsetIdx = [6,7,8,9];
 frameSet = fullFrameSet(gazeSubsetIdx);
 gazeTargets = (gazeTargetsDeg(gazeSubsetIdx,:)).*[-1,1];
 
@@ -49,7 +49,9 @@ sceneArgs = {
     'radialDistortionVector',[0 0]};
 
 % Add the args for this particular observer
-observerArgs = {'sphericalAmetropia',2.25,'spectacleLens',[2.25,2,80]};
+%observerArgs = {'sphericalAmetropia',-1.25,'spectacleLens',[-1.25,0,0]};
+observerArgs = {'sphericalAmetropia',-1.25};
+
 
 % Combine the two argument sets
 setupArgs = [sceneArgs observerArgs];
@@ -57,11 +59,10 @@ setupArgs = [sceneArgs observerArgs];
 
 % This is the x0, in case we want to pass that
 x0 = [-29.9355  -10.3699   52.3664   24.2541    2.1374   15.5410    0.9895    1.0024   17.6172   43.0417   41.0665];
-% Run the routine
-[sceneGeometry,p] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs);
 
-% Search again starting from the prior search result
-[sceneGeometry,p5] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', p);
+[sceneGeometry,p5] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', x0);
+
+[sceneGeometry,p5] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', p5);
 
 % CHECK the graphs. Do the xs and os overlap well? Is the f value below 4?
 %If no, investigate the playable video of the pupil camera and see if any
@@ -69,8 +70,8 @@ x0 = [-29.9355  -10.3699   52.3664   24.2541    2.1374   15.5410    0.9895    1.
 %procedure.
 
 %% now again with the first half of the gaze targets
-frameSet = fullFrameSet(1:17);
-gazeTargets = gazeTargetsDeg(1:17,:).*[-1,1];
+frameSet = fullFrameSet(2:17);
+gazeTargets = gazeTargetsDeg(2:17,:).*[-1,1];
 [sceneGeometry,p17] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', p5);
 
 % CHECK the graphs. Do the xs and os overlap well? Is the f value below 4?
