@@ -1,4 +1,4 @@
-function [frame_list] = findGazeFrames(start_time, gaze_targets_deg, perimeterFile, target_dur_s)
+function [frame_list] = findGazeFrames(start_time, gaze_targets_deg, perimeterFile, target_dur_s, onset_delay_s)
 %FINDGAZEFRAMES Automated process to identify representative frames from gaze calibration.
 %   Uses the MEDIAN of the Xp/Yp points to find a robust center 
 %   frame for each target, based on a 120 fps rate.
@@ -23,6 +23,7 @@ function [frame_list] = findGazeFrames(start_time, gaze_targets_deg, perimeterFi
         gaze_targets_deg (:, 2) double         % N x 2 array of target positions [phi, theta] (Used for N, but not position values)
         perimeterFile char
         target_dur_s (1,1) double = 3.43       % Duration (s) each dot was presented (optional, default 3.43s)
+        onset_delay_s (1,1) double = 0.5 % how much shorter is the first fixation than intended?
     end
     % Hardcoded Parameters
     FPS = 120;
@@ -34,6 +35,8 @@ function [frame_list] = findGazeFrames(start_time, gaze_targets_deg, perimeterFi
 
     % convert time to frame number
     start_frame = estimateFrameFromTime(FPS, start_time);
+    onset_delay_frames = round(onset_delay_s * FPS); 
+
     
     % --- 1. DATA LOADING AND PREPARATION ---
     %data_file_path = '/Users/samanthamontoya/Aguirre-Brainard Lab Dropbox/Sam Montoya/FLIC_data/lightLogger/sam_gazecal_106.mat';
@@ -52,14 +55,18 @@ function [frame_list] = findGazeFrames(start_time, gaze_targets_deg, perimeterFi
     analysis_window_frames = round(analysis_window_duration * FPS);
     
     % --- 3. TIMING AND WINDOW SETUP (in Frames) ---
-    N = size(gaze_targets_deg, 1); 
-    frame_list = nan(N, 1); 
-    
-    % Determine the start frame for each target
-    dot_start_frames = start_frame + (0:N-1)' * target_dur_frames;
-    
+    N = size(gaze_targets_deg, 1);
+    frame_list = nan(N, 1);
+
+    % Create per-target durations
+    target_dur_each = repmat(target_dur_frames, N, 1); % default durations
+    target_dur_each(1) = target_dur_each(1) - onset_delay_frames; % shorten first target
+
+    %Determine the start frame for each target
+    dot_start_frames = start_frame + [0; cumsum(target_dur_each(1:end-1))];
+
     % Calculate the start and end of the 1.5s analysis window for each target (in frames)
-    center_offset_frames = round(target_dur_frames / 2);
+    center_offset_frames = round(target_dur_each / 2);
     half_window_frames = round(analysis_window_frames / 2);
     window_starts_frame = dot_start_frames + center_offset_frames - half_window_frames;
     window_ends_frame = window_starts_frame + analysis_window_frames - 1; 
