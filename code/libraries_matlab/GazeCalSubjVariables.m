@@ -1,5 +1,7 @@
 %FLIC_2001 Gaze cal values:
 startTime = [1, 23, 683]
+targetDurSec = 3.267;
+onset_delay_s = 0;
 
 %FLIC_2002 Gaze cal values:
 startTime = [1, 20, 933];
