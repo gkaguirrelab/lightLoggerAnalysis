@@ -4,7 +4,8 @@ dropboxBasedir = fullfile(getpref("lightLoggerAnalysis", 'dropboxBaseDir'));
 
 % STEP 1: make a perimeter file from raw data
 perimeterFile = [dropboxBasedir, '/FLIC_data/lightLogger/Processing/', subjectID '_gazeCalibration_session1_perimeter.mat']; % path to perimeter file
-
+perimeter = load(perimeterFile, 'perimeter');
+perimeter = perimeter.perimeter;
 % STEP 2: find the start frame from the playable pupil camera video using
 %   IINA. Also calculate the duration of the dots from the playable world
 %   camera video. sometimes the first dot is shorter than the rest.
@@ -27,17 +28,20 @@ gazeTargetsDeg = vertcat(runData.gaze_target_positions_deg,runData.gaze_target_p
 
 %check timing inputs (human!)
 startTime = [1, 20, 108]; % [minutes, seconds, milliseconds]
-targetDurSec = 3.267;
+targetDurSec = 3.5;
 onset_delay_s = 0.8; % again, human should calculate this based on the difference betwen start frame and first eye movement. What is that duration compared to the intended?
 %determine frame numbers to analyze
 fullFrameSet = findGazeFrames(startTime, gazeTargetsDeg, perimeterFile, targetDurSec, onset_delay_s);
-
+goodIdx = find(~isnan(fullFrameSet));
+gazeTargetsDeg = gazeTargetsDeg(goodIdx,:);
 %% STEP 4: estimate scene geometry
 % first, use only 5 points and use the p output for your second round of
 % searching
 
 % Define the input variables for this particular gaze cal video
-gazeSubsetIdx = [1,6,7,8,9];
+gazeSubsetIdx = [1,6,7,8,9]; % NEEDS TO BE ADJUSTED IF THERE ARE NANs
+gazeSubsetIdx = [1,5:8]; % NEEDS TO BE ADJUSTED IF THERE ARE NANs
+
 frameSet = fullFrameSet(gazeSubsetIdx);
 gazeTargets = (gazeTargetsDeg(gazeSubsetIdx,:)).*[-1,1];
 
