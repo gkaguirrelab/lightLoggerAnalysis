@@ -158,10 +158,8 @@ def convert_sensor_to_angles(sensor_coordinates: np.ndarray,
     Z: np.ndarray = R * np.cos(theta)
 
     # Compute azimuth (horizontal angle) in degrees and apply the horizontal offset
-    azi: np.ndarray = np.degrees(np.arctan2(Y, Z)) + center_offset[0]
-
-    # Compute elevation (vertical angle) in degrees and apply the vertical offset
-    ele: np.ndarray = np.degrees(np.arctan2(X, Z)) + center_offset[1]
+    azi: np.ndarray = np.degrees(np.arctan2(Y, Z)) - center_offset[0]
+    ele: np.ndarray = np.degrees(np.arctan2(X, Z)) - center_offset[1]
 
     return np.column_stack([azi, ele])
 
@@ -212,15 +210,15 @@ def perspective_transform_frame(frame: np.ndarray,
     sub_image: np.ndarray = frame.copy().astype(np.float64)  # ensure we can assign NaN
     sub_image = sub_image.ravel()            # flatten to align with eyeRotationCoordinates
     sub_image[idx] = np.nan
-    sub_image = sub_image.reshape(sub_image.shape)   # reshape back to 2D
+    sub_image = sub_image.reshape(n_rows, n_cols)   # reshape back to 2D
 
     # --- 3. Reshape transformed coordinates to image grid ---
     virtually_foveated_X: np.ndarray = eye_rotation_coordinates[:, 0].reshape(n_rows, n_cols)
     virtually_foveated_Y: np.ndarray = eye_rotation_coordinates[:, 1].reshape(n_rows, n_cols)
 
     # Create evenly spaced query grid along X and Y
-    xq: np.ndarray = np.linspace(np.nanmin(virtually_foveated_X), np.nanmax(virtually_foveated_X), n_cols)
-    yq: np.ndarray = np.linspace(np.nanmin(virtually_foveated_Y), np.nanmax(virtually_foveated_Y), n_rows)
+    xq: np.ndarray = np.linspace(-degrees_eccentricity, degrees_eccentricity, n_cols)
+    yq: np.ndarray = np.linspace(-degrees_eccentricity, degrees_eccentricity, n_rows)
     Xq, Yq = np.meshgrid(xq, yq)
 
     # Flatten the inputs like MATLAB's (:)

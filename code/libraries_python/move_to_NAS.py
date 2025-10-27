@@ -4,23 +4,27 @@ import platform
 from tqdm import tqdm
 import os
 import shutil
+import re
+import dill
+import collections
 
 # Define the list of activities for a given experiment 
-experiment_name_set: set = {"scriptedIndoorOutdoor"}
-activities_set: set = {"lunch", 
-                         "work", 
-                         "chat", 
-                         "phone", 
-                         "walkindoor", 
-                         "walkoutdoor", 
-                         "grocery", 
-                         "cemetery", 
-                         "walkbiopond", 
-                         "sitbiopond"
-                        }
-modes_dict: dict = {"sf": "spatialFrequency", 
-                    "tf": "temporalFrequency"
-                   }
+experiment_name_set: set[str] = {"scriptedIndoorOutdoor"}
+activities_dict: dict[str, str] = { "gazecalibration": "gazeCalibration",
+                                    "lunch": "lunch", 
+                                    "work": "work", 
+                                    "chat": "chat", 
+                                    "phone": "phone", 
+                                    "walkindoor": "walkIndoor", 
+                                    "walkoutdoor": "walkOutdoor", 
+                                    "grocery": "grocery", 
+                                    "cemetery": "cemetery", 
+                                    "walkbiopond": "walkBiopond", 
+                                    "sitbiopond": "sitBiopond"
+                                  }
+modes_dict: dict[str, str] = {"sf": "spatialFrequency", 
+                              "tf": "temporalFrequency"
+                             }
 
 """Parse the commandline arguments, returning the source path and the experiment name"""
 def parse_args() -> str:
@@ -56,7 +60,7 @@ def scripted_indoor_outdoor_recording_name_to_filestructure(recording_name: str)
 
     # Activity is the next token 
     activity: str = tokens[2].lower()
-    assert activity in activities_set, f"Activity: {activity} unrecognized. Potentially a typo? Valid activites are {activities_set}"
+    assert activity in activities_dict, f"Activity: {activity} unrecognized. Potentially a typo? Valid activites are {activities_dict.keys()}"
 
     # Mode is the next token 
     mode: str = tokens[3]
@@ -66,7 +70,7 @@ def scripted_indoor_outdoor_recording_name_to_filestructure(recording_name: str)
     session_num: str = "session_" + "".join([char for char in tokens[-1] if char.isnumeric()])
 
     # Construct a path from this 
-    return os.path.join(project_subject_ID, activity, modes_dict[mode])
+    return os.path.join(project_subject_ID, activities_dict[activity], modes_dict[mode])
 
 """Given a path to a recording directory and an experiment name, 
    move the file to the NAS.
@@ -81,6 +85,9 @@ def move_to_NAS(experiment_name: str, recording_path: str) -> str:
     assert experiment_name in experiment_name_set, f"Experiment name: {experiment_name} unrecognized. Do you have a typo? Valid names are: {experiment_name_set}"
     assert os.path.exists(recording_path), f"Recording path {recording_path} does not exist. Do you have a typo?"
     assert os.path.isdir(recording_path), f"Recording path {recording_path} is not a recording folder."
+    
+    # Assert that there is a config file going along with the recording 
+    assert "config.pkl" in os.listdir(recording_path), f"Recordign path {recording_path} missing config file"
 
     # Parse the source recording filename into the hierarchical structure 
     # we will use to put it on the NAS
@@ -106,6 +113,28 @@ def move_to_NAS(experiment_name: str, recording_path: str) -> str:
 
     # Make the directory structure if it doesn't already exist 
     os.makedirs(video_output_path, exist_ok=True)
+
+    # Let's get the chunk numbers from the files, so that we make sure there are not more than 1 video 
+    # in this folder 
+    chunk_numbers: list[int] = [ int(re.search(r"chunk_\d+", filename).group().split("_")[1])
+                                 for filename in os.listdir(recording_path)
+                                 if "config" not in filename 
+                                 and "metadata" not in filename
+                               ]
+    # Let's get the frequency of the numbers 
+    chunk_num_frequency_dict: collections.Counter = collections.Counter(chunk_numbers)
+
+    # Assert some chunk started 
+    assert 0 in chunk_num_frequency_dict, f"0 not in {recording_path}'s chunk nums. Something has gone very wrong"
+    
+    # Load in the config file. This will tell us the minimum number of chunk 0s we should have 
+    config_dict: dict | None = None
+    with open(os.path.join(recording_path, "config.pkl"), "rb") as f:
+        config_dict = dill.load(f)
+
+    # We check 2x here since metadata files also have chunk number in 
+    assert chunk_num_frequency_dict[0] == len(config_dict["sensors"]), f"Multiple recordings in {recording_path}"
+    
 
     # Next, we will move the files to the NAS 
     filenames: list[str] = [filename for filename in os.listdir(recording_path)]
