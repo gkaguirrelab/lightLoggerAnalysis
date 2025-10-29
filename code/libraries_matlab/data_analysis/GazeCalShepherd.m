@@ -1,9 +1,10 @@
+function GazeCalShepherd
 %GazeCalibrationShepherd
-subjectID = 'FLIC_2002';
+subjectID = 'FLIC_2003';
 dropboxBasedir = fullfile(getpref("lightLoggerAnalysis", 'dropboxBaseDir'));
 
 % STEP 1: make a perimeter file from raw data
-perimeterFile = [dropboxBasedir, '/FLIC_data/lightLogger/Processing/', subjectID '_gazeCalibration_session1_perimeter.mat']; % path to perimeter file
+perimeterFile = [dropboxBasedir, '/FLIC_data/lightLogger/scriptedIndoorOutdoor/', subjectID, '/', subjectID, '_gazeCalibration_session1_perimeter.mat']; % path to perimeter file
 perimeter = load(perimeterFile, 'perimeter');
 perimeter = perimeter.perimeter;
 % STEP 2: find the start frame from the playable pupil camera video using
@@ -33,6 +34,7 @@ onset_delay_s = 0.8; % again, human should calculate this based on the differenc
 %determine frame numbers to analyze
 fullFrameSet = findGazeFrames(startTime, gazeTargetsDeg, perimeterFile, targetDurSec, onset_delay_s);
 goodIdx = find(~isnan(fullFrameSet));
+fullFrameSet = fullFrameSet(goodIdx);
 gazeTargetsDeg = gazeTargetsDeg(goodIdx,:);
 %% STEP 4: estimate scene geometry
 % first, use only 5 points and use the p output for your second round of
@@ -40,7 +42,7 @@ gazeTargetsDeg = gazeTargetsDeg(goodIdx,:);
 
 % Define the input variables for this particular gaze cal video
 gazeSubsetIdx = [1,6,7,8,9]; % NEEDS TO BE ADJUSTED IF THERE ARE NANs
-gazeSubsetIdx = [1,5:8]; % NEEDS TO BE ADJUSTED IF THERE ARE NANs
+gazeSubsetIdx = [1,6:9]; % NEEDS TO BE ADJUSTED IF THERE ARE NANs
 
 frameSet = fullFrameSet(gazeSubsetIdx);
 gazeTargets = (gazeTargetsDeg(gazeSubsetIdx,:)).*[-1,1];
@@ -66,7 +68,7 @@ setupArgs = [sceneArgs observerArgs];
 
 
 % This is the x0, in case we want to pass that
-x0 = [-29.9355  -10.3699   52.3664   24.2541    2.1374   15.5410    0.9895    1.0024   17.6172   43.0417   41.0665];
+x0 = [-28.6484   -7.3094   51.0564   24.3158    0.5042   12.1706    0.9918 0.9927   18.8754   49.3395   40.5355];
 
 [sceneGeometry,p5] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', x0);
 
@@ -78,8 +80,10 @@ x0 = [-29.9355  -10.3699   52.3664   24.2541    2.1374   15.5410    0.9895    1.
 %procedure.
 
 %% now again with the first half of the gaze targets
-frameSet = fullFrameSet(1:17);
-gazeTargets = gazeTargetsDeg(1:17,:).*[-1,1];
+fullFrameSet = sort([fullFrameSet; 13776; 21995]);
+fullFrameSet = fullFrameSet(1:end-2);
+frameSet = fullFrameSet(1:16);
+gazeTargets = gazeTargetsDeg(1:16,:).*[-1,1];
 [sceneGeometry,p17] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', p5);
 
 % CHECK the graphs. Do the xs and os overlap well? Is the f value below 4?
@@ -87,12 +91,14 @@ gazeTargets = gazeTargetsDeg(1:17,:).*[-1,1];
 %of the points look poorly outlined. They may need to be omitted from the
 %procedure.
 %% now again with the second half of the gaze targets
-subset = [18:34];
+subset = [17:33];
 frameSet = fullFrameSet(subset);
 gazeTargets = gazeTargetsDeg(subset,:).*[-1,1];
 
-figure; for ii=1:6; %length(frameSet); 
+figure; for ii=14:16 %length(frameSet); 
 Xp = perimeter.data{frameSet(ii)}.Xp; Yp = perimeter.data{frameSet(ii)}.Yp; plot(Xp,Yp,'x'); hold on; pause; end
+
+plotCenters(fullFrameSet, perimeter, [17:33]);
 
 [sceneGeometry,p18] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', p5);
 
@@ -106,9 +112,17 @@ pMean = mean([p17(:), p18(:)],2);
 
 frameSet = fullFrameSet;
 gazeTargets = gazeTargetsDeg.*[-1,1];
-[sceneGeometry,p34] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', pMean);
+[sceneGeometry,p34] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', pMean');
 
 %% Save things so we could regenerate the scene geometry file if needed!
 % if everything looks good, save the scene geometry, p34, gaze offset, x0
 % and frames used for this participant in a file!
 
+% what is the gaze offset?? HUMAN
+gazeOffset = []; % [azi, ele]
+
+saveFile = [dropboxBasedir, '/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/', subjectID, '/', subjectID, 'SceneGeometry.mat'];
+saveFileMeta = [dropboxBasedir, '/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/', subjectID, '/', subjectID, 'SceneGeometryMetadata.mat'];
+save(saveFile, 'sceneGeometry')
+save(saveFileMeta, "p34", "gazeOffset", "fullFrameSet", "gazeTargets")
+end
