@@ -1,10 +1,10 @@
 function GazeCalShepherd
 %GazeCalibrationShepherd
-subjectID = 'FLIC_2003';
+subjectID = 'FLIC_2002';
 dropboxBasedir = fullfile(getpref("lightLoggerAnalysis", 'dropboxBaseDir'));
 
 % STEP 1: make a perimeter file from raw data
-perimeterFile = [dropboxBasedir, '/FLIC_data/lightLogger/scriptedIndoorOutdoor/', subjectID, '/', subjectID, '_gazeCalibration_session1_perimeter.mat']; % path to perimeter file
+perimeterFile = [dropboxBasedir, '/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/', subjectID, '/', subjectID, '_gazeCalibration_session1_perimeter.mat']; % path to perimeter file
 perimeter = load(perimeterFile, 'perimeter');
 perimeter = perimeter.perimeter;
 % STEP 2: find the start frame from the playable pupil camera video using
@@ -119,10 +119,22 @@ gazeTargets = gazeTargetsDeg.*[-1,1];
 % and frames used for this participant in a file!
 
 % what is the gaze offset?? HUMAN
-gazeOffset = []; % [azi, ele]
+gazeOffset = [azi, ele]; % [azi, ele]
 
-saveFile = [dropboxBasedir, '/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/', subjectID, '/', subjectID, 'SceneGeometry.mat'];
+sceneGeometryFile = [dropboxBasedir, '/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/', subjectID, '/', subjectID, 'SceneGeometry.mat'];
 saveFileMeta = [dropboxBasedir, '/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/', subjectID, '/', subjectID, 'SceneGeometryMetadata.mat'];
-save(saveFile, 'sceneGeometry')
+save(sceneGeometryFile, 'sceneGeometry')
 save(saveFileMeta, "p34", "gazeOffset", "fullFrameSet", "gazeTargets")
+%% How to turn pupil perimeters into gaze angles now that you have scene geometry
+% Define variables for the path to the sceneGeometry file, perimeter file, and a _pupilData.mat file (which is to be created).
+% Issue this command: fitPupilPerimeter(perimeterFileName, pupilFileName,'sceneGeometryFileName',sceneGeometryFileName,'useParallel',true,'verbose',true);
+pupilFileName = [dropboxBasedir, '/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/', subjectID, '/', subjectID, 'gazeCal_pupilData.mat'];
+fitPupilPerimeter(perimeterFile,pupilFileName, 'sceneGeometryFileName',sceneGeometryFile,'useParallel',true,'verbose',true, 'nWorkers', 6);
+%% Smooth the pupil perimeters
+[pupilData] = smoothPupilRadius(perimeterFile, pupilFileName, sceneGeometryFile, 'useParallel', true, 'nWorkers', 6, 'eyePoseLB', [-30, -30, 0, 0.5], 'eyePoseUB', [30, 30, 0, 0.5]);
+
+load('/Users/samanthamontoya/Aguirre-Brainard Lab Dropbox/Sam Montoya/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/FLIC_2002/FLIC_2002gazeCal_pupilData.mat')
+figure; hold on
+plot(pupilData.sceneConstrained.eyePoses.values(:,2), '.-')
+plot(pupilData.radiusSmoothed.eyePoses.values(:,2), '.-')
 end
