@@ -14,6 +14,7 @@ function frames = avi2frames(video_path, options)
     rows = double(frame_size{1}); 
     cols = double(frame_size{2}); 
 
+    start = options.start; 
     if(options.end == inf)
         endpoint = num_frames; 
     else
@@ -22,24 +23,26 @@ function frames = avi2frames(video_path, options)
 
     % Allocate return variable 
     if(options.grayscale)
-        frames = zeros(num_frames, rows, cols, 'uint8');
+        frames = zeros((endpoint - start) + 1, rows, cols, 'uint8');
     else
-        frames = zeros(num_frames, rows, cols, 3, 'uint8');
+        frames = zeros( (endpoint - start) + 1, rows, cols, 3, 'uint8');
     end
 
     % Iterate over the frames 
-    for ii = options.start:endpoint 
-        if(options.verbose)
-            fprintf("Frame %d/%d\n", ii, endpoint); 
-        end 
-
+    for ii = start:endpoint 
+        tic; 
         % Retrieve the frame from the video
         if(options.grayscale)
             frames(ii, :, :) = readAviFrame(video_path, ii, "grayscale", options.grayscale);
         else 
-            frames(ii, :, :, :) = readAviFrame(video_path, ii, "grayscale", options.grayscale); ;
-    
+            frames(ii, :, :, :) = readAviFrame(video_path, ii, "grayscale", options.grayscale); 
         end        
+        elapsed_seconds = toc; 
+
+        if(options.verbose)
+            fprintf("Frame %d/%d | Elapsed time: %.3f\n", ii, endpoint, elapsed_seconds); 
+        end 
+
     end 
 
     return ; 

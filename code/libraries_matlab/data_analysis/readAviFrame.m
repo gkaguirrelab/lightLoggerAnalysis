@@ -12,7 +12,7 @@ function frame = readAviFrame(video_path, idx, options)
     end 
 
     % Retrieve the frame from the video
-    frame = uint8(Pi_util.extract_frames_from_video(video_path, {idx}, options.grayscale));
+    frame = squeeze(uint8(Pi_util.extract_frames_from_video(video_path, {idx}, options.grayscale)));
 
     return ; 
 end 
