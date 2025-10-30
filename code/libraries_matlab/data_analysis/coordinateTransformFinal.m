@@ -27,12 +27,16 @@ function retinalImage = coordinateTransformFinal(I, gaze_angle, fisheyeIntrinsic
 %                           calculated camera projection object.
 %
 % Optional key/value pairs:
-%   "FOVradius"           - Scalar. The field of view of the retinal image
+%  "FOVradius"            - Scalar. The field of view of the retinal image
 %                           in degrees of visual angle.
+%  "degPerSample"         - Scalar. The visual angle degrees per sample in
+%                           the returned retinal image.
+%  "forceRecalc"          - Logical. Forces reloading and recalculation
+%                           based upon the camera intrinsics and the
+%                           projection from world to eye coordinates.
 %
 % Outputs:
-%   none
-%   retinalImage - Matrix. The retinal image in degrees of
+%   retinalImage          - Matrix. The retinal image in degrees of
 %                           visual angle.
 %
 % Examples:
@@ -101,53 +105,25 @@ if recalcFlag
 
 end
 
-% Extract x, y, v
+% Extract x, y, v from the eyeRotationCoordinates
 x = eyeRotationCoordinates(:, 1);
 y = eyeRotationCoordinates(:, 2);
 v = I(:);
 
 % Define the Regular Grid for Interpolation
-xmin = -options.FOVradius;
-xmax = options.FOVradius;
-ymin = -options.FOVradius;
-ymax = options.FOVradius;
+xmin = gaze_angle(1)-options.FOVradius;
+xmax = gaze_angle(1)+options.FOVradius;
+ymin = gaze_angle(2)-options.FOVradius;
+ymax = gaze_angle(2)+options.FOVradius;
 
-num_x_points = (2 * options.FOVradius) / options.degPerSample;
-num_y_points = (2 * options.FOVradius) / options.degPerSample;
+num_x_points = (xmax-xmin) / options.degPerSample;
+num_y_points = (ymax-ymin) / options.degPerSample;
 
 xi = linspace(xmin, xmax, num_x_points);
 yi = linspace(ymin, ymax, num_y_points);
 [XX, YY] = meshgrid(xi, yi);
 
-% --- 3. Interpolate the Scattered Data onto the Grid ---
-% The 'griddata' function performs the interpolation.
-% Method can be 'linear', 'cubic', 'nearest', or 'v4'.
-VI = griddata(x, y, v, XX, YY, 'linear');
-
-% Compute distance from each grid point to gaze angle
-dist = sqrt((XX - gaze_angle(1)).^2 + (YY - gaze_angle(2)).^2);
-
-% Create mask: keep pixels inside the radius
-mask = dist <= options.FOVradius;
-
-xi = xi - gaze_angle(1);
-yi = yi - gaze_angle(2);
-
-% Apply mask (set outside region to NaN or 0)
-VI_masked = VI;
-VI_masked(~mask) = NaN; 
-   
-imagesc(xi, yi, VI_masked)
-
-% Find the coordinates of sample at zero degrees, and the number of samples
-% on either side that is required to achieve our desired FOV radius
-[~,xCenterIdx] = min(abs(xi));
-[~,yCenterIdx] = min(abs(yi));
-nSamples = round(options.FOVradius/options.degPerSample);
-
-% Grab the portion of VI_masked that corresponds to our desired FOV. This
-% is the retinal image
-retinalImage = VI_masked(yCenterIdx-nSamples:yCenterIdx+nSamples,...
-                         xCenterIdx-nSamples:xCenterIdx+nSamples);
+% Interpolate the irregularly scattered samples onto a grid
+retinalImage = griddata(x, y, v, XX, YY, 'linear');
 
 end
