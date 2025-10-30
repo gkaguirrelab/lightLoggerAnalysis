@@ -3,6 +3,7 @@ function frame = readAviFrame(video_path, idx, options)
         video_path {mustBeText}; 
         idx {mustBeNumeric}; 
         options.grayscale {mustBeNumericOrLogical} = false; 
+        options.color {mustBeText} = "rgb"
     end 
 
     % Only import Pi_util once
@@ -13,6 +14,20 @@ function frame = readAviFrame(video_path, idx, options)
 
     % Retrieve the frame from the video
     frame = squeeze(uint8(Pi_util.extract_frames_from_video(video_path, {idx-1}, options.grayscale)));
+    
+    % Convert to desired color if not grayscale 
+    if (~options.grayscale)
+        switch(options.color)
+            % If user wants, just return bgr
+            case "bgr"
+                return ; 
+
+            % Otherwise, need to flip channels 
+            case "rgb"
+                frame = frame(:, :, [3 2 1]);
+                return ; 
+        end
+    end 
 
     return ; 
 end 
