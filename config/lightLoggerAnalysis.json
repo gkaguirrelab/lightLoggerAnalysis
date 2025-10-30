@@ -26,6 +26,19 @@
 		"update": "",
 		"url": "https:\/\/github.com\/gkaguirrelab\/lightLogger.git"
 	},
+	{
+		"flavor": "",
+		"hook": "",
+		"importance": "",
+		"localHookTemplate": "",
+		"name": "transparentTrack",
+		"pathPlacement": "append",
+		"subfolder": "",
+		"toolboxRoot": "",
+		"type": "include",
+		"update": "",
+		"url": ""
+	},
     {
         "flavor": "",
         "hook": "",
