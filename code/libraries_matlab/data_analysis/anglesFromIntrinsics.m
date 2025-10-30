@@ -1,8 +1,7 @@
-function visualFieldPoints = anglesFromIntrinsics(sensorPoints, fisheyeIntrinsics, offset)
+function visualFieldPoints = anglesFromIntrinsics(sensorPoints, fisheyeIntrinsics)
     arguments
         sensorPoints
         fisheyeIntrinsics
-        offset (1,2) double = [0 0]   % [dx, dy] shift
     end
 
     % Apply offset to distortion center
@@ -29,8 +28,8 @@ function visualFieldPoints = anglesFromIntrinsics(sensorPoints, fisheyeIntrinsic
     Y = R*sin(theta).*sin(phi);
     Z = R*cos(theta);
 
-    azi = rad2deg(atan(Y./Z)) + offset(1);
-    ele = rad2deg(atan(X./Z)) + offset(2);
+    azi = rad2deg(atan(Y./Z));
+    ele = rad2deg(atan(X./Z));
     
     visualFieldPoints = [azi, ele];
 end

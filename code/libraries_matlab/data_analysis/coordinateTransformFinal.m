@@ -1,4 +1,4 @@
-function virtually_foveated_frame = coordinateTransformFinal(I, fisheyeIntrinsicsPath, transformationPath, center_offset)
+function virtually_foveated_frame = coordinateTransformFinal(I, gaze_angle, fisheyeIntrinsicsPath, transformationPath)
     % TODO: 
     %    center_offset is in degrees but not what you expect on the plot 
     %    first number is somehow y and then x. 
@@ -22,146 +22,92 @@ function virtually_foveated_frame = coordinateTransformFinal(I, fisheyeIntrinsic
         lightLevel = 'highAS';
         [SensorFigure, CameraFigure, EyeFigure] = coordinateTransformFinal(fisheyeIntrinsics, myChoice, lightLevel)
     %}
+        
     
+    figure; 
+    plot(gaze_angle(1), gaze_angle(2), '+', 'MarkerSize', 12, 'DisplayName', 'Gaze Angle'); 
+    hold on;  
 
-    % Obtain the set of gaze calibration targets as seen by the world camera,
-    % expressed in sensor coordinate locations
-    % Obtain the set of eye rotations that correspond to these gaze target
-    % locations
+
+    % --- 1. Load or Define Your Data ---
+    % Load in the intrinsics and the transformation calculated we previously calculated to map TODO: XX to YY 
     fisheyeIntrinsics = load(fisheyeIntrinsicsPath).camera_intrinsics_calibration.results.Intrinsics; 
     transformation = load(transformationPath).perspective_transform.fit.geometric_transform; 
-    
-    % Transform the gaze targets as seen by the camera into the eye rotation
-    % coordinate space
-    %gazeTargetEyeRotation = transformPointsForward( tform, gazeTargetCameraFieldCoord );
-    
-    % Obtain the data map in the sensor (u,v) space.
-    myMap = 'gray'; 
-    barRange = [0,255]; 
-    gazePlotFlag = false;
-
     
     % Get the camera visual field positions corresponding to positions of all
     % locations on the camera sensor
     [nRows, nCols]    = size(I);
     [xg, yg]          = meshgrid(1:nCols, 1:nRows);
     sensorPoints      = [xg(:),yg(:)];
-    visualFieldPoints = anglesFromIntrinsics(sensorPoints, fisheyeIntrinsics, center_offset);
-
-    % Show what I looks like in the sensor grid coordinate space, and add the
-    % gaze targets
-    %{
-    SensorFigure = figure;
-    surf(reshape(sensorPoints(:,1),480,640), reshape(sensorPoints(:,2),nRows,nCols), I, 'edgeColor','none');
-    view([0,-90]); % This command rotates the plot so we are looking straight at it
-    colormap(myMap)
-    hold on
-    %if gazePlotFlag
-    %    plot3(gazeTargetSensorCoord(:,1),gazeTargetSensorCoord(:,2),repmat(0,size(gazeTargetSensorCoord(:,1))),'xr');
-    %end
-    title('Camera Image in Sensor Coordinates')
-    xlabel('sensor position [pixels]');
-    ylabel('sensor position [pixels]');
-    %colorbar
-    %clim(barRange);
-    %}
-
-    % Now show what I looks like in the camera visual field coordinate space
-    %{
-    CameraFigure = figure;
-    surf(reshape(visualFieldPoints(:,1),nRows,nCols),reshape(visualFieldPoints(:,2),nRows,nCols),I,'edgeColor','none');
-    view([90,90]); % This command rotates the plot so we are looking straight at it
-    colormap(myMap)
-    hold on
-    %if gazePlotFlag
-    %    plot3(gazeTargetCameraFieldCoord(:,1),gazeTargetCameraFieldCoord(:,2),repmat(255,size(gazeTargetCameraFieldCoord(:,1))),'xr');
-    %end
-    title('Camera Image in Camera Visual Angle Coordinates')
-    %colorbar
-    %clim(barRange);
-    %}
-
+    visualFieldPoints = anglesFromIntrinsics(sensorPoints, fisheyeIntrinsics);
+    
     % Transform the camera visual field points to eye rotation coordinate space
     % using the previously calculated tform
     eyeRotationCoordinates = transformPointsForward(transformation, visualFieldPoints);
+
+    % START GEOFF CODE BLOCK
+
+    % Extract x, y, v 
+    x = eyeRotationCoordinates(:, 1);
+    y = eyeRotationCoordinates(:, 2);
+    v = I(:); 
+
+    % --- 2. Define the Regular Grid for Interpolation ---
+    xmin = min(x);
+    xmax = max(x);
+    ymin = min(y);
+    ymax = max(y);
+
+    num_x_points = 600;
+    num_y_points = 600;
+
+    xi = linspace(xmin, xmax, num_x_points);
+    yi = linspace(ymin, ymax, num_y_points);
+    [XX, YY] = meshgrid(xi, yi);
     
-    % Now show what I looks like in eye rotation coordinates
-    %{
-    EyeFigure = figure;
-    surf(reshape(eyeRotationCoordinates(:,1),480,640),reshape(eyeRotationCoordinates(:,2),nRows,nCols),I,'edgeColor','none');
-    view([0,-90]);
-    axis ij;    
-    %colormap(myMap)
-    hold on
-    %if gazePlotFlag
-    %    plot3(gazeTargetEyeRotation(:,1),gazeTargetEyeRotation(:,2),repmat(0,size(gazeTargetEyeRotation(:,1))),'xr');
-    %    plot3(veridicalEyeRotations(:,1),veridicalEyeRotations(:,2),repmat(0,size(veridicalEyeRotations(:,1))),'xb');
-    %end
-    title('camera image in eye rotation coords')
-    %colorbar
-    %clim(barRange);
-    %}
-
-    % Plot this for 60 degree of eccentricity
-    idx = vecnorm(eyeRotationCoordinates,2,2) > 60;
-    subI = I; subI(idx)=nan;
-
-    virtually_foveated_X = reshape(eyeRotationCoordinates(:,1),nRows,nCols); 
-    virtually_foveated_Y = reshape(eyeRotationCoordinates(:,2),nRows,nCols); 
+    % --- 3. Interpolate the Scattered Data onto the Grid ---
+    % The 'griddata' function performs the interpolation.
+    % Method can be 'linear', 'cubic', 'nearest', or 'v4'.
+    VI = griddata(x, y, v, XX, YY, 'linear');
     
-    %figure;     
-    %surf(virtually_foveated_X, virtually_foveated_Y, subI,'edgeColor','none');    
-    %view([0,-90]);
-    %axis ij;    % NEED TO DO THIS OTHERWISE THE THING IS ROTATED (FIGURE OUT WHY BETTER)
-    %colormap(myMap)
-    %hold on
-    %if gazePlotFlag
-    %    plot3(gazeTargetEyeRotation(:,1),gazeTargetEyeRotation(:,2),repmat(-5,size(gazeTargetEyeRotation(:,1))),'xr');
-    %    plot3(veridicalEyeRotations(:,1),veridicalEyeRotations(:,2),repmat(-5,size(veridicalEyeRotations(:,1))),'xb');
-    %end
-    %axis square
-    %grid off
-    % Add some polar angle coordinate grids
-    %plot3([-60,60],[0,0],[-5,-5],'-g');
-    %plot3([0,0],[-60,60],[-5,-5],'-g');
-    %for r = [15,30,60]
-    %    plotCircle3d([0 0 -5],[0 0 1],r)
-    %end
-    %title('camera image in eye rotation coords')
-    %xlabel('Visual angle [deg]');
-    %ylabel('Visual angle [deg]');
-    %colorbar
-    %clim(barRange);
+        % --- 4. Apply circular mask around gaze angle ---
+    radius_deg = 30; % Adjust this depending on your desired radius in degrees
 
-    % 
-    % Regular query grid (choose resolution = image size)
-    xq = linspace(min(virtually_foveated_X(:)), max(virtually_foveated_X(:)), nCols);
-    yq = linspace(min(virtually_foveated_Y(:)), max(virtually_foveated_Y(:)), nRows);
-    [Xq, Yq] = meshgrid(xq, yq);
+    % Compute distance from each grid point to gaze angle
+    dist = sqrt((XX - gaze_angle(1)).^2 + (YY - gaze_angle(2)).^2);
 
-    % Interpolate onto regular grid (vectorize X, Y, Z)
-    Vq = griddata(virtually_foveated_X(:), virtually_foveated_Y(:), subI(:), Xq, Yq);
+    % Create mask: keep pixels inside the radius
+    mask = dist <= radius_deg;
 
-    % Show rasterized result
-    %figure;
-    %imagesc(xq, yq, Vq);
-    %axis image;
-    %set(gca,'YDir','normal');
-    %colormap gray;
-    %colorbar;
-    %title('Rasterized camera image in eye rotation coords');
-    %xlabel('Visual angle [deg]');
-   % ylabel('Visual angle [deg]');
+    xi = xi - gaze_angle(1); 
+    yi = yi - gaze_angle(2);
 
-    %figure; 
-    M = Vq; 
-    M(isnan(M)) = 0;               % replace NaNs with 0 if needed
-    M = mat2gray(M);               % scale to [0,1]
+    % Apply mask (set outside region to NaN or 0)
+    VI_masked = VI;
+    VI_masked(~mask) = NaN;  % NaN for transparency in plotting (or 0 for black fill)
+
+    % --- 5. Display the Result as an Image ---
+    imagesc(xi, yi, VI_masked);
+    hold on;
     
-   % imshow(M)
+    axis xy;          % make y increase upward (important!)
+    axis equal;       % keep aspect ratio 1:1
+    xlim([-35, 35]);  % now works
+    ylim([-35, 35]);
+    colormap gray;
+    xlabel('X Coordinate');
+    ylabel('Y Coordinate');
+    %title('Masked Around Gaze Angle');
+    axis off;            % removes axes, ticks, label
 
-    % Assign the transformed variable 
-    virtually_foveated_frame = M; 
+
+    exportgraphics(gcf, '/Users/zacharykelly/Desktop/virtually_foveated.png', 'Resolution', 300);
+    close all; 
+
+    virtually_foveated_frame = imread('/Users/zacharykelly/Desktop/virtually_foveated.png');
+ 
+
+    return ; 
 end
 
 % local function to adjust plot ...

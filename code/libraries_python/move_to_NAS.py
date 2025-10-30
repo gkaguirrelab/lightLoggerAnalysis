@@ -148,6 +148,22 @@ def move_to_NAS(experiment_name: str, recording_path: str) -> str:
 
     return video_output_path
 
+"""Verify all the data is present for a given participant"""
+def verify_data(path_to_participant_folder: str) -> None:
+    # Gather the recording folders for this participant 
+    for folder in os.listdir(path_to_participant_folder):
+        folder_path: str = os.path.join(path_to_participant_folder, folder)
+        spatial_resolution_path: str = os.path.join(folder_path, "spatialFrequency")
+        temporal_resolution_path: str = os.path.join(folder_path, "temporalFrequency")
+
+        # Assert that the recordings exist for all folders, except gazecal which only uses temporal
+        assert os.path.exists(temporal_resolution_path) and len(os.listdir(temporal_resolution_path)) > 0, f"Problem with {temporal_resolution_path}. Either does not exist or no content"
+        if(folder == "gazeCalibration"):
+            continue
+        assert os.path.exists(spatial_resolution_path) and len(os.listdir(spatial_resolution_path)) > 0, f"Problem with {spatial_resolution_path}. Either does not exist or no content"
+
+    return 
+
 def main():
     # Retrieve the experiment name and recording path from 
     # commandline 
