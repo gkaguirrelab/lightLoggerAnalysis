@@ -107,13 +107,13 @@ y = eyeRotationCoordinates(:, 2);
 v = I(:);
 
 % Define the Regular Grid for Interpolation
-xmin = min(x);
-xmax = max(x);
-ymin = min(y);
-ymax = max(y);
+xmin = -options.FOVradius;
+xmax = options.FOVradius;
+ymin = -options.FOVradius;
+ymax = options.FOVradius;
 
-num_x_points = 600;
-num_y_points = 600;
+num_x_points = (2 * options.FOVradius) / options.degPerSample;
+num_y_points = (2 * options.FOVradius) / options.degPerSample;
 
 xi = linspace(xmin, xmax, num_x_points);
 yi = linspace(ymin, ymax, num_y_points);
@@ -136,19 +136,18 @@ yi = yi - gaze_angle(2);
 % Apply mask (set outside region to NaN or 0)
 VI_masked = VI;
 VI_masked(~mask) = NaN; 
-
-% Calculate the degrees per sample in the VI_masked image
-degPerSample = mean([mean(diff(xi)),mean(diff(yi))]);
+   
+imagesc(xi, yi, VI_masked)
 
 % Find the coordinates of sample at zero degrees, and the number of samples
 % on either side that is required to achieve our desired FOV radius
 [~,xCenterIdx] = min(abs(xi));
 [~,yCenterIdx] = min(abs(yi));
-nSamples = round(options.FOVradius/degPerSample);
+nSamples = round(options.FOVradius/options.degPerSample);
 
 % Grab the portion of VI_masked that corresponds to our desired FOV. This
 % is the retinal image
 retinalImage = VI_masked(yCenterIdx-nSamples:yCenterIdx+nSamples,...
-    xCenterIdx-nSamples:xCenterIdx+nSamples);
+                         xCenterIdx-nSamples:xCenterIdx+nSamples);
 
 end
