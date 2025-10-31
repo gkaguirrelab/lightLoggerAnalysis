@@ -10,6 +10,7 @@ classdef videoIOWrapper < handle
     % Private properties
     properties (GetAccess=private)
         utility_library
+        full_video_path  
 
     end
 
@@ -51,6 +52,7 @@ classdef videoIOWrapper < handle
             [filepath,name,ext] = fileparts(videoFileName);
             obj.Name = [name,ext];
             obj.Path = filepath;
+            obj.full_video_path = videoFileName; 
 
             % Store the number of frames in the video 
             obj.NumFrames =  obj.utility_library.inspect_video_frame_count(videoFileName);
@@ -73,7 +75,7 @@ classdef videoIOWrapper < handle
         end
 
         % Required methds
-        frame = read(obj,frameNum)
+        frame = read(obj,frameNum, options)
 
     end
 end

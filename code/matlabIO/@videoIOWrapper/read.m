@@ -7,7 +7,7 @@ function frame = read(obj, frameNum, options)
     end 
 
     % Retrieve the frame from the video
-    frame = squeeze(uint8(Pi_util.extract_frames_from_video(video_path, {frameNum-1}, options.grayscale)));
+    frame = squeeze(uint8(obj.utility_library.extract_frames_from_video( py.str(obj.full_video_path), {frameNum-1}, py.bool(options.grayscale))));
     
     % Convert to desired color if not grayscale 
     if (~options.grayscale)
