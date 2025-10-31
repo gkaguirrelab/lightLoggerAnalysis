@@ -81,15 +81,16 @@ observerArgs = {'sphericalAmetropia',-5.75,'spectacleLens',[-4.5,0,0]};
 
 % Combine the two argument sets
 setupArgs = [sceneArgs observerArgs];
+confidenceThreshold = confidenceCutoff;
 
 
 % This is the x0, in case we want to pass that
 % pick u here
 x0 = [-28.6484   -7.3094   51.0564   24.3158    0.5042   12.1706    0.9918 0.9927   18.8754   49.3395   40.5355];
 
-[sceneGeometry,p5] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', x0);
+[sceneGeometry,p5] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', x0, 'confidenceThreshold', confidenceThreshold);
 
-[sceneGeometry,p5] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', p5);
+[sceneGeometry,p5] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', p5, 'confidenceThreshold', confidenceThreshold);
 
 % CHECK the graphs. Do the xs and os overlap well? Is the f value below 4?
 %If no, investigate the playable video of the pupil camera and see if any
@@ -101,7 +102,7 @@ fullFrameSet = sort([fullFrameSet; 13776; 21995]);
 fullFrameSet = fullFrameSet(1:end-2);
 frameSet = fullFrameSet(1:16);
 gazeTargets = gazeTargetsDeg(1:16,:).*[-1,1];
-[sceneGeometry,p17] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', p5);
+[sceneGeometry,p17] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', p5, 'confidenceThreshold', confidenceThreshold);
 
 % CHECK the graphs. Do the xs and os overlap well? Is the f value below 4?
 %If no, investigate the playable video of the pupil camera and see if any
@@ -117,7 +118,7 @@ Xp = perimeter.data{frameSet(ii)}.Xp; Yp = perimeter.data{frameSet(ii)}.Yp; plot
 
 plotPupilCenters(fullFrameSet, perimeter, [17:33]);
 
-[sceneGeometry,p18] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', p5);
+[sceneGeometry,p18] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', p5, 'confidenceThreshold', confidenceThreshold);
 
 % CHECK the graphs. Do the xs and os overlap well? Is the f value below 4?
 %If no, investigate the playable video of the pupil camera and see if any
@@ -129,7 +130,7 @@ pMean = mean([p17(:), p18(:)],2);
 
 frameSet = fullFrameSet;
 gazeTargets = gazeTargetsDeg.*[-1,1];
-[sceneGeometry,p34] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', pMean');
+[sceneGeometry,p34] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', pMean', 'confidenceThreshold', confidenceThreshold);
 
 %% Save things so we could regenerate the scene geometry file if needed!
 % if everything looks good, save the scene geometry, p34, gaze offset, x0
@@ -141,7 +142,7 @@ gazeOffset = [azi, ele]; % [azi, ele]
 sceneGeometryFile = [dropboxBasedir, '/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/', subjectID, '/', subjectID, 'SceneGeometry.mat'];
 saveFileMeta = [dropboxBasedir, '/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/', subjectID, '/', subjectID, 'SceneGeometryMetadata.mat'];
 save(sceneGeometryFile, 'sceneGeometry')
-save(saveFileMeta, "p34", "gazeOffset", "fullFrameSet", "gazeTargets", "startTime", "observerArgs");
+save(saveFileMeta, "p34", "gazeOffset", "fullFrameSet", "gazeTargets", "startTime", "observerArgs", "confidenceThreshold");
 %% How to turn pupil perimeters into gaze angles now that you have scene geometry
 % Define variables for the path to the sceneGeometry file, perimeter file, and a _pupilData.mat file (which is to be created).
 % Issue this command: fitPupilPerimeter(perimeterFileName, pupilFileName,'sceneGeometryFileName',sceneGeometryFileName,'useParallel',true,'verbose',true);

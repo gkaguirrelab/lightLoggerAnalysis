@@ -103,6 +103,9 @@ pMean = [-20.2767
    p34 = [-20.2778  -11.7970   56.2308   16.5185   -4.3553   14.9316    1.0004 1.0328   12.4987   49.9999   40.0000];
     
 gazeOffset = [-0.8, 0.3] % [azi, ele]
+%NOTE! frame selection was done with default of 0.8 confidence for at least
+%8 points. scene geometry was estimated with default of 0.75 confidence for
+%each point.
 
 
 %%FLIC_2003
