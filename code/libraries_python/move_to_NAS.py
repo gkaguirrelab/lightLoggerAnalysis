@@ -9,19 +9,20 @@ import dill
 import collections
 
 # Define the list of activities for a given experiment 
-experiment_name_set: set[str] = {"scriptedIndoorOutdoor"}
-activities_dict: dict[str, str] = { "gazecalibration": "gazeCalibration",
-                                    "lunch": "lunch", 
-                                    "work": "work", 
-                                    "chat": "chat", 
-                                    "phone": "phone", 
-                                    "walkindoor": "walkIndoor", 
-                                    "walkoutdoor": "walkOutdoor", 
-                                    "grocery": "grocery", 
-                                    "cemetery": "cemetery", 
-                                    "walkbiopond": "walkBiopond", 
-                                    "sitbiopond": "sitBiopond"
-                                  }
+experiment_info_dict: dict[str, dict[str, str]] = {"scriptedIndoorOutdoor": 
+                                                    { "gazecalibration": "gazeCalibration",
+                                                                             "lunch": "lunch", 
+                                                                             "work": "work", 
+                                                                             "chat": "chat", 
+                                                                             "phone": "phone", 
+                                                                             "walkindoor": "walkIndoor", 
+                                                                             "walkoutdoor": "walkOutdoor", 
+                                                                             "grocery": "grocery", 
+                                                                             "cemetery": "cemetery", 
+                                                                             "walkbiopond": "walkBiopond", 
+                                                                             "sitbiopond": "sitBiopond"
+                                                    }
+                                                }
 modes_dict: dict[str, str] = {"sf": "spatialFrequency", 
                               "tf": "temporalFrequency"
                              }
@@ -39,6 +40,7 @@ def parse_args() -> str:
     args: object = parser.parse_args() 
 
     return args.experiment_name, args.recording_path
+ 
 
 """Given a recording name for the scripted indoor/outdoor experiment
    parse it into the DropBox hierarchical file structure
@@ -87,7 +89,7 @@ def move_to_NAS(experiment_name: str, recording_path: str) -> str:
     assert os.path.isdir(recording_path), f"Recording path {recording_path} is not a recording folder."
     
     # Assert that there is a config file going along with the recording 
-    assert "config.pkl" in os.listdir(recording_path), f"Recordign path {recording_path} missing config file"
+    assert "config.pkl" in os.listdir(recording_path), f"Recording path {recording_path} missing config file"
 
     # Parse the source recording filename into the hierarchical structure 
     # we will use to put it on the NAS
@@ -161,6 +163,9 @@ def verify_data(path_to_participant_folder: str) -> None:
         if(folder == "gazeCalibration"):
             continue
         assert os.path.exists(spatial_resolution_path) and len(os.listdir(spatial_resolution_path)) > 0, f"Problem with {spatial_resolution_path}. Either does not exist or no content"
+
+        # Next, we will go into these files and assert that they have the correct config files (the dimensions in the config are proper)
+        # TODO: 
 
     return 
 
