@@ -105,7 +105,7 @@
 %     end
 % end
 
-function [frame_list] = findGazeFrames(start_time, gaze_targets_deg, perimeterFile, target_dur_s, onset_delay_s)
+function [frame_list] = findGazeFrames(start_time, gaze_targets_deg, perimeterFile, target_dur_s, onset_delay_s, confidence_cutoff, min_perimeter_points)
 %FINDGAZEFRAMES Automated process to identify representative frames from gaze calibration.
 %   Uses the MEDIAN of the Xp/Yp points to find a robust center 
 %   frame for each target, based on a 120 fps rate.
@@ -118,20 +118,20 @@ function [frame_list] = findGazeFrames(start_time, gaze_targets_deg, perimeterFi
         perimeterFile char
         target_dur_s (1,1) double = 3.43       % Duration (s) each dot was presented (optional, default 3.43s)
         onset_delay_s (1,1) double = 0.5 % how much shorter is the first fixation than intended?
+        confidence_cutoff = 0.7; %confidencce of perimeter points 
+        min_perimeter_points = 8;% number of points at above confidence required to be a "good frame"
     end
     % Hardcoded Parameters
     FPS = 120;
     analysis_window_duration = 1.5; % seconds
-    % CONFIDENCE PARAMETERS
-    confidence_cutoff = 0.7; 
-    min_perimeter_points = 8;
+
     % ADJUSTMENT PARAMETER: How many dot durations (frames) of "slack" is allowed.
     % If the difference between selected frames is greater than this, we assume a skipped dot.
     % We use 1.5 * target_dur_frames as a generous threshold.
     FRAME_DIFFERENCE_THRESHOLD_FACTOR = 1.5;
     
     % convert time to frame number
-    start_frame = estimateFrameFromTime(FPS, start_time);
+    start_frame = time2frame(start_time, FPS);
     onset_delay_frames = round(onset_delay_s * FPS); 
     
     % --- 1. DATA LOADING AND PREPARATION ---

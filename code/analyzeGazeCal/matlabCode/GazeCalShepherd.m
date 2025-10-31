@@ -1,19 +1,37 @@
 function GazeCalShepherd
 %GazeCalibrationShepherd
-subjectID = 'FLIC_2002';
+subjectID = 'FLIC_2003';
 dropboxBasedir = fullfile(getpref("lightLoggerAnalysis", 'dropboxBaseDir'));
 
 % STEP 1: make a perimeter file from raw data
-perimeterFile = [dropboxBasedir, '/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/', subjectID, '/', subjectID, '_gazeCalibration_session1_perimeter.mat']; % path to perimeter file
+perimeterFile = [dropboxBasedir, '/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/', subjectID, '/', subjectID, '_gazeCal_session-1_perimeter.mat']; % path to perimeter file
 perimeter = load(perimeterFile, 'perimeter');
 perimeter = perimeter.perimeter;
 % STEP 2: find the start frame from the playable pupil camera video using
 %   IINA. Also calculate the duration of the dots from the playable world
 %   camera video. sometimes the first dot is shorter than the rest.
+startTime = [1, 24, 525]; % [minutes, seconds, milliseconds]
+firstDotEnd = [1 26 142];
+secondDotEnd = [1 39 392];
+thirdDotEnd =[1 42 667];
 
+fps = 120;
+% calculate the duration of the first dot becuase it is often shorter
+% becuase of eye opening.
+firstDotDurFrames = time2frame(firstDotEnd) - time2frame(startTime);
+firstDotDurS = firstDotDurFrames/fps;
+% calculate the duration of the second and third dots and average them
+secondDotDurFrames = time2frame(secondDotEnd) - time2frame(firstDotEnd);
+secondDotDurS = secondDotDurFrames/fps;
+
+thirdDotDurFrames = time2frame(thirdDotEnd) - time2frame(secondDotEnd);
+thirdDotDurS = thirdDotDurFrames/fps;
+
+targetDurSec = mean([thirdDotDurS, secondDotDurS]);
+targetDurSec = 3.3;
 %% STEP 3: find gaze frames to use in scene geometry estimation
 % load run file for this participant
-folders = ['/FLIC_data/lightLogger/GazeCalRunFileData/', subjectID];
+folders = ['/FLIC_data/lightLogger/scriptedIndoorOutdoor/GazeCalRunFileData/', subjectID];
 searchPattern = [dropboxBasedir, folders, '/', subjectID, '_GazeCalibration_session1*'];
 fileList = dir(searchPattern);
 if isempty(fileList)
@@ -27,12 +45,10 @@ runData = runData.taskData;
 % pull out gaze target positions from this file
 gazeTargetsDeg = vertcat(runData.gaze_target_positions_deg,runData.gaze_target_positions_deg);
 
-%check timing inputs (human!)
-startTime = [1, 20, 108]; % [minutes, seconds, milliseconds]
-targetDurSec = 3.5;
-onset_delay_s = 0.8; % again, human should calculate this based on the difference betwen start frame and first eye movement. What is that duration compared to the intended?
 %determine frame numbers to analyze
-fullFrameSet = findGazeFrames(startTime, gazeTargetsDeg, perimeterFile, targetDurSec, onset_delay_s);
+confidenceCutoff = 0.6; % FLIC_2004
+
+fullFrameSet = findGazeFrames(startTime, gazeTargetsDeg, perimeterFile, targetDurSec, firstDotDurS, confidenceCutoff);
 goodIdx = find(~isnan(fullFrameSet));
 fullFrameSet = fullFrameSet(goodIdx);
 gazeTargetsDeg = gazeTargetsDeg(goodIdx,:);
@@ -41,14 +57,13 @@ gazeTargetsDeg = gazeTargetsDeg(goodIdx,:);
 % searching
 
 % Define the input variables for this particular gaze cal video
-gazeSubsetIdx = [1,6,7,8,9]; % NEEDS TO BE ADJUSTED IF THERE ARE NANs
-gazeSubsetIdx = [1,6:9]; % NEEDS TO BE ADJUSTED IF THERE ARE NANs
+gazeSubsetIdx = [1,5:9]; % NEEDS TO BE ADJUSTED IF THERE ARE NANs
 
 frameSet = fullFrameSet(gazeSubsetIdx);
 gazeTargets = (gazeTargetsDeg(gazeSubsetIdx,:)).*[-1,1];
 
 % use this to make sure the points look like they make a cross
-figure; for ii=1:length(frameSet); Xp = perimeter.data{frameSet(ii)}.Xp; Yp = perimeter.data{frameSet(ii)}.Yp; plot(Xp,Yp,'x'); hold on; pause; end
+plotPupilCenters(fullFrameSet, perimeter, [1:33]);
 
 % Define some properties of the eye and of the scene that will be fixed
 % for the scene search
@@ -60,7 +75,8 @@ sceneArgs = {
 
 % Add the args for this particular observer
 %observerArgs = {'sphericalAmetropia',-1.25,'spectacleLens',[-1.25,0,0]};
-observerArgs = {'sphericalAmetropia',-1.25};
+%observerArgs = {'sphericalAmetropia',-1.25};
+observerArgs = {'sphericalAmetropia',-5.75,'spectacleLens',[-4.5,0,0]};
 
 
 % Combine the two argument sets
@@ -68,6 +84,7 @@ setupArgs = [sceneArgs observerArgs];
 
 
 % This is the x0, in case we want to pass that
+% pick u here
 x0 = [-28.6484   -7.3094   51.0564   24.3158    0.5042   12.1706    0.9918 0.9927   18.8754   49.3395   40.5355];
 
 [sceneGeometry,p5] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', x0);
@@ -124,14 +141,16 @@ gazeOffset = [azi, ele]; % [azi, ele]
 sceneGeometryFile = [dropboxBasedir, '/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/', subjectID, '/', subjectID, 'SceneGeometry.mat'];
 saveFileMeta = [dropboxBasedir, '/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/', subjectID, '/', subjectID, 'SceneGeometryMetadata.mat'];
 save(sceneGeometryFile, 'sceneGeometry')
-save(saveFileMeta, "p34", "gazeOffset", "fullFrameSet", "gazeTargets")
+save(saveFileMeta, "p34", "gazeOffset", "fullFrameSet", "gazeTargets", "startTime", "observerArgs");
 %% How to turn pupil perimeters into gaze angles now that you have scene geometry
 % Define variables for the path to the sceneGeometry file, perimeter file, and a _pupilData.mat file (which is to be created).
 % Issue this command: fitPupilPerimeter(perimeterFileName, pupilFileName,'sceneGeometryFileName',sceneGeometryFileName,'useParallel',true,'verbose',true);
 pupilFileName = [dropboxBasedir, '/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/', subjectID, '/', subjectID, 'gazeCal_pupilData.mat'];
 fitPupilPerimeter(perimeterFile,pupilFileName, 'sceneGeometryFileName',sceneGeometryFile,'useParallel',true,'verbose',true, 'nWorkers', 6);
 %% Smooth the pupil perimeters
-[pupilData] = smoothPupilRadius(perimeterFile, pupilFileName, sceneGeometryFile, 'useParallel', true, 'nWorkers', 6, 'eyePoseLB', [-30, -30, 0, 0.5], 'eyePoseUB', [30, 30, 0, 0.5]);
+[pupilData] = smoothPupilRadius(perimeterFile, pupilFileName,...
+    sceneGeometryFile, 'useParallel', true, 'nWorkers', 6,...
+    'eyePoseLB', [-30, -30, 0, 0.5], 'eyePoseUB', [30, 30, 0, 0.5]);
 
 load('/Users/samanthamontoya/Aguirre-Brainard Lab Dropbox/Sam Montoya/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/FLIC_2002/FLIC_2002gazeCal_pupilData.mat')
 figure; hold on

@@ -2,11 +2,10 @@
 startTime = [1, 23, 683]
 targetDurSec = 3.267;
 onset_delay_s = 0;
+observerArgs = {'sphericalAmetropia',-1.25,'spectacleLens',[-1.25,0,0]};
 
-%FLIC_2002 Gaze cal values:
+%%FLIC_2002 Gaze cal values:
 startTime = [1, 20, 933];
-fullFrameSet
-
 fullFrameSet = [...
         9812
        10228
@@ -40,7 +39,8 @@ fullFrameSet = [...
        21857
        21995
        22395
-       22809]; % 13776; 21995 had to be added manually because these targets were skipped. extra frames from the end were deleted. Target 4 had bad perimeters so we skipped it.
+       22809]; % 13776; 21995 had to be added manually because these targets were skipped. two extra frames from the end were deleted. Target 4 had bad perimeters so we skipped target 4.
+% skip target 4
 gazeTargets =
 
          0         0
@@ -77,6 +77,7 @@ gazeTargets =
     7.5000         0
    -7.5000         0
 
+   observerArgs = {'sphericalAmetropia',-1.25};
 p5 =
 
   Columns 1 through 7
@@ -87,7 +88,7 @@ p5 =
 
     0.9927   18.8754   49.3395   40.5355
 
-pMean = -20.2767
+pMean = [-20.2767
   -11.7980
    56.2349
    16.5126
@@ -97,17 +98,136 @@ pMean = -20.2767
     1.0328
    12.9956
    49.0111
-   40.2369
+   40.2369];
 
-   p34 =
-
-  Columns 1 through 7
-
-  -20.2778  -11.7970   56.2308   16.5185   -4.3553   14.9316    1.0004
-
-  Columns 8 through 11
-
-    1.0328   12.4987   49.9999   40.0000
+   p34 = [-20.2778  -11.7970   56.2308   16.5185   -4.3553   14.9316    1.0004 1.0328   12.4987   49.9999   40.0000];
     
 gazeOffset = [-0.8, 0.3] % [azi, ele]
+
+
+%%FLIC_2003
+startTime = [1, 24, 525]; % [minutes, seconds, milliseconds]
+firstDotEnd = [1 26 142];
+secondDotEnd = [1 39 392];% actually 5th probably because of a long buffering gap
+thirdDotEnd =[1 42 667];
+targetDurSec = 3.3;
+% the gaps are very long for this participant and the confidence was too
+% low on many point
+confidenceCutoff = 0.6;
+fullFrameSet =[...
+       10223
+       10552
+       10899
+       11671
+       12122
+       12553
+       12986
+       13265
+       13758
+       14046
+       14425
+       14882
+       15309
+       15724
+       16081
+       16415
+       16958
+       17271
+       17744
+       18014
+       18442
+       18826
+       19282
+       19683
+       20095
+       20422
+       20808
+       21178
+       21634
+       22088
+       22489
+       22805
+       23201];
+
+gazeTargetsDeg =
+
+         0         0
+  -15.0000   15.0000
+  -15.0000  -15.0000
+   15.0000  -15.0000
+         0   15.0000
+         0  -15.0000
+  -15.0000         0
+   15.0000         0
+   -7.5000    7.5000
+   -7.5000   -7.5000
+    7.5000    7.5000
+    7.5000   -7.5000
+         0    7.5000
+         0   -7.5000
+   -7.5000         0
+    7.5000         0
+         0         0
+  -15.0000   15.0000
+  -15.0000  -15.0000
+   15.0000   15.0000
+   15.0000  -15.0000
+         0   15.0000
+         0  -15.0000
+  -15.0000         0
+   15.0000         0
+   -7.5000    7.5000
+   -7.5000   -7.5000
+    7.5000    7.5000
+    7.5000   -7.5000
+         0    7.5000
+         0   -7.5000
+   -7.5000         0
+    7.5000         0
+
+observerArgs = {'sphericalAmetropia',-5.75,'spectacleLens',[-4.5,0,0]};
+
+
+%%FLIC_2004
+startTime = [1, 39, 408]; % [minutes, seconds, milliseconds]
+firstDotEnd = [1 41 908];
+secondDotEnd = [1 45 275];
+thirdDotEnd =[1 48 608];
+targetDurSec = 3.600;
+confidenceCutoff = 0.8;
+
+fullFrameSet =[...
+
+       12010
+       12339
+       12756
+       13226
+       14086
+       14868
+       15218
+       15733
+       16117
+       16589
+       16976
+       17461
+       17882
+       18329
+       18763
+       19155
+       20137
+       20954
+       21370
+       21804
+       22239
+       22621
+       23076
+       23508
+       23946
+       24386
+       24813
+       25156
+       25658
+       26173];
+
+% had to pause on FLIC_2004 because we need optical prescription
 
