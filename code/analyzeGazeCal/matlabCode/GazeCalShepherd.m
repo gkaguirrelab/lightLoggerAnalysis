@@ -4,7 +4,8 @@ subjectID = 'FLIC_2003';
 dropboxBasedir = fullfile(getpref("lightLoggerAnalysis", 'dropboxBaseDir'));
 
 % STEP 1: make a perimeter file from raw data
-perimeterFile = [dropboxBasedir, '/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/', subjectID, '/', subjectID, '_gazeCal_session-1_perimeter.mat']; % path to perimeter file
+saveFolders = [dropboxBasedir, '/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/', subjectID, '/gazeCalibration/temporalFrequency/'];
+perimeterFile = [saveFolders, subjectID, '_gazeCal_session-1_perimeter.mat']; % path to perimeter file
 perimeter = load(perimeterFile, 'perimeter');
 perimeter = perimeter.perimeter;
 % STEP 2: find the start frame from the playable pupil camera video using
@@ -98,10 +99,11 @@ x0 = [-28.6484   -7.3094   51.0564   24.3158    0.5042   12.1706    0.9918 0.992
 %procedure.
 
 %% now again with the first half of the gaze targets
-fullFrameSet = sort([fullFrameSet; 13776; 21995]);
-fullFrameSet = fullFrameSet(1:end-2);
-frameSet = fullFrameSet(1:16);
-gazeTargets = gazeTargetsDeg(1:16,:).*[-1,1];
+%fullFrameSet = sort([fullFrameSet; 13776; 21995]); % use if adding frames
+%manually
+%fullFrameSet = fullFrameSet(1:end-2);
+frameSet = fullFrameSet(1:17);
+gazeTargets = gazeTargetsDeg(1:17,:).*[-1,1];
 [sceneGeometry,p17] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', p5, 'confidenceThreshold', confidenceThreshold);
 
 % CHECK the graphs. Do the xs and os overlap well? Is the f value below 4?
@@ -125,12 +127,15 @@ plotPupilCenters(fullFrameSet, perimeter, [17:33]);
 %of the points look poorly outlined. They may need to be omitted from the
 %procedure.
 %% now run with all gaze targets
+close all
 % use mean x0 from 1st and 2nd half as starting point
 pMean = mean([p17(:), p18(:)],2);
 
 frameSet = fullFrameSet;
 gazeTargets = gazeTargetsDeg.*[-1,1];
 [sceneGeometry,p34] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', pMean', 'confidenceThreshold', confidenceThreshold);
+% to redo quickly:
+%[sceneGeometry,p34] = estimateSceneGeometry(perimeterFile, fullFrameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', p34, 'confidenceThreshold', confidenceThreshold, 'paramSearchSets',{3});
 
 %% Save things so we could regenerate the scene geometry file if needed!
 % if everything looks good, save the scene geometry, p34, gaze offset, x0
@@ -139,22 +144,37 @@ gazeTargets = gazeTargetsDeg.*[-1,1];
 % what is the gaze offset?? HUMAN
 gazeOffset = [azi, ele]; % [azi, ele]
 
-sceneGeometryFile = [dropboxBasedir, '/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/', subjectID, '/', subjectID, 'SceneGeometry.mat'];
-saveFileMeta = [dropboxBasedir, '/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/', subjectID, '/', subjectID, 'SceneGeometryMetadata.mat'];
+sceneGeometryFile = [saveFolders, subjectID, '_gazeCal_session-1_SceneGeometry.mat'];
+saveFileMeta = [saveFolders, subjectID, '_gazeCal_session-1_SceneGeometryMetadata.mat'];
 save(sceneGeometryFile, 'sceneGeometry')
 save(saveFileMeta, "p34", "gazeOffset", "fullFrameSet", "gazeTargets", "startTime", "observerArgs", "confidenceThreshold");
+
+% Save the figure 1 as a MATLAB figure file
+fig1_handle = figure(1);
+saveas(fig1_handle, [saveFolders, subjectID, '_gazeCal_SceneGeometryTargetsPlot'], 'fig');
 %% How to turn pupil perimeters into gaze angles now that you have scene geometry
 % Define variables for the path to the sceneGeometry file, perimeter file, and a _pupilData.mat file (which is to be created).
 % Issue this command: fitPupilPerimeter(perimeterFileName, pupilFileName,'sceneGeometryFileName',sceneGeometryFileName,'useParallel',true,'verbose',true);
-pupilFileName = [dropboxBasedir, '/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/', subjectID, '/', subjectID, 'gazeCal_pupilData.mat'];
+pupilFileName = [saveFolders, subjectID, '_gazeCal_session-1_pupilData.mat'];
 fitPupilPerimeter(perimeterFile,pupilFileName, 'sceneGeometryFileName',sceneGeometryFile,'useParallel',true,'verbose',true, 'nWorkers', 6);
+%% Clean up: remove low confidence points and something.
+
 %% Smooth the pupil perimeters
+aziLowerBound = -20 + gazeOffset(1,1);
+aziUpperBound = 20 + gazeOffset(1,1);
+eleLowerBound = -20 + gazeOffset(1,2);
+eleUpperBound = 20 + gazeOffset(1,2);
+
 [pupilData] = smoothPupilRadius(perimeterFile, pupilFileName,...
     sceneGeometryFile, 'useParallel', true, 'nWorkers', 6,...
-    'eyePoseLB', [-30, -30, 0, 0.5], 'eyePoseUB', [30, 30, 0, 0.5]);
+    'eyePoseLB', [aziLowerBound, eleLowerBound, 0, 0.5], 'eyePoseUB', [aziUpperBound, eleUpperBound, 0, 0.5]);
 
-load('/Users/samanthamontoya/Aguirre-Brainard Lab Dropbox/Sam Montoya/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/FLIC_2002/FLIC_2002gazeCal_pupilData.mat')
+load([saveFolders, subjectID, '_gazeCal_session-1_pupilData.mat'])
 figure; hold on
 plot(pupilData.sceneConstrained.eyePoses.values(:,2), '.-')
 plot(pupilData.radiusSmoothed.eyePoses.values(:,2), '.-')
+
+figure; hold on
+plot(pupilData.sceneConstrained.eyePoses.values(:,1), '.-')
+plot(pupilData.radiusSmoothed.eyePoses.values(:,1), '.-')
 end

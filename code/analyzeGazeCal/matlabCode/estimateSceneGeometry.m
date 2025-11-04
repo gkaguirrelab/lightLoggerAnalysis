@@ -283,15 +283,15 @@ xlabel('azimuth [deg]'); ylabel('elevation [deg]');
 title(sprintf('Gaze offset %2.1f, %2.1f [azi, ele]',gazeOffset));
 
 % Render the eyes and the pupil perimeters
-for ii = 1:length(perimeter)
-    renderEyePose(eyePoses(ii,:),sceneGeometry);
-    hold on
-    conf = perimeter{ii}.confidence;
-    goodIdx = conf > confidenceThreshold;
-    Xp = perimeter{ii}.Xp(goodIdx);
-    Yp = perimeter{ii}.Yp(goodIdx);
-    plot(Xp,Yp,'*k')
-end
+% for ii = 1:length(perimeter)
+%     renderEyePose(eyePoses(ii,:),sceneGeometry);
+%     hold on
+%     conf = perimeter{ii}.confidence;
+%     goodIdx = conf > confidenceThreshold;
+%     Xp = perimeter{ii}.Xp(goodIdx);
+%     Yp = perimeter{ii}.Yp(goodIdx);
+%     plot(Xp,Yp,'*k')
+% end
 
 
 end % main function
