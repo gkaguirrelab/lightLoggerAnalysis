@@ -1,6 +1,6 @@
 function GazeCalShepherd
 %GazeCalibrationShepherd
-subjectID = 'FLIC_2003';
+subjectID = 'FLIC_2005';
 dropboxBasedir = fullfile(getpref("lightLoggerAnalysis", 'dropboxBaseDir'));
 
 % STEP 1: make a perimeter file from raw data
@@ -11,10 +11,10 @@ perimeter = perimeter.perimeter;
 % STEP 2: find the start frame from the playable pupil camera video using
 %   IINA. Also calculate the duration of the dots from the playable world
 %   camera video. sometimes the first dot is shorter than the rest.
-startTime = [1, 24, 525]; % [minutes, seconds, milliseconds]
-firstDotEnd = [1 26 142];
-secondDotEnd = [1 39 392];
-thirdDotEnd =[1 42 667];
+startTime = [1, 25, 400]; % [minutes, seconds, milliseconds]
+firstDotEnd = [1 26 608];
+secondDotEnd = [1 30 000];
+thirdDotEnd =[1 39 983];
 
 fps = 120;
 % calculate the duration of the first dot becuase it is often shorter
@@ -29,7 +29,7 @@ thirdDotDurFrames = time2frame(thirdDotEnd) - time2frame(secondDotEnd);
 thirdDotDurS = thirdDotDurFrames/fps;
 
 targetDurSec = mean([thirdDotDurS, secondDotDurS]);
-targetDurSec = 3.3;
+targetDurSec = 3.34;
 %% STEP 3: find gaze frames to use in scene geometry estimation
 % load run file for this participant
 folders = ['/FLIC_data/lightLogger/scriptedIndoorOutdoor/GazeCalRunFileData/', subjectID];
@@ -47,7 +47,7 @@ runData = runData.taskData;
 gazeTargetsDeg = vertcat(runData.gaze_target_positions_deg,runData.gaze_target_positions_deg);
 
 %determine frame numbers to analyze
-confidenceCutoff = 0.6; % FLIC_2004
+confidenceCutoff = 0.8; % FLIC_2004
 
 fullFrameSet = findGazeFrames(startTime, gazeTargetsDeg, perimeterFile, targetDurSec, firstDotDurS, confidenceCutoff);
 goodIdx = find(~isnan(fullFrameSet));
@@ -75,9 +75,11 @@ sceneArgs = {
     'radialDistortionVector',[0 0]};
 
 % Add the args for this particular observer
+correctionType = 'spectacleLens';
+%correctionType = 'contactLens';
 %observerArgs = {'sphericalAmetropia',-1.25,'spectacleLens',[-1.25,0,0]};
 %observerArgs = {'sphericalAmetropia',-1.25};
-observerArgs = {'sphericalAmetropia',-5.75,'spectacleLens',[-4.5,0,0]};
+observerArgs = {'sphericalAmetropia',-1.00,'spectacleLens',[-1.00,-0.25,0]};
 
 
 % Combine the two argument sets
@@ -102,8 +104,8 @@ x0 = [-28.6484   -7.3094   51.0564   24.3158    0.5042   12.1706    0.9918 0.992
 %fullFrameSet = sort([fullFrameSet; 13776; 21995]); % use if adding frames
 %manually
 %fullFrameSet = fullFrameSet(1:end-2);
-frameSet = fullFrameSet(1:17);
-gazeTargets = gazeTargetsDeg(1:17,:).*[-1,1];
+frameSet = fullFrameSet(1:16);
+gazeTargets = gazeTargetsDeg(1:16,:).*[-1,1];
 [sceneGeometry,p17] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', p5, 'confidenceThreshold', confidenceThreshold);
 
 % CHECK the graphs. Do the xs and os overlap well? Is the f value below 4?
