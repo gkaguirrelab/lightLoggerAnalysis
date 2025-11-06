@@ -80,3 +80,9 @@ addpath(genpath(light_logger_analysis_path));
 % Save the path to light logger analysis libraries python 
 light_logger_analysis_libraries_python_path = fullfile(light_logger_analysis_path, "code", "libraries_python"); 
 setpref(projectName, "light_logger_analysis_libraries_python_path", light_logger_analysis_libraries_python_path); 
+
+
+
+% Save the path to the MATLAB I/O python library helper 
+video_io_py_path = fullfile(light_logger_analysis_path, "code", "library", "matlabIO", "python_libraries", "video_io.py");
+setpref(projectName, "video_io_py_path", video_io_py_path); 
