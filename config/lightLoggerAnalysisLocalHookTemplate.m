@@ -84,5 +84,9 @@ setpref(projectName, "light_logger_analysis_libraries_python_path", light_logger
 
 
 % Save the path to the MATLAB I/O python library helper 
-video_io_py_path = fullfile(light_logger_analysis_path, "code", "library", "matlabIO", "python_libraries", "video_io.py");
-setpref(projectName, "video_io_py_path", video_io_py_path); 
+video_io_util_path = fullfile(light_logger_analysis_path, "code", "library", "matlabIO", "python_libraries", "video_io.py");
+setpref(projectName, "video_io_util_path", video_io_util_path); 
+
+% Save the path to the virtual foveation python helper file
+virtual_foveation_util_path = fullfile(light_logger_analysis_path, "code", "applyVirtualFoveation", "pythonCode", "virtual_foveation.py");
+setpref(projectName, "virtual_foveation_util_path", virtual_foveation_util_path); 
