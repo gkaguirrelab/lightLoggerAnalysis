@@ -7,9 +7,9 @@ function virtuallyFoveateVideo(world_video, gaze_angles, output_path, path_to_re
         path_to_recording_chunks {mustBeText};
         path_to_intrinsics {mustBeText};
         path_to_perspective_projection {mustBeText}; 
+        options.num_frames_to_process = inf; 
         options.pupil_fps {mustBeNumeric} = 120; 
         options.pupil_world_phase_offset {mustBeNumeric} = 0.005; 
-
     end     
 
     % Import the Python util library 
@@ -43,7 +43,12 @@ function virtuallyFoveateVideo(world_video, gaze_angles, output_path, path_to_re
     blank_frame = zeros(world_frame_reader.Height, world_frame_reader.Width, 3, 'uint8'); 
 
     % Iterate over the world frames 
-    parfor ii = 1:world_frame_reader.NumFrames
+    end_frame = world_frame_reader.NumFrames; 
+    if(options.num_frames_to_process != inf)
+        end_frame = options.num_frames_to_process;
+    end 
+
+    parfor ii = 1:end_frame
         % Retrieve the world frame and its timestamp 
         world_frame = world_frame_reader.read(ii); 
         world_timestamp = world_t(ii); 
