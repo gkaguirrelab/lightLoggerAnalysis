@@ -8,11 +8,13 @@ function virtuallyFoveateVideo(world_video, gaze_angles, output_path, path_to_re
         path_to_intrinsics {mustBeText};
         path_to_perspective_projection {mustBeText}; 
         options.pupil_fps {mustBeNumeric} = 120; 
+        options.pupil_world_phase_offset {mustBeNumeric} = 0.005; 
 
     end     
 
     % Import the Python util library 
     virutal_foveation_util = import_pyfile(getpref("lightLoggerAnalysis", "virtual_foveation_util_path"));
+    video_io_util = import_pyfile(getpref("lightLoggerAnalysis", "video_iu_util"))''
 
     % Create a video IO reader wrapper we will use to read into the original video
     world_frame_reader = videoIOWrapper(world_video); 
@@ -22,28 +24,51 @@ function virtuallyFoveateVideo(world_video, gaze_angles, output_path, path_to_re
     world_start_end = start_ends.("world");
     pupil_start_end = start_ends.("pupil");
 
-    % Find the time difference in the start of the world and the pupil. This will
-    % inform us how to map between associated world frames and gaze angles 
-    start_time_difference = pupil_start_end(1) - world_start_end(1); % TODO: Need to add offset from paper  
-    start_frame_difference = start_time_difference / 1; 
+    % Create the T vectors that will be used to do mapping of gaze angles to frames, given 
+    % that the sensors may sometimes be off on FPS 
+    world_t = world_start_end(1) + 0: 1/world_frame_reader.FrameRate : world_start_end(2); 
+    pupil_t = pupil_start_end(1) + 0 : 1/options.pupil_frame_rate : pupil_start_end(2); 
 
-    % Iterate over the world frames 
-    for ii = 1:world_frame_reader.NumFrames
-        % Retrieve the world frame and the pupil gaze angle 
-        world_frame = world_frame_reader.read(ii); 
-        gaze_angle = gaze_angles(ii + start_frame_difference, 1:2); 
-        
-        % Virtually foveat the frame 
-        virtually_foveated_frame = virtuallyFoveateFrame(world_frame, gaze_angle, path_to_intrinsics, path_to_perspective_projection); 
-        
-        % Write this image out as bytes to a text file (since .avi video writing does not work in MATLAB )
+    % Next, add the slight offset that we measured in the calibration procedure. That is, the pupil 
+    % is actually 0.005 seconds phase advanced
+    pupil_t = pupil_t + options.pupil_world_phase_offset; 
+
+    % Make a tempdir for the output so we can reconstruct to an .avi video later (MALTAB does not support this)
+    temp_dir = random_string();
+    if(~exist(temp_dir, "dir"))
+        mkdir(temp_dir)
     end 
 
-    % Convert the temp text file back to the playable video 
+    % Initialize a blank frame we will use to pad frames that have nan gaze angles 
+    blank_frame = zeros(world_frame_reader.Height, world_frame_reader.Width, 3, 'uint8'); 
 
+    % Iterate over the world frames 
+    parfor ii = 1:world_frame_reader.NumFrames
+        % Retrieve the world frame and its timestamp 
+        world_frame = world_frame_reader.read(ii); 
+        world_timestamp = world_t(ii); 
+        
+        % Find the gaze angle that corresponds to this frame 
+        [~, gaze_angle_idx] = min(abs(pupil_t - world_timestamp));
+        gaze_angle = gaze_angles(gaze_angle_idx, 1:2); 
+        
+        % Virtually foveat the frame 
+        virtually_foveated_frame = []
+        if(any(isnan(gaze_angle)))
+            virtually_foveated_frame = blank_frame; 
+        else 
+            virtually_foveated_frame = uint8(virtuallyFoveateFrame(world_frame, gaze_angle, path_to_intrinsics, path_to_perspective_projection)); 
+        end 
 
+        % Write the resulting image out as a frame 
+        imwrite(virtually_foveated_frame, fullfile(temp_dir, sprintf('frame_%d.png', ii)));
+    end     
 
+    % Convert the temp dir back into a playable video at the desired output location 
+    video_io_util.dir_to_video(temp_dir, output_path, world_frame_reader.FrameRate); 
 
+    % Remove the temp dir 
+    rmdir(temp_dir, 's'); 
 
     return; 
 
@@ -59,11 +84,10 @@ function start_ends = find_sensor_start_ends(virutal_foveation_util, path_to_rec
 
 end 
 
-function reconstruct_video_from_bytes(virutal_foveation_util, path_to_file, output_path)
-    
-
-
-end 
+function s = random_string(n)
+    chars = ['A':'Z' 'a':'z' '0':'9'];  % character set
+    s = chars(randi(numel(chars), [1, n])); 
+end
 
 
 
