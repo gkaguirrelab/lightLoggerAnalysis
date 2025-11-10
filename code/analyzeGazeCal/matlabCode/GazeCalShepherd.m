@@ -1,7 +1,7 @@
 function GazeCalShepherd
 %GazeCalibrationShepherd
 %attempt save
-subjectID = 'FLIC_200';
+subjectID = 'FLIC_2001';
 dropboxBasedir = fullfile(getpref("lightLoggerAnalysis", 'dropboxBaseDir'));
 
 % STEP 1: make a perimeter file from raw data
@@ -153,8 +153,8 @@ gazeTargets = gazeTargetsDeg.*[-1,1];
 % what is the gaze offset?? HUMAN
 gazeOffset = [-3.6, -0.7]; % [azi, ele]
 
-sceneGeometryFile = [saveFolders, subjectID, '_gazeCal_session-1_SceneGeometry.mat'];
-saveFileMeta = [saveFolders, subjectID, '_gazeCal_session-1_SceneGeometryMetadata.mat'];
+sceneGeometryFile = [saveFolders, subjectID, '_gazeCal_SceneGeometry.mat'];
+saveFileMeta = [saveFolders, subjectID, '_gazeCal_SceneGeometryMetadata.mat'];
 save(sceneGeometryFile, 'sceneGeometry')
 save(saveFileMeta, "p34", "gazeOffset", "fullFrameSet", "gazeTargets", "startTime", "observerArgs", "confidenceThreshold");
 
@@ -190,12 +190,12 @@ load([saveFolders, subjectID, '_gazeCal_pupilData.mat'])
 figure; hold on
 plot(pupilData.sceneConstrained.eyePoses.values(:,2), '.-')
 plot(pupilData.radiusSmoothed.eyePoses.values(:,2), '.-')
-ElevationFigHandle = figure(70);
+ElevationFigHandle = figure(72);
 saveas(ElevationFigHandle, [saveFolders, subjectID, '_gazeCal_eyePosEle_smoothed'], 'fig');
 
 figure; hold on
 plot(pupilData.sceneConstrained.eyePoses.values(:,1), '.-')
 plot(pupilData.radiusSmoothed.eyePoses.values(:,1), '.-')
-ElevationFigHandle = figure(71);
+ElevationFigHandle = figure(73);
 saveas(ElevationFigHandle, [saveFolders, subjectID, '_gazeCal_eyePosAzi_smoothed'], 'fig');
 end
