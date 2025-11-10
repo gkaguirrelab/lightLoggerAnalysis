@@ -1,11 +1,12 @@
 function GazeCalShepherd
 %GazeCalibrationShepherd
-subjectID = 'FLIC_2005';
+%attempt save
+subjectID = 'FLIC_200';
 dropboxBasedir = fullfile(getpref("lightLoggerAnalysis", 'dropboxBaseDir'));
 
 % STEP 1: make a perimeter file from raw data
 saveFolders = [dropboxBasedir, '/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/', subjectID, '/gazeCalibration/temporalFrequency/'];
-perimeterFile = [saveFolders, subjectID, '_gazeCal_session-1_perimeter.mat']; % path to perimeter file
+perimeterFile = [saveFolders, subjectID, '_gazeCal_perimeter.mat']; % path to perimeter file
 perimeter = load(perimeterFile, 'perimeter');
 perimeter = perimeter.perimeter;
 % STEP 2: find the start frame from the playable pupil camera video using
@@ -32,8 +33,8 @@ targetDurSec = mean([thirdDotDurS, secondDotDurS]);
 targetDurSec = 3.34;
 %% STEP 3: find gaze frames to use in scene geometry estimation
 % load run file for this participant
-folders = ['/FLIC_data/lightLogger/scriptedIndoorOutdoor/GazeCalRunFileData/', subjectID];
-searchPattern = [dropboxBasedir, folders, '/', subjectID, '_GazeCalibration_session1*'];
+folders = ['/FLIC_data/lightLogger/scriptedIndoorOutdoor/', subjectID, '/gazeCalibration/temporalFrequency/'];
+searchPattern = [dropboxBasedir, folders, '/', subjectID, '_gazeCal_runData.mat*'];
 fileList = dir(searchPattern);
 if isempty(fileList)
     error('No files found matching the pattern: %s', searchPattern);
@@ -76,10 +77,11 @@ sceneArgs = {
 
 % Add the args for this particular observer
 correctionType = 'spectacleLens';
-%correctionType = 'contactLens';
+%correctionType = 'contactLens'; 
+% note contact lens only takes 2 key value pairs
 %observerArgs = {'sphericalAmetropia',-1.25,'spectacleLens',[-1.25,0,0]};
 %observerArgs = {'sphericalAmetropia',-1.25};
-observerArgs = {'sphericalAmetropia',-1.00,'spectacleLens',[-1.00,-0.25,0]};
+observerArgs = {'sphericalAmetropia',-1.00,correctionType,[-1.00,-0.25,0]};
 
 
 % Combine the two argument sets
@@ -91,9 +93,9 @@ confidenceThreshold = confidenceCutoff;
 % pick u here
 x0 = [-28.6484   -7.3094   51.0564   24.3158    0.5042   12.1706    0.9918 0.9927   18.8754   49.3395   40.5355];
 
-[sceneGeometry,p5] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', x0, 'confidenceThreshold', confidenceThreshold);
+[sceneGeometry,p5] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', x0, 'confidenceThreshold', confidenceThreshold, 'nWorkers', 6);
 
-[sceneGeometry,p5] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', p5, 'confidenceThreshold', confidenceThreshold);
+[sceneGeometry,p5] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', p5, 'confidenceThreshold', confidenceThreshold, 'nWorkers', 6);
 
 % CHECK the graphs. Do the xs and os overlap well? Is the f value below 4?
 %If no, investigate the playable video of the pupil camera and see if any
@@ -106,7 +108,7 @@ x0 = [-28.6484   -7.3094   51.0564   24.3158    0.5042   12.1706    0.9918 0.992
 %fullFrameSet = fullFrameSet(1:end-2);
 frameSet = fullFrameSet(1:16);
 gazeTargets = gazeTargetsDeg(1:16,:).*[-1,1];
-[sceneGeometry,p17] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', p5, 'confidenceThreshold', confidenceThreshold);
+[sceneGeometry,p17] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', p5, 'confidenceThreshold', confidenceThreshold, 'nWorkers', 6);
 
 % CHECK the graphs. Do the xs and os overlap well? Is the f value below 4?
 %If no, investigate the playable video of the pupil camera and see if any
@@ -122,7 +124,7 @@ Xp = perimeter.data{frameSet(ii)}.Xp; Yp = perimeter.data{frameSet(ii)}.Yp; plot
 
 plotPupilCenters(fullFrameSet, perimeter, [17:33]);
 
-[sceneGeometry,p18] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', p5, 'confidenceThreshold', confidenceThreshold);
+[sceneGeometry,p18] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', p5, 'confidenceThreshold', confidenceThreshold, 'nWorkers', 6);
 
 % CHECK the graphs. Do the xs and os overlap well? Is the f value below 4?
 %If no, investigate the playable video of the pupil camera and see if any
@@ -135,16 +137,21 @@ pMean = mean([p17(:), p18(:)],2);
 
 frameSet = fullFrameSet;
 gazeTargets = gazeTargetsDeg.*[-1,1];
-[sceneGeometry,p34] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', pMean', 'confidenceThreshold', confidenceThreshold);
+[sceneGeometry,p34] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets,...
+    'setupArgs', setupArgs, 'x0', pMean',...
+    'confidenceThreshold', confidenceThreshold, 'nWorkers', 6);
+[sceneGeometry,p34] = estimateSceneGeometry(perimeterFile, fullFrameSet, gazeTargets,...
+    'setupArgs', setupArgs, 'x0', p34,...
+    'confidenceThreshold', confidenceThreshold, 'nWorkers', 6);
 % to redo quickly:
-%[sceneGeometry,p34] = estimateSceneGeometry(perimeterFile, fullFrameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', p34, 'confidenceThreshold', confidenceThreshold, 'paramSearchSets',{3});
+%[sceneGeometry,p34] = estimateSceneGeometry(perimeterFile, fullFrameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', p34, 'confidenceThreshold', confidenceThreshold, 'nWorkers', 6);
 
 %% Save things so we could regenerate the scene geometry file if needed!
 % if everything looks good, save the scene geometry, p34, gaze offset, x0
 % and frames used for this participant in a file!
 
 % what is the gaze offset?? HUMAN
-gazeOffset = [azi, ele]; % [azi, ele]
+gazeOffset = [-3.6, -0.7]; % [azi, ele]
 
 sceneGeometryFile = [saveFolders, subjectID, '_gazeCal_session-1_SceneGeometry.mat'];
 saveFileMeta = [saveFolders, subjectID, '_gazeCal_session-1_SceneGeometryMetadata.mat'];
@@ -152,31 +159,43 @@ save(sceneGeometryFile, 'sceneGeometry')
 save(saveFileMeta, "p34", "gazeOffset", "fullFrameSet", "gazeTargets", "startTime", "observerArgs", "confidenceThreshold");
 
 % Save the figure 1 as a MATLAB figure file
-fig1_handle = figure(1);
+fig1_handle = figure(35);
 saveas(fig1_handle, [saveFolders, subjectID, '_gazeCal_SceneGeometryTargetsPlot'], 'fig');
 %% How to turn pupil perimeters into gaze angles now that you have scene geometry
 % Define variables for the path to the sceneGeometry file, perimeter file, and a _pupilData.mat file (which is to be created).
 % Issue this command: fitPupilPerimeter(perimeterFileName, pupilFileName,'sceneGeometryFileName',sceneGeometryFileName,'useParallel',true,'verbose',true);
-pupilFileName = [saveFolders, subjectID, '_gazeCal_session-1_pupilData.mat'];
+pupilFileName = [saveFolders, subjectID, '_gazeCal_pupilData.mat'];
 fitPupilPerimeter(perimeterFile,pupilFileName, 'sceneGeometryFileName',sceneGeometryFile,'useParallel',true,'verbose',true, 'nWorkers', 6);
 %% Clean up: remove low confidence points and something.
+load(pupilFileName);
+RMSECutoff = 2;
 
+% Create indices for bad data with bad RMSE or fitAtBound
+RMSEVals = pupilData.sceneConstrained.ellipses.RMSE;
+badRMSEIdx = RMSEVals > RMSECutoff;
+badFitAtBoundIdx = pupilData.sceneConstrained.eyePoses.fitAtBound > 0;
+badIdx = badRMSEIdx | badFitAtBoundIdx; 
+pupilData.sceneConstrained.eyePoses.values(badIdx, [1 2]) = NaN;
 %% Smooth the pupil perimeters
-aziLowerBound = -20 + gazeOffset(1,1);
-aziUpperBound = 20 + gazeOffset(1,1);
-eleLowerBound = -20 + gazeOffset(1,2);
-eleUpperBound = 20 + gazeOffset(1,2);
+aziLowerBound = -25 + gazeOffset(1,1);
+aziUpperBound = 25 + gazeOffset(1,1);
+eleLowerBound = -25 + gazeOffset(1,2);
+eleUpperBound = 25 + gazeOffset(1,2);
 
 [pupilData] = smoothPupilRadius(perimeterFile, pupilFileName,...
     sceneGeometryFile, 'useParallel', true, 'nWorkers', 6,...
     'eyePoseLB', [aziLowerBound, eleLowerBound, 0, 0.5], 'eyePoseUB', [aziUpperBound, eleUpperBound, 0, 0.5]);
 
-load([saveFolders, subjectID, '_gazeCal_session-1_pupilData.mat'])
+load([saveFolders, subjectID, '_gazeCal_pupilData.mat'])
 figure; hold on
 plot(pupilData.sceneConstrained.eyePoses.values(:,2), '.-')
 plot(pupilData.radiusSmoothed.eyePoses.values(:,2), '.-')
+ElevationFigHandle = figure(70);
+saveas(ElevationFigHandle, [saveFolders, subjectID, '_gazeCal_eyePosEle_smoothed'], 'fig');
 
 figure; hold on
 plot(pupilData.sceneConstrained.eyePoses.values(:,1), '.-')
 plot(pupilData.radiusSmoothed.eyePoses.values(:,1), '.-')
+ElevationFigHandle = figure(71);
+saveas(ElevationFigHandle, [saveFolders, subjectID, '_gazeCal_eyePosAzi_smoothed'], 'fig');
 end

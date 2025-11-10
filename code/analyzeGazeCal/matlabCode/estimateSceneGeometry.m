@@ -52,79 +52,39 @@ function [sceneGeometry,p, gazeOffset] = estimateSceneGeometry(perimeterFile, fr
         'radialDistortionVector',[0 0]};
 
     % Add the args for this particular observer
-    observerArgs = {'sphericalAmetropia',2.25,'spectacleLens',[2.25,2,80]};
+    observerArgs = {'sphericalAmetropia',-1.00,'spectacleLens',[-1.00,-0.25,0]};
 
     % Combine the two argument sets
     setupArgs = [sceneArgs observerArgs];
 
-    % Define the input variables for this particular gaze cal video
-    perimeterFile = '/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Flic Experimenter/FLIC_data/lightLogger/Processing/FLIC_200X_gazeCalibration_session1_perimeter.mat';
-    
+    % More parameters
+    subjectID = 'FLIC_2005';
+    confidenceThreshold = 0.8;
 
-fullFrameSet = [10242
-       10551
-       11038
-       11424
-       11759
-       12138
-       12504
-       13054
-       13361
-       13770
-       14200
-       14508
-       14849
-       15318
-       15695
-       16081
-       16515
-       16896
-       17225
-       17762
-       18113
-       18501
-       18905
-       19282
-       19672
-       20063
-       20368
-       20751
-       21277
-       21585
-       22065
-       22388
-       22830
-       23188]';
+    % Set up the paths
+    dropboxBaseDir = getpref('lightLoggerAnalysis','dropboxBaseDir');
+    saveFolders = [dropboxBaseDir, '/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/', subjectID, '/gazeCalibration/temporalFrequency/'];
+    perimeterFile = [saveFolders, subjectID, '_gazeCal_session-1_perimeter.mat'];
 
-fullGazeTargets = [-1, 1].*[ ...
-            0, 0; -15, 15; -15, -15; 15, 15; 15, -15; ...
-            0, 15; 0, -15; -15, 0; 15, 0;...
-            -7.5, 7.5; -7.5, -7.5; 7.5, 7.5; 7.5, -7.5; ...
-            0, 10; 0, -7.5; -7.5, 0; 7.5, 0;...
-            0, 0; -15, 15; -15, -15; 15, 15; 15, -15; ...
-            0, 15; 0, -15; -15, 0; 15, 0;...
-            -7.5, 7.5; -7.5, -7.5; 7.5, 7.5; 7.5, -7.5; ...
-            0, 10; 0, -7.5; -7.5, 0; 7.5, 0]; % where gaze targets are
-            %taken from runGazeCalibration.m (in this original file,
-            %negative x = left, negative y = down. In gka model eye,
-            %negative x = right, negative y = down. So we flip the sign of x).
+    % Identify the frames and gazes
+    frameSet = [10349; 12362; 12783; 13153; 13518; 13962];
+    gazeTargets = [
+             0         0
+             0   15.0000
+             0  -15.0000
+       15.0000         0
+      -15.0000         0
+        7.5000    7.5000];
 
-smallSetIdx = [1, 6, 7, 8, 9];
+    % The x0 guess
+    x0 = [-28.6484   -7.3094   51.0564   24.3158    0.5042   12.1706    0.9918 0.9927   18.8754   49.3395   40.5355];
 
-    %frameSet = fullFrameSet(smallSetIdx);
-    %gazeTargets = fullGazeTargets(smallSetIdx,:);
-
-frameSet = fullFrameSet;
-    gazeTargets = fullGazeTargets;
-
-    % This is the x0, in case we want to pass that
-    x0 = [-29.9355  -10.3699   52.3664   24.2541    2.1374   15.5410    0.9895    1.0024   17.6172   43.0417   41.0665];
+    % Indicate that we want to use the parpool. Can only make use of
+    % nWorkers <= the total number of gaze targets
+    nWorkers = 6;
 
     % Run the routine
-    [sceneGeometry,p,gazeOffset] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs);
-
-    % Search again starting from the prior search result
-    [sceneGeometry,p] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', p);
+    [sceneGeometry,p,gazeOffset] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', x0, 'nWorkers', nWorkers);
 
 %}
 
@@ -137,11 +97,24 @@ arguments
     options.x0 double = [];
     options.paramSearchSets = {};
     options.verbosity = 'stage'; % 'none','stage','iter';
+    options.nWorkers double {mustBeNumeric} = [];
 end
 
 % Extract the optional arguments
 setupArgs = options.setupArgs;
 confidenceThreshold = options.confidenceThreshold;
+nWorkers = options.nWorkers;
+
+% Set up the parallel pool
+if isempty(nWorkers)
+    nWorkers = 1;
+end
+switch options.verbosity
+    case 'none'
+        nWorkers = startParpool( nWorkers, false );
+    otherwise
+        nWorkers = startParpool( nWorkers, true );
+end
 
 % Load the perimeter file
 load(perimeterFile,'perimeter');
@@ -220,7 +193,7 @@ end
 
 % Define a progressive search strategy
 if isempty(options.paramSearchSets)
-    paramSearchSets = {1:3,4:6,1:6,7:8,9:11,1:11};
+    paramSearchSets = {1:3,4:6,1:6,7:8,9:11};
 else
     paramSearchSets = options.paramSearchSets;
 end
@@ -283,15 +256,15 @@ xlabel('azimuth [deg]'); ylabel('elevation [deg]');
 title(sprintf('Gaze offset %2.1f, %2.1f [azi, ele]',gazeOffset));
 
 % Render the eyes and the pupil perimeters
-% for ii = 1:length(perimeter)
-%     renderEyePose(eyePoses(ii,:),sceneGeometry);
-%     hold on
-%     conf = perimeter{ii}.confidence;
-%     goodIdx = conf > confidenceThreshold;
-%     Xp = perimeter{ii}.Xp(goodIdx);
-%     Yp = perimeter{ii}.Yp(goodIdx);
-%     plot(Xp,Yp,'*k')
-% end
+for ii = 1:length(perimeter)
+    renderEyePose(eyePoses(ii,:),sceneGeometry);
+    hold on
+    conf = perimeter{ii}.confidence;
+    goodIdx = conf > confidenceThreshold;
+    Xp = perimeter{ii}.Xp(goodIdx);
+    Yp = perimeter{ii}.Yp(goodIdx);
+    plot(Xp,Yp,'*k')
+end
 
 
 end % main function
@@ -346,7 +319,7 @@ eyePoses = nan(length(perimeter),4);
 ellipseRMSEs = nan(length(perimeter),1);
 
 % Loop through the perimeters
-for ii = 1:length(perimeter)
+parfor ii = 1:length(perimeter)
     conf = perimeter{ii}.confidence;
     goodIdx = conf > confidenceThreshold;
     Xp = perimeter{ii}.Xp(goodIdx);
@@ -357,8 +330,8 @@ for ii = 1:length(perimeter)
             'cameraTransX0',[0;0;0],...
             'cameraTransBounds', [0;0;0]);
     end
-    drawnow
 end
+
 end
 
 
