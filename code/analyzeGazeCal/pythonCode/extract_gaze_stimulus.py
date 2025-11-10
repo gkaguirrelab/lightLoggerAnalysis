@@ -17,18 +17,17 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 import shutil
 import argparse
 
+
 # Import relevant custom libraries with helper functions and constants 
-light_logger_dir_path: str = os.path.expanduser("~/Documents/MATLAB/projects/lightLogger")
-Pi_util_dir_path: str = os.path.join(light_logger_dir_path, "raspberry_pi_firmware", "utility")
-pupil_util_path: str = os.path.join(light_logger_dir_path, "pupil")
-for path in (Pi_util_dir_path, pupil_util_path):
+light_logger_analysis_dir_path: str = os.path.expanduser("~/Documents/MATLAB/projects/lightLoggerAnalysis")
+video_io_util_path: str = os.path.join(light_logger_analysis_dir_path, "code", "library", "matlabIO", "python_libraries")
+world_camera_constants_path: str = os.path.join(light_logger_analysis_dir_path, "data")
+for path in (light_logger_analysis_dir_path, video_io_util_path, world_camera_constants_path):
+    assert os.path.exists(path), f"Expected path: {path} does not exist"
     sys.path.append(path)
 
-# Import Pi_util for helper functions 
-import Pi_util 
-
-# Import pupil_util for constants 
-import pupil_util
+import video_io 
+import world_camera_constants
 
 def parse_args() -> str:
     # Initialize argument parser 
@@ -36,11 +35,12 @@ def parse_args() -> str:
 
     # Add the path to video argument 
     parser.add_argument("path_to_video", type=str, help="Path to world camera video from gaze calibration")
+    parser.add_argument("path_to_output_file", type=str, help="Path to numpy output file")
 
     # Parse the args
     args: object = parser.parse_args()
 
-    return args.path_to_video
+    return args.path_to_video, args.path_to_output_file
 
 """Given a dict of detected gaze targets and an image to display 
    on, visualize the results 
@@ -83,18 +83,27 @@ def find_stimulus_period(video: str | np.ndarray,
     if(isinstance(video, np.ndarray)):
         raise NotImplementedError
     
+    # Define the RGB mask variable. We will use this to calculate 
+    # just the red pixels. It will be calculated based on the size 
+    # of the images in the video 
+    RGB_mask: np.ndarray = world_camera_constants.RGB_mask(video_io.inspect_video_framesize(video))
+    red_pixel_locations: tuple[np.ndarray] = np.where(RGB_mask == "R")
+    red_pixel_rows: np.ndarray = red_pixel_locations[0]
+    red_pixel_cols: np.ndarray = red_pixel_locations[1] 
+
     # Otherwise, we will go through the frames 
     # of the video and find the peaks in average red channel 
     # intensity of each frame
      # Stream frames in and add them to the per pixel sum 
     frame_queue: mp.Queue = mp.Queue(maxsize=5)
     stop_event: object = mp.Event()
-    frame_stream_process: object = mp.Process(target=Pi_util.destruct_video, 
+    frame_stream_process: object = mp.Process(target=video_io.destruct_video, 
                                               args=(video, 0, float("inf"), 
-                                                    False, frame_queue, stop_event)
+                                                    True, frame_queue, stop_event)
                                              )
     # Start the subprocess 
     frame_stream_process.start()
+    
 
     # Parse frames from the video, finding their average red 
     # channel and saving their frame num + average red channel
@@ -113,11 +122,10 @@ def find_stimulus_period(video: str | np.ndarray,
         # If no frame arrived, then we are done 
         if(frame is None):
             break
-        
+
         # Otherwise, we have a frame, 
         # Let's find its red intensity and 
-        # save it to the list # Note (cv2 reads in as BGR)
-        red_intensities.append( [frame_num, np.mean(frame[:, :, 2])] )
+        red_intensities.append( [frame_num, np.mean(frame[red_pixel_rows, red_pixel_cols])] )
 
         # Increment the frame number 
         frame_num += 1
@@ -170,13 +178,13 @@ def find_background_image(video: str | np.ndarray,
                          ) -> np.ndarray | tuple[np.ndarray, object]:
 
     # Allocate the sum frame 
-    frame_size: tuple[int] = Pi_util.inspect_video_framesize(video)
+    frame_size: tuple[int] = video_io.inspect_video_framesize(video)
     frame_sum: np.ndarray = np.zeros(frame_size if is_grayscale is True else tuple(list(frame_size)+[3]), dtype=np.float64)
 
     # Stream frames in and add them to the per pixel sum 
     frame_queue: mp.Queue = mp.Queue(maxsize=5)
     stop_event: object = mp.Event()
-    frame_stream_process: object = mp.Process(target=Pi_util.destruct_video, 
+    frame_stream_process: object = mp.Process(target=video_io.destruct_video, 
                                               args=(video, start_frame, float("inf") if end_frame is None else end_frame, 
                                                     is_grayscale, frame_queue, stop_event)
                                              )
@@ -277,7 +285,7 @@ def auto_extract_target_circles(video: str,
     # Stream frames in 
     read_queue: mp.Queue = mp.Queue(maxsize=5)
     read_stop: object = mp.Event()
-    read_process: object = mp.Process(target=Pi_util.destruct_video, 
+    read_process: object = mp.Process(target=video_io.destruct_video, 
                                               args=(video, start_frame, float("inf") if end_frame is None else end_frame, 
                                                     is_grayscale, read_queue, read_stop)
                                              )
@@ -292,7 +300,7 @@ def auto_extract_target_circles(video: str,
     # assigned a value later if we want to actually use video visualization
     video_writer: cv2.VideoWriter | None = None 
     visualization_frame_size: tuple[int] | None = None 
-    visualization_fps: int = Pi_util.inspect_video_FPS(video)
+    visualization_fps: int = video_io.inspect_video_FPS(video)
     visualized_bgr: np.ndarray | None = None
 
     # Parse frames from the video, gathering their features
@@ -512,7 +520,7 @@ def manual_extract_target_circles(background_img: np.ndarray) -> np.ndarray:
 def main() -> None:
     # Parse arguments
     print("---Parsing Args---")
-    video_path: str = parse_args()
+    video_path, path_to_output = parse_args()
 
     # Find the start end of stimulus
     print("---Finding stimulus start/end---") 
@@ -532,7 +540,7 @@ def main() -> None:
     gaze_target_points: np.ndarray = manual_extract_target_circles(background_gray)
 
     print("---Saving selections---")
-    np.save("testpoints.npy", gaze_target_points)
+    np.save(path_to_output, gaze_target_points)
 
 
 if(__name__ == "__main__"):

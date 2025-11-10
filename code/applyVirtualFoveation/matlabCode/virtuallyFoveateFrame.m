@@ -47,7 +47,7 @@ function retinalImage = virtuallyFoveateFrame(I, gaze_angle, fisheyeIntrinsicsPa
 %}
 
     arguments
-        I double {mustBeMatrix}
+        I double 
         gaze_angle double {mustBeVector}
         fisheyeIntrinsicsPath
         transformationPath
@@ -98,7 +98,7 @@ function retinalImage = virtuallyFoveateFrame(I, gaze_angle, fisheyeIntrinsicsPa
 
         % Load the projection matrix
         lastTransformationPath = transformationPath;
-        transformation = load(transformationPath).perspective_transform.fit.geometric_transform;
+        transformation = load(transformationPath).perspective_projection.fit.geometric_transform;
 
         % Calculate world degrees --> eye degrees
         eyeRotationCoordinates = transformPointsForward(transformation, worldCoordsInDegrees);
