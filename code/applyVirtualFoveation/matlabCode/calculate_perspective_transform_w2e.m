@@ -1,4 +1,4 @@
-function perspective_transform = calculate_perspective_transform_w2e(world_camera_intrinsics, target_pos_ang_intended, target_pos_screen)
+function perspective_projection = calculate_perspective_transform_w2e(world_camera_intrinsics, target_pos_ang_intended, target_pos_screen)
 
     arguments 
         world_camera_intrinsics; % Struct containing the world camera intrinsics
@@ -9,7 +9,9 @@ function perspective_transform = calculate_perspective_transform_w2e(world_camer
     % First, if we do not already know the target positions on screen, we will calculate them 
     if(isempty(target_pos_screen))
         error("Not yet implemented"); 
-    end 
+    end
+
+    target_pos_screen(:, :) = target_pos_screen(:, [2, 1]); 
 
     % Ensure we have the same number of pos in angles and screen 
     assert(size(target_pos_ang_intended, 1) == size(target_pos_screen, 1));  
@@ -20,14 +22,25 @@ function perspective_transform = calculate_perspective_transform_w2e(world_camer
 
     % Transform the gaze targets as seen by the camera into the eye rotation
     % coordinate space
-    target_pos_angles_measured = transformPointsForward( geometric_transform, pixel_azimuth_elevation );
+    degreesVisualAngle = transformPointsForward( geometric_transform, pixel_azimuth_elevation );
 
     % initialize return struct
-    perspective_transform.data.world_camera_intrinsics = world_camera_intrinsics; 
-    perspective_transform.data.target_pos_ang_intended = target_pos_ang_intended; 
-    perspective_transform.data.target_pos_screen = target_pos_screen; 
-    perspective_transform.fit.target_pos_angles_measured = target_pos_angles_measured; 
-    perspective_transform.fit.geometric_transform = geometric_transform; 
+    perspective_projection.data.world_camera_intrinsics = world_camera_intrinsics; 
+    perspective_projection.data.target_pos_ang_intended = target_pos_ang_intended; 
+    perspective_projection.data.target_pos_screen = target_pos_screen; 
+    perspective_projection.fit.target_pos_angles_measured = degreesVisualAngle; 
+    perspective_projection.fit.geometric_transform = geometric_transform; 
+
+    figure; 
+    plot(degreesVisualAngle(:, 1), degreesVisualAngle(:, 2), 'o', 'DisplayName', 'Observed (World)'); 
+    hold on; 
+    plot(target_pos_ang_intended(:, 1), target_pos_ang_intended(:, 2), 'x', 'DisplayName', 'Intended'); 
+    title("Observed/Intended Screen Points in Visual Angle"); 
+    xlabel("azimuth"); 
+    ylabel("elevation"); 
+    legend show; 
+
+    hold on; 
 
 
 end     

@@ -527,7 +527,7 @@ def main() -> None:
     start, end = find_stimulus_period(video_path)
 
     # Calculate the background image 
-    print("---Finding background image---")
+    print(f"---Finding background image of frames: [{start}, {end})---")
     background_gray: np.ndarray = find_background_image(video_path, 
                                             is_grayscale=True,
                                             start_frame=start,

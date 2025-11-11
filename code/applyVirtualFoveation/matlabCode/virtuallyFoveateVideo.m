@@ -1,8 +1,8 @@
-function virtuallyFoveateVideo(world_video, gaze_angles, output_path, path_to_recording_chunks, path_to_intrinsics, path_to_perspective_projection, options)
+function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_path, path_to_recording_chunks, path_to_intrinsics, path_to_perspective_projection, options)
 % Virtually foveate desired frames of a video with given gaze angles
 %
 % Syntax:
-%   virtuallyFoveateVideo(world_video, gaze_angles, output_path, path_to_recording_chunks, path_to_intrinsics, path_to_perspective_projection, options)
+%   virtuallyFoveateVideo(world_video, gaze_angles, offsets, output_path, path_to_recording_chunks, path_to_intrinsics, path_to_perspective_projection, options)
 %
 % Description:
 %   TODO 
@@ -17,19 +17,21 @@ function virtuallyFoveateVideo(world_video, gaze_angles, output_path, path_to_re
 %
 % Examples:
 %{
-    world_video = "/Volumes/T7 Shield/scriptedIndoorOutdoorVideos/FLIC_2003/gazeCalibration/temporalFrequency/W.avi"; 
-    path_to_recording_chunks = "/Volumes/EXTERNAL_1/FLIC_2003/gazeCalibration/temporalFrequency"
-    output_path = "/.testingVirtualFoveation.avi"; 
-    gaze_angles = load("/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/FLIC_2003/gazeCalibration/temporalFrequency/FLIC_2003_gazeCal_session-1_pupilData.mat").pupilData.radiusSmoothed.eyePoses.values; 
+    world_video = "/Volumes/T7 Shield/scriptedIndoorOutdoorVideos/FLIC_2001/gazeCalibration/temporalFrequency/W.avi"; 
+    path_to_recording_chunks = "/Volumes/EXTERNAL_1/FLIC_2001/gazeCalibration/temporalFrequency";
+    output_path = "./testingVirtualFoveation.avi"; 
+    gaze_angles = load("/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/FLIC_2001/gazeCalibration/temporalFrequency/FLIC_2001_gazeCal_pupilData.mat").pupilData.radiusSmoothed.eyePoses.values; 
+    offsets = load("/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/FLIC_2001/gazeCalibration/temporalFrequency/FLIC_2001_gazeCal_SceneGeometryMetadata.mat").gazeOffset;
     path_to_intrinsics = "/Users/zacharykelly/Documents/MATLAB/projects/lightLoggerAnalysis/data/intrinsics_calibration.mat"; 
-    path_to_perspective_projection = "/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/FLIC_2003/gazeCalibration/temporalFrequency/FLIC_2003_gazeCal_prospectiveProjection.mat";
-    virtuallyFoveateVideo(world_video, gaze_angles, output_path, path_to_recording_chunks, path_to_intrinsics, path_to_perspective_projection)
+    path_to_perspective_projection = "/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/FLIC_2001/gazeCalibration/temporalFrequency/FLIC_2001_gazeCal_perspectiveProjection.mat";
+    virtuallyFoveateVideo(world_video, gaze_angles, offsets, output_path, path_to_recording_chunks, path_to_intrinsics, path_to_perspective_projection)
     
 %}
 
     arguments 
         world_video {mustBeText}; 
         gaze_angles {mustBeMatrix}; 
+        gaze_offsets {mustBeNumeric}; 
         output_path {mustBeText}; 
         path_to_recording_chunks {mustBeText};
         path_to_intrinsics {mustBeText};
@@ -53,8 +55,12 @@ function virtuallyFoveateVideo(world_video, gaze_angles, output_path, path_to_re
 
     % Create the T vectors that will be used to do mapping of gaze angles to frames, given 
     % that the sensors may sometimes be off on FPS 
-    world_t = world_start_end(1) + 0: 1/world_frame_reader.FrameRate : world_start_end(2); 
-    pupil_t = pupil_start_end(1) + 0 : 1/options.pupil_fps : pupil_start_end(2); 
+    world_t = linspace(world_start_end(1), world_start_end(2), world_frame_reader.NumFrames);
+    pupil_t = linspace(pupil_start_end(1), pupil_start_end(2), size(gaze_angles, 1));
+
+    if(numel(world_t) ~= world_frame_reader.NumFrames)
+        error("Miscalculation of world timestamps");
+    end 
 
     % Next, add the slight offset that we measured in the calibration procedure. That is, the pupil 
     % is actually 0.005 seconds phase advanced
@@ -77,23 +83,32 @@ function virtuallyFoveateVideo(world_video, gaze_angles, output_path, path_to_re
     end 
 
     tic; 
-    parfor ii = start_frame:end_frame
+    for ii = start_frame:end_frame
         % Retrieve the world frame and its timestamp 
         world_frame = world_frame_reader.read(ii, 'grayscale', true); 
         world_timestamp = world_t(ii); 
         
         % Find the gaze angle that corresponds to this frame 
         [~, gaze_angle_idx] = min(abs(pupil_t - world_timestamp));
-        gaze_angle = gaze_angles(gaze_angle_idx, 1:2); 
+        gaze_angle = (gaze_angles(gaze_angle_idx, 1:2) .* [1, 1]) + ([gaze_offsets(1), gaze_offsets(2)] .* [-1, -1] );
+        gaze_angle = [0, 0]; 
 
         % Virtually foveat the frame 
         virtually_foveated_frame = []; 
         if(any(isnan(gaze_angle)))
             virtually_foveated_frame = blank_frame; 
-        else 
-            % NEED TO GO GRAY SCALE FOR THIS!!! 
+        else    
             virtually_foveated_frame = uint8(virtuallyFoveateFrame(world_frame, gaze_angle, path_to_intrinsics, path_to_perspective_projection)); 
         end 
+
+        figure; 
+        imshow(world_frame)
+        hold on; 
+        title(sprintf("Gaze angle: %f %f", gaze_angle(1), gaze_angle(2)));
+
+        figure; 
+        imshow(virtually_foveated_frame); 
+        hold on; 
 
         % Write the resulting image out as a frame 
         imwrite(virtually_foveated_frame, fullfile(temp_dir, sprintf('frame_%d.png', ii)));
