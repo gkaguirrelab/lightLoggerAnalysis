@@ -20,6 +20,13 @@ function frame = read(obj, frameNum, options)
             case "rgb"  
                 frame = frame(:, :, [3 2 1]);
                 return ; 
+
+            % If we want a grayscale image, flip to rgb then gray 
+            case "gray"
+                frame = frame(:, :, [3 2 1]);
+                frame = rgb2gray(frame);
+                return; 
+            
             otherwise 
                 error("Unsupported color mode: %s", colorMode);
 

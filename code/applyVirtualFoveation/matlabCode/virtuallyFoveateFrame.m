@@ -51,7 +51,7 @@ function retinalImage = virtuallyFoveateFrame(I, gaze_angle, fisheyeIntrinsicsPa
         gaze_angle double {mustBeVector}
         fisheyeIntrinsicsPath
         transformationPath
-        options.FOVradius double = 200
+        options.FOVradius double = 30
         options.degPerSample double = 0.25
         options.forceRecalc logical = true
     end
@@ -59,6 +59,7 @@ function retinalImage = virtuallyFoveateFrame(I, gaze_angle, fisheyeIntrinsicsPa
     % Get the camera visual field positions corresponding to positions of all
     % locations on the camera sensor
     [nRows, nCols] = size(I);
+    I = fliplr(imrotate(I, 180));
 
     % Load the camera intrinsics and derive the conversion of world camera
     % pixels to world camera angle degrees. Then, load the projection matrix
@@ -125,5 +126,4 @@ function retinalImage = virtuallyFoveateFrame(I, gaze_angle, fisheyeIntrinsicsPa
 
     % Interpolate the irregularly scattered samples onto a grid
     retinalImage = griddata(x, y, v, XX, YY, 'linear');
-
 end

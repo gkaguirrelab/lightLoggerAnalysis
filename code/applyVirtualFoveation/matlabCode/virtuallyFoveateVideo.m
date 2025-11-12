@@ -90,8 +90,7 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
         
         % Find the gaze angle that corresponds to this frame 
         [~, gaze_angle_idx] = min(abs(pupil_t - world_timestamp));
-        gaze_angle = (gaze_angles(gaze_angle_idx, 1:2) .* [1, 1]) + ([gaze_offsets(1), gaze_offsets(2)] .* [-1, -1] );
-        gaze_angle = [0, 0]; 
+        gaze_angle = ( (gaze_angles(gaze_angle_idx, 1:2)) + ([gaze_offsets(1), gaze_offsets(2)] .* [-1, -1] ) ) .* [-1, -1];
 
         % Virtually foveat the frame 
         virtually_foveated_frame = []; 
@@ -100,15 +99,6 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
         else    
             virtually_foveated_frame = uint8(virtuallyFoveateFrame(world_frame, gaze_angle, path_to_intrinsics, path_to_perspective_projection)); 
         end 
-
-        figure; 
-        imshow(world_frame)
-        hold on; 
-        title(sprintf("Gaze angle: %f %f", gaze_angle(1), gaze_angle(2)));
-
-        figure; 
-        imshow(virtually_foveated_frame); 
-        hold on; 
 
         % Write the resulting image out as a frame 
         imwrite(virtually_foveated_frame, fullfile(temp_dir, sprintf('frame_%d.png', ii)));
