@@ -1,7 +1,7 @@
 function GazeCalShepherd
 %GazeCalibrationShepherd
 %attempt save
-subjectID = 'FLIC_2001';
+subjectID = 'FLIC_2004';
 dropboxBasedir = fullfile(getpref("lightLoggerAnalysis", 'dropboxBaseDir'));
 
 % STEP 1: make a perimeter file from raw data
@@ -59,13 +59,13 @@ gazeTargetsDeg = gazeTargetsDeg(goodIdx,:);
 % searching
 
 % Define the input variables for this particular gaze cal video
-gazeSubsetIdx = [1,5:9]; % NEEDS TO BE ADJUSTED IF THERE ARE NANs
+gazeSubsetIdx = [1,6:10]; % NEEDS TO BE ADJUSTED IF THERE ARE NANs
 
 frameSet = fullFrameSet(gazeSubsetIdx);
 gazeTargets = (gazeTargetsDeg(gazeSubsetIdx,:)).*[-1,1];
 
 % use this to make sure the points look like they make a cross
-plotPupilCenters(fullFrameSet, perimeter, [1:33]);
+plotPupilCenters(fullFrameSet, perimeter, [1:31]);
 
 % Define some properties of the eye and of the scene that will be fixed
 % for the scene search
@@ -151,16 +151,16 @@ gazeTargets = gazeTargetsDeg.*[-1,1];
 % and frames used for this participant in a file!
 
 % what is the gaze offset?? HUMAN
-gazeOffset = [-3.6, -0.7]; % [azi, ele]
+gazeOffset = [1.5, 9.0]; % [azi, ele]
 
 sceneGeometryFile = [saveFolders, subjectID, '_gazeCal_SceneGeometry.mat'];
 saveFileMeta = [saveFolders, subjectID, '_gazeCal_SceneGeometryMetadata.mat'];
 save(sceneGeometryFile, 'sceneGeometry')
-save(saveFileMeta, "p34", "gazeOffset", "fullFrameSet", "gazeTargets", "startTime", "observerArgs", "confidenceThreshold");
+save(saveFileMeta, "p34", "gazeOffset", "fullFrameSet", "gazeTargets", "startTime", "observerArgs", "confidenceThreshold", "targetDurSec");
 
 % Save the figure 1 as a MATLAB figure file
 fig1_handle = figure(35);
-saveas(fig1_handle, [saveFolders, subjectID, '_gazeCal_SceneGeometryTargetsPlot'], 'fig');
+saveas(fig1_handle, [saveFolders, subjectID, '_gazeCal_SceneGeometryTargetsPlot'], 'pdf');
 %% How to turn pupil perimeters into gaze angles now that you have scene geometry
 % Define variables for the path to the sceneGeometry file, perimeter file, and a _pupilData.mat file (which is to be created).
 % Issue this command: fitPupilPerimeter(perimeterFileName, pupilFileName,'sceneGeometryFileName',sceneGeometryFileName,'useParallel',true,'verbose',true);
@@ -190,12 +190,12 @@ load([saveFolders, subjectID, '_gazeCal_pupilData.mat'])
 figure; hold on
 plot(pupilData.sceneConstrained.eyePoses.values(:,2), '.-')
 plot(pupilData.radiusSmoothed.eyePoses.values(:,2), '.-')
-ElevationFigHandle = figure(72);
-saveas(ElevationFigHandle, [saveFolders, subjectID, '_gazeCal_eyePosEle_smoothed'], 'fig');
+ElevationFigHandle = figure(1);
+saveas(ElevationFigHandle, [saveFolders, subjectID, '_gazeCal_eyePosEle_smoothed'], 'pdf');
 
 figure; hold on
 plot(pupilData.sceneConstrained.eyePoses.values(:,1), '.-')
 plot(pupilData.radiusSmoothed.eyePoses.values(:,1), '.-')
-ElevationFigHandle = figure(73);
-saveas(ElevationFigHandle, [saveFolders, subjectID, '_gazeCal_eyePosAzi_smoothed'], 'fig');
+ElevationFigHandle = figure(2);
+saveas(ElevationFigHandle, [saveFolders, subjectID, '_gazeCal_eyePosAzi_smoothed'], 'pdf');
 end

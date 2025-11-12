@@ -160,7 +160,7 @@ fValBest = Inf;
         meanGazeTargets = mean(gazeTargets);
         gazeTargets = gazeTargets - meanGazeTargets;
         idx = ~isnan(eyePoses);
-        angleError = norm(gazeTargets(idx)-eyePoses(idx)) + norm(meanEyePoses)/10;
+        angleError = norm(gazeTargets(idx)-eyePoses(idx)) + (norm(meanEyePoses)/10)^2;
         % Store the best solution seen
         if angleError < fValBest
             fValBest = angleError;
