@@ -16,6 +16,7 @@ import cv2
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 import shutil
 import argparse
+import scipy.io
 
 
 # Import relevant custom libraries with helper functions and constants 
@@ -549,7 +550,10 @@ def main() -> None:
     gaze_target_points: np.ndarray = manual_extract_target_circles(background_gray)
 
     print("---Saving selections---")
-    np.save(path_to_output, gaze_target_points)
+    if(path_to_output.strip().endswith(".mat")):
+        scipy.io.savemat(path_to_output, {"gaze_targets": gaze_target_points})
+    else:
+        np.save(path_to_output, gaze_target_points)
 
 
 if(__name__ == "__main__"):

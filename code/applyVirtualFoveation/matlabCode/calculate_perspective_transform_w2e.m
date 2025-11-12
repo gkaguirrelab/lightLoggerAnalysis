@@ -1,5 +1,46 @@
 function perspective_projection = calculate_perspective_transform_w2e(world_camera_intrinsics, target_pos_ang_intended, target_pos_screen)
+% Calcualte the perspective projection used to map between screen coordinates and eye coordinates
+%
+% Syntax:
+%   perspective_projection = calculate_perspective_transform_w2e(world_camera_intrinsics, target_pos_ang_intended, target_pos_screen)
+%
+% Description:
+%  Given the world camera intrinscis, a list of gaze calibration targets in deg [azi, ele], 
+%  as well as the positions of those targets observed on the screen [x, y], 
+%  calculate the perspective projection used to map between screen coordinates and eye coordinates
+%
+% Inputs:
+%   world_camera_intrinscis     - Object. Object representing the result 
+%                                 of the world camera intrinscis calibration                   
+%
+%   target_pos_ang_intended     - Nx2 Double. Matrix representing the 
+%                                 intended position of the targets in degrees 
+%   
+%   target_pos_screen           - Nx2 Double. Matrix representing the 
+%                                 positions of the targets in screen space 
+%   
+% Optional key/value pairs:
+%   none
+%
+% Outputs:
+%   perspective_projection       - Object. Object representing the perspective 
+%                                  projection from screen coordinates to 
+%                                  eye coordinates
+%                                       
+% Examples:
+%{
+	% Load in the world camera intrinscis 
+    world_camera_intrinscis = load("/Users/zacharykelly/Documents/MATLAB/projects/lightLoggerAnalysis/data/intrinsics_calibration.mat");
 
+    % Load in the target positions in their intended angle form 
+    target_pos_ang_intended = load("/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_data/lightLogger/scriptedIndoorOutdoor/FLIC_2001/gazeCalibration/temporalFrequency/runData.mat".taskData);
+
+    % Load in the targets in their screen positions 
+    % NOTE: If you do not have this, consult extract_gaze_stimulus.py
+    target_pos_screen = load("/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/FLIC_2001/gazeCalibration/temporalFrequency/FLIC_2001_gazeCal_gazeTargetsScreen".gaze_targets);
+
+
+%}
     arguments 
         world_camera_intrinsics; % Struct containing the world camera intrinsics
         target_pos_ang_intended; % Position of gaze targets in degrees of visual angle 

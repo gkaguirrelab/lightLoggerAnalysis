@@ -41,9 +41,7 @@ function retinalImage = virtuallyFoveateFrame(I, gaze_angle, fisheyeIntrinsicsPa
 %
 % Examples:
 %{
-	foo = 1;
-    bar = myFunc(foo);
-	fprintf('Bar = %d \n',bar);   
+	TODO 
 %}
 
     arguments
@@ -59,7 +57,7 @@ function retinalImage = virtuallyFoveateFrame(I, gaze_angle, fisheyeIntrinsicsPa
     % Get the camera visual field positions corresponding to positions of all
     % locations on the camera sensor
     [nRows, nCols] = size(I);
-    I = fliplr(imrotate(I, 180));
+    I = fliplr(imrotate(I, 180)); 
 
     % Load the camera intrinsics and derive the conversion of world camera
     % pixels to world camera angle degrees. Then, load the projection matrix
