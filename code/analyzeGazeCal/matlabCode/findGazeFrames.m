@@ -1,111 +1,4 @@
-% function [frame_list] = findGazeFrames(start_time, gaze_targets_deg, perimeterFile, target_dur_s, onset_delay_s)
-% %FINDGAZEFRAMES Automated process to identify representative frames from gaze calibration.
-% %   Uses the MEDIAN of the Xp/Yp points to find a robust center 
-% %   frame for each target, based on a 120 fps rate.
-% %
-% %   NOTE: When a target fails to yield a valid frame (returns NaN), 
-% %   a detailed diagnostic is printed to the command window.
-% % Example
-% %{ 
-%     gaze_targets_deg = [ ...
-%             0, 0; -15, 15; -15, -15; 15, 15; 15, -15; ...
-%             0, 15; 0, -15; -15, 0; 15, 0;...
-%             -7.5, 7.5; -7.5, -7.5; 7.5, 7.5; 7.5, -7.5; ...
-%             0, 10; 0, -7.5; -7.5, 0; 7.5, 0;...
-%             0, 0; -15, 15; -15, -15; 15, 15; 15, -15; ...
-%             0, 15; 0, -15; -15, 0; 15, 0;...
-%             -7.5, 7.5; -7.5, -7.5; 7.5, 7.5; 7.5, -7.5; ...
-%             0, 10; 0, -7.5; -7.5, 0; 7.5, 0];
-%     findGazeFrames([1, 23, 575], gaze_targets_deg, 3.267)
-% %}
-%     arguments
-%         start_time (1,3) double      % time of first dot in [minute, second, millisecond] format. Human observer should determine this with IINA for now.
-%         gaze_targets_deg (:, 2) double         % N x 2 array of target positions [phi, theta] (Used for N, but not position values)
-%         perimeterFile char
-%         target_dur_s (1,1) double = 3.43       % Duration (s) each dot was presented (optional, default 3.43s)
-%         onset_delay_s (1,1) double = 0.5 % how much shorter is the first fixation than intended?
-%     end
-%     % Hardcoded Parameters
-%     FPS = 120;
-%     analysis_window_duration = 1.5; % seconds
-% 
-%     % CONFIDENCE PARAMETERS
-%     confidence_cutoff = 0.7; 
-%     min_perimeter_points = 8;
-% 
-%     % convert time to frame number
-%     start_frame = estimateFrameFromTime(FPS, start_time);
-%     onset_delay_frames = round(onset_delay_s * FPS); 
-% 
-% 
-%     % --- 1. DATA LOADING AND PREPARATION ---
-%     %data_file_path = '/Users/samanthamontoya/Aguirre-Brainard Lab Dropbox/Sam Montoya/FLIC_data/lightLogger/sam_gazecal_106.mat';
-%     %data_file_path = '/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Flic Experimenter/FLIC_data/lightLogger/Processing/FLIC_200X_gazeCalibration_session1_perimeter.mat';
-% 
-% 
-%     % UPDATED DATA LOADING based on user feedback
-%     pupil_features_struct = load(perimeterFile, 'perimeter');
-%     pupil_features = pupil_features_struct.perimeter.data;
-% 
-%     % Call flatten_features to filter frames and extract valid data
-%     [median_pupil_centers, ~, ~, frame_idx] = flatten_features(pupil_features, confidence_cutoff, min_perimeter_points);
-% 
-%     % --- 2. CONVERT TIME TO FRAMES ---
-%     target_dur_frames = round(target_dur_s * FPS);
-%     analysis_window_frames = round(analysis_window_duration * FPS);
-% 
-%     % --- 3. TIMING AND WINDOW SETUP (in Frames) ---
-%     N = size(gaze_targets_deg, 1);
-%     frame_list = nan(N, 1);
-% 
-%     % Create per-target durations
-%     target_dur_each = repmat(target_dur_frames, N, 1); % default durations
-%     target_dur_each(1) = target_dur_each(1) - onset_delay_frames; % shorten first target
-% 
-%     %Determine the start frame for each target
-%     dot_start_frames = start_frame + [0; cumsum(target_dur_each(1:end-1))];
-% 
-%     % Calculate the start and end of the 1.5s analysis window for each target (in frames)
-%     center_offset_frames = round(target_dur_each / 2);
-%     half_window_frames = round(analysis_window_frames / 2);
-%     window_starts_frame = dot_start_frames + center_offset_frames - half_window_frames;
-%     window_ends_frame = window_starts_frame + analysis_window_frames - 1; 
-% 
-%     % --- 4. FRAME SELECTION LOOP ---
-%     for i = 1:N
-%         f_start = window_starts_frame(i);
-%         f_end = window_ends_frame(i);
-% 
-%         % a) Segment: Find all valid (pre-filtered) frames within the analysis window
-%         idx_window = (frame_idx >= f_start) & (frame_idx <= f_end); 
-% 
-%         centers_window = median_pupil_centers(idx_window, :);
-%         frame_idx_window = frame_idx(idx_window);
-% 
-%         % Skip if no valid frames found in the window 
-%         if isempty(centers_window)
-%             warning('No valid detected frames found for target %d in the window [Frame %d to %d].', i, f_start, f_end);
-% 
-%             % *** DIAGNOSTIC OUTPUT HERE ***
-%             diagnoseFailure(pupil_features, f_start, f_end, confidence_cutoff, min_perimeter_points);
-% 
-%             continue;
-%         end
-%         % b) Find the Median (X_median and Y_median) across all frames in the window
-%         median_x_across_frames = median(centers_window(:, 1));
-%         median_y_across_frames = median(centers_window(:, 2));
-% 
-%         % c) Find the Frame Closest to the Median
-%         median_center_across_frames = [median_x_across_frames, median_y_across_frames];
-%         distances = hypot(centers_window(:, 1) - median_center_across_frames(1), centers_window(:, 2) - median_center_across_frames(2));
-%         [~, min_dist_sub_idx] = min(distances);
-%         selected_frame_index = frame_idx_window(min_dist_sub_idx);
-% 
-%         frame_list(i) = selected_frame_index;
-%     end
-% end
-
-function [frame_list] = findGazeFrames(start_time, gaze_targets_deg, perimeterFile, target_dur_s, onset_delay_s, confidence_cutoff, min_perimeter_points)
+function [frame_list] = findGazeFrames(start_time, gaze_targets_deg, perimeterFile, target_dur_s, onset_dur_s, confidence_cutoff, min_perimeter_points)
 %FINDGAZEFRAMES Automated process to identify representative frames from gaze calibration.
 %   Uses the MEDIAN of the Xp/Yp points to find a robust center 
 %   frame for each target, based on a 120 fps rate.
@@ -117,7 +10,7 @@ function [frame_list] = findGazeFrames(start_time, gaze_targets_deg, perimeterFi
         gaze_targets_deg (:, 2) double         % N x 2 array of target positions [phi, theta] (Used for N, but not position values)
         perimeterFile char
         target_dur_s (1,1) double = 3.43       % Duration (s) each dot was presented (optional, default 3.43s)
-        onset_delay_s (1,1) double = 0.5 % how much shorter is the first fixation than intended?
+        onset_dur_s = 2.6 % how much shorter is the first fixation than intended?
         confidence_cutoff = 0.7; %confidencce of perimeter points 
         min_perimeter_points = 8;% number of points at above confidence required to be a "good frame"
     end
@@ -132,8 +25,8 @@ function [frame_list] = findGazeFrames(start_time, gaze_targets_deg, perimeterFi
     
     % convert time to frame number
     start_frame = time2frame(start_time, FPS);
-    onset_delay_frames = round(onset_delay_s * FPS); 
-    
+    onset_dur_frames = round(onset_dur_s * FPS); 
+
     % --- 1. DATA LOADING AND PREPARATION ---
     pupil_features_struct = load(perimeterFile, 'perimeter');
     pupil_features = pupil_features_struct.perimeter.data;
@@ -150,7 +43,7 @@ function [frame_list] = findGazeFrames(start_time, gaze_targets_deg, perimeterFi
     frame_list = nan(N, 1);
     % Create per-target durations
     target_dur_each = repmat(target_dur_frames, N, 1); % default durations
-    target_dur_each(1) = target_dur_each(1) - onset_delay_frames; % shorten first target
+    target_dur_each(1) = onset_dur_frames; % shorten first target
     % Determine the start frame for each target
     dot_start_frames = start_frame + [0; cumsum(target_dur_each(1:end-1))];
     % Calculate the start and end of the 1.5s analysis window for each target (in frames)
@@ -203,11 +96,7 @@ function [frame_list] = findGazeFrames(start_time, gaze_targets_deg, perimeterFi
         
         % The expected duration is target_dur_frames, unless it's the first target, 
         % which is shortened by onset_delay_frames.
-        if i == 1
-            expected_frame_dur = target_dur_frames - onset_delay_frames;
-        else
-            expected_frame_dur = target_dur_frames;
-        end
+        expected_frame_dur = target_dur_each(i);
         
         % Check if the frame difference is significantly larger than expected
         if frame_diff > (expected_frame_dur + frame_diff_threshold)

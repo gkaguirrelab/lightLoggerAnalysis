@@ -1,4 +1,4 @@
-function [minutes, seconds, ms] = frame2time(frame_num, fps)
+function [output] = frame2time(frame_num, fps)
 % FRAME2TIME Converts a frame number (or vector of frame numbers) into a timestamp 
 % (minutes, seconds, ms).
 %
@@ -13,6 +13,7 @@ function [minutes, seconds, ms] = frame2time(frame_num, fps)
 %                  (Numeric scalar, must be > 0)
 %
 % Outputs:
+% output [minutes seconds ms]
 %   minutes      - The whole number of minutes (Column vector).
 %   seconds      - The whole number of seconds remaining after minutes (Column vector).
 %   ms           - The whole number of milliseconds remaining after seconds
@@ -68,5 +69,7 @@ function [minutes, seconds, ms] = frame2time(frame_num, fps)
     rollover_s = (seconds >= 60);
     seconds(rollover_s) = seconds(rollover_s) - 60; % Reset seconds by subtracting 60
     minutes(rollover_s) = minutes(rollover_s) + 1; % Increment minutes
+
+    output = [minutes seconds ms]
 
 end
