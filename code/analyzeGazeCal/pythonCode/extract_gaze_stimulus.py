@@ -514,6 +514,15 @@ def manual_extract_target_circles(background_img: np.ndarray) -> np.ndarray:
 
     # Click until enter is pressed
     points: list[tuple] = plt.ginput(0, timeout=0)
+    plt.close() 
+
+    # Verify the order of the points
+    fig, ax = plt.subplots()
+    ax.imshow(background_img)
+    for i, (x, y) in enumerate(points, start=1):
+        ax.plot(x, y, 'o')
+        ax.text(x+5, y-5, str(i), ha='left', va='top')
+    plt.show()
     
     return np.array(points)
 
