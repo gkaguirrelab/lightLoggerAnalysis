@@ -77,7 +77,12 @@ gazeTargets =
     7.5000         0
    -7.5000         0
 
-   observerArgs = {'sphericalAmetropia',-1.25};
+
+   targetDurSec = 3.34;
+   confidenceCutoff = 0.8;
+
+   correctionType = 'contactLens'; 
+   observerArgs = {'sphericalAmetropia',-1.25, correctionType, -1.25};
 p5 =
 
   Columns 1 through 7
@@ -187,8 +192,8 @@ gazeTargetsDeg =
          0   -7.5000
    -7.5000         0
     7.5000         0
-
-observerArgs = {'sphericalAmetropia',-5.75,'spectacleLens',[-4.5,0,0]};
+correctionType = 'contactLens';
+observerArgs = {'sphericalAmetropia',-5.75, correctionType,[-4.5]};
 
 
 %%FLIC_2004

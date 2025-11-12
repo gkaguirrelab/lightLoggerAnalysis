@@ -26,7 +26,7 @@ function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, 
 % 
 % Example:
 %{
-    subjectId = 'FLIC_2004';
+    subjectId = 'FLIC_2006';
     sessionNum = 1;
     runGazeCalibrationStimulus("full", 2, 60, subjectId, 'GazeCalibration',sessionNum, 106.7, 192.4)
 %}
@@ -280,13 +280,12 @@ function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, 
     taskData.gaze_target_positions_deg = degPositions; % Target positions (nDots x 2)
     
     % 2. Create unique filename
-    timestamp = datestr(now, 'yyyymmdd_HHMMSS');
-    folders = ['/FLIC_data/lightLogger/GazeCalRunFileData/', subjectId];
+    folders = ['/FLIC_data/lightLogger/scriptedIndoorOutdoor/', subjectId, 'gazeCalibration/temporalFrequency'];
     subjDir = fullfile(getpref("lightLoggerAnalysis", 'dropboxBaseDir'), folders);
     if ~exist(subjDir, 'dir')
         mkdir(subjDir)
     end
-    filename = fullfile(subjDir, sprintf('%s_%s_session%s_%s.mat', subjectId, experiment_name, num2str(session),timestamp));
+    filename = fullfile(subjDir, sprintf('%s_gazeCal_runData.mat', subjectId));
 
     % 3. Save the data structure
     try
