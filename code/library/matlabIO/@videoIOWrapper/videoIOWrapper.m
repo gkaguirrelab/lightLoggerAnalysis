@@ -12,7 +12,8 @@ classdef videoIOWrapper < handle
         utility_library
         full_video_path  
         filename
-
+        last_frame_read = 0; 
+        last_frame_written = 0; 
     end
 
     % Calling function can see, but not modify

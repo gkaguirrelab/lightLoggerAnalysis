@@ -141,7 +141,7 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
         fprintf("Processing frame: %d/%d\n", ii, end_frame);
 
         % Retrieve the world frame and its timestamp 
-        world_frame = world_frame_reader.read(ii, 'grayscale', true); 
+        world_frame = world_frame_reader.read('frameNum', ii, 'grayscale', true); 
         world_timestamp = world_t(ii); 
         
         % Find the gaze angle that corresponds to this frame 
