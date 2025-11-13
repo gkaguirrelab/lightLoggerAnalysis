@@ -23,12 +23,10 @@ function frame = readFrame(obj, options)
         switch(options.color)
             % If user wants, just return bgr
             case "bgr"
-                return ; 
-
+                
             % Otherwise, need to flip channels 
             case "rgb"  
                 frame = frame(:, :, [3 2 1]);
-                return ; 
             
             otherwise 
                 error("Unsupported color mode: %s", colorMode);
