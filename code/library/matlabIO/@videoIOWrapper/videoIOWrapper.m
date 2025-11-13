@@ -98,6 +98,9 @@ classdef videoIOWrapper < handle
         frame = readFrame(obj,frameNum, options)
         writeVideo(obj,frameNum, options)
 
+        % Delete/clear overload 
+        delete(obj); 
+
         
 
     end
