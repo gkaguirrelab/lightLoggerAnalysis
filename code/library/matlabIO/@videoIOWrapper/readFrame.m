@@ -17,6 +17,7 @@ function frame = readFrame(obj, options)
 
     % Retrieve the frame from the video
     frame = squeeze(uint8(obj.utility_library.extract_frames_from_video( py.str(obj.full_video_path), {frameNum-1}, py.bool(options.grayscale))));
+    py.gc.collect(); 
     
     % Convert to desired color if not grayscale 
     if (~options.grayscale)
