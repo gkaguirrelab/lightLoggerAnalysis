@@ -47,7 +47,8 @@ end
     total_patches = maxRows * maxCols;
     % Initialize 3D arrays for slope and AUC values per window layer
     slope3D     = nan(nRows, nCols, total_patches);
-    auc3D       = nan(nRows, nCols, total_patches); % *** CHANGE 1: Renamed intercept3D to auc3D ***
+    auc3D       = nan(nRows, nCols, total_patches); % 
+
     % Calculate the temporal SPD of the input chunk
     [~, frq] = calcTemporalSPD(v, fps, 'lineResolution', false);
     % Counter for layer index (each patch corresponds to one layer)
@@ -72,36 +73,44 @@ end
             spd = spd(:); 
             fLoc = fLoc(:);
             
-            % Exclude exactly 30 Hz (set to NaN, e.g. avoid mains noise artifact)
-            spd(fLoc==30) = NaN;
-            
             % Define valid data points: positive frequencies and positive power
             valid = fLoc>0 & spd>0;
-            % Exclude a specific band of frequencies (52–71 Hz)
-            valid(fLoc>=52 & fLoc<=71) = false;
+            
             % Only proceed if at least 2 valid frequency bins remain
             if nnz(valid)>=2
                 
-                % Calculate AUC using trapezoidal integration (trapz)
-                % AUC is the sum of the power spectrum (SPD) multiplied by the 
-                % frequency bin width (df), which is handled by trapz.
-                % The integration is performed only over the valid frequencies.
-                auc = trapz(fLoc(valid), spd(valid)); 
+                f_min = min(fLoc(valid));
+
+                f_max = max(fLoc(valid));
                 
                 % Fit a straight line in log-log space for the slope
                 C = polyfit(log10(fLoc(valid)), log10(spd(valid)), 1);
-                
+                % Calculate Area Under the *FITTED LINE* (Analytic Integral)
+                % The function is SPD(f) = 10^C(2) * f^C(1)
+                % Check for the special case where the exponent C(1) is -1
+                if abs(C(1) + 1) < 1e-6
+                    % Integral of 1/f is ln(f)
+                    auc = (10^C(2)) * (log(f_max) - log(f_min));
+                else
+                    % General case: Integral[ A * f^B df ]
+                    A = 10^C(2); % Scaling factor
+                    B = C(1);    % Exponent/Slope
+
+                    % Closed-form integral: (A / (B+1)) * (f_max^(B+1) - f_min^(B+1))
+                    auc = (A / (B + 1)) * ( (f_max^(B + 1)) - (f_min^(B + 1)) );
+                end
+
                 % Assign slope and AUC values to current region layer
-                slope3D(row:row+window(1)-1, col:col+window(2)-1, layer)     = C(1);
-                auc3D(row:row+window(1)-1, col:col+window(2)-1, layer)       = auc; % *** CHANGE 3: Store AUC instead of intercept ***
+                slope3D(row:row+window(1)-1, col:col+window(2)-1, layer) = C(1);
+                auc3D(row:row+window(1)-1, col:col+window(2)-1, layer) = auc;
             end
         end
-    end % Added missing 'end' for the row loop closure
+    end 
     
     % Average slope across all overlapping layers (ignoring NaNs)
     slopeMap     = mean(slope3D,     3, 'omitnan');
     % Average AUC across all overlapping layers (ignoring NaNs)
-    aucMap       = mean(auc3D, 3, 'omitnan'); % *** CHANGE 4: Renamed interceptMap to aucMap ***
+    aucMap       = mean(auc3D, 3, 'omitnan'); % 
     
     % If plotting is requested
     if options.doPlot
@@ -122,6 +131,6 @@ end
         % Plot AUC map on the visual field surface
         figure;
         surf(X, Y, Z, aucMap, 'EdgeColor','none'); shading interp; lighting none;
-        axis equal; colormap jet; colorbar; title('1/f SPD Area Under Curve Map'); % *** CHANGE 5: Updated plot title ***
+        axis equal; colormap jet; colorbar; title('1/f SPD Area Under Curve Map'); % 
     end
 end
