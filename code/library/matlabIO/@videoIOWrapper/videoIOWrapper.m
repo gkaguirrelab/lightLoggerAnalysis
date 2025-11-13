@@ -94,8 +94,8 @@ classdef videoIOWrapper < handle
         close(obj);
 
         % video I/O 
-        frame = read(obj,frameNum, options)
-        write(obj,frameNum, options)
+        frame = readFrame(obj,frameNum, options)
+        writeVideo(obj,frameNum, options)
 
         
 
