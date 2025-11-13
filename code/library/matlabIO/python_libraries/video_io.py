@@ -12,6 +12,7 @@ def dir_to_video(dir_path: str, output_path: str, fps: float=30) -> None:
     # Gather all of the frame paths 
     frame_paths: list[str] = [os.path.join(dir_path, filename)
                               for filename in natsorted(os.listdir(dir_path))
+                              if not filename.startswith(".")
                              ]
     
     assert len(frame_paths) > 0, "Must have non-zero amount of frames"
@@ -20,7 +21,7 @@ def dir_to_video(dir_path: str, output_path: str, fps: float=30) -> None:
     sample_frame: np.ndarray = cv2.imread(frame_paths[0])
 
     # Initialize a video writer based on info from this frame 
-    video_writer: cv2.VideoWriter = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*"MJPG"), 
+    video_writer: cv2.VideoWriter = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*"FFV1"), 
                                                     float(fps), sample_frame.shape[:2][::-1], isColor=True
                                                    )
     if(not video_writer.isOpened()):

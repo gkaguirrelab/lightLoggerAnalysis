@@ -134,6 +134,12 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
 
     tic; 
     for ii = start_frame:end_frame
+        if(ii > world_frame_reader.NumFrames)
+            break ; 
+        end 
+
+        fprintf("Processing frame: %d/%d\n", ii, end_frame);
+
         % Retrieve the world frame and its timestamp 
         world_frame = world_frame_reader.read(ii, 'grayscale', true); 
         world_timestamp = world_t(ii); 
@@ -152,6 +158,11 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
 
         % Write the resulting image out as a frame 
         imwrite(virtually_foveated_frame, fullfile(temp_dir, sprintf('frame_%d.png', ii)));
+
+        % Flush any jump memory 
+        clear virtually_foveated_frame; 
+        py.gc.collect(); 
+
     end     
 
     % Convert the temp dir back into a playable video at the desired output location 

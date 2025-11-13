@@ -11,6 +11,7 @@ classdef videoIOWrapper < handle
     properties (GetAccess=private)
         utility_library
         full_video_path  
+        filename
 
     end
 
@@ -21,7 +22,6 @@ classdef videoIOWrapper < handle
         Path
         NumFrames
         Duration
-        FrameRate
         Width
         Height
 
@@ -32,6 +32,9 @@ classdef videoIOWrapper < handle
 
         % Verbosity
         verbose = false;
+        
+        % Public so that we can set it when writing
+        FrameRate
 
     end
 
@@ -53,29 +56,48 @@ classdef videoIOWrapper < handle
             obj.Name = [name,ext];
             obj.Path = filepath;
             obj.full_video_path = videoFileName; 
+            obj.filename = name; 
 
-            % Store the number of frames in the video 
-            obj.NumFrames =  double(obj.utility_library.inspect_video_frame_count(videoFileName));
+            switch(options.ioAction)
+                % In the case of read, load in some information about the video 
+                case "read"
+                    % Store the number of frames in the video 
+                    obj.NumFrames =  double(obj.utility_library.inspect_video_frame_count(videoFileName));
 
-            % Retrieve the FPS of the video
-            obj.FrameRate = double(obj.utility_library.inspect_video_FPS(videoFileName)); 
+                    % Retrieve the FPS of the video
+                    obj.FrameRate = double(obj.utility_library.inspect_video_FPS(videoFileName)); 
 
-            % Set the duration of the video 
-            obj.Duration = (obj.NumFrames / obj.FrameRate); 
+                    % Set the duration of the video 
+                    obj.Duration = (obj.NumFrames / obj.FrameRate); 
 
-            % Retrieve the frame size of the video 
-            frame_size = cell(obj.utility_library.inspect_video_framesize(videoFileName)); 
-            rows = double(frame_size{1});
-            cols = double(frame_size{2});
-            
-            % Set the dimensions of the video
-            obj.Height = rows; 
-            obj.Width = cols; 
+                    % Retrieve the frame size of the video 
+                    frame_size = cell(obj.utility_library.inspect_video_framesize(videoFileName)); 
+                    rows = double(frame_size{1});
+                    cols = double(frame_size{2});
+                    
+                    % Set the dimensions of the video
+                    obj.Height = rows; 
+                    obj.Width = cols; 
+
+                case "write"
+
+                otherwise 
+                    error("Unsupported action")
+
+            end 
 
         end
 
         % Required methds
+        % FileIO 
+        open(obj); 
+        close(obj);
+
+        % video I/O 
         frame = read(obj,frameNum, options)
+        write(obj,frameNum, options)
+
+        
 
     end
 end
