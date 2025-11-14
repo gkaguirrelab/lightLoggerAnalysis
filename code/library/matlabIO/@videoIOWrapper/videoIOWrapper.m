@@ -42,12 +42,14 @@ classdef videoIOWrapper < handle
     methods
 
         % Constructor
-        function obj = videoIOWrapper(videoFileName,options)
+        function obj = videoIOWrapper(videoFileName,varargin)
 
-            arguments
-                videoFileName
-                options.ioAction char = 'read'
-            end
+            % Using an old-fashioned input parser as the arguments block
+            % syntax fails under Matlab 2025a.
+            p = inputParser; p.KeepUnmatched = false;            
+            p.addParameter('ioAction','read',@ischar);
+            p.parse(varargin{:})
+            options.ioAction = p.Results.ioAction;
 
             % Import the Python helper library 
             obj.utility_library = import_pyfile(getpref("lightLoggerAnalysis", "video_io_util_path")); 
