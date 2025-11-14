@@ -1,4 +1,4 @@
-function [slopeMap, aucMap, frq] = mapSPDs(video, fps, window, step, options)
+function [whole_video_mean_slope3D, whole_video_mean_auc3D, whole_video_frequencies] = mapSPDs(video, fps, window, step, options)
 % Computes slope and Area Under the Curve (AUC) maps of temporal SPD across 
 % image regions and projects them onto a 1 m visual field surface, then 
 % plots both maps.
@@ -40,7 +40,7 @@ function [slopeMap, aucMap, frq] = mapSPDs(video, fps, window, step, options)
         options.chunk_size_seconds {mustBeNumeric} = 15; 
     end 
         % Open a reader to the video 
-        world_reader = videoIOWrapper(v); 
+        world_reader = videoIOWrapper(video, 'ioAction', 'read'); 
         nRows = world_reader.Height; 
         nCols = world_reader.Width; 
 
@@ -58,17 +58,31 @@ function [slopeMap, aucMap, frq] = mapSPDs(video, fps, window, step, options)
         start = options.num_frames_to_process(1); 
         endpoint = options.num_frames_to_process(2);
         if(endpoint == inf)
-            endpoint = world_frame_reader.NumFrames; 
+            endpoint = world_reader.NumFrames; 
         end 
 
         % Calculate the step size in frames 
-        chunk_size_frames = floor(chunk_size_seconds * world_reader.FrameRate); 
+        chunk_size_frames = floor(options.chunk_size_seconds * world_reader.FrameRate); 
         
+        % Find the number of chunks in the video 
+        num_chunks = ceil((endpoint - start + 1) / chunk_size_frames); 
+
+        % Allocate average Slope3D and AUC3D variables across all chunks 
+        whole_video_mean_slope3D = zeros(nRows, nCols); 
+        whole_video_mean_auc3D = zeros(nRows, nCols); 
+
+        % Allocate a frequency vector that will store the frequency used for the SPD per chunk 
+        whole_video_frequencies = nan(num_chunks, 1);
+
         % Counter for layer index (each patch corresponds to one layer)
         layer = 0;
 
         % Move over the chunks of the video
+        current_chunk = 1; 
         for frame_num = start:chunk_size_frames:endpoint
+            tic; 
+            fprintf("Processing chunk: %d/%d\n", current_chunk, num_chunks); 
+
             % Find the local chunk size (e.g. the last frame may not be the ideal large) 
             local_chunk_size_frames = min(chunk_size_frames, world_reader.NumFrames - frame_num + 1); 
             
@@ -82,6 +96,9 @@ function [slopeMap, aucMap, frq] = mapSPDs(video, fps, window, step, options)
 
             % Find the SPD of the full spatial resolution
             [~, frq] = calcTemporalSPD(frame_chunk, fps, 'lineResolution', false);
+            whole_video_frequencies(current_chunk) = frq; 
+
+            size(frame_chunk)
 
             % Slide the analysis window across the image in row and column directions
             for row = 1:step:(nRows - window(1) + 1)
@@ -94,7 +111,7 @@ function [slopeMap, aucMap, frq] = mapSPDs(video, fps, window, step, options)
                     regionMatrix(row:row+window(1)-1, col:col+window(2)-1) = 1;
                     try
                         % Compute temporal SPD restricted to this region
-                        [spd, fLoc] = calcTemporalSPD(local_chunk_size_frames, fps, 'lineResolution', false, 'regionMatrix', regionMatrix);
+                        [spd, fLoc] = calcTemporalSPD(frame_chunk, fps, 'lineResolution', false, 'regionMatrix', regionMatrix);
                     catch
                         % If computation failes, skip that patch
                         continue;
@@ -132,11 +149,11 @@ function [slopeMap, aucMap, frq] = mapSPDs(video, fps, window, step, options)
                             % Closed-form integral: (A / (B+1)) * (f_max^(B+1) - f_min^(B+1))
                             auc = (A / (B + 1)) * ( (f_max^(B + 1)) - (f_min^(B + 1)) );
                         end
-
-                    % Assign slope and AUC values to current region layer
-                    slope3D(row:row+window(1)-1, col:col+window(2)-1, layer) = C(1);
-                    auc3D(row:row+window(1)-1, col:col+window(2)-1, layer) = auc;
-
+                        
+                        % Assign slope and AUC values to current region layer
+                        slope3D(row:row+window(1)-1, col:col+window(2)-1, layer) = C(1);
+                        auc3D(row:row+window(1)-1, col:col+window(2)-1, layer) = auc;
+                    end 
                 end
             end % Added missing 'end' for the row loop closure
         
@@ -144,6 +161,10 @@ function [slopeMap, aucMap, frq] = mapSPDs(video, fps, window, step, options)
             slopeMap     = mean(slope3D,     3, 'omitnan');
             % Average AUC across all overlapping layers (ignoring NaNs)
             aucMap       = mean(auc3D, 3, 'omitnan'); % 
+
+            % Add this to the growing average for the whole video 
+            whole_video_mean_slope3D = whole_video_mean_slope3D + slopeMap;
+            whole_video_mean_auc3D = whole_video_mean_auc3D + aucMap; 
             
             % If plotting is requested
             if options.doPlot
@@ -160,14 +181,25 @@ function [slopeMap, aucMap, frq] = mapSPDs(video, fps, window, step, options)
                 % Plot slope map on the visual field surface
                 figure;
                 surf(X, Y, Z, slopeMap, 'EdgeColor','none'); shading interp; lighting none;
-                axis equal; colormap jet; colorbar; title('1/f SPD Slope Map');
+                axis equal; colormap jet; colorbar; title(sprintf('Chunk %d | 1/f SPD Slope Map', current_chunk));
                 % Plot AUC map on the visual field surface
                 figure;
                 surf(X, Y, Z, aucMap, 'EdgeColor','none'); shading interp; lighting none;
-                axis equal; colormap jet; colorbar; title('1/f SPD Area Under Curve Map'); % 
+                axis equal; colormap jet; colorbar; title(sprintf('Chunk %d | 1/f SPD Area Under Curve Map', current_chunk)); % 
             end
 
+            % Calculate the elapsed tiem per chunk 
+            elapsed_seconds = toc; 
+
+            fprintf("Chunk %d took: %f seconds\n", elapsed_seconds)
+
+            % Increment the chunk number we are on 
+            current_chunk = current_chunk + 1;
+
         end % end chunks
-        
-    end % end function
+
+        % Finally, finish the average slope map and AUC map calculations 
+        whole_video_mean_slope3D = whole_video_mean_slope3D / num_chunks;
+        whole_video_mean_auc3D = whole_video_mean_auc3D / num_chunks;
+
 end 
