@@ -96,9 +96,9 @@ function [whole_video_mean_slope3D, whole_video_mean_auc3D, whole_video_frequenc
 
             % Find the SPD of the full spatial resolution
             [~, frq] = calcTemporalSPD(frame_chunk, fps, 'lineResolution', false);
-            whole_video_frequencies(current_chunk) = frq; 
+            whole_video_frequencies(current_chunk, 1) = frq; 
 
-            size(frame_chunk)
+            disp(frq)
 
             % Slide the analysis window across the image in row and column directions
             for row = 1:step:(nRows - window(1) + 1)
