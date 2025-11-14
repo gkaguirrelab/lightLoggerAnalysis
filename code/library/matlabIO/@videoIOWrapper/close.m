@@ -3,11 +3,18 @@ function close(obj)
         obj 
     end 
 
+    % If obj.Path was not defined, this obj is being destroyed before properly created, 
+    % so let's just close 
+    if(isempty(obj.Path))
+        return;
+    end 
+
     % Construct the output path of the video 
     temp_dir_path = fullfile(obj.Path, obj.filename); 
     video_output_path = fullfile(obj.full_video_path); 
 
-    % Check if the temp dir existed, if it did, we remove it, if it did not, we do nothing 
+    % Check if the temp dir existed for if we were using, 
+    % this in the writing mode, if it did, we remove it, if it did not, we do nothing 
     if(exist(temp_dir_path, "dir"))
         % List everything in the directory
         files = dir(temp_dir_path);
