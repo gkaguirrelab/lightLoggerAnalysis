@@ -10,10 +10,6 @@ classdef videoIOWrapper < handle
     % Private properties
     properties (GetAccess=private)
         utility_library
-        full_video_path  
-        filename
-        last_frame_read = 0; 
-        last_frame_written = 0; 
     end
 
     % Calling function can see, but not modify
@@ -25,6 +21,10 @@ classdef videoIOWrapper < handle
         Duration
         Width
         Height
+        full_video_path  
+        filename
+        last_frame_read = 0; 
+        last_frame_written = 0; 
 
     end
 
