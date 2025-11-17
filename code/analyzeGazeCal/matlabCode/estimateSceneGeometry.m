@@ -64,7 +64,7 @@ function [sceneGeometry,p, gazeOffset] = estimateSceneGeometry(perimeterFile, fr
     % Set up the paths
     dropboxBaseDir = getpref('lightLoggerAnalysis','dropboxBaseDir');
     saveFolders = [dropboxBaseDir, '/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/', subjectID, '/gazeCalibration/temporalFrequency/'];
-    perimeterFile = [saveFolders, subjectID, '_gazeCal_session-1_perimeter.mat'];
+    perimeterFile = [saveFolders, subjectID, '_gazeCal_perimeter.mat'];
 
     % Identify the frames and gazes
     frameSet = [10349; 12362; 12783; 13153; 13518; 13962];
@@ -84,7 +84,7 @@ function [sceneGeometry,p, gazeOffset] = estimateSceneGeometry(perimeterFile, fr
     nWorkers = 6;
 
     % Run the routine
-    [sceneGeometry,p,gazeOffset] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', x0, 'nWorkers', nWorkers);
+    [sceneGeometry,p,gazeOffset] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'glintFileName',glintFileName, 'setupArgs', setupArgs, 'x0', x0, 'nWorkers', nWorkers);
 
 %}
 
@@ -95,6 +95,7 @@ arguments
     options.setupArgs cell {mustBeVector} = {}
     options.confidenceThreshold double {mustBeScalarOrEmpty} = 0.75
     options.x0 double = [];
+    options.glintFileName char = '';
     options.paramSearchSets = {};
     options.verbosity = 'stage'; % 'none','stage','iter';
     options.nWorkers double {mustBeNumeric} = [];
@@ -122,10 +123,21 @@ load(perimeterFile,'perimeter');
 % Use just the selected frames
 perimeter = perimeter.data(frameSet);
 
+% If the glintFileName is defined, load the glints
+if ~isempty(options.glintFileName)
+    load(options.glintFileName,'glintData')
+    glintData.X = glintData.X(frameSet);
+    glintData.Y = glintData.Y(frameSet);
+else
+    glintData.X = nan(size(frameSet));
+    glintData.Y = nan(size(frameSet));
+end
+
 % Remove any perimeters that have no points that are above the confidence
 % threshold
 goodIdx = cellfun(@(x) any(x.confidence > confidenceThreshold), perimeter);
 perimeter = perimeter(goodIdx);
+glintData.X = glintData.X(goodIdx); glintData.Y = glintData.Y(goodIdx);
 
 % Create the sceneGeometry starting point
 sceneGeometry = createSceneGeometry(setupArgs{:});
@@ -172,7 +184,7 @@ fValBest = Inf;
 % Define an objective that minimizes mismatch between targets and eye
 % rotations, and uses updates in camera position
 myNewScene = @(p) updateSceneGeometry(sceneGeometry,p,setupArgs);
-myEyePoses = @(p) estimateEyePoses(perimeter,myNewScene(p),confidenceThreshold);
+myEyePoses = @(p) estimateEyePoses(perimeter,glintData,myNewScene(p),confidenceThreshold);
 myObj = @(p) calcAngleError(gazeTargets,myEyePoses(p),p);
 
 % Define the X0 and bounds on the search for camera position and eye
@@ -181,8 +193,8 @@ myObj = @(p) calcAngleError(gazeTargets,myEyePoses(p),p);
 %       azi, ele, tor camera rotation
 %       eye rotation centers (common, differential)
 %       cornea (axial length, k1, k2)
-lb = [-50 -15 40 10 -5 -10 0.8 0.8 10 40 40];
-ub = [-20 -05 100 40  5  20 1.2 1.2 20 50 50];
+lb = [-50 -15 40 10 -5 -10 0.8 0.8 10 30 30];
+ub = [-20 -05 100 40  5  20 1.2 1.2 20 60 60];
 
 % Use passed or built-in x0
 if ~isempty(options.x0)
@@ -193,7 +205,7 @@ end
 
 % Define a progressive search strategy
 if isempty(options.paramSearchSets)
-    paramSearchSets = {1:3,4:6,1:6,7:8,9:11};
+    paramSearchSets = {1:3,4:6,1:6,7:8,9:11,1:11};
 else
     paramSearchSets = options.paramSearchSets;
 end
@@ -245,7 +257,7 @@ end
 
 %% Plot
 % Show the visual angle results
-eyePoses = estimateEyePoses(perimeter,sceneGeometry,confidenceThreshold);
+eyePoses = estimateEyePoses(perimeter,glintData,sceneGeometry,confidenceThreshold);
 figure
 gazeOffset = mean(eyePoses(:,1:2))-mean(gazeTargets(:,1:2));
 plot(gazeTargets(:,1),gazeTargets(:,2),'o'); hold on
@@ -256,14 +268,19 @@ xlabel('azimuth [deg]'); ylabel('elevation [deg]');
 title(sprintf('Gaze offset %2.1f, %2.1f [azi, ele]',gazeOffset));
 
 % Render the eyes and the pupil perimeters
+modelEyeLabelNames = {'retina' 'irisPerimeter' 'pupilEllipse' 'cornea'  'glint_01'};
+modelEyePlotColors = {'.w' 'ob' '-g' '.y' 'or'};
+
 for ii = 1:length(perimeter)
-    renderEyePose(eyePoses(ii,:),sceneGeometry);
+    renderEyePose(eyePoses(ii,:),sceneGeometry,...
+        'modelEyeLabelNames',modelEyeLabelNames,'modelEyePlotColors',modelEyePlotColors);
     hold on
     conf = perimeter{ii}.confidence;
     goodIdx = conf > confidenceThreshold;
     Xp = perimeter{ii}.Xp(goodIdx);
     Yp = perimeter{ii}.Yp(goodIdx);
-    plot(Xp,Yp,'*k')
+    plot(Xp,Yp,'xg')
+    plot(glintData.X(ii),glintData.Y(ii),'xr')
 end
 
 
@@ -309,10 +326,7 @@ end
 
 
 % Fit the set of frames for this scene geometry and return the fits and errors
-function [eyePoses,ellipseRMSEs] = estimateEyePoses(perimeter,sceneGeometry,confidenceThreshold)
-
-% For now, we are not using the glint
-glintCoord = [];
+function [eyePoses,ellipseRMSEs] = estimateEyePoses(perimeter,glintData,sceneGeometry,confidenceThreshold)
 
 % Define the return variables
 eyePoses = nan(length(perimeter),4);
@@ -324,9 +338,11 @@ parfor ii = 1:length(perimeter)
     goodIdx = conf > confidenceThreshold;
     Xp = perimeter{ii}.Xp(goodIdx);
     Yp = perimeter{ii}.Yp(goodIdx);
+    glintCoord = [glintData.X(ii) glintData.Y(ii)];
     % Make sure we have Xp points
     if ~isempty(Xp)
         [eyePoses(ii,:),~,ellipseRMSEs(ii)] = eyePoseEllipseFit(Xp, Yp, glintCoord, sceneGeometry,...
+            'glintTol',5,...
             'cameraTransX0',[0;0;0],...
             'cameraTransBounds', [0;0;0]);
     end
