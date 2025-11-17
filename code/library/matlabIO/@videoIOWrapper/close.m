@@ -24,9 +24,8 @@ function close(obj)
 
         % If there is a non-zero amount of frames, make the video
         if(~isempty(files))
-            obj.utility_library.dir_to_video(temp_dir_path, video_output_path, obj.FrameRate); 
+            obj.utility_library.dir_to_video(temp_dir_path, video_output_path, double(obj.FrameRate)); 
         end 
-
 
         % Once the video is made, remove the temp dir 
         rmdir(temp_dir_path, 's');

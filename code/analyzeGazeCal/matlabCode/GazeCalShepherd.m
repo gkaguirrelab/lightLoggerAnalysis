@@ -115,7 +115,7 @@ gazeTargets = gazeTargetsDeg(1:16,:).*[-1,1];
 %of the points look poorly outlined. They may need to be omitted from the
 %procedure.
 %% now again with the second half of the gaze targets
-subset = [17:33];
+subset = [17:30];
 frameSet = fullFrameSet(subset);
 gazeTargets = gazeTargetsDeg(subset,:).*[-1,1];
 
@@ -151,7 +151,7 @@ gazeTargets = gazeTargetsDeg.*[-1,1];
 % and frames used for this participant in a file!
 
 % what is the gaze offset?? HUMAN
-gazeOffset = [1.5, 9.0]; % [azi, ele]
+gazeOffset = [-7.2, 1.9]; % [azi, ele]
 
 sceneGeometryFile = [saveFolders, subjectID, '_gazeCal_SceneGeometry.mat'];
 saveFileMeta = [saveFolders, subjectID, '_gazeCal_SceneGeometryMetadata.mat'];
@@ -159,7 +159,7 @@ save(sceneGeometryFile, 'sceneGeometry')
 save(saveFileMeta, "p34", "gazeOffset", "fullFrameSet", "gazeTargets", "startTime", "observerArgs", "confidenceThreshold", "targetDurSec");
 
 % Save the figure 1 as a MATLAB figure file
-fig1_handle = figure(35);
+fig1_handle = figure(1);
 saveas(fig1_handle, [saveFolders, subjectID, '_gazeCal_SceneGeometryTargetsPlot'], 'pdf');
 %% How to turn pupil perimeters into gaze angles now that you have scene geometry
 % Define variables for the path to the sceneGeometry file, perimeter file, and a _pupilData.mat file (which is to be created).
@@ -184,7 +184,8 @@ eleUpperBound = 25 + gazeOffset(1,2);
 
 [pupilData] = smoothPupilRadius(perimeterFile, pupilFileName,...
     sceneGeometryFile, 'useParallel', true, 'nWorkers', 6,...
-    'eyePoseLB', [aziLowerBound, eleLowerBound, 0, 0.5], 'eyePoseUB', [aziUpperBound, eleUpperBound, 0, 0.5]);
+    'eyePoseLB', [aziLowerBound, eleLowerBound, 0, 0.5], 'eyePoseUB', [aziUpperBound, eleUpperBound, 0, 0.5],...
+    'exponentialTauParam', 20);
 
 load([saveFolders, subjectID, '_gazeCal_pupilData.mat'])
 figure; hold on
