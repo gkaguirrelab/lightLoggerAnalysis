@@ -97,7 +97,7 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
     video_io_util = import_pyfile(getpref("lightLoggerAnalysis", "video_io_util_path"));
 
     % Create a video IO reader wrapper we will use to read into the original video
-    world_frame_reader = videoIOWrapper(world_video); 
+    world_frame_reader = videoIOWrapper(world_video, "ioAction", 'read'); 
 
     % Now we will retrieve the start and end time of all of the sensors 
     start_ends = find_sensor_start_ends(virutal_foveation_util, path_to_recording_chunks); 
@@ -144,7 +144,7 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
         end 
 
         % Retrieve the world frame and its timestamp 
-        world_frame = world_frame_reader.read('frameNum', ii, 'grayscale', true); 
+        world_frame = world_frame_reader.readFrame('frameNum', ii, 'grayscale', true); 
         world_timestamp = world_t(ii); 
         
         % Find the gaze angle that corresponds to this frame 
