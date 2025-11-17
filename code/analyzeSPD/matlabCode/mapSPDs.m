@@ -4,7 +4,7 @@ function [whole_video_mean_slope3D, whole_video_mean_auc3D, whole_video_frequenc
 % plots both maps.
 %
 % Required Inputs:
-%   v                 - [frames x rows x cols] video chunk (double)
+%   video             - String. path to video
 %   fps               - Sampling rate (Hz)
 %   window            - [height width] of square region. Defaults to [40 40]
 %   step              - Step size for moving window. Defaults to 20
@@ -25,7 +25,7 @@ function [whole_video_mean_slope3D, whole_video_mean_auc3D, whole_video_frequenc
 %
 % Example Usage: 
 %{
-    [slopeMap, aucMap, frq] = mapSlopeAUCSPD(v, fps, [40 40], 20, True, theta, phi, R)
+    [slopeMap, aucMap, frq] = mapSlopeAUCSPD(video, fps, [40 40], 20, True, theta, phi, R)
 %}
     arguments
         video               {mustBeText}
@@ -72,7 +72,7 @@ function [whole_video_mean_slope3D, whole_video_mean_auc3D, whole_video_frequenc
         whole_video_mean_auc3D = zeros(nRows, nCols); 
 
         % Allocate a frequency vector that will store the frequency used for the SPD per chunk 
-        whole_video_frequencies = nan(num_chunks, 1);
+        whole_video_frequencies = [];
 
         % Counter for layer index (each patch corresponds to one layer)
         layer = 0;
@@ -96,9 +96,9 @@ function [whole_video_mean_slope3D, whole_video_mean_auc3D, whole_video_frequenc
 
             % Find the SPD of the full spatial resolution
             [~, frq] = calcTemporalSPD(frame_chunk, fps, 'lineResolution', false);
-            whole_video_frequencies(current_chunk, 1) = frq; 
-
-            disp(frq)
+            if(isempty(whole_video_frequencies))
+                whole_video_frequencies = frq; 
+            end 
 
             % Slide the analysis window across the image in row and column directions
             for row = 1:step:(nRows - window(1) + 1)
@@ -191,7 +191,7 @@ function [whole_video_mean_slope3D, whole_video_mean_auc3D, whole_video_frequenc
             % Calculate the elapsed tiem per chunk 
             elapsed_seconds = toc; 
 
-            fprintf("Chunk %d took: %f seconds\n", elapsed_seconds)
+            fprintf("Chunk %d took: %f seconds\n", current_chunk, elapsed_seconds)
 
             % Increment the chunk number we are on 
             current_chunk = current_chunk + 1;
