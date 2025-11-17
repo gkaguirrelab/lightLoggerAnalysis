@@ -57,15 +57,15 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
 %{
     % First, we will define a path to the playable video of the world camera we want to virtually foveate
     % and its original chunks, to get the respective timestamps of all the sensors 
-    world_video = "/Volumes/T7 Shield/scriptedIndoorOutdoorVideos/FLIC_2001/gazeCalibration/temporalFrequency/W.avi"; 
-    path_to_recording_chunks = "/Volumes/EXTERNAL_1/FLIC_2001/gazeCalibration/temporalFrequency";
+    world_video = "/Volumes/T7 Shield/scriptedIndoorOutdoorVideos/FLIC_2001/walkIndoor/temporalFrequency/W.avi"; 
+    path_to_recording_chunks = "/Volumes/EXTERNAL_1/FLIC_2001/walkIndoor/temporalFrequency";
 
     % Load in the gaze angles and the constant offset we will apply to the gaze angles
-    gaze_angles = load("/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/FLIC_2001/gazeCalibration/temporalFrequency/FLIC_2001_gazeCal_pupilData.mat").pupilData.radiusSmoothed.eyePoses.values; 
+    gaze_angles = load("/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/FLIC_2001/walkIndoor/temporalFrequency/FLIC_2001_walkIndoor_pupilData_contrast-1x5.mat").pupilData.radiusSmoothed.eyePoses.values; 
     offsets = load("/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/FLIC_2001/gazeCalibration/temporalFrequency/FLIC_2001_gazeCal_SceneGeometryMetadata.mat").gazeOffset;
 
     % Define the output path where this video will write to 
-    output_path = "./testingVirtualFoveation.avi"; 
+    output_path = "/Users/zacharykelly/FLIC_2001_walkIndoor_virtuallyFoveatedVideo.avi"; 
     
     % Load in the camera intrinscis of the world camera 
     path_to_intrinsics = "/Users/zacharykelly/Documents/MATLAB/projects/lightLoggerAnalysis/data/intrinsics_calibration.mat"; 
@@ -89,6 +89,7 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
         options.num_frames_to_process = [1, inf]; 
         options.pupil_fps {mustBeNumeric} = 120; 
         options.pupil_world_phase_offset {mustBeNumeric} = 0.005; 
+        options.verbose = false; 
     end     
 
     % Import the Python util library 
@@ -138,7 +139,9 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
             break ; 
         end 
 
-        fprintf("Processing frame: %d/%d\n", ii, end_frame);
+        if(options.verbose)
+            fprintf("Processing frame: %d/%d\n", ii, end_frame);
+        end 
 
         % Retrieve the world frame and its timestamp 
         world_frame = world_frame_reader.read('frameNum', ii, 'grayscale', true); 
