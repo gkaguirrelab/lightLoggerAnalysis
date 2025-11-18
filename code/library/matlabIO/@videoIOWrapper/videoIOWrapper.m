@@ -25,6 +25,7 @@ classdef videoIOWrapper < handle
         filename
         last_frame_read = 0; 
         last_frame_written = 0; 
+        mode;
 
     end
 
@@ -60,6 +61,9 @@ classdef videoIOWrapper < handle
             obj.Path = filepath;
             obj.full_video_path = videoFileName; 
             obj.filename = name; 
+            
+            % Store the mode this was opened with 
+            obj.mode = options.ioAction; 
 
             switch(options.ioAction)
                 % In the case of read, load in some information about the video 

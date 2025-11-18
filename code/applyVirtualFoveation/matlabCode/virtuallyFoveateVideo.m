@@ -74,8 +74,14 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
     % NOTE: If you do not have this, please consult calculate_perspective_transform_w2e.m 
     path_to_perspective_projection = "/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/FLIC_2001/gazeCalibration/temporalFrequency/FLIC_2001_gazeCal_perspectiveProjection.mat";
     
-    % Virtually foveate the video 
-    virtuallyFoveateVideo(world_video, gaze_angles, offsets, output_path, path_to_recording_chunks, path_to_intrinsics, path_to_perspective_projection)
+    % Virtually foveate the WHOLE video 
+    % virtuallyFoveateVideo(world_video, gaze_angles, offsets, output_path, path_to_recording_chunks, path_to_intrinsics, path_to_perspective_projection)
+
+    % Virtually foveate a PORTION of the video 
+    start_end = [1, 100];
+    % virtuallyFoveateVideo(world_video, gaze_angles, offsets, output_path, path_to_recording_chunks, path_to_intrinsics, path_to_perspective_projection, "num_frames_to_process", start_end);
+
+
 %}
 
     arguments 
@@ -98,6 +104,8 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
 
     % Create a video IO reader wrapper we will use to read into the original video
     world_frame_reader = videoIOWrapper(world_video, "ioAction", 'read'); 
+    world_frame_writer = videoIOWrapper(output_path, "ioAction", 'write'); 
+    world_frame_writer.FrameRate = 120; 
 
     % Now we will retrieve the start and end time of all of the sensors 
     start_ends = find_sensor_start_ends(virutal_foveation_util, path_to_recording_chunks); 
@@ -109,6 +117,10 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
     world_t = linspace(world_start_end(1), world_start_end(2), world_frame_reader.NumFrames);
     pupil_t = linspace(pupil_start_end(1), pupil_start_end(2), size(gaze_angles, 1));
 
+    if(numel(pupil_t) ~= size(gaze_angles, 1))
+        error("Miscalculation of pupil timestamps");
+    end 
+
     if(numel(world_t) ~= world_frame_reader.NumFrames)
         error("Miscalculation of world timestamps");
     end 
@@ -117,22 +129,24 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
     % is actually 0.005 seconds phase advanced
     pupil_t = pupil_t + options.pupil_world_phase_offset; 
 
-    % Make a tempdir for the output so we can reconstruct to an .avi video later (MALTAB does not support this)
-    temp_dir = random_string(5);
-    if(~exist(temp_dir, "dir"))
-        mkdir(temp_dir)
-    end 
-
     % Initialize a blank frame we will use to pad frames that have nan gaze angles 
     blank_frame = zeros(world_frame_reader.Height, world_frame_reader.Width, 3, 'uint8'); 
 
-    % Iterate over the world frames 
+    % Apply the gaze offsets to the gaze angles, and adjust their coordinate system 
+    gaze_angles_original = gaze_angles(:, 1:2) - gaze_offsets; 
+    gaze_angles(:, 1:2) = ( gaze_angles(:, 1:2) + ( -1 * gaze_offsets  ) ) .* [-1, -1];
+
+    % Choose the bounds for our virtual foveation 
     start_frame = options.num_frames_to_process(1); 
     end_frame = world_frame_reader.NumFrames; 
     if(options.num_frames_to_process(2) ~= inf)
         end_frame = options.num_frames_to_process(2);
     end 
 
+    % Open the writer to start writing frames 
+    open(world_frame_writer); 
+
+    % Iterate over the world frames 
     tic; 
     for ii = start_frame:end_frame
         if(ii > world_frame_reader.NumFrames)
@@ -143,13 +157,25 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
             fprintf("Processing frame: %d/%d\n", ii, end_frame);
         end 
 
-        % Retrieve the world frame and its timestamp 
-        world_frame = world_frame_reader.readFrame('frameNum', ii, 'grayscale', true); 
+        % Retrieve the world frame timestamp 
         world_timestamp = world_t(ii); 
         
         % Find the gaze angle that corresponds to this frame 
         [~, gaze_angle_idx] = min(abs(pupil_t - world_timestamp));
-        gaze_angle = ( (gaze_angles(gaze_angle_idx, 1:2)) + ([gaze_offsets(1), gaze_offsets(2)] .* [-1, -1] ) ) .* [-1, -1];
+        gaze_angle = gaze_angles(gaze_angle_idx, 1:2); 
+        
+        if(gaze_angle_idx ~= 12318)
+            disp(gaze_angle_idx)
+            continue
+        end 
+        
+        % Load in the world frame
+        world_frame = world_frame_reader.readFrame('frameNum', ii, 'grayscale', true); 
+
+        figure; 
+        title(sprintf("Frame number %d | Gaze angle %d | Gaze Angle (Original): %.2f %2.f", ii, gaze_angle_idx, gaze_angles_original(gaze_angle_idx, 1), gaze_angles_original(gaze_angle_idx, 2)));
+        hold on; 
+        imshow(world_frame); 
 
         % Virtually foveat the frame 
         virtually_foveated_frame = []; 
@@ -159,20 +185,19 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
             virtually_foveated_frame = uint8(virtuallyFoveateFrame(world_frame, gaze_angle, path_to_intrinsics, path_to_perspective_projection)); 
         end 
 
-        % Write the resulting image out as a frame 
-        imwrite(virtually_foveated_frame, fullfile(temp_dir, sprintf('frame_%d.png', ii)));
+        figure; 
+        title(sprintf("Frame number %d | Gaze angle %d | Gaze Angle (Original) %.2f %2.f", ii, gaze_angle_idx, gaze_angles_original(gaze_angle_idx, 1), gaze_angles_original(gaze_angle_idx, 2)));
+        hold on; 
+        imshow(virtually_foveated_frame); 
 
-        % Flush any jump memory 
-        clear virtually_foveated_frame; 
-        py.gc.collect(); 
+        % Write the frame to the video 
+        world_frame_writer.writeVideo(virtually_foveated_frame); 
+        break 
 
     end     
 
-    % Convert the temp dir back into a playable video at the desired output location 
-    video_io_util.dir_to_video(temp_dir, output_path, world_frame_reader.FrameRate); 
-
-    % Remove the temp dir 
-    rmdir(temp_dir, 's'); 
+    % Close the world video writer 
+    close(world_frame_writer); 
 
     elapsed_seconds = toc; 
     fprintf("Elapsed Time: %f seconds\n", elapsed_seconds); 

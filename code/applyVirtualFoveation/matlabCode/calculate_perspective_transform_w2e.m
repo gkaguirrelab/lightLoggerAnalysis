@@ -30,15 +30,16 @@ function perspective_projection = calculate_perspective_transform_w2e(world_came
 % Examples:
 %{
 	% Load in the world camera intrinscis 
-    world_camera_intrinscis = load("/Users/zacharykelly/Documents/MATLAB/projects/lightLoggerAnalysis/data/intrinsics_calibration.mat");
+    world_camera_intrinsics = load("/Users/zacharykelly/Documents/MATLAB/projects/lightLoggerAnalysis/data/intrinsics_calibration.mat");
 
     % Load in the target positions in their intended angle form 
-    target_pos_ang_intended = load("/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_data/lightLogger/scriptedIndoorOutdoor/FLIC_2001/gazeCalibration/temporalFrequency/runData.mat".taskData);
+    target_pos_ang_intended = load("/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_data/lightLogger/scriptedIndoorOutdoor/FLIC_2001/gazeCalibration/runData.mat").taskData;
 
     % Load in the targets in their screen positions 
     % NOTE: If you do not have this, consult extract_gaze_stimulus.py
-    target_pos_screen = load("/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/FLIC_2001/gazeCalibration/temporalFrequency/FLIC_2001_gazeCal_gazeTargetsScreen".gaze_targets);
+    target_pos_screen = load("/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/FLIC_2001/gazeCalibration/temporalFrequency/FLIC_2001_gazeCal_gazeTargetsScreen").gaze_targets;
 
+    perspective_projection = calculate_perspective_transform_w2e(world_camera_intrinsics, target_pos_ang_intended, target_pos_screen); 
 
 %}
     arguments 
@@ -56,7 +57,7 @@ function perspective_projection = calculate_perspective_transform_w2e(world_came
     assert(size(target_pos_ang_intended, 1) == size(target_pos_screen, 1));  
 
     % Convert the screen pixel coordinates into [N x azimuth x elevation]
-    pixel_azimuth_elevation = anglesFromIntrinsics(target_pos_screen, world_camera_intrinsics);
+    pixel_azimuth_elevation = anglesFromIntrinsics(target_pos_screen, world_camera_intrinsics.camera_intrinsics_calibration.results.Intrinsics);
     geometric_transform = fitgeotform2d( pixel_azimuth_elevation, target_pos_ang_intended, 'projective');
 
     % initialize return struct

@@ -17,7 +17,7 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 import shutil
 import argparse
 import scipy.io
-
+import h5py
 
 # Import relevant custom libraries with helper functions and constants 
 light_logger_analysis_dir_path: str = os.path.expanduser("~/Documents/MATLAB/projects/lightLoggerAnalysis")
@@ -36,12 +36,13 @@ def parse_args() -> str:
 
     # Add the path to video argument 
     parser.add_argument("path_to_video", type=str, help="Path to world camera video from gaze calibration")
+    parser.add_argument("intended_gaze_targets_path", type=str, help="Path to the gaze targets' positions in degrees when they were displayed on screen")
     parser.add_argument("path_to_output_file", type=str, help="Path to numpy output file")
 
     # Parse the args
     args: object = parser.parse_args()
 
-    return args.path_to_video, args.path_to_output_file
+    return args.path_to_video, args.intended_gaze_targets_path, args.path_to_output_file
 
 """Given a dict of detected gaze targets and an image to display 
    on, visualize the results 
@@ -137,36 +138,57 @@ def find_stimulus_period(video: str | np.ndarray,
     # Convert red intensities to np.ndarray 
     red_intensities = np.array(red_intensities)
 
-    # Find the positive peaks in the signal corresponding 
-    # to the start/end
-    peaks, props = find_peaks(red_intensities[:, 1],
-                              height=peak_height,                
-                              prominence=peak_prominence,              
-                              distance=peak_min_distance             
-                             )
-    
-    # Find the approximate start/end (add a small delta)
-    # to get out of the peak positions
-    delta: int = 200 
-    peaks += delta
-    start, end = red_intensities[peaks, 0][:2] 
+    # Find the peaks
+    peaks, props = find_peaks(
+        red_intensities[:, 1],
+        height=peak_height,
+        prominence=peak_prominence,
+        distance=peak_min_distance
+    )
 
-    # Visualize results if desired 
-    if(visualize_results is True):
-        fig, ax = plt.subplots() 
-        ax.plot(red_intensities[:, 0], red_intensities[:, 1], '-x', label="Red Intensity by Frame")
-        ax.plot(peaks, red_intensities[peaks][:, 1], 'x', label="Peaks")
-        ax.plot(peaks[:2], red_intensities[peaks[:2], 1], 'x', label="Start/End")
+    # Get frame numbers of the peak indices
+    peak_frames = red_intensities[peaks, 0]
+
+    # Add delta to frame numbers (NOT to indices)
+    delta = 200
+    start, end = (peak_frames + delta)[:2]
+
+    # Visualization
+    if visualize_results is True:
+        fig, ax = plt.subplots()
+
+        # Main intensity curve
+        ax.plot(
+            red_intensities[:, 0],
+            red_intensities[:, 1],
+            '-x',
+            label="Red Intensity by Frame"
+        )
+
+        # Mark detected peaks
+        ax.plot(
+            red_intensities[peaks, 0],
+            red_intensities[peaks, 1],
+            'x',
+            label="Peaks"
+        )
+
+        # Mark start/end (shifted frames)
+        ax.plot(
+            peak_frames[:2] + delta,
+            red_intensities[peaks[:2], 1],
+            'x',
+            label="Start/End"
+        )
+
         ax.set_title("Stimulus Start/End")
         ax.set_xlabel("Frame #")
         ax.set_ylabel("Intensity")
-        ax.legend() 
-        
+        ax.legend()
+
         plt.show()
-
-        return start, end, fig
-
-    return start, end
+    
+    return start, end, fig
 
 
 """Find the background image of a video.
@@ -507,34 +529,53 @@ def auto_extract_target_circles(video: str,
     return circles.items()  
 
 """Manually extract"""
-def manual_extract_target_circles(background_img: np.ndarray) -> np.ndarray:    
-    # Display the background image to choose points off of 
-    plt.imshow(background_img, cmap=None if background_img.ndim == 3 else "gray")
-    plt.title("Background Img")
-    plt.axis('on')  
+def manual_extract_target_circles(background_img: np.ndarray, path_to_intended_targets: str) -> np.ndarray:    
+    # First, let's load in the intended order of the points 
+    intended_positions: np.ndarray | None = None
+    with h5py.File(path_to_intended_targets, "r") as f:
+        intended_positions = np.transpose(np.array(f["taskData"]["gaze_target_positions_deg"][()]))
 
-    # Click until enter is pressed
-    points: list[tuple] = plt.ginput(0, timeout=0)
-    plt.close() 
+    # FIGURE 1 — Intended order
+    fig1, ax1 = plt.subplots()
+    ax1.set_title("Gaze targets were presented in the following order")
+    for i, (x, y) in enumerate(intended_positions, start=1):
+        ax1.plot(x, y, 'o')
+        ax1.text(x, y, str(i), ha='left', va='top')
 
-    # Verify the order of the points
-    fig, ax = plt.subplots()
-    ax.imshow(background_img)
+    plt.show(block=False)  
+
+  
+    fig2, ax2 = plt.subplots()
+    ax2.imshow(background_img, cmap=None if background_img.ndim == 3 else "gray")
+    ax2.set_title("Pick gaze target points in order [Enter to quit]")
+
+    # Click until Enter is pressed
+    points: list[tuple] = fig2.ginput(0, timeout=0)
+    plt.close(fig2)
+
+    # FIGURE 3 — Verification
+    fig3, ax3 = plt.subplots()
+    ax3.imshow(background_img)
+    ax3.set_title("Verify order gaze target points were clicked")
+
     for i, (x, y) in enumerate(points, start=1):
-        ax.plot(x, y, 'o')
-        ax.text(x+5, y-5, str(i), ha='left', va='top')
+        ax3.plot(x, y, 'o')
+        ax3.text(x + 5, y - 5, str(i), ha='left', va='top')
+
     plt.show()
-    
+
     return np.array(points)
 
 def main() -> None:
     # Parse arguments
     print("---Parsing Args---")
-    video_path, path_to_output = parse_args()
+    video_path, intended_gaze_targets_path, path_to_output = parse_args()
+    for path in (video_path, intended_gaze_targets_path):
+        assert os.path.exists(path), f"Path: {path} does not exist"
 
     # Find the start end of stimulus
     print("---Finding stimulus start/end---") 
-    start, end = find_stimulus_period(video_path)
+    start, end, fig = find_stimulus_period(video_path, visualize_results=True)
 
     # Calculate the background image 
     print(f"---Finding background image of frames: [{start}, {end})---")
@@ -547,7 +588,7 @@ def main() -> None:
     
     # Manually select gaze target poinst 
     print("---Selecting targets---")
-    gaze_target_points: np.ndarray = manual_extract_target_circles(background_gray)
+    gaze_target_points: np.ndarray = manual_extract_target_circles(background_gray, intended_gaze_targets_path)
 
     print("---Saving selections---")
     if(path_to_output.strip().endswith(".mat")):
