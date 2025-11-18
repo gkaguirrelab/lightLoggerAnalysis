@@ -164,18 +164,13 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
         [~, gaze_angle_idx] = min(abs(pupil_t - world_timestamp));
         gaze_angle = gaze_angles(gaze_angle_idx, 1:2); 
         
-        if(gaze_angle_idx ~= 12318)
-            disp(gaze_angle_idx)
-            continue
-        end 
-        
         % Load in the world frame
         world_frame = world_frame_reader.readFrame('frameNum', ii, 'grayscale', true); 
 
-        figure; 
-        title(sprintf("Frame number %d | Gaze angle %d | Gaze Angle (Original): %.2f %2.f", ii, gaze_angle_idx, gaze_angles_original(gaze_angle_idx, 1), gaze_angles_original(gaze_angle_idx, 2)));
-        hold on; 
-        imshow(world_frame); 
+        %figure; 
+        %title(sprintf("Frame number %d | Gaze angle %d | Gaze Angle (Original): %.2f %2.f", ii, gaze_angle_idx, gaze_angles_original(gaze_angle_idx, 1), gaze_angles_original(gaze_angle_idx, 2)));
+        %hold on; 
+        %imshow(world_frame); 
 
         % Virtually foveat the frame 
         virtually_foveated_frame = []; 
@@ -185,10 +180,10 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
             virtually_foveated_frame = uint8(virtuallyFoveateFrame(world_frame, gaze_angle, path_to_intrinsics, path_to_perspective_projection)); 
         end 
 
-        figure; 
-        title(sprintf("Frame number %d | Gaze angle %d | Gaze Angle (Original) %.2f %2.f", ii, gaze_angle_idx, gaze_angles_original(gaze_angle_idx, 1), gaze_angles_original(gaze_angle_idx, 2)));
-        hold on; 
-        imshow(virtually_foveated_frame); 
+        %figure; 
+        %title(sprintf("Frame number %d | Gaze angle %d | Gaze Angle (Original) %.2f %2.f", ii, gaze_angle_idx, gaze_angles_original(gaze_angle_idx, 1), gaze_angles_original(gaze_angle_idx, 2)));
+        %hold on; 
+        %imshow(virtually_foveated_frame); 
 
         % Write the frame to the video 
         world_frame_writer.writeVideo(virtually_foveated_frame); 
