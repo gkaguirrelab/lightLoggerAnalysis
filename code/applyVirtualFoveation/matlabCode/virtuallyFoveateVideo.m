@@ -99,15 +99,23 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
     end     
 
     % Import the Python util library 
+    if(options.verbose)
+        disp("Importing Python libraries")
+    end 
     virutal_foveation_util = import_pyfile(getpref("lightLoggerAnalysis", "virtual_foveation_util_path"));
-    video_io_util = import_pyfile(getpref("lightLoggerAnalysis", "video_io_util_path"));
 
     % Create a video IO reader wrapper we will use to read into the original video
+    if(options.verbose)
+        disp("Opening video reader/writer")
+    end 
     world_frame_reader = videoIOWrapper(world_video, "ioAction", 'read'); 
     world_frame_writer = videoIOWrapper(output_path, "ioAction", 'write'); 
     world_frame_writer.FrameRate = 120; 
 
     % Now we will retrieve the start and end time of all of the sensors 
+    if(options.verbose)
+        disp("Finding sensor start end times")
+    end 
     start_ends = find_sensor_start_ends(virutal_foveation_util, path_to_recording_chunks); 
     world_start_end = start_ends.("world");
     pupil_start_end = start_ends.("pupil");
@@ -133,6 +141,9 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
     blank_frame = zeros(world_frame_reader.Height, world_frame_reader.Width, 3, 'uint8'); 
 
     % Apply the gaze offsets to the gaze angles, and adjust their coordinate system 
+    if(options.verbose)
+        disp("Modifying gaze angles")
+    end 
     gaze_angles_original = gaze_angles(:, 1:2) - gaze_offsets; 
     gaze_angles(:, 1:2) = ( gaze_angles(:, 1:2) + ( -1 * gaze_offsets  ) ) .* [-1, -1];
 
@@ -147,9 +158,13 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
     open(world_frame_writer); 
 
     % Iterate over the world frames 
+    if(options.verbose)
+        disp("Beginning frame processing")
+    end 
     tic; 
     for ii = start_frame:end_frame
         if(ii > world_frame_reader.NumFrames)
+            warning(sprintf("Frame %d is out of bounds for video with NumFrames %d. Quitting early.", ii, world_reader.NumFrames));
             break ; 
         end 
 
@@ -167,11 +182,6 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
         % Load in the world frame
         world_frame = world_frame_reader.readFrame('frameNum', ii, 'grayscale', true); 
 
-        %figure; 
-        %title(sprintf("Frame number %d | Gaze angle %d | Gaze Angle (Original): %.2f %2.f", ii, gaze_angle_idx, gaze_angles_original(gaze_angle_idx, 1), gaze_angles_original(gaze_angle_idx, 2)));
-        %hold on; 
-        %imshow(world_frame); 
-
         % Virtually foveat the frame 
         virtually_foveated_frame = []; 
         if(any(isnan(gaze_angle)))
@@ -180,14 +190,8 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
             virtually_foveated_frame = uint8(virtuallyFoveateFrame(world_frame, gaze_angle, path_to_intrinsics, path_to_perspective_projection)); 
         end 
 
-        %figure; 
-        %title(sprintf("Frame number %d | Gaze angle %d | Gaze Angle (Original) %.2f %2.f", ii, gaze_angle_idx, gaze_angles_original(gaze_angle_idx, 1), gaze_angles_original(gaze_angle_idx, 2)));
-        %hold on; 
-        %imshow(virtually_foveated_frame); 
-
         % Write the frame to the video 
-        world_frame_writer.writeVideo(virtually_foveated_frame); 
-        break 
+        world_frame_writer.writeVideo(virtually_foveated_frame);  
 
     end     
 
