@@ -30,11 +30,11 @@ function [whole_video_mean_slope3D, whole_video_mean_auc3D, whole_video_frequenc
     arguments
         video               {mustBeText}
         fps             (1,1) {mustBeNumeric}   = 120
-        window          (1,2) {mustBeNumeric}   = [40 40] 
-        step            (1,1) {mustBeNumeric}   = 20
+        window          (1,2) {mustBeNumeric}   = [6 6] 
+        step            (1,1) {mustBeNumeric}   = 3
         options.doPlot  (1,1) logical           = false
         options.num_frames_to_process {mustBeNumeric} = [1, inf];
-        options.chunk_size_seconds {mustBeNumeric} = 15; 
+        options.chunk_size_seconds {mustBeNumeric} = 30; 
     end 
         % Open a reader to the video 
         world_reader = videoIOWrapper(video, 'ioAction', 'read'); 
@@ -91,6 +91,9 @@ function [whole_video_mean_slope3D, whole_video_mean_auc3D, whole_video_frequenc
             for insertion_index = 1:local_chunk_size_frames
                 frame_chunk(insertion_index, :, :) = world_reader.readFrame("frameNum", frame_num+insertion_index - 1, "grayscale", true); 
             end
+            if(insertion_index ~= local_chunk_size_frames)
+                error("Number of frames does not match the chunk size");
+            end 
 
             % Find the SPD of the full spatial resolution
             [~, frq] = calcTemporalSPD(frame_chunk, fps, 'lineResolution', false);
@@ -114,10 +117,16 @@ function [whole_video_mean_slope3D, whole_video_mean_auc3D, whole_video_frequenc
                         % If computation failes, skip that patch
                         continue;
                     end
+
                     % Flatten vectors for fitting/AUC calculation
                     spd = spd(:); 
                     fLoc = fLoc(:);
-                    
+
+                    %figure; 
+                    %plot(whole_video_frequencies, spd);
+                    %hold on; 
+                    %title(sprintf("SPD | Chunk %d R=%d C=%d", current_chunk, row, col));
+
                     % Exclude exactly 30 Hz (set to NaN, e.g. avoid mains noise artifact)
                     spd(fLoc==30) = NaN;
                     

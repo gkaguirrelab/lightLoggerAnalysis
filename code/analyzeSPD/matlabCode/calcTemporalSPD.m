@@ -67,8 +67,17 @@ function [spd, frq] = calcTemporalSPD(v, fps, options)
         fps = fps * nRows;
         
     else
+        % Ensure we are selecting the right mask 
+        mask = options.regionMatrix ~= 0; 
+
+        % Flatten spatial dims into a single pixel dimension
+        v_flat = reshape(v, [nFrames, nRows * nCols]);      % nFrames x (nRows*nCols)
+
+        % Select only pixels in the region
+        regionPixels = v_flat(:, mask(:));                 
+
         % Mean the pixels per image per frame to achieve the signal 
-        signal = squeeze(mean(mean(v, 3), 2));
+        signal = mean(regionPixels, 2); 
 
         % Convert to contrast units
         signal = (signal - mean(signal)) / mean(signal);
@@ -77,6 +86,5 @@ function [spd, frq] = calcTemporalSPD(v, fps, options)
 
     % PSD of the signal
     [frq, spd] = simplePSD(signal, fps);
-
 end
 
