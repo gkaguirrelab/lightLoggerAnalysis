@@ -30,8 +30,15 @@ def dir_to_video(dir_path: str, output_path: str, fps: float=30) -> None:
     # Iterate over the frames and add them to the video writer 
     for frame_num, frame_path in enumerate(frame_paths):
         frame: np.ndarray | None = cv2.imread(frame_path)
+        
         if(frame is None):
-            warnings.warn(f"Could not read frame: {frame_path}")
+            video_writer.release() 
+            raise Exception(f"Could not read frame: {frame_path}")
+        
+        if(frame.shape != sample_frame.shape):
+            video_writer.release()
+            raise Exception(f"Video frames are of inhomogenous shape")
+
         video_writer.write(frame)
 
     # Release the video writer 

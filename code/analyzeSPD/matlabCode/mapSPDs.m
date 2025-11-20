@@ -68,8 +68,8 @@ function [whole_video_mean_slope3D, whole_video_mean_auc3D, whole_video_frequenc
         num_chunks = ceil((endpoint - start + 1) / chunk_size_frames); 
 
         % Allocate average Slope3D and AUC3D variables across all chunks 
-        whole_video_mean_slope3D = zeros(nRows, nCols); 
-        whole_video_mean_auc3D = zeros(nRows, nCols); 
+        whole_video_mean_slopeMap = zeros(nRows, nCols); 
+        whole_video_mean_aucMap = zeros(nRows, nCols); 
 
         % Allocate a frequency vector that will store the frequency used for the SPD per chunk 
         whole_video_frequencies = [];
@@ -163,29 +163,20 @@ function [whole_video_mean_slope3D, whole_video_mean_auc3D, whole_video_frequenc
             aucMap       = mean(auc3D, 3, 'omitnan'); % 
 
             % Add this to the growing average for the whole video 
-            whole_video_mean_slope3D = whole_video_mean_slope3D + slopeMap;
-            whole_video_mean_auc3D = whole_video_mean_auc3D + aucMap; 
+            whole_video_mean_slopeMap = whole_video_mean_slopeMap + slopeMap;
+            whole_video_mean_aucMap = whole_video_mean_aucMap + aucMap; 
             
             % If plotting is requested
             if options.doPlot
-                % Ensure angular coordinates are provided
-                assert(~isempty(options.theta) && ~isempty(options.phi), ...
-                    'To plot, provide options.theta and options.phi.');
-                
-                % Extract radius for projection
-                R = options.R;
-                % Convert spherical coordinates (R, theta, phi) to Cartesian (X,Y,Z)
-                X = reshape(R .* sin(options.theta) .* cos(options.phi), nRows, nCols);
-                Y = reshape(R .* sin(options.theta) .* sin(options.phi), nRows, nCols);
-                Z = reshape(R .* cos(options.theta),                     nRows, nCols);
-                % Plot slope map on the visual field surface
-                figure;
-                surf(X, Y, Z, slopeMap, 'EdgeColor','none'); shading interp; lighting none;
-                axis equal; colormap jet; colorbar; title(sprintf('Chunk %d | 1/f SPD Slope Map', current_chunk));
-                % Plot AUC map on the visual field surface
-                figure;
-                surf(X, Y, Z, aucMap, 'EdgeColor','none'); shading interp; lighting none;
-                axis equal; colormap jet; colorbar; title(sprintf('Chunk %d | 1/f SPD Area Under Curve Map', current_chunk)); % 
+                figure; 
+                title(sprintf("Chunk %d | Slope Map", current_chunk)); 
+                hold on; 
+                imshow(slopeMap); 
+
+                figure; 
+                title(sprintf("Chunk %d | AUC Map", current_chunk)); 
+                imshow(aucMap); 
+
             end
 
             % Calculate the elapsed tiem per chunk 
@@ -199,7 +190,18 @@ function [whole_video_mean_slope3D, whole_video_mean_auc3D, whole_video_frequenc
         end % end chunks
 
         % Finally, finish the average slope map and AUC map calculations 
-        whole_video_mean_slope3D = whole_video_mean_slope3D / num_chunks;
-        whole_video_mean_auc3D = whole_video_mean_auc3D / num_chunks;
+        whole_video_mean_slopeMap = whole_video_mean_slopeMap / num_chunks;
+        whole_video_mean_aucMap = whole_video_mean_aucMap / num_chunks;
+
+        figure; 
+        title(sprintf("Mean Slope Map")); 
+        hold on;
+        imshow(whole_video_mean_slopeMap)
+
+
+        figure; 
+        title(sprintf("Mean AUC Map")); 
+        hold on;
+        imshow(whole_video_mean_aucMap)
 
 end 

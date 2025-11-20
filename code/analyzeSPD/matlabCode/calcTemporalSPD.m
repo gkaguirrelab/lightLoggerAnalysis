@@ -38,10 +38,10 @@ function [spd, frq] = calcTemporalSPD(v, fps, options)
 %}
 
     arguments
-        v (:,480,640) {mustBeNumeric}
+        v (:,240,240) {mustBeNumeric}
         fps (1,1) {mustBeScalarOrEmpty} = 120
         options.lineResolution (1,1) logical = true
-        options.regionMatrix (:,:) {mustBeNumeric} = ones(480,640);
+        options.regionMatrix (:,:) {mustBeNumeric} = ones(240,240);
         options.applyFieldCorrection (1,1) logical = false
         options.byChannel (1,1) logical = false
         options.postreceptoralChannel {mustBeMember(options.postreceptoralChannel,{'LM', 'L-M', 'S'})} = 'LM'
@@ -67,42 +67,11 @@ function [spd, frq] = calcTemporalSPD(v, fps, options)
         fps = fps * nRows;
         
     else
-        mat2D_V = reshape(v, nFrames, nRows * nCols);
+        % Mean the pixels per image per frame to achieve the signal 
+        signal = squeeze(mean(mean(v, 3), 2));
 
-        % Prepare output
-        channels = {'R','G','B'};
-        rgbSignal = nan(nFrames, numel(channels));
-        
-        for cc = 1:numel(channels)
-        
-            % Get 2D Bayer Mask for this channel
-            [~, mask2D] = returnPixelIdx(channels{cc}, 'nRows', nRows, 'nCols', nCols);
-        
-            % Flatten and apply regionMatrix mask with logical 'AND'
-            maskVec = mask2D(:) & options.regionMatrix(:);
-        
-            % Compute average per frame
-            rgbSignal(:, cc) = mean(mat2D_V(:, maskVec), 2);
-        
-        end
-        
-        % Convert RGB --> LMS contrast relative to background
-        background_RGB = mean(rgbSignal, 1);
-        modulation_RGB = rgbSignal - background_RGB;
-        modulation_LMS = cameraToCones(modulation_RGB, options.camera);
-        background_LMS = cameraToCones(background_RGB, options.camera);
-        
-        lmsSignal = modulation_LMS ./ background_LMS;
-        
-        % Select a post-receptoral channel
-        switch options.postreceptoralChannel
-            case {'LM'}
-                signal = (lmsSignal(:,1)+lmsSignal(:,2))/2;
-            case {'L-M'}
-                signal = (lmsSignal(:,1)-lmsSignal(:,2));
-            case {'S'}
-                signal = ((lmsSignal(:,3)-lmsSignal(:,1))+lmsSignal(:,2))/2;
-        end
+        % Convert to contrast units
+        signal = (signal - mean(signal)) / mean(signal);
 
     end
 

@@ -49,7 +49,7 @@ function retinalImage = virtuallyFoveateFrame(I, gaze_angle, fisheyeIntrinsicsPa
         gaze_angle double {mustBeVector}
         fisheyeIntrinsicsPath
         transformationPath
-        options.FOVradius double = 30
+        options.FOVradius double = 60
         options.degPerSample double = 0.25
         options.forceRecalc logical = true
     end

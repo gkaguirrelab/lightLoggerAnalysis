@@ -96,6 +96,7 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
         options.pupil_fps {mustBeNumeric} = 120; 
         options.pupil_world_phase_offset {mustBeNumeric} = 0.005; 
         options.verbose = false; 
+        options.manual_offset = [0, 0]; % Manual offset for FLIC_2001 walkIndoor = [-4.75, 4.75]
     end     
 
     % Import the Python util library 
@@ -138,14 +139,19 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
     pupil_t = pupil_t + options.pupil_world_phase_offset; 
 
     % Initialize a blank frame we will use to pad frames that have nan gaze angles 
-    blank_frame = zeros(world_frame_reader.Height, world_frame_reader.Width, 3, 'uint8'); 
+    blank_frame = zeros(480, 480); 
 
     % Apply the gaze offsets to the gaze angles, and adjust their coordinate system 
     if(options.verbose)
         disp("Modifying gaze angles")
     end 
     gaze_angles_original = gaze_angles(:, 1:2) - gaze_offsets; 
-    gaze_angles(:, 1:2) = ( gaze_angles(:, 1:2) + ( -1 * gaze_offsets  ) ) .* [-1, -1];
+
+    % We first subtract the constant gaze offset from the gaze angles (measured once per pariticpant)
+    % Then, we flip the signs to be upsidedown and left handed. Then, 
+    % we apply a manual offset from the April Tag. The sign of this corresponds to the follow
+    % +azi = move right, +ele = move up
+    gaze_angles(:, 1:2) = ( ( gaze_angles(:, 1:2) - gaze_offsets ) .* [-1, -1] ) + options.manual_offset;
 
     % Choose the bounds for our virtual foveation 
     start_frame = options.num_frames_to_process(1); 
@@ -183,10 +189,18 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
         world_frame = world_frame_reader.readFrame('frameNum', ii, 'grayscale', true); 
 
         % Virtually foveat the frame 
-        virtually_foveated_frame = []; 
-        if(any(isnan(gaze_angle)))
+        virtually_foveated_frame = [];
+        
+        % Ensure we only send valid world frames to be virtually foveated
+        if(~any(world_frame(:))) 
             virtually_foveated_frame = blank_frame; 
-        else    
+
+        % If the gaze angle is nan, just output a blank frame 
+        elseif(any(isnan(gaze_angle)))
+            virtually_foveated_frame = blank_frame; 
+
+        % If we have a valid frame to virtually foveate 
+        else
             virtually_foveated_frame = uint8(virtuallyFoveateFrame(world_frame, gaze_angle, path_to_intrinsics, path_to_perspective_projection)); 
         end 
 
@@ -215,12 +229,3 @@ function start_ends = find_sensor_start_ends(virutal_foveation_util, path_to_rec
     end 
 
 end 
-
-% Generate a random string of length n 
-function s = random_string(n)
-    chars = ['A':'Z' 'a':'z' '0':'9'];  % character set
-    s = chars(randi(numel(chars), [1, n])); 
-end
-
-
-
