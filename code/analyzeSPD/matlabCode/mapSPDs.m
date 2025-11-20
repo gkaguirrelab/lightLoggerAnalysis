@@ -33,9 +33,6 @@ function [whole_video_mean_slope3D, whole_video_mean_auc3D, whole_video_frequenc
         window          (1,2) {mustBeNumeric}   = [40 40] 
         step            (1,1) {mustBeNumeric}   = 20
         options.doPlot  (1,1) logical           = false
-        options.theta   {mustBeNumeric}         = []
-        options.phi     {mustBeNumeric}         = []
-        options.R       (1,1) {mustBeNumeric}   = 1
         options.num_frames_to_process {mustBeNumeric} = [1, inf];
         options.chunk_size_seconds {mustBeNumeric} = 15; 
     end 
@@ -44,22 +41,19 @@ function [whole_video_mean_slope3D, whole_video_mean_auc3D, whole_video_frequenc
         nRows = world_reader.Height; 
         nCols = world_reader.Width; 
 
-        % Compute how many window positions fit vertically and horizontally
-        maxRows = floor((nRows - window(1)) / step) + 1;
-        maxCols = floor((nCols - window(2)) / step) + 1;
-        
-        % Total number of patches (window positions across the image)
-        total_patches = maxRows * maxCols;
-        % Initialize 3D arrays for slope and AUC values per window layer
-        slope3D     = nan(nRows, nCols, total_patches);
-        auc3D       = nan(nRows, nCols, total_patches); % *** CHANGE 1: Renamed intercept3D to auc3D ***
-        
         % Define the start and endpoint that we want to analyze of the video 
         start = options.num_frames_to_process(1); 
         endpoint = options.num_frames_to_process(2);
         if(endpoint == inf)
             endpoint = world_reader.NumFrames; 
         end 
+
+        % Compute how many window positions fit vertically and horizontally
+        maxRows = floor((nRows - window(1)) / step) + 1;
+        maxCols = floor((nCols - window(2)) / step) + 1;
+        
+        % Total number of patches (window positions across the image)
+        total_patches = maxRows * maxCols;
 
         % Calculate the step size in frames 
         chunk_size_frames = floor(options.chunk_size_seconds * world_reader.FrameRate); 
@@ -80,6 +74,10 @@ function [whole_video_mean_slope3D, whole_video_mean_auc3D, whole_video_frequenc
         % Move over the chunks of the video
         current_chunk = 1; 
         for frame_num = start:chunk_size_frames:endpoint
+            % Initialize 3D arrays for slope and AUC values per window layer
+            slope3D     = nan(nRows, nCols, total_patches);
+            auc3D       = nan(nRows, nCols, total_patches); % *** CHANGE 1: Renamed intercept3D to auc3D ***
+
             tic; 
             fprintf("Processing chunk: %d/%d\n", current_chunk, num_chunks); 
 
@@ -127,8 +125,7 @@ function [whole_video_mean_slope3D, whole_video_mean_auc3D, whole_video_frequenc
                     valid = fLoc>0 & spd>0;
                     
                     % Only proceed if at least 2 valid frequency bins remain
-                    if nnz(valid)>=2
-                            
+                    if nnz(valid)>=2        
                         f_min = min(fLoc(valid));
 
                         f_max = max(fLoc(valid));
@@ -158,9 +155,9 @@ function [whole_video_mean_slope3D, whole_video_mean_auc3D, whole_video_frequenc
             end % Added missing 'end' for the row loop closure
         
             % Average slope across all overlapping layers (ignoring NaNs)
-            slopeMap     = mean(slope3D,     3, 'omitnan');
+            slopeMap = mean(slope3D,     3, 'omitnan');
             % Average AUC across all overlapping layers (ignoring NaNs)
-            aucMap       = mean(auc3D, 3, 'omitnan'); % 
+            aucMap = mean(auc3D, 3, 'omitnan'); % 
 
             % Add this to the growing average for the whole video 
             whole_video_mean_slopeMap = whole_video_mean_slopeMap + slopeMap;
@@ -168,14 +165,19 @@ function [whole_video_mean_slope3D, whole_video_mean_auc3D, whole_video_frequenc
             
             % If plotting is requested
             if options.doPlot
-                figure; 
-                title(sprintf("Chunk %d | Slope Map", current_chunk)); 
-                hold on; 
-                imshow(slopeMap); 
+                figure;
+                imagesc(slopeMap);            
+                title(sprintf("Chunk %d | Slope Map", current_chunk));
+                axis image;                 
+                colormap('hot');             
+                colorbar;             
 
-                figure; 
-                title(sprintf("Chunk %d | AUC Map", current_chunk)); 
-                imshow(aucMap); 
+                figure;
+                imagesc(aucMap);
+                title(sprintf("Chunk %d | AUC Map", current_chunk));
+                axis image;
+                colormap('hot');
+                colorbar;
 
             end
 
@@ -193,15 +195,18 @@ function [whole_video_mean_slope3D, whole_video_mean_auc3D, whole_video_frequenc
         whole_video_mean_slopeMap = whole_video_mean_slopeMap / num_chunks;
         whole_video_mean_aucMap = whole_video_mean_aucMap / num_chunks;
 
-        figure; 
-        title(sprintf("Mean Slope Map")); 
-        hold on;
-        imshow(whole_video_mean_slopeMap)
-
-
-        figure; 
-        title(sprintf("Mean AUC Map")); 
-        hold on;
-        imshow(whole_video_mean_aucMap)
+        figure;
+        imagesc(whole_video_mean_slopeMap);            
+        title(sprintf("Whole Video Mean | Slope Map"));
+        axis image;                 
+        colormap('hot');             
+        colorbar;             
+        
+        figure;
+        imagesc(whole_video_mean_aucMap);
+        title(sprintf("Whole Video Mean | AUC Map"));
+        axis image;
+        colormap('hot');
+        colorbar;
 
 end 
