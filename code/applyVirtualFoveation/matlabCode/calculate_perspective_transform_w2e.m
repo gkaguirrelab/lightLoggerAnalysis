@@ -29,15 +29,18 @@ function perspective_projection = calculate_perspective_transform_w2e(world_came
 %                                       
 % Examples:
 %{
+    % Set the subject ID
+    subjectID = "FLIC_2002"; 
+
 	% Load in the world camera intrinscis 
     world_camera_intrinsics = load("/Users/zacharykelly/Documents/MATLAB/projects/lightLoggerAnalysis/data/intrinsics_calibration.mat");
 
     % Load in the target positions in their intended angle form 
-    target_pos_ang_intended = load("/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_data/lightLogger/scriptedIndoorOutdoor/FLIC_2001/gazeCalibration/runData.mat").taskData;
+    target_pos_ang_intended = load(sprintf("/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_data/lightLogger/scriptedIndoorOutdoor/%s/gazeCalibration/temporalFrequency/%s_gazeCal_runData.mat", subjectID, subjectID)).taskData.gaze_target_positions_deg;
 
     % Load in the targets in their screen positions 
     % NOTE: If you do not have this, consult extract_gaze_stimulus.py
-    target_pos_screen = load("/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/FLIC_2001/gazeCalibration/temporalFrequency/FLIC_2001_gazeCal_gazeTargetsScreen").gaze_targets;
+    target_pos_screen = load(sprintf("/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/%s/gazeCalibration/temporalFrequency/%s_gazeCal_gazeTargetsScreen", subjectID, subjectID)).gaze_targets;
 
     perspective_projection = calculate_perspective_transform_w2e(world_camera_intrinsics, target_pos_ang_intended, target_pos_screen); 
 
