@@ -76,21 +76,18 @@ function [spd, frq] = calcTemporalSPD(v, fps, options)
 
         % Select only pixels in the region
         regionPixels = v_flat(:, mask(:));                 
-        
-        disp(regionPixels)
-        drawnow; 
-
 
         % Mean the pixels per image per frame to achieve the signal 
-        signal = mean(regionPixels, 2); 
-
-        disp(signal)
-        drawnow; 
+        signal = mean(regionPixels, 2, 'omitnan'); 
 
         % Convert to contrast units
-        signal = (signal - mean(signal)) / mean(signal);
+        signal = (signal - mean(signal, 'omitnan')) / mean(signal, 'omitnan');
 
     end
+
+    if(numel(signal(:)) == 0)
+        error("Signal is empty"); 
+    end     
 
     % Find the percent nan of the signal. If it is large, simply return 
     % NaN now 
@@ -100,10 +97,7 @@ function [spd, frq] = calcTemporalSPD(v, fps, options)
 
         return; 
     end 
-
-    disp(signal)
-    drawnow; 
-
+    
     % Otherwise, simply take PSD of the signal
     [frq, spd] = simplePSD(double(signal), fps);
 

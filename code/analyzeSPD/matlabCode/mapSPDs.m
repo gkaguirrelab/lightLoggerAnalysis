@@ -40,6 +40,9 @@ function [whole_video_mean_slopeMap, whole_video_mean_aucMap, whole_video_freque
         world_reader = videoIOWrapper(video, 'ioAction', 'read'); 
         nRows = world_reader.Height; 
         nCols = world_reader.Width; 
+        if(world_reader.NumFrames <= 0)
+            error("Video has no frames");
+        end 
 
         % Define the start and endpoint that we want to analyze of the video 
         start = options.num_frames_to_process(1); 
@@ -83,19 +86,28 @@ function [whole_video_mean_slopeMap, whole_video_mean_aucMap, whole_video_freque
 
             % Find the local chunk size (e.g. the last frame may not be the ideal large) 
             local_chunk_size_frames = min(chunk_size_frames, world_reader.NumFrames - frame_num + 1); 
+
+            if(local_chunk_size_frames == 0)
+                disp("Local chunk size is 0");
+            end 
             
             % Initialize a frame chunk we wil populate
             frame_chunk = zeros(local_chunk_size_frames, nRows, nCols); 
 
             % Populate the frame chunk in 30 second chunks 
             for insertion_index = 1:local_chunk_size_frames
-                frame_chunk(insertion_index, :, :) = world_reader.readFrame("frameNum", frame_num+insertion_index - 1, "grayscale", true, "zeros_to_nans", true); 
+                read_frame = world_reader.readFrame("frameNum", frame_num+insertion_index - 1, "grayscale", true, "zeros_to_nans", false); 
+                frame_chunk(insertion_index, :, :) = read_frame; 
             end
             if(insertion_index ~= local_chunk_size_frames)
                 error("Number of frames does not match the chunk size");
             end 
 
             % Find the SPD of the full spatial resolution
+            if(numel(frame_chunk(:)) == 0)
+                error("Frame chunk is empty");
+            end 
+
             [~, frq] = calcTemporalSPD(frame_chunk, fps, 'lineResolution', false);
             if(isempty(whole_video_frequencies))
                 whole_video_frequencies = frq; 

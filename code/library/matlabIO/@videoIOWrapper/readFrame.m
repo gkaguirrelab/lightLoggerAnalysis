@@ -20,6 +20,11 @@ function frame = readFrame(obj, options)
     frame = squeeze(uint8(obj.utility_library.extract_frames_from_video( py.str(obj.full_video_path), {frameNum-1}, py.bool(options.grayscale))));
     py.gc.collect(); 
 
+    frame_size = size(frame);
+    if(frame_size(1) ~= obj.Height || frame_size(2) ~= obj.Width)
+        error("Frame read of inhomogenous shape");
+    end     
+
     % If we are in grayscale and we want to convert zeros to nans, do it now 
     if(options.zeros_as_nans)
         frame(frame == 0) = nan; 
@@ -39,6 +44,11 @@ function frame = readFrame(obj, options)
                 error("Unsupported color mode: %s", colorMode);
 
         end
+    end 
+
+
+    if(isempty(frame))
+        error("readFrame is about to return an empty variable");
     end 
 
     % Update the last read frame 
