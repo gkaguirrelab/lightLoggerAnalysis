@@ -103,7 +103,6 @@ function [spd, frq] = calcTemporalSPD(v, fps, options)
 
     disp(signal)
     drawnow; 
-    save("/Users/zacharykelly/Desktop/signal.mat", "signal");
 
     % Otherwise, simply take PSD of the signal
     [frq, spd] = simplePSD(double(signal), fps);
