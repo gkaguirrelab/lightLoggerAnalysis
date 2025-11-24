@@ -4,6 +4,7 @@ function frame = readFrame(obj, options)
         options.frameNum {mustBeNumeric} = []; 
         options.grayscale {mustBeNumericOrLogical} = false; 
         options.color {mustBeText} = "rgb"; 
+        options.zeros_as_nans = false; 
     end 
 
 
@@ -18,6 +19,11 @@ function frame = readFrame(obj, options)
     % Retrieve the frame from the video
     frame = squeeze(uint8(obj.utility_library.extract_frames_from_video( py.str(obj.full_video_path), {frameNum-1}, py.bool(options.grayscale))));
     py.gc.collect(); 
+
+    % If we are in grayscale and we want to convert zeros to nans, do it now 
+    if(options.zeros_as_nans)
+        frame(frame == 0) = nan; 
+    end 
     
     % Convert to desired color if not grayscale 
     if (~options.grayscale)

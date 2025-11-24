@@ -38,14 +38,15 @@ function [spd, frq] = calcTemporalSPD(v, fps, options)
 %}
 
     arguments
-        v (:,240,240) {mustBeNumeric}
+        v (:,480,480) {mustBeNumeric}
         fps (1,1) {mustBeScalarOrEmpty} = 120
         options.lineResolution (1,1) logical = true
-        options.regionMatrix (:,:) {mustBeNumeric} = ones(240,240);
+        options.regionMatrix (:,:) {mustBeNumeric} = ones(480,480);
         options.applyFieldCorrection (1,1) logical = false
         options.byChannel (1,1) logical = false
         options.postreceptoralChannel {mustBeMember(options.postreceptoralChannel,{'LM', 'L-M', 'S'})} = 'LM'
         options.camera (1,:) char {mustBeMember(options.camera, {'standard', 'imx219'})} = 'imx219'
+        options.nan_threshold = .1; 
     end
 
     % Convert video data to double and get dimensions
@@ -84,7 +85,21 @@ function [spd, frq] = calcTemporalSPD(v, fps, options)
 
     end
 
-    % PSD of the signal
-    [frq, spd] = simplePSD(signal, fps);
+    % Find the percent nan of the signal. If it is large, simply return 
+    % NaN now 
+    if( numel(find(isnan(signal(:)))) >= options.nan_threshold )
+        freq = nan; 
+        spd = nan; 
+
+        return; 
+    end 
+
+
+    save("/Users/zacharykelly/Desktop/signal.mat", signal);
+
+    % Otherwise, simply take PSD of the signal
+    [frq, spd] = simplePSD(double(signal), fps);
+
+    
 end
 

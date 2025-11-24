@@ -121,7 +121,12 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
         options.pupil_fps {mustBeNumeric} = 120; 
         options.pupil_world_phase_offset {mustBeNumeric} = 0.005; 
         options.verbose = false; 
-        options.manual_offset = [0, 0]; % Manual offset for FLIC_2001 walkIndoor = [-4.75, 4.75]
+        options.manual_offset = [0, 0]; % Manual offset for FLIC_2001 walkIndoor = [-4.75, 4.75] 
+        % Manual offset for FLIC 2003 = [-6, -1.5];
+        % Manual offset for FLIC 2004 = [-11.5, -12.5]
+        % Manual offset for FLIC 2005 = [-7.5, -7.5]
+        options.testing = false; 
+        options.nan_deg_threshold = 45; 
     end     
 
     % Import the Python util library 
@@ -135,6 +140,11 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
         disp("Opening video reader/writer")
     end 
     world_frame_reader = videoIOWrapper(world_video, "ioAction", 'read'); 
+
+    if(options.testing)
+        output_path = "/Users/zacharykelly/Desktop/testing.avi"
+    end 
+
     world_frame_writer = videoIOWrapper(output_path, "ioAction", 'write'); 
     world_frame_writer.FrameRate = 120; 
 
@@ -209,6 +219,10 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
         % Find the gaze angle that corresponds to this frame 
         [~, gaze_angle_idx] = min(abs(pupil_t - world_timestamp));
         gaze_angle = gaze_angles(gaze_angle_idx, 1:2); 
+
+        if( any(abs(gaze_angle) > options.nan_deg_threshold) )
+            gaze_angle(:) = nan;
+        end
         
         % Load in the world frame
         world_frame = world_frame_reader.readFrame('frameNum', ii, 'grayscale', true); 
@@ -227,6 +241,17 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
         % If we have a valid frame to virtually foveate 
         else
             virtually_foveated_frame = uint8(virtuallyFoveateFrame(world_frame, gaze_angle, path_to_intrinsics, path_to_perspective_projection)); 
+        end 
+
+
+        % Imshow the virtually foveated frame 
+        if(options.testing)
+            disp(gaze_angle)
+            disp(size(virtually_foveated_frame  ))
+
+            figure; 
+            imshow(virtually_foveated_frame)
+            axis on; 
         end 
 
         % Write the frame to the video 

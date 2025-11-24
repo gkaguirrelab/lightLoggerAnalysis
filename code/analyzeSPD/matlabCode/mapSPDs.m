@@ -1,4 +1,4 @@
-function [whole_video_mean_slope3D, whole_video_mean_auc3D, whole_video_frequencies] = mapSPDs(video, fps, window, step, options)
+function [whole_video_mean_slopeMap, whole_video_mean_aucMap, whole_video_frequencies] = mapSPDs(video, fps, window, step, options)
 % Computes slope and Area Under the Curve (AUC) maps of temporal SPD across 
 % image regions and projects them onto a 1 m visual field surface, then 
 % plots both maps.
@@ -30,8 +30,8 @@ function [whole_video_mean_slope3D, whole_video_mean_auc3D, whole_video_frequenc
     arguments
         video               {mustBeText}
         fps             (1,1) {mustBeNumeric}   = 120
-        window          (1,2) {mustBeNumeric}   = [6 6] 
-        step            (1,1) {mustBeNumeric}   = 3
+        window          (1,2) {mustBeNumeric}   = [8 8] 
+        step            (1,1) {mustBeNumeric}   = 4 
         options.doPlot  (1,1) logical           = false
         options.num_frames_to_process {mustBeNumeric} = [1, inf];
         options.chunk_size_seconds {mustBeNumeric} = 30; 
@@ -89,7 +89,7 @@ function [whole_video_mean_slope3D, whole_video_mean_auc3D, whole_video_frequenc
 
             % Populate the frame chunk in 30 second chunks 
             for insertion_index = 1:local_chunk_size_frames
-                frame_chunk(insertion_index, :, :) = world_reader.readFrame("frameNum", frame_num+insertion_index - 1, "grayscale", true); 
+                frame_chunk(insertion_index, :, :) = world_reader.readFrame("frameNum", frame_num+insertion_index - 1, "grayscale", true, "zeros_to_nans", true); 
             end
             if(insertion_index ~= local_chunk_size_frames)
                 error("Number of frames does not match the chunk size");
@@ -118,14 +118,15 @@ function [whole_video_mean_slope3D, whole_video_mean_auc3D, whole_video_frequenc
                         continue;
                     end
 
+                    % If spd or fLoc are nan, skip this patch 
+                    if(isnan(spd) || isnan(fLoc))
+                        disp("TOO MANY NAN VALUES FOR THIS PATCH");
+                        continue; 
+                    end 
+
                     % Flatten vectors for fitting/AUC calculation
                     spd = spd(:); 
                     fLoc = fLoc(:);
-
-                    %figure; 
-                    %plot(whole_video_frequencies, spd);
-                    %hold on; 
-                    %title(sprintf("SPD | Chunk %d R=%d C=%d", current_chunk, row, col));
 
                     % Exclude exactly 30 Hz (set to NaN, e.g. avoid mains noise artifact)
                     spd(fLoc==30) = NaN;
@@ -187,6 +188,7 @@ function [whole_video_mean_slope3D, whole_video_mean_auc3D, whole_video_frequenc
                 axis image;
                 colormap('hot');
                 colorbar;
+                drawnow; 
 
             end
 
@@ -217,5 +219,6 @@ function [whole_video_mean_slope3D, whole_video_mean_auc3D, whole_video_frequenc
         axis image;
         colormap('hot');
         colorbar;
+        drawnow; 
 
 end 

@@ -1,11 +1,11 @@
 close all; 
 clear all;
 
-subjectIDs = {"2002", "2004", "2005"};
-start_ends = { [14236, 16183]; [8877, 10674]; [8891, 10811]}; % For whole video, do [1, inf]
+subjectIDs = {"2005"};
+start_ends = {[10640, 10640]};
+manual_offsets = { [-7.5, -7.5] }
 
-video_type = "virtuallyFoveatedVideoAprilTag";
-
+video_type = "testing";
 
 for ii = 1:numel(subjectIDs)
     subjectID = "FLIC_" + subjectIDs{ii}
@@ -25,7 +25,7 @@ for ii = 1:numel(subjectIDs)
     offsets = load(sprintf("/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/%s/gazeCalibration/temporalFrequency/%s_gazeCal_SceneGeometryMetadata.mat", subjectID, subjectID)).gazeOffset;
 
     % Define the output path where this video will write to 
-    output_path = sprintf("/Users/zacharykelly/%s_walkIndoor_%s.avi", subjectID, video_type) 
+    output_path = sprintf("/Users/zacharykelly/%s_walkIndoor_%s.avi", subjectID, video_type) % change this to testing when you do single frames
 
     % Load in the camera intrinscis of the world camera 
     path_to_intrinsics = "/Users/zacharykelly/Documents/MATLAB/projects/lightLoggerAnalysis/data/intrinsics_calibration.mat"; 
@@ -35,9 +35,9 @@ for ii = 1:numel(subjectIDs)
     path_to_perspective_projection = sprintf("/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/%s/gazeCalibration/temporalFrequency/%s_gazeCal_perspectiveProjection.mat", subjectID, subjectID)
 
     start_end = start_ends{ii}
+    manual_offset = manual_offsets{ii};
 
-
-    virtuallyFoveateVideo(world_video, gaze_angles, offsets, output_path, path_to_recording_chunks, path_to_intrinsics, path_to_perspective_projection, "num_frames_to_process", start_end, "verbose", true);
+    virtuallyFoveateVideo(world_video, gaze_angles, offsets, output_path, path_to_recording_chunks, path_to_intrinsics, path_to_perspective_projection, "num_frames_to_process", start_end, "verbose", true, "manual_offset", manual_offset, "testing", true);
 
     
 end 
