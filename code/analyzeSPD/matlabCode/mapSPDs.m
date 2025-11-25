@@ -1,6 +1,6 @@
 function [whole_video_mean_slopeMap, whole_video_mean_aucMap, whole_video_frequencies] = mapSPDs(video_hdf5_path, fps, window, step, options)
-% Computes slope and Area Under the Curve (AUC) maps of temporal SPD across 
-% image regions and projects them onto a 1 m visual field surface, then 
+% Computes slope and Area Under the Curve (AUC) maps of temporal SPD across
+% image regions and projects them onto a 1 m visual field surface, then
 % plots both maps.
 %
 % Required Inputs:
@@ -10,8 +10,8 @@ function [whole_video_mean_slopeMap, whole_video_mean_aucMap, whole_video_freque
 %   step              - Step size for moving window. Defaults to 20
 %   doPlot            - (boolean) Visualize the SPD maps or not
 %   theta             - (radians) [rows x cols] elevation-from-optical-axis
-%   phi               - (radians) [rows x cols] azimuth                    
-%   R                 - (radians) (scalar) radius                       
+%   phi               - (radians) [rows x cols] azimuth
+%   R                 - (radians) (scalar) radius
 %
 % Optional:
 %   affineMat         - 2x3 affine matrix to apply to [az, el] before XYZ
@@ -23,212 +23,180 @@ function [whole_video_mean_slopeMap, whole_video_mean_aucMap, whole_video_freque
 %   hFigSlope         - figure handle for slope map
 %   hFigAUC           - figure handle for AUC map
 %
-% Example Usage: 
+% Example Usage:
 %{
     [slopeMap, aucMap, frq] = mapSlopeAUCSPD(video, fps, [40 40], 20, True, theta, phi, R)
 %}
-    arguments
-        video_hdf5_path {mustBeText}
-        fps             (1,1) {mustBeNumeric}   = 120
-        window          (1,2) {mustBeNumeric}   = [8 8] 
-        step            (1,1) {mustBeNumeric}   = 4 
-        options.doPlot  (1,1) logical           = false
-        options.num_frames_to_process {mustBeNumeric} = [1, inf];
-        options.chunk_size_seconds {mustBeNumeric} = 30; 
-    end 
+arguments
+    video_hdf5_path {mustBeText}
+    fps             (1,1) {mustBeNumeric}   = 120
+    window          (1,2) {mustBeNumeric}   = [24 24]
+    step            (1,1) {mustBeNumeric}   = 12
+    options.doPlot  (1,1) logical           = false
+    options.num_frames_to_process {mustBeNumeric} = [1, inf];
+    options.chunk_size_seconds {mustBeNumeric} = 5;
+    options.aucRange {mustBeNumeric} = [log10(0.1),log10(60)];
+end
 
-        % Load in some info about the video to get us started 
-        video_info = h5info(video_hdf5_path, "/video");
-        video_size = video_info.Dataspace.Size; 
-        nRows = video_size(1);
-        nCols = video_size(2);
-        nFrames = video_size(3);
+% Load in some info about the video to get us started
+video_info = h5info(video_hdf5_path, "/video");
+video_size = video_info.Dataspace.Size;
+nRows = video_size(1);
+nCols = video_size(2);
+nFrames = video_size(3);
 
-        if(nFrames <= 0)
-            error("Video has no frames");
-        end 
+if(nFrames <= 0)
+    error("Video has no frames");
+end
 
-        % Define the start and endpoint that we want to analyze of the video 
-        start_frame = options.num_frames_to_process(1); 
-        end_frame = options.num_frames_to_process(2);
-        
-        if(end_frame == inf)
-            end_frame = nFrames; 
-        end 
+% Define the start and endpoint that we want to analyze of the video
+start_frame = options.num_frames_to_process(1);
+end_frame = options.num_frames_to_process(2);
 
-        % Compute how many window positions fit vertically and horizontally
-        maxRows = floor((nRows - window(1)) / step) + 1;
-        maxCols = floor((nCols - window(2)) / step) + 1;
-        
-        % Total number of patches (window positions across the image)
-        total_patches = maxRows * maxCols;
+if(end_frame == inf)
+    end_frame = nFrames;
+end
 
-        % Calculate the step size in frames 
-        chunk_size_frames = floor(options.chunk_size_seconds * fps); 
-        
-        % Find the number of chunks in the video 
-        num_chunks = ceil((end_frame - start_frame + 1) / chunk_size_frames); 
+% Compute how many window positions fit vertically and horizontally
+maxRows = floor((nRows - window(1)) / step) + 1;
+maxCols = floor((nCols - window(2)) / step) + 1;
 
-        % Allocate average Slope3D and AUC3D variables across all chunks 
-        whole_video_mean_slopeMap = zeros(nRows, nCols); 
-        whole_video_mean_aucMap = zeros(nRows, nCols); 
+% Total number of patches (window positions across the image)
+total_patches = maxRows * maxCols;
 
-        % Allocate a frequency vector that will store the frequency used for the SPD per chunk 
-        whole_video_frequencies = [];
+% Calculate the step size in frames
+chunk_size_frames = floor(options.chunk_size_seconds * fps);
 
-        % Move over the chunks of the video
-        current_chunk = 1; 
-        for frame_num = start_frame:chunk_size_frames:end_frame
+% Find the chunk starts
+chunkStarts = 1:chunk_size_frames/2:(end_frame-chunk_size_frames);
 
-            % Counter for layer index (each patch corresponds to one layer)
-            layer = 0;
+% Find the number of chunks in the video
+nChunks = length(chunkStarts);
 
-            % Initialize 3D arrays for slope and AUC values per window layer
-            slope3D = nan(nRows, nCols, total_patches);
-            auc3D = nan(nRows, nCols, total_patches); 
+% Allocate average Slope3D and AUC3D variables across all chunks
+whole_video_mean_slopeMap = zeros(nRows, nCols);
+whole_video_mean_aucMap = zeros(nRows, nCols);
 
-            tic; 
-            fprintf("Processing chunk: %d/%d\n", current_chunk, num_chunks); 
+% Move over the chunks of the video
+current_chunk = 1;
+for frame_num = chunkStarts
 
-            % Find the local chunk size (e.g. the last frame may not be the ideal large) 
-            local_chunk_size_frames = min(chunk_size_frames, nFrames - frame_num + 1); 
+    % Counter for layer index (each patch corresponds to one layer)
+    layer = 0;
 
-            if(local_chunk_size_frames == 0)
-                disp("Local chunk size is 0");
-            end 
-            
-            % Initialize a frame chunk we wil populate
-            frame_chunk = h5read(video_hdf5_path, "/video", [1, 1, frame_num], [inf, inf, local_chunk_size_frames]);
-            frame_chunk = permute(frame_chunk, [3 1 2]);  % flip back to nFrames x nRows x nCols
+    % Initialize 3D arrays for slope and AUC values per window layer
+    slope3D = nan(nRows, nCols, total_patches);
+    auc3D = nan(nRows, nCols, total_patches);
 
-            % Find the SPD of the full spatial resolution
-            if(numel(frame_chunk(:)) == 0)
-                error("Frame chunk is empty");
-            end     
+    tic;
+    fprintf("Processing chunk: %d/%d\n", current_chunk, nChunks);
 
-            [~, frq] = calcTemporalSPD(frame_chunk, fps, 'lineResolution', false);
-            if(isempty(whole_video_frequencies))
-                whole_video_frequencies = frq; 
-            end 
+    % Find the local chunk size (e.g. the last frame may not be the ideal large)
+    local_chunk_size_frames = min(chunk_size_frames, nFrames - frame_num + 1);
 
-            % Slide the analysis window across the image in row and column directions
-            for row = 1:step:(nRows - window(1) + 1)
-                for col = 1:step:(nCols - window(2) + 1)
-                    % Increment patch counter
-                    layer = layer + 1;
-                    
-                    % Create a binary mask selecting the current region of interest
-                    regionMatrix = zeros(nRows, nCols);
-                    regionMatrix(row:row+window(1)-1, col:col+window(2)-1) = 1;
-                    try
-                        % Compute temporal SPD restricted to this region
-                        [spd, fLoc] = calcTemporalSPD(frame_chunk, fps, 'lineResolution', false, 'regionMatrix', regionMatrix);
-                    catch
-                        % If computation failes, skip that patch
-                        continue;
-                    end
+    if(local_chunk_size_frames == 0)
+        disp("Local chunk size is 0");
+    end
 
-                    % If spd or fLoc are nan, skip this patch 
-                    if(any(isnan(spd)) || any(isnan(fLoc)))
-                        disp("TOO MANY NAN VALUES FOR THIS PATCH");
-                        continue; 
-                    end 
+    % Initialize a frame chunk we wil populate
+    frame_chunk = h5read(video_hdf5_path, "/video", [1, 1, frame_num], [inf, inf, local_chunk_size_frames]);
+    frame_chunk = permute(frame_chunk, [3 1 2]);  % flip back to nFrames x nRows x nCols
 
-                    % Flatten vectors for fitting/AUC calculation
-                    spd = spd(:); 
-                    fLoc = fLoc(:);
+    % Slide the analysis window across the image in row and column directions
+    for row = 1:step:(nRows - window(1) + 1)
+        for col = 1:step:(nCols - window(2) + 1)
+            % Increment patch counter
+            layer = layer + 1;
 
-                    % Exclude exactly 30 Hz (set to NaN, e.g. avoid mains noise artifact)
-                    spd(fLoc==30) = NaN;
-                    
-                    % Define valid data points: positive frequencies and positive power
-                    valid = fLoc>0 & spd>0;
-                    
-                    % Only proceed if at least 2 valid frequency bins remain
-                    if nnz(valid)>=2        
-                        f_min = min(fLoc(valid));
-
-                        f_max = max(fLoc(valid));
-                        
-                        % Fit a straight line in log-log space for the slope
-                        C = polyfit(log10(fLoc(valid)), log10(spd(valid)), 1);
-                        % Calculate Area Under the *FITTED LINE* (Analytic Integral)
-                        % The function is SPD(f) = 10^C(2) * f^C(1)
-                        % Check for the special case where the exponent C(1) is -1
-                        if abs(C(1) + 1) < 1e-6
-                            % Integral of 1/f is ln(f)
-                            auc = (10^C(2)) * (log(f_max) - log(f_min));
-                        else
-                            % General case: Integral[ A * f^B df ]
-                            A = 10^C(2); % Scaling factor
-                            B = C(1);    % Exponent/Slope
-
-                            % Closed-form integral: (A / (B+1)) * (f_max^(B+1) - f_min^(B+1))
-                            auc = (A / (B + 1)) * ( (f_max^(B + 1)) - (f_min^(B + 1)) );
-                        end
-                        
-                        % Assign slope and AUC values to current region layer
-                        slope3D(row:row+window(1)-1, col:col+window(2)-1, layer) = C(1);
-                        auc3D(row:row+window(1)-1, col:col+window(2)-1, layer) = auc;
-                    end 
-                end
-            end % Added missing 'end' for the row loop closure
-        
-            % Average slope across all overlapping layers (ignoring NaNs)
-            slopeMap = mean(slope3D,     3, 'omitnan');
-            % Average AUC across all overlapping layers (ignoring NaNs)
-            aucMap = mean(auc3D, 3, 'omitnan'); % 
-
-            % Add this to the growing average for the whole video 
-            whole_video_mean_slopeMap = whole_video_mean_slopeMap + slopeMap;
-            whole_video_mean_aucMap = whole_video_mean_aucMap + aucMap; 
-            
-            % If plotting is requested
-            if options.doPlot
-                figure;
-                imagesc(slopeMap);            
-                title(sprintf("Chunk %d | Slope Map", current_chunk));
-                axis image;                 
-                colormap('hot');             
-                colorbar;             
-
-                figure;
-                imagesc(aucMap);
-                title(sprintf("Chunk %d | AUC Map", current_chunk));
-                axis image;
-                colormap('hot');
-                colorbar;
-                drawnow; 
-
+            % Create a binary mask selecting the current region of interest
+            regionMatrix = zeros(nRows, nCols);
+            regionMatrix(row:row+window(1)-1, col:col+window(2)-1) = 1;
+            try
+                % Compute temporal SPD restricted to this region
+                [spd, fLoc] = calcTemporalSPD(frame_chunk, fps, 'lineResolution', false, 'regionMatrix', regionMatrix);
+            catch
+                % If computation failes, skip that patch
+                continue;
             end
 
-            % Calculate the elapsed tiem per chunk 
-            elapsed_seconds = toc; 
+            % If spd or fLoc are nan, skip this patch
+            if(any(isnan(spd)) || any(isnan(fLoc)))
+                continue
+            end
 
-            fprintf("Chunk %d took: %f seconds\n", current_chunk, elapsed_seconds)
+            % Discard the zeroeth frequency
+            fLoc = fLoc(2:end);
+            spd = spd(2:end);
 
-            % Increment the chunk number we are on 
-            current_chunk = current_chunk + 1;
+            % Fit a straight line in log-log space for the slope
+            C = polyfit(log10(fLoc'), log10(spd), 1);
 
-        end % end chunks
+            % Calculate the auc
+            auc = (mean(polyval(C,options.aucRange))/2)*diff(options.aucRange);
 
-        % Finally, finish the average slope map and AUC map calculations 
-        whole_video_mean_slopeMap = whole_video_mean_slopeMap / num_chunks;
-        whole_video_mean_aucMap = whole_video_mean_aucMap / num_chunks;
+            % Assign slope and AUC values to current region layer
+            slope3D(row:row+window(1)-1, col:col+window(2)-1, layer) = C(1);
+            auc3D(row:row+window(1)-1, col:col+window(2)-1, layer) = auc;
 
+        end
+
+    end % Added missing 'end' for the row loop closure
+
+    % Average slope across all overlapping layers (ignoring NaNs)
+    slopeMap = mean(slope3D,     3, 'omitnan');
+    % Average AUC across all overlapping layers (ignoring NaNs)
+    aucMap = mean(auc3D, 3, 'omitnan'); %
+
+    % Add this to the growing average for the whole video
+    whole_video_mean_slopeMap(:,:,current_chunk) = slopeMap;
+    whole_video_mean_aucMap(:,:,current_chunk) =  aucMap;
+
+    % If plotting is requested
+    if options.doPlot
         figure;
-        imagesc(whole_video_mean_slopeMap);            
-        title(sprintf("Whole Video Mean | Slope Map"));
-        axis image;                 
-        colormap('hot');             
-        colorbar;             
-        
-        figure;
-        imagesc(whole_video_mean_aucMap);
-        title(sprintf("Whole Video Mean | AUC Map"));
+        imagesc(slopeMap);
+        title(sprintf("Chunk %d | Slope Map", current_chunk));
         axis image;
         colormap('hot');
         colorbar;
-        drawnow; 
 
-end 
+        figure;
+        imagesc(aucMap);
+        title(sprintf("Chunk %d | AUC Map", current_chunk));
+        axis image;
+        colormap('hot');
+        colorbar;
+        drawnow;
+
+    end
+
+    % Calculate the elapsed tiem per chunk
+    elapsed_seconds = toc;
+
+    fprintf("Chunk %d took: %f seconds\n", current_chunk, elapsed_seconds)
+
+    % Increment the chunk number we are on
+    current_chunk = current_chunk + 1;
+
+end % end chunks
+
+% Finally, finish the average slope map and AUC map calculations
+whole_video_mean_slopeMap = mean(whole_video_mean_slopeMap,3,'omitmissing');
+whole_video_mean_aucMap = mean(whole_video_mean_aucMap,3,'omitmissing');
+
+figure;
+imagesc(whole_video_mean_slopeMap);
+title(sprintf("Whole Video Mean | Slope Map"));
+axis image;
+colormap('hot');
+colorbar;
+
+figure;
+imagesc(whole_video_mean_aucMap);
+title(sprintf("Whole Video Mean | AUC Map"));
+axis image;
+colormap('hot');
+colorbar;
+drawnow;
+
+end
