@@ -179,6 +179,12 @@ def inspect_video_frame_count(video_path: str) -> int:
     # Open the video via cv2 
     video_stream: cv2.VideoCapture = cv2.VideoCapture(video_path)
 
+    # Immediately see if we can get a result. Sometimes this is erroneously 0 
+    frame_count = int(video_stream.get(cv2.CAP_PROP_FRAME_COUNT))
+    if(frame_count != 0):
+        video_stream.release() 
+        return frame_count
+
     # Next, write frames to the video 
     frame_num: int = 0
     while(True):

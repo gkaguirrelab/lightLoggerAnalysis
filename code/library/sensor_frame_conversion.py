@@ -1,6 +1,8 @@
 import numpy as np 
 import os 
 import sys
+from typing import Iterable
+import natsort
 
 
 # Import relevant custom libraries with helper functions and constants 
@@ -55,9 +57,8 @@ def find_sensor_start_end_times(path_to_recording: str) -> dict[str, tuple]:
     return sensor_start_ends
 
 """Convert world camera frame number to pupil camera frame number"""
-def world_to_pupil(world_frame_number: int, 
-                   path_to_world_video: str,
-                   path_to_pupil_video: str,  
+def world_to_pupil(world_frame_numbers: Iterable, 
+                   path_to_recording_folder: str, 
                    path_to_recording_chunks: str,
                    pupil_phase_offset: float=0.05
                   ) -> np.ndarray:
@@ -66,12 +67,22 @@ def world_to_pupil(world_frame_number: int,
     sensor_start_ends: dict[str, tuple] = find_sensor_start_end_times(path_to_recording_chunks)
     
     # Generate timestamps for the two videos
-    world_t: np.ndarrary = np.linspace(*sensor_start_ends["world"], video_io.inspect_video_framecount(path_to_world_video))
-    pupil_t: np.ndarrary = np.linspace(*sensor_start_ends["world"], video_io.inspect_video_framecount(path_to_pupil_video)) + pupil_phase_offset
+    path_to_world_video: str = os.path.join(path_to_recording_folder, "W.avi")
+    path_to_pupil_video: str = os.path.join(path_to_recording_folder, "P.avi")
 
+    world_t: np.ndarray = np.linspace(*sensor_start_ends["world"], video_io.inspect_video_frame_count(path_to_world_video), endpoint=True)
+    pupil_t: np.ndarray = np.linspace(*sensor_start_ends["pupil"], video_io.inspect_video_frame_count(path_to_pupil_video), endpoint=True) + pupil_phase_offset
 
-    return 
+    pupil_frame_indices: list = []
+    for world_frame_number in world_frame_numbers:
+        # Find the nearest neighbor in pupil camera 
+        time_differences_from_target: np.ndarray = np.abs(world_t[int(world_frame_number)] - pupil_t)
+        pupil_index: int = int(np.argmin(time_differences_from_target))
+        
+        # Append it to the list 
+        pupil_frame_indices.append(pupil_index)
 
+    return np.array(pupil_frame_indices)
 
 
 """Convert pupil camera frame number to world camera frame number"""
