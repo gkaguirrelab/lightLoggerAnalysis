@@ -36,13 +36,14 @@ def parse_args() -> str:
 
     # Add the path to video argument 
     parser.add_argument("path_to_video", type=str, help="Path to world camera video from gaze calibration")
-    parser.add_argument("intended_gaze_targets_path", type=str, help="Path to the gaze targets' positions in degrees when they were displayed on screen")
     parser.add_argument("path_to_output_file", type=str, help="Path to numpy output file")
+    parser.add_argument("--intended_gaze_targets_path", "--ig", default=None, required=False, type=str, help="GAZE CAL ONLY | Path to the gaze targets' positions in degrees when they were displayed on screen")
+    parser.add_argument("--frame_indices", "--fi", nargs="*", default=[], type=int, help="APRIL TAG ONLY | List of frames to use for selection")
 
     # Parse the args
     args: object = parser.parse_args()
 
-    return args.path_to_video, args.intended_gaze_targets_path, args.path_to_output_file
+    return args.path_to_video,  args.path_to_output_file, args.intended_gaze_targets_path, args.frame_indices
 
 """Given a dict of detected gaze targets and an image to display 
    on, visualize the results 
@@ -529,20 +530,22 @@ def auto_extract_target_circles(video: str,
     return circles.items()  
 
 """Manually extract"""
-def manual_extract_target_circles(background_img: np.ndarray, path_to_intended_targets: str) -> np.ndarray:    
-    # First, let's load in the intended order of the points 
-    intended_positions: np.ndarray | None = None
-    with h5py.File(path_to_intended_targets, "r") as f:
-        intended_positions = np.transpose(np.array(f["taskData"]["gaze_target_positions_deg"][()]))
+def manual_extract_target_circles(background_img: np.ndarray, path_to_intended_targets: str | None=None) -> np.ndarray:    
+    
+    if(path_to_intended_targets is not None):
+        # First, let's load in the intended order of the points 
+        intended_positions: np.ndarray | None = None
+        with h5py.File(path_to_intended_targets, "r") as f:
+            intended_positions = np.transpose(np.array(f["taskData"]["gaze_target_positions_deg"][()]))
 
-    # FIGURE 1 — Intended order
-    fig1, ax1 = plt.subplots()
-    ax1.set_title("Gaze targets were presented in the following order")
-    for i, (x, y) in enumerate(intended_positions, start=1):
-        ax1.plot(x, y, 'o')
-        ax1.text(x, y, str(i), ha='left', va='top')
+        # FIGURE 1 — Intended order
+        fig1, ax1 = plt.subplots()
+        ax1.set_title("Gaze targets were presented in the following order")
+        for i, (x, y) in enumerate(intended_positions, start=1):
+            ax1.plot(x, y, 'o')
+            ax1.text(x, y, str(i), ha='left', va='top')
 
-    plt.show(block=False)  
+        plt.show(block=False)  
 
   
     fig2, ax2 = plt.subplots()
@@ -566,31 +569,59 @@ def manual_extract_target_circles(background_img: np.ndarray, path_to_intended_t
 
     return np.array(points)
 
-def main() -> None:
-    # Parse arguments
-    print("---Parsing Args---")
-    video_path, intended_gaze_targets_path, path_to_output = parse_args()
-    for path in (video_path, intended_gaze_targets_path):
-        assert os.path.exists(path), f"Path: {path} does not exist"
 
-    # Find the start end of stimulus
+def extract_gazecal_stimulus(video_path: str, intended_gaze_targets_path: str) -> np.ndarray:
     print("---Finding stimulus start/end---") 
     start, end, fig = find_stimulus_period(video_path, visualize_results=True)
 
     # Calculate the background image 
     print(f"---Finding background image of frames: [{start}, {end})---")
     background_gray: np.ndarray = find_background_image(video_path, 
-                                            is_grayscale=True,
-                                            start_frame=start,
-                                            end_frame=end,
-                                            visualize_results=False
-                                           )
+                                                        is_grayscale=True,
+                                                        start_frame=start,
+                                                        end_frame=end,
+                                                        visualize_results=False
+                                                       )
     
     # Manually select gaze target poinst 
     print("---Selecting targets---")
     gaze_target_points: np.ndarray = manual_extract_target_circles(background_gray, intended_gaze_targets_path)
 
+    return gaze_target_points
+
+def extract_april_tag_stimulus(source_video: str,
+                               target_frames_idx: Iterable,
+                              ) -> np.ndarray:
+
+    # First, extract the target frames from the video 
+    target_frames: np.ndarray = video_io.extract_frames_from_video(source_video, target_frames_idx, is_grayscale=True)
+
+    # Construct the avg frame to display the targets in a ghosting format 
+    background_img: np.ndarray = np.mean(target_frames, axis=(0,))
+
+    # Retrieve the target points in screen space by clicking the image
+    target_points: np.ndarray = manual_extract_target_circles(background_img)
+
+    return target_points
+
+def main() -> None:
+    # Parse arguments
+    print("---Parsing Args---")
+    video_path, path_to_output, intended_gaze_targets_path, frame_indices = parse_args()
+    assert os.path.exists(video_path), f"Video path: {video_path} does not exist"
+
+    # Determine which type of stimulus we are selecting 
+    gaze_target_points: np.ndarray | None = None
+    if(intended_gaze_targets_path is None):
+        assert len(frame_indices) > 0, "No frame indices passed"
+        gaze_target_points = extract_april_tag_stimulus(video_path, frame_indices)
+    else:
+        assert intended_gaze_targets_path is not None, "No intended gaze targets path passed"
+        assert os.path.exists(intended_gaze_targets_path), f"Video path: {intended_gaze_targets_path} does not exist"
+        gaze_target_points = extract_gazecal_stimulus(video_path, intended_gaze_targets_path)
+    
     print("---Saving selections---")
+    assert gaze_target_points is not None, "Gaze target points is None"
     if(path_to_output.strip().endswith(".mat")):
         scipy.io.savemat(path_to_output, {"gaze_targets": gaze_target_points})
     else:

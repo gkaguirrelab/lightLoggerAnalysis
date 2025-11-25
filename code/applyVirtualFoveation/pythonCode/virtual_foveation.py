@@ -3,7 +3,7 @@ import natsort
 import os 
 
 """Find the start times of each of the sensors in the recording"""
-def find_sensor_start_end_times(path_to_recording: str) -> tuple:
+def find_sensor_start_end_times(path_to_recording: str) -> dict[str, tuple]:
     # Group metadata files by sensor 
     sensor_files: dict[str, tuple[str]] = {sensor: [os.path.join(path_to_recording, file) 
                                                     for file in natsort.natsorted(os.listdir(path_to_recording))
