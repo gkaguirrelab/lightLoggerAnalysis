@@ -1,4 +1,4 @@
-function [whole_video_mean_slopeMap, whole_video_mean_aucMap, whole_video_frequencies] = mapSPDs(video, fps, window, step, options)
+function [whole_video_mean_slopeMap, whole_video_mean_aucMap, whole_video_frequencies] = mapSPDs(video_hdf5_path, fps, window, step, options)
 % Computes slope and Area Under the Curve (AUC) maps of temporal SPD across 
 % image regions and projects them onto a 1 m visual field surface, then 
 % plots both maps.
@@ -28,7 +28,7 @@ function [whole_video_mean_slopeMap, whole_video_mean_aucMap, whole_video_freque
     [slopeMap, aucMap, frq] = mapSlopeAUCSPD(video, fps, [40 40], 20, True, theta, phi, R)
 %}
     arguments
-        video               {mustBeText}
+        video_hdf5_path {mustBeText}
         fps             (1,1) {mustBeNumeric}   = 120
         window          (1,2) {mustBeNumeric}   = [8 8] 
         step            (1,1) {mustBeNumeric}   = 4 
@@ -36,19 +36,24 @@ function [whole_video_mean_slopeMap, whole_video_mean_aucMap, whole_video_freque
         options.num_frames_to_process {mustBeNumeric} = [1, inf];
         options.chunk_size_seconds {mustBeNumeric} = 30; 
     end 
-        % Open a reader to the video 
-        world_reader = videoIOWrapper(video, 'ioAction', 'read'); 
-        nRows = world_reader.Height; 
-        nCols = world_reader.Width; 
-        if(world_reader.NumFrames <= 0)
+
+        % Load in some info about the video to get us started 
+        video_info = h5info(video_hdf5_path, "/video");
+        video_size = video_info.Dataspace.Size; 
+        nRows = video_size(1);
+        nCols = video_size(2);
+        nFrames = video_size(3);
+
+        if(nFrames <= 0)
             error("Video has no frames");
         end 
 
         % Define the start and endpoint that we want to analyze of the video 
-        start = options.num_frames_to_process(1); 
-        endpoint = options.num_frames_to_process(2);
-        if(endpoint == inf)
-            endpoint = world_reader.NumFrames; 
+        start_frame = options.num_frames_to_process(1); 
+        end_frame = options.num_frames_to_process(2);
+        
+        if(end_frame == inf)
+            end_frame = nFrames; 
         end 
 
         % Compute how many window positions fit vertically and horizontally
@@ -59,10 +64,10 @@ function [whole_video_mean_slopeMap, whole_video_mean_aucMap, whole_video_freque
         total_patches = maxRows * maxCols;
 
         % Calculate the step size in frames 
-        chunk_size_frames = floor(options.chunk_size_seconds * world_reader.FrameRate); 
+        chunk_size_frames = floor(options.chunk_size_seconds * fps); 
         
         % Find the number of chunks in the video 
-        num_chunks = ceil((endpoint - start + 1) / chunk_size_frames); 
+        num_chunks = ceil((end_frame - start_frame + 1) / chunk_size_frames); 
 
         % Allocate average Slope3D and AUC3D variables across all chunks 
         whole_video_mean_slopeMap = zeros(nRows, nCols); 
@@ -71,42 +76,35 @@ function [whole_video_mean_slopeMap, whole_video_mean_aucMap, whole_video_freque
         % Allocate a frequency vector that will store the frequency used for the SPD per chunk 
         whole_video_frequencies = [];
 
-        % Counter for layer index (each patch corresponds to one layer)
-        layer = 0;
-
         % Move over the chunks of the video
         current_chunk = 1; 
-        for frame_num = start:chunk_size_frames:endpoint
+        for frame_num = start_frame:chunk_size_frames:end_frame
+
+            % Counter for layer index (each patch corresponds to one layer)
+            layer = 0;
+
             % Initialize 3D arrays for slope and AUC values per window layer
-            slope3D     = nan(nRows, nCols, total_patches);
-            auc3D       = nan(nRows, nCols, total_patches); % *** CHANGE 1: Renamed intercept3D to auc3D ***
+            slope3D = nan(nRows, nCols, total_patches);
+            auc3D = nan(nRows, nCols, total_patches); 
 
             tic; 
             fprintf("Processing chunk: %d/%d\n", current_chunk, num_chunks); 
 
             % Find the local chunk size (e.g. the last frame may not be the ideal large) 
-            local_chunk_size_frames = min(chunk_size_frames, world_reader.NumFrames - frame_num + 1); 
+            local_chunk_size_frames = min(chunk_size_frames, nFrames - frame_num + 1); 
 
             if(local_chunk_size_frames == 0)
                 disp("Local chunk size is 0");
             end 
             
             % Initialize a frame chunk we wil populate
-            frame_chunk = zeros(local_chunk_size_frames, nRows, nCols); 
-
-            % Populate the frame chunk in 30 second chunks 
-            for insertion_index = 1:local_chunk_size_frames
-                read_frame = world_reader.readFrame("frameNum", frame_num+insertion_index - 1, "grayscale", true, "zeros_to_nans", false); 
-                frame_chunk(insertion_index, :, :) = read_frame; 
-            end
-            if(insertion_index ~= local_chunk_size_frames)
-                error("Number of frames does not match the chunk size");
-            end 
+            frame_chunk = h5read(video_hdf5_path, "/video", [1, 1, frame_num], [inf, inf, local_chunk_size_frames]);
+            frame_chunk = permute(frame_chunk, [3 1 2]);  % flip back to nFrames x nRows x nCols
 
             % Find the SPD of the full spatial resolution
             if(numel(frame_chunk(:)) == 0)
                 error("Frame chunk is empty");
-            end 
+            end     
 
             [~, frq] = calcTemporalSPD(frame_chunk, fps, 'lineResolution', false);
             if(isempty(whole_video_frequencies))
@@ -131,7 +129,7 @@ function [whole_video_mean_slopeMap, whole_video_mean_aucMap, whole_video_freque
                     end
 
                     % If spd or fLoc are nan, skip this patch 
-                    if(isnan(spd) || isnan(fLoc))
+                    if(any(isnan(spd)) || any(isnan(fLoc)))
                         disp("TOO MANY NAN VALUES FOR THIS PATCH");
                         continue; 
                     end 

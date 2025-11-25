@@ -4,8 +4,11 @@ import warnings
 import time
 import queue
 from natsort import natsorted
-from typing import Iterable
+from typing import Literal, Iterable
 import os
+import hdf5storage
+import tqdm
+import h5py
 
 """Given a directory of frames, read them in and convert to video"""
 def dir_to_video(dir_path: str, output_path: str, fps: float=30) -> None:
@@ -310,6 +313,106 @@ def destruct_video(video_path: str, start_frame: int=0, end_frame: int=float("in
     frames: np.ndarray = np.stack(frames, axis=0)
 
     return frames
+
+"""Convert a video to a matlab 7.3 .mat file saved in HDF5 format"""
+def video_to_hdf5(video_path: str, output_path: str, 
+                 color_mode: Literal["GRAY", "RGB", "BGR"]="RGB",
+                 start_frame: int=0, 
+                 end_frame: int | float = float("inf"),
+                 zeros_as_nans: bool=False
+                ) -> None:
+    assert os.path.exists(video_path), f"Video path: {video_path} does not exist"
+    assert output_path.endswith(".hdf5"), f"Output path: {output_path} must end in .hdf5"
+
+    # Open the video via cv2 
+    video_stream: cv2.VideoCapture = cv2.VideoCapture(video_path)
+    if(not video_stream.isOpened()):
+        raise RuntimeError(f"Could not open video: {video_path}")
+    
+    # Move the video pointer to the start of the target interval 
+    video_stream.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+    end_frame = end_frame if end_frame != float("inf") else inspect_video_frame_count(video_path)
+
+    # Open the output file with an empty dataset of the appropriate type 
+    # and shape
+    frame_height, frame_width = inspect_video_framesize(video_path)
+    frame_array_shape_list: list[int] = [0, frame_height, frame_width]
+    if(color_mode != "GRAY"):
+        frame_array_shape_list += [3]
+    frame_array_shape_tuple: tuple = tuple(frame_array_shape_list)
+
+    max_frame_array_shape_list: list[int | None] = frame_array_shape_list.copy() 
+    max_frame_array_shape_list[0] = None
+    max_frame_array_shape_tuple: tuple[int | None] = tuple(max_frame_array_shape_list)
+
+    chunks_shape_list: list[int] = frame_array_shape_list.copy()
+    chunks_shape_list[0] = 1 
+    chunks_shape_tuple: tuple[int] = tuple(chunks_shape_list)
+
+    with h5py.File(output_path, "w") as f:
+        dset: object = f.create_dataset("video",
+                                        shape=frame_array_shape_tuple,
+                                        maxshape=max_frame_array_shape_tuple,
+                                        chunks=chunks_shape_tuple,
+                                        dtype=np.float64
+                                      )
+
+
+        # Read frames from the interval 
+        written_frame_idx: int = 0
+        for frame_num in tqdm.tqdm(range(start_frame, end_frame)):
+
+            # Attempt to read in a video 
+            # from the stream 
+            ret, frame = video_stream.read() 
+
+            # If we could not read in the frame 
+            # or we finished capturing the desired frames
+            # end the loop
+            if(not ret):
+                # If we could not read the frame, end frame was specified, and we have not reached it
+                # throw an error 
+                if(end_frame != float("inf")):
+                    video_stream.release()
+                    raise Exception(f"Did not read all frames from interval [{start_frame}, {end_frame}). Frame: {frame_num} could not be read")
+
+                break 
+
+            # if we want a grayscale video, 
+            # convert to grayscale
+            if(color_mode == "GRAY"): 
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            elif(color_mode == "RGB"):
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            elif(color_mode == "BGR"):
+                pass 
+            else:
+                video_stream.release() 
+                raise Exception(f"Color mode: {color_mode} is unsupported")
+
+
+            # Convert to floats so we can use NaN 
+            if(zeros_as_nans is True):
+                frame = frame.astype(np.float64)
+                frame[frame == 0] = np.nan
+
+            # Append to the dataset 
+            if color_mode.upper() == "GRAY":
+                    dset.resize((written_frame_idx + 1, frame_height, frame_width))
+                    dset[written_frame_idx, :, :] = frame
+            else:
+                dset.resize((written_frame_idx + 1, frame_height, frame_width, 3))
+                dset[written_frame_idx, :, :, :] = frame
+
+            # Increment the written frame number
+            written_frame_idx += 1
+
+
+
+    # Close the capture stream 
+    video_stream.release()  
+
+    return 
 
 def main():
     return 
