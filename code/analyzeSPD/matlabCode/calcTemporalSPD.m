@@ -78,10 +78,10 @@ else
     regionPixels = v_flat(:, mask(:));
 
     % Mean the pixels per image per frame to achieve the signal
-    signal = mean(regionPixels, 2, 'omitnan');
+    signal = mean(regionPixels, 2, 'omitmissing');
 
     % Convert to contrast units
-    signal = (signal - mean(signal, 'omitnan')) / mean(signal, 'omitnan');
+    signal = (signal - mean(signal, 'omitmissing')) / mean(signal, 'omitmissing');
 
 end
 
@@ -89,16 +89,13 @@ if(numel(signal(:)) == 0)
     error("Signal is empty");
 end
 
-% Find the percent nan of the signal. If it is large, simply return
-% NaN now
+% Find the percent nan of the signal. If it is large, simply return nan now
 if( numel(find(isnan(signal(:)))) / numel(signal(:)) >= options.nan_threshold )
-    frq = nan;
-    spd = nan;
-
+    frq = nan; spd = nan;
     return;
 end
 
-% Otherwise, simply take PSD of the signal
+% Otherwise, obtain the PSD of the signal
 [frq, spd] = simplePSD(double(signal), fps);
 
 
