@@ -1,18 +1,18 @@
 function [spd, frq] = calcTemporalSPD(v, fps, options)
-% Return the temporal spectral power density for a world camera video
+% Return the temporal spectral power density for a video
 %
 % Syntax:
 %   [spd, frq] = calcTemporalSPD(video, t)
 %t
 % Description:
-%   This routine accepts 640x480 "raw" format videos from the light logger.
-%   The duration of the passed video can vary. The routine returns the
-%   spectral power density of the video across the time domain. By default,
-%   this will be the temporal SPD for the spatial average value for each
-%   frame. Optional arguments adjust this behavior.
+%   This routine accepts "raw" format videos from the light logger. The
+%   duration of the passed video can vary. The routine returns the spectral
+%   power density of the video across the time domain. By default, this
+%   will be the temporal SPD for the spatial average value for each frame.
+%   Optional arguments adjust this behavior.
 %
 % Inputs:
-%   v                     - tx480x640 array of 8 bit unsigned integers.
+%   v                     - txVertxHoriz array of 8 bit unsigned integers.
 %                           This is a "chunk" of the world camera video
 %   fps                   - Scalar. Sampling rate of the recording (frames
 %                           per second). Defaults to 120.
@@ -23,6 +23,7 @@ function [spd, frq] = calcTemporalSPD(v, fps, options)
 %                           providing for temporal resolution = fps * 480.
 %  'byChannel'            - Logical. Return the SPD separately for the R,
 %                           G, and B sensor channels.
+%
 % Outputs:
 %   spd                   - 1xf. The spectral power density in units of
 %                           contrast^2/Hz.
@@ -46,7 +47,7 @@ arguments
     options.byChannel (1,1) logical = false
     options.postreceptoralChannel {mustBeMember(options.postreceptoralChannel,{'LM', 'L-M', 'S'})} = 'LM'
     options.camera (1,:) char {mustBeMember(options.camera, {'standard', 'imx219'})} = 'imx219'
-    options.nan_threshold = .1;
+    options.nan_threshold = 0.1;
 end
 
 % Convert video data to double and get dimensions

@@ -1,17 +1,14 @@
-function [slopeMap, aucMap, spdByRegion, frq, medianImage] = mapSPDs(video_hdf5_path, fps, window, step, options)
+function [slopeMap, aucMap, spdByRegion, frq, medianImage] = mapSPDs(videoPath, fps, window, step, options)
 % Computes slope and Area Under the Curve (AUC) maps of temporal SPD across
 % image regions and projects them onto a 1 m visual field surface, then
 % plots both maps.
 %
 % Required Inputs:
-%   video             - String. path to video
-%   fps               - Sampling rate (Hz)
-%   window            - [height width] of square region. Defaults to [40 40]
-%   step              - Step size for moving window. Defaults to 20
+%   video             - String. path to video in hdf5 format
+%   fps               - Scalar. Sampling rate (Hz)
+%   window            - [height width] of square region
+%   step              - Step size for moving window.
 %   doPlot            - (boolean) Visualize the SPD maps or not
-%   theta             - (radians) [rows x cols] elevation-from-optical-axis
-%   phi               - (radians) [rows x cols] azimuth
-%   R                 - (radians) (scalar) radius
 %
 % Optional:
 %   affineMat         - 2x3 affine matrix to apply to [az, el] before XYZ
@@ -28,18 +25,18 @@ function [slopeMap, aucMap, spdByRegion, frq, medianImage] = mapSPDs(video_hdf5_
     [slopeMap, aucMap, frq] = mapSlopeAUCSPD(video, fps, [40 40], 20, True, theta, phi, R)
 %}
 arguments
-    video_hdf5_path {mustBeText}
+    videoPath {mustBeText}
     fps             (1,1) {mustBeNumeric}   = 120
     window          (1,2) {mustBeNumeric}   = [24 24]
     step            (1,1) {mustBeNumeric}   = 12
     options.doPlot  (1,1) logical           = false
-    options.num_frames_to_process {mustBeNumeric} = [1, inf];
-    options.chunk_size_seconds {mustBeNumeric} = 1;
+    options.nFramesToProcess {mustBeNumeric} = [1, inf];
+    options.chunkSizeSecs {mustBeNumeric} = 1;
     options.aucRange {mustBeNumeric} = [log10(0.1),log10(60)];
 end
 
 % Load in some info about the video to get us started
-video_info = h5info(video_hdf5_path, "/video");
+video_info = h5info(videoPath, "/video");
 video_size = video_info.Dataspace.Size;
 nRows = video_size(1);
 nCols = video_size(2);
@@ -50,15 +47,15 @@ if(nFrames <= 0)
 end
 
 % Define the start and endpoint that we want to analyze of the video
-start_frame = options.num_frames_to_process(1);
-end_frame = options.num_frames_to_process(2);
+start_frame = options.nFramesToProcess(1);
+end_frame = options.nFramesToProcess(2);
 
 if(end_frame == inf)
     end_frame = nFrames;
 end
 
 % Calculate the step size in frames
-framesPerChunk = floor(options.chunk_size_seconds * fps);
+framesPerChunk = floor(options.chunkSizeSecs * fps);
 
 % Find the chunk starts
 chunkStarts = 1:framesPerChunk/2:(end_frame-framesPerChunk);
@@ -104,7 +101,7 @@ for ff = 1:nChunks
     fprintf("Processing chunk: %d/%d...", ff, nChunks);
 
     % Initialize a frame chunk we wil populate
-    frameChunk = h5read(video_hdf5_path, "/video", [1, 1, chunkStarts(ff)], [inf, inf, framesPerChunk]);
+    frameChunk = h5read(videoPath, "/video", [1, 1, chunkStarts(ff)], [inf, inf, framesPerChunk]);
     frameChunk = permute(frameChunk, [3 2 1]);  % flip back to nFrames x nRows x nCols
 
     % Get the median image across time for this chunk
@@ -180,28 +177,33 @@ medianImage = median(medianImage,3,'omitmissing');
 % Get the mean spd by region
 spdByRegion = squeeze(mean(spdByRegion,3,'omitmissing'));
 
-figure('Position',[100,100,900,300]);
-tiledlayout(1,3,'TileSpacing','compact','Padding','compact');
+% Show the results if requested
+if options.doPlot
 
-nexttile
-imagesc(slopeMap)
-title(sprintf("Slope Map"));
-axis image;
-colormap('hot');
-colorbar;
+    figure('Position',[100,100,900,300]);
+    tiledlayout(1,3,'TileSpacing','compact','Padding','compact');
 
-nexttile
-imagesc(aucMap)
-title(sprintf("AUC Map"));
-axis image;
-colormap('hot');
-colorbar;
-drawnow;
+    nexttile
+    imagesc(slopeMap)
+    title(sprintf("Slope Map"));
+    axis image;
+    colormap('hot');
+    colorbar;
 
-nexttile
-title('Median image');
-image(medianImage);
-axis image;
-drawnow;
+    nexttile
+    imagesc(aucMap)
+    title(sprintf("AUC Map"));
+    axis image;
+    colormap('hot');
+    colorbar;
+    drawnow;
+
+    nexttile
+    title('Median image');
+    image(medianImage);
+    axis image;
+    drawnow;
+
+end
 
 end
