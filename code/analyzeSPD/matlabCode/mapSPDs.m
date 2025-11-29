@@ -1,4 +1,4 @@
-function [slopeMap, aucMap, spdByRegion, frq] = mapSPDs(video_hdf5_path, fps, window, step, options)
+function [slopeMap, aucMap, spdByRegion, frq, medianImage] = mapSPDs(video_hdf5_path, fps, window, step, options)
 % Computes slope and Area Under the Curve (AUC) maps of temporal SPD across
 % image regions and projects them onto a 1 m visual field surface, then
 % plots both maps.
@@ -82,6 +82,9 @@ aucMap = nan(nRows, nCols, nChunks);
 % Allocate storage for the spds
 spdByRegion = nan(nRowPatches, nColPatches, nChunks, framesPerChunk/2);
 
+% Allocate storage for the median image
+medianImage = nan(nRows, nCols, nChunks);
+
 % Turn off a warning that occurs during robust linear fitting
 warnState = warning();
 warning('off','stats:statrobustfit:IterationLimit');
@@ -103,6 +106,9 @@ for ff = 1:nChunks
     % Initialize a frame chunk we wil populate
     frameChunk = h5read(video_hdf5_path, "/video", [1, 1, chunkStarts(ff)], [inf, inf, framesPerChunk]);
     frameChunk = permute(frameChunk, [3 2 1]);  % flip back to nFrames x nRows x nCols
+
+    % Get the median image across time for this chunk
+    medianImage(:,:,ff) = median(frameChunk,1,'omitmissing');
 
     % Slide the analysis window across the image in row and column directions
     for rr = 1:nRowPatches
@@ -166,26 +172,36 @@ end % end chunks
 % Restore the warning state
 warning(warnState);
 
-% Finally, finish the average slope map and AUC map calculations
+% Obtain the average slope and  AUC map, and the median image
 slopeMap = mean(slopeMap,3,'omitmissing');
 aucMap = mean(aucMap,3,'omitmissing');
+medianImage = median(medianImage,3,'omitmissing');
 
 % Get the mean spd by region
 spdByRegion = squeeze(mean(spdByRegion,3,'omitmissing'));
 
-figure;
-imagesc(slopeMap,[-2.5 -2])
-title(sprintf("Whole Video Mean | Slope Map"));
+figure('Position',[100,100,900,300]);
+tiledlayout(1,3,'TileSpacing','compact','Padding','compact');
+
+nexttile
+imagesc(slopeMap)
+title(sprintf("Slope Map"));
 axis image;
 colormap('hot');
 colorbar;
 
-figure;
-imagesc(aucMap,[-3.75 -3.25])
-title(sprintf("Whole Video Mean | AUC Map"));
+nexttile
+imagesc(aucMap)
+title(sprintf("AUC Map"));
 axis image;
 colormap('hot');
 colorbar;
+drawnow;
+
+nexttile
+title('Median image');
+image(medianImage);
+axis image;
 drawnow;
 
 end
