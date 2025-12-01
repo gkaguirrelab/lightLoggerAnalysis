@@ -30,10 +30,11 @@ arguments
     options.frameIdxToProcess {mustBeNumeric} = [1, inf];
     options.windowSpacePixels          (1,2) {mustBeNumeric}   = [24 24]
     options.stepSpacePixels            (1,1) {mustBeNumeric}   = 12
-    options.windowTimeSecs {mustBeNumeric} = 10;
-    options.stepTimeSecs {mustBeNumeric} = 0.5;
-    options.aucFreqRangeHz {mustBeNumeric} = [log10(0.1),log10(60)];
+    options.windowTimeSecs {mustBeNumeric} = 10
+    options.stepTimeSecs {mustBeNumeric} = 0.5
+    options.aucFreqRangeHz {mustBeNumeric} = [log10(0.1),log10(60)]
     options.doPlot  (1,1) logical           = true
+    options.nWorkers (1,1) {mustBeNumeric}   = 6
 end
 
 % Load in some info about the video to get us started
@@ -95,7 +96,7 @@ warnState = warning();
 warning('off','stats:statrobustfit:IterationLimit');
 
 % Move over the chunks of the video
-for ff = 1:nChunks
+parfor (ff = 1:nChunks, options.nWorkers)
 
     % Counter for layer index (each patch corresponds to one layer)
     layer = 0;
