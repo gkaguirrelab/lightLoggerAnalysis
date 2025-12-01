@@ -1,4 +1,4 @@
-function [slopeMap, aucMap, spdByRegion, frq, medianImage] = mapSPDs(videoPath, fps, window, step, options)
+function [slopeMap, aucMap, spdByRegion, frq, medianImage] = mapSPDs(videoPath, options)
 % Computes slope and Area Under the Curve (AUC) maps of temporal SPD across
 % image regions and projects them onto a 1 m visual field surface, then
 % plots both maps.
@@ -6,8 +6,8 @@ function [slopeMap, aucMap, spdByRegion, frq, medianImage] = mapSPDs(videoPath, 
 % Required Inputs:
 %   video             - String. path to video in hdf5 format
 %   fps               - Scalar. Sampling rate (Hz)
-%   window            - [height width] of square region
-%   step              - Step size for moving window.
+%   windowSpacePixels            - [height width] of square region
+%   stepSpacePixels              - stepSpacePixels size for moving windowSpacePixels.
 %   doPlot            - (boolean) Visualize the SPD maps or not
 %
 % Optional:
@@ -26,13 +26,14 @@ function [slopeMap, aucMap, spdByRegion, frq, medianImage] = mapSPDs(videoPath, 
 %}
 arguments
     videoPath {mustBeText}
-    fps             (1,1) {mustBeNumeric}   = 120
-    window          (1,2) {mustBeNumeric}   = [24 24]
-    step            (1,1) {mustBeNumeric}   = 12
-    options.doPlot  (1,1) logical           = false
-    options.nFramesToProcess {mustBeNumeric} = [1, inf];
-    options.chunkSizeSecs {mustBeNumeric} = 1;
-    options.aucRange {mustBeNumeric} = [log10(0.1),log10(60)];
+    options.fps             (1,1) {mustBeNumeric}   = 120
+    options.frameIdxToProcess {mustBeNumeric} = [1, inf];
+    options.windowSpacePixels          (1,2) {mustBeNumeric}   = [24 24]
+    options.stepSpacePixels            (1,1) {mustBeNumeric}   = 12
+    options.windowTimeSecs {mustBeNumeric} = 10;
+    options.stepTimeSecs {mustBeNumeric} = 0.5;
+    options.aucFreqRangeHz {mustBeNumeric} = [log10(0.1),log10(60)];
+    options.doPlot  (1,1) logical           = true
 end
 
 % Load in some info about the video to get us started
@@ -46,30 +47,37 @@ if(nFrames <= 0)
     error("Video has no frames");
 end
 
-% Define the start and endpoint that we want to analyze of the video
-start_frame = options.nFramesToProcess(1);
-end_frame = options.nFramesToProcess(2);
+% Place some options in variables
+fps = options.fps;
+windowSpacePixels = options.windowSpacePixels;
+stepSpacePixels = options.stepSpacePixels;
+windowTimeSecs = options.windowTimeSecs;
+stepTimeSecs = options.stepTimeSecs;
 
-if(end_frame == inf)
-    end_frame = nFrames;
+startFrameIdx = options.frameIdxToProcess(1);
+if(options.frameIdxToProcess(2) == inf)
+    endFrameIdx = nFrames;
+else
+    endFrameIdx = options.frameIdxToProcess(2);
 end
 
-% Calculate the step size in frames
-framesPerChunk = floor(options.chunkSizeSecs * fps);
+% Calculate the video chunk size in frames
+framesPerChunk = floor(windowTimeSecs * fps);
+framesPerStep = floor(stepTimeSecs * fps);
 
 % Find the chunk starts
-chunkStarts = 1:framesPerChunk/2:(end_frame-framesPerChunk);
+chunkStarts = startFrameIdx:framesPerStep:(endFrameIdx-framesPerChunk);
 
 % Find the number of chunks in the video
 nChunks = length(chunkStarts);
 
 % Find the row and column starts
-rowStarts = 1:step:(nRows - window(1) + 1);
-colStarts = 1:step:(nCols - window(2) + 1);
+rowStarts = 1:stepSpacePixels:(nRows - windowSpacePixels(1) + 1);
+colStarts = 1:stepSpacePixels:(nCols - windowSpacePixels(2) + 1);
 nRowPatches = length(rowStarts);
 nColPatches = length(colStarts);
 
-% Total number of patches (window positions across the image)
+% Total number of patches (windowSpacePixels positions across the image)
 nPatches = nRowPatches * nColPatches;
 
 % Allocate average Slope3D and AUC3D variables across all chunks
@@ -92,7 +100,7 @@ for ff = 1:nChunks
     % Counter for layer index (each patch corresponds to one layer)
     layer = 0;
 
-    % Initialize 3D arrays for slope and AUC values per window layer
+    % Initialize 3D arrays for slope and AUC values per windowSpacePixels layer
     slope3D = nan(nRows, nCols, nPatches);
     auc3D = nan(nRows, nCols, nPatches);
 
@@ -107,7 +115,7 @@ for ff = 1:nChunks
     % Get the median image across time for this chunk
     medianImage(:,:,ff) = median(frameChunk,1,'omitmissing');
 
-    % Slide the analysis window across the image in row and column directions
+    % Slide the analysis windowSpacePixels across the image in row and column directions
     for rr = 1:nRowPatches
         for cc = 1:nColPatches
 
@@ -120,7 +128,7 @@ for ff = 1:nChunks
 
             % Create a binary mask selecting the current region of interest
             regionMatrix = zeros(nRows, nCols);
-            regionMatrix(row:row+window(1)-1, col:col+window(2)-1) = 1;
+            regionMatrix(row:row+windowSpacePixels(1)-1, col:col+windowSpacePixels(2)-1) = 1;
             try
                 % Compute temporal SPD restricted to this region
                 [spd, fLoc] = calcTemporalSPD(frameChunk, fps, 'lineResolution', false, 'regionMatrix', regionMatrix);
@@ -147,11 +155,11 @@ for ff = 1:nChunks
             C = robustfit(log10(frq'), log10(spd) );
 
             % Calculate the auc
-            auc = (mean(polyval(C,options.aucRange))/2)*diff(options.aucRange);
+            auc = (mean(polyval(C,options.aucFreqRangeHz))/2)*diff(options.aucFreqRangeHz);
 
             % Assign slope and AUC values to current region layer
-            slope3D(row:row+window(1)-1, col:col+window(2)-1, layer) = C(1);
-            auc3D(row:row+window(1)-1, col:col+window(2)-1, layer) = auc;
+            slope3D(row:row+windowSpacePixels(1)-1, col:col+windowSpacePixels(2)-1, layer) = C(1);
+            auc3D(row:row+windowSpacePixels(1)-1, col:col+windowSpacePixels(2)-1, layer) = auc;
 
         end % col
 
