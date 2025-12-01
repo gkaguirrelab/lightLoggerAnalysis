@@ -86,13 +86,16 @@ slopeMap = nan(nRows, nCols, nChunks);
 aucMap = nan(nRows, nCols, nChunks);
 
 % Allocate storage for the spds
-spdByRegion = nan(nRowPatches, nColPatches, nChunks, framesPerChunk/2);
+spdByRegion = nan(nRowPatches, nColPatches, nChunks, floor(framesPerChunk/2));
 
 % Allocate storage for the median image
 medianImage = nan(nRows, nCols, nChunks);
 
+% Allocate storage for the frq variable
+frq = nan(1,floor(framesPerChunk/2)+1);
+
 % Move over the chunks of the video
-parfor (ff = 1:nChunks, options.nWorkers)
+for ff = 1:nChunks
 
     % Turn off a warning that occurs during robust linear fitting
     warnState = warning();
@@ -105,11 +108,11 @@ parfor (ff = 1:nChunks, options.nWorkers)
     slope3D = nan(nRows, nCols, nPatches);
     auc3D = nan(nRows, nCols, nPatches);
 
-    % Inform the users
-    tic;
+    % Inform the user
+    startTime = datetime('now');
     fprintf("Processing chunk: %d/%d...", ff, nChunks);
 
-    % Initialize a frame chunk we wil populate
+    % Initialize a frame chunk we will populate
     frameChunk = h5read(videoPath, "/video", [1, 1, chunkStarts(ff)], [inf, inf, framesPerChunk]);
     frameChunk = permute(frameChunk, [3 2 1]);  % flip back to nFrames x nRows x nCols
 
@@ -145,15 +148,11 @@ parfor (ff = 1:nChunks, options.nWorkers)
                 frq = fLoc;
             end
 
-            % Discard the zeroeth frequency
-            frq = frq(2:end);
-            spd = spd(2:end);
-
             % Save the raw spd
-            spdByRegion(rr,cc,ff,:) = spd;
+            spdByRegion(rr,cc,ff,:) = spd(2:end);
 
             % Fit a straight line in log-log space for the slope
-            C = robustfit(log10(frq'), log10(spd) );
+            C = robustfit(log10(frq(2:end)'), log10(spd(2:end)) );
 
             % Calculate the auc
             auc = (mean(polyval(C,options.aucFreqRangeHz))/2)*diff(options.aucFreqRangeHz);
@@ -163,7 +162,6 @@ parfor (ff = 1:nChunks, options.nWorkers)
             auc3D(row:row+windowSpacePixels(1)-1, col:col+windowSpacePixels(2)-1, layer) = auc;
 
         end % col
-
     end % row
 
     % Add this to the growing average for the whole video
@@ -171,12 +169,16 @@ parfor (ff = 1:nChunks, options.nWorkers)
     aucMap(:,:,ff) =  mean(auc3D,3,'omitnan');
 
     % Finish the console report
-    fprintf("%2.2f seconds\n", toc)
+    endTime = datetime('now');
+    fprintf("%2.2f seconds\n", seconds(endTime-startTime))
 
     % Restore the warning state
     warning(warnState);
 
 end % end chunks
+
+% Drop the zeroeth frequency
+frq = frq(2:end);
 
 % Obtain the average slope and  AUC map, and the median image
 slopeMap = mean(slopeMap,3,'omitmissing');
