@@ -91,12 +91,12 @@ spdByRegion = nan(nRowPatches, nColPatches, nChunks, framesPerChunk/2);
 % Allocate storage for the median image
 medianImage = nan(nRows, nCols, nChunks);
 
-% Turn off a warning that occurs during robust linear fitting
-warnState = warning();
-warning('off','stats:statrobustfit:IterationLimit');
-
 % Move over the chunks of the video
 parfor (ff = 1:nChunks, options.nWorkers)
+
+    % Turn off a warning that occurs during robust linear fitting
+    warnState = warning();
+    warning('off','stats:statrobustfit:IterationLimit');
 
     % Counter for layer index (each patch corresponds to one layer)
     layer = 0;
@@ -173,10 +173,10 @@ parfor (ff = 1:nChunks, options.nWorkers)
     % Finish the console report
     fprintf("%2.2f seconds\n", toc)
 
-end % end chunks
+    % Restore the warning state
+    warning(warnState);
 
-% Restore the warning state
-warning(warnState);
+end % end chunks
 
 % Obtain the average slope and  AUC map, and the median image
 slopeMap = mean(slopeMap,3,'omitmissing');
