@@ -1,4 +1,4 @@
-subjectIDs = {'2001','2003','2004'};%,'2005'};
+subjectIDs = {'2001','2003','2004','2005'};
 dropBoxDir = getpref("lightLoggerAnalysis", "dropboxBaseDir");
 
 for ss = 1:length(subjectIDs)
@@ -29,7 +29,7 @@ avgAUCMap(mask==0)=nan;
 
 % Display the maps
 figure
-imagesc(avgSlopeMap,[-2.75 -2.25]);
+imagesc(avgSlopeMap,[-2.5 -2.0]);
 hold on
 plot(240,240,'+k')
 viscircles([240 240], 50, 'Color', 'k', 'LineWidth', 1,'EnhanceVisibility',false);
@@ -39,7 +39,7 @@ title('Average Slope')
 axis square
 colorbar
 figure
-imagesc(avgAUCMap,[-4 -3.5]);
+imagesc(avgAUCMap,[-3.75 -3.25]);
 hold on
 plot(240,240,'+k')
 viscircles([240 240], 50, 'Color', 'k', 'LineWidth', 1,'EnhanceVisibility',false);
