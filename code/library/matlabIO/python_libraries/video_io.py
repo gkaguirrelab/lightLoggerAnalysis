@@ -137,7 +137,7 @@ def frames_to_video(frames: np.ndarray | queue.Queue, output_path: str, fps: flo
 
 """Given a path to a video, return the size of each frame of the video"""
 def inspect_video_framesize(video_path: str) -> tuple:
-    assert os.path.exists(video_path), "Video path does not exist"
+    assert os.path.exists(video_path), f"Video path: {video_path} does not exist"
 
     # Open the video stream
     video_stream: cv2.VideoCapture = cv2.VideoCapture(video_path)
@@ -156,7 +156,7 @@ def inspect_video_framesize(video_path: str) -> tuple:
 
 """Given a path to a video, return the FPS of that video"""
 def inspect_video_FPS(video_path: str) -> float:
-    assert os.path.exists(video_path), "Video path does not exist"
+    assert os.path.exists(video_path), f"Video path: {video_path} does not exist"
 
     # Open the video via cv2 
     video_stream: cv2.VideoCapture = cv2.VideoCapture(video_path)
@@ -174,7 +174,7 @@ def inspect_video_FPS(video_path: str) -> float:
 
 """Given a path to a video, return the number of frames in that video"""
 def inspect_video_frame_count(video_path: str) -> int:
-    assert os.path.exists(video_path), "Video path does not exist"
+    assert os.path.exists(video_path), f"Video path: {video_path} does not exist"
 
     # Open the video via cv2 
     video_stream: cv2.VideoCapture = cv2.VideoCapture(video_path)
@@ -208,7 +208,7 @@ def inspect_video_frame_count(video_path: str) -> int:
 
 """Given a path to a video, extract the provided frames idx from it as a numpy array"""
 def extract_frames_from_video(video_path: str, frames_idx: Iterable, is_grayscale: bool=False) -> np.ndarray: 
-    assert os.path.exists(video_path), "Video path does not exist"
+    assert os.path.exists(video_path), f"Video path: {video_path} does not exist"
     
     # First, sort the frame numbers we want to extract 
     frames_idx: list[int] = [int(idx) for idx in frames_idx] 

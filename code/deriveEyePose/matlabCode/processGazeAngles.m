@@ -3,20 +3,20 @@ dropboxBasedir = fullfile(getpref("lightLoggerAnalysis", 'dropboxBaseDir'));
 
 % STEP 1: make a perimeter file from raw data
 activity = 'lunch';
-for subjIdx = 1: length(subjectId)
-    if strcmp(subjectID, 'FLIC_2004') % in the future, it would be better to search for the contrast and gamma in the perimeterFile name
+for subjIdx = 1: length(subjectID)
+    if strcmp(subjectID{subjIdx}, 'FLIC_2004') % in the future, it would be better to search for the contrast and gamma in the perimeterFile name
         gamma = '1x5'
     else
         gamma = '1'
     end
-    saveFolders = [dropboxBasedir, '/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/', subjectID, '/' activity '/temporalFrequency/'];
-    sceneGeometryFile = [dropboxBasedir, '/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/', subjectID, '/gazeCalibration/temporalFrequency/', subjectID, '_gazeCal_SceneGeometry.mat'];
-    perimeterFile = [saveFolders, subjectID, '_' activity '_tf_perimeter_contrast1x25gamma' gamma '.mat']; % path to perimeter file
-    gazeCalMetaFile = [dropboxBasedir, '/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/', subjectID, '/gazeCalibration/temporalFrequency/', subjectID, '_gazeCal_SceneGeometryMetadata.mat'];
+    saveFolders = [dropboxBasedir, '/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/', subjectID{subjIdx}, '/' activity '/temporalFrequency/'];
+    sceneGeometryFile = [dropboxBasedir, '/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/', subjectID{subjIdx}, '/gazeCalibration/temporalFrequency/', subjectID{subjIdx}, '_gazeCal_SceneGeometry.mat'];
+    perimeterFile = [saveFolders, subjectID{subjIdx}, '_' activity '_tf_perimeter_contrast1x25gamma' gamma '.mat']; % path to perimeter file
+    gazeCalMetaFile = [dropboxBasedir, '/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/', subjectID{subjIdx}, '/gazeCalibration/temporalFrequency/', subjectID{subjIdx}, '_gazeCal_SceneGeometryMetadata.mat'];
     load(gazeCalMetaFile);
 
-    pupilFileName = [saveFolders, subjectID, '_' activity '_pupilData_contrast1x25gamma' gamma '.mat'];
-    fitPupilPerimeter(perimeterFile,pupilFileName, 'sceneGeometryFileName',sceneGeometryFile,'useParallel',true,'verbose',true, 'nWorkers', 6);
+    pupilFileName = [saveFolders, subjectID{subjIdx}, '_' activity '_pupilData_contrast1x25gamma' gamma '.mat'];
+    fitPupilPerimeter(perimeterFile,pupilFileName, 'sceneGeometryFileName',sceneGeometryFile,'useParallel',true,'verbose',true, 'nWorkers', 12);
 end
 %% Clean up: remove low confidence points and something.
 load(pupilFileName);
