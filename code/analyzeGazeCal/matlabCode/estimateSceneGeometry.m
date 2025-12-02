@@ -2,7 +2,7 @@ function [sceneGeometry,p, gazeOffset] = estimateSceneGeometry(perimeterFile, fr
 % Estimate eye and scene geometry for a gaze calibration measurement
 %
 % Syntax:
-%  estimateSceneGeometry(perimeterFile, frameSet, gazeTargets)
+%  [sceneGeometry,p, gazeOffset] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets)
 %
 % Description:
 %   The appearance of the eye in a camera image is influenced by several
@@ -342,7 +342,7 @@ parfor ii = 1:length(perimeter)
     % Make sure we have Xp points
     if ~isempty(Xp)
         [eyePoses(ii,:),~,ellipseRMSEs(ii)] = eyePoseEllipseFit(Xp, Yp, glintCoord, sceneGeometry,...
-            'glintTol',5,...
+            'glintTol',1,...
             'cameraTransX0',[0;0;0],...
             'cameraTransBounds', [0;0;0]);
     end
