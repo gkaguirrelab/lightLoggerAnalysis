@@ -65,7 +65,7 @@ frameSet = fullFrameSet(gazeSubsetIdx);
 gazeTargets = (gazeTargetsDeg(gazeSubsetIdx,:)).*[-1,1];
 
 % use this to make sure the points look like they make a cross
-plotPupilCenters(fullFrameSet, perimeter, [1:31]);
+plotPupilCenters(fullFrameSet, perimeter, [1:34]);
 
 % Define some properties of the eye and of the scene that will be fixed
 % for the scene search
@@ -86,6 +86,7 @@ observerArgs = {'sphericalAmetropia',-1.00,correctionType,[-1.00,-0.25,0]};
 
 % Combine the two argument sets
 setupArgs = [sceneArgs observerArgs];
+setupArgs = [sceneArgs]; % 2006
 confidenceThreshold = confidenceCutoff;
 
 
