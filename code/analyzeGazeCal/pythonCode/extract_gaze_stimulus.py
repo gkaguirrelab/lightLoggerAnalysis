@@ -17,7 +17,9 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 import shutil
 import argparse
 import scipy.io
+import tqdm 
 import h5py
+
 
 # Import relevant custom libraries with helper functions and constants 
 light_logger_analysis_dir_path: str = os.path.expanduser("~/Documents/MATLAB/projects/lightLoggerAnalysis")
@@ -80,7 +82,8 @@ def find_stimulus_period(video: str | np.ndarray,
                          visualize_results: bool=False, 
                          peak_height: float=100,
                          peak_prominence: int=5,
-                         peak_min_distance: int=240
+                         peak_min_distance: int=240,
+                         verbose: bool=False
                         ) -> tuple[int | object]:
     # If np.ndarray, not yet implemeneted 
     if(isinstance(video, np.ndarray)):
@@ -94,50 +97,33 @@ def find_stimulus_period(video: str | np.ndarray,
     red_pixel_rows: np.ndarray = red_pixel_locations[0]
     red_pixel_cols: np.ndarray = red_pixel_locations[1] 
 
-    # Otherwise, we will go through the frames 
-    # of the video and find the peaks in average red channel 
-    # intensity of each frame
-     # Stream frames in and add them to the per pixel sum 
-    frame_queue: mp.Queue = mp.Queue(maxsize=5)
-    stop_event: object = mp.Event()
-    frame_stream_process: object = mp.Process(target=video_io.destruct_video, 
-                                              args=(video, 0, float("inf"), 
-                                                    True, frame_queue, stop_event)
-                                             )
-    # Start the subprocess 
-    frame_stream_process.start()
-    
+    # Find the number of frames in the video 
+    num_video_frames: int = video_io.inspect_video_frame_count(video)
+
+    # Open a reader to the video 
+    frame_reader: cv2.VideoCapture = cv2.VideoCapture(video)
 
     # Parse frames from the video, finding their average red 
     # channel and saving their frame num + average red channel
-    red_intensities: list[int] = []
-    frame_num: int = 0 
-    while(True):
-        # Attempt to retrieve a frame from the frame queue 
-        try:
-            frame: np.ndarray | None = frame_queue.get(timeout=5)
-        except queue.Empty:
-            # Stop the subprocess
-            stop_event.set()
-            frame_stream_process.join()   
-            raise Exception("Did not recieve frame in time")
+    red_intensities: np.ndarray = np.zeros((num_video_frames, 2), dtype=np.float64)
+    frame_iterator: Iterable = range(num_video_frames) if verbose is False else tqdm.tqdm(range(num_video_frames), desc="Finding stimulus start/end")
+    for frame_num in frame_iterator:
+        # Read a frame 
+        ret, frame = frame_reader.read()
 
         # If no frame arrived, then we are done 
-        if(frame is None):
+        if(not ret):
             break
+
+        # Convert the frame to grayscale 
+        frame: np.ndarray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
         # Otherwise, we have a frame, 
         # Let's find its red intensity and 
-        red_intensities.append( [frame_num, np.mean(frame[red_pixel_rows, red_pixel_cols])] )
+        red_intensities[frame_num, :] = [frame_num, np.mean(frame[red_pixel_rows, red_pixel_cols])]
 
-        # Increment the frame number 
-        frame_num += 1
-
-    # Join the subprocess 
-    frame_stream_process.join()     
-
-    # Convert red intensities to np.ndarray 
-    red_intensities = np.array(red_intensities)
+    # Cleanly close the frame reader
+    frame_reader.release()
 
     # Find the peaks
     peaks, props = find_peaks(
@@ -152,7 +138,7 @@ def find_stimulus_period(video: str | np.ndarray,
 
     # Add delta to frame numbers (NOT to indices)
     delta = 200
-    start, end = (peak_frames + delta)[:2]
+    start, end = [ int(item) for item in (peak_frames + delta)[:2]]
 
     # Visualization
     if visualize_results is True:
@@ -188,7 +174,7 @@ def find_stimulus_period(video: str | np.ndarray,
         ax.legend()
 
         plt.show()
-    
+
     return start, end, fig
 
 
@@ -198,44 +184,40 @@ def find_stimulus_period(video: str | np.ndarray,
 def find_background_image(video: str | np.ndarray,
                           start_frame: int, end_frame: int | None=None,
                           is_grayscale: bool=False,
-                          visualize_results: bool=False, 
+                          visualize_results: bool=False,
+                          verbose: bool=False
                          ) -> np.ndarray | tuple[np.ndarray, object]:
+
+    if(isinstance(video, np.ndarray)):
+        NotImplementedError("Array support not yet added")
 
     # Allocate the sum frame 
     frame_size: tuple[int] = video_io.inspect_video_framesize(video)
     frame_sum: np.ndarray = np.zeros(frame_size if is_grayscale is True else tuple(list(frame_size)+[3]), dtype=np.float64)
 
-    # Stream frames in and add them to the per pixel sum 
-    frame_queue: mp.Queue = mp.Queue(maxsize=5)
-    stop_event: object = mp.Event()
-    frame_stream_process: object = mp.Process(target=video_io.destruct_video, 
-                                              args=(video, start_frame, float("inf") if end_frame is None else end_frame, 
-                                                    is_grayscale, frame_queue, stop_event)
-                                             )
-    # Start the subprocess 
-    frame_stream_process.start()
+    # Open a frame reader to the video at the start frame 
+    frame_reader: cv2.VideoCapture = cv2.VideoCapture(video)
+    frame_reader.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
 
     # Parse frames from the video, gathering their features
-    frame_num: int = 0
-    while(True):
-        # Attempt to retrieve a frame from the frame queue 
-        try:
-            frame: np.ndarray | None = frame_queue.get(timeout=5)
-        except queue.Empty:
-            # Stop the subprocess
-            stop_event.set()
-            frame_stream_process.join()   
-            raise Exception("Did not recieve frame in time")
+    frame_iterator: Iterable = range(start_frame, end_frame) if verbose is False else tqdm.tqdm(range(start_frame, end_frame), desc="Finding background image")
+    for frame_num in frame_iterator:
+        # Read a frame from the video 
+        ret, frame = frame_reader.read()
 
-        # If no frame arrived, then we are done 
-        if(frame is None):
-            break
+        # Break if no frame returned 
+        if(not ret):
+            break 
 
         # If frame is an empty frame (such as when chunks)
         # are being written, discard this 
         if( (frame == 0).all()):
             continue
         
+        # If grayscale, covert frame to gray 
+        if(is_grayscale is True):
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            
         # Otherwise, we have a frame, 
         # so we let's add it to the running average
         frame_sum += frame
@@ -243,8 +225,8 @@ def find_background_image(video: str | np.ndarray,
         # Increment the frame number 
         frame_num += 1
 
-    # Join the subprocess 
-    frame_stream_process.join()   
+    # Cleanly close the video reader 
+    frame_reader.release() 
 
     # Calculate the backgroudn image 
     background_img: np.ndarray = ( np.clip(frame_sum / frame_num, 0, 255) ).astype(np.uint8) 
@@ -572,7 +554,7 @@ def manual_extract_target_circles(background_img: np.ndarray, path_to_intended_t
 
 def extract_gazecal_stimulus(video_path: str, intended_gaze_targets_path: str) -> np.ndarray:
     print("---Finding stimulus start/end---") 
-    start, end, fig = find_stimulus_period(video_path, visualize_results=True)
+    start, end, fig = find_stimulus_period(video_path, visualize_results=True, verbose=True)
 
     # Calculate the background image 
     print(f"---Finding background image of frames: [{start}, {end})---")
@@ -580,7 +562,8 @@ def extract_gazecal_stimulus(video_path: str, intended_gaze_targets_path: str) -
                                                         is_grayscale=True,
                                                         start_frame=start,
                                                         end_frame=end,
-                                                        visualize_results=False
+                                                        visualize_results=False,
+                                                        verbose=True
                                                        )
     
     # Manually select gaze target poinst 
@@ -617,7 +600,7 @@ def main() -> None:
         gaze_target_points = extract_april_tag_stimulus(video_path, frame_indices)
     else:
         assert intended_gaze_targets_path is not None, "No intended gaze targets path passed"
-        assert os.path.exists(intended_gaze_targets_path), f"Video path: {intended_gaze_targets_path} does not exist"
+        assert os.path.exists(intended_gaze_targets_path), f"Gaze targets path: {intended_gaze_targets_path} does not exist"
         gaze_target_points = extract_gazecal_stimulus(video_path, intended_gaze_targets_path)
     
     print("---Saving selections---")

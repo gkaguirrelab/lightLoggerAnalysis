@@ -51,7 +51,7 @@ function generateVirtuallyFoveatedVideos(subjectIDs, start_ends, options)
         if(numel(options.manual_offsets) == 0)
             manual_offset = [0, 0]; 
         else 
-            manual_offset = manual_offsets{ii};
+            manual_offset = options.manual_offsets{ii};
         end 
 
         % Output information before we process if we would like 
@@ -74,17 +74,24 @@ function generateVirtuallyFoveatedVideos(subjectIDs, start_ends, options)
         end 
 
         % Virtually foveate and output the video 
-        %virtuallyFoveateVideo(path_to_world_video, gaze_angles, offsets, output_path, path_to_recording_chunks, path_to_intrinsics, path_to_perspective_projection,... 
-        %                      "num_frames_to_process", start_end,...
-        %                      "verbose", options.verbose,...
-        %                      "manual_offset", manual_offset...
-        %                     );
+        virtuallyFoveateVideo(path_to_world_video, gaze_angles, offsets, output_path, path_to_recording_chunks, path_to_intrinsics, path_to_perspective_projection,... 
+                              "num_frames_to_process", start_end,...
+                              "verbose", options.verbose,...
+                              "manual_offset", manual_offset,...
+                              "testing", options.testing...
+                             );
     end 
 end 
 
 
 
 
+% 2001 lunch april tag frames 
+% 10548   11595 1.2340e+04  1.3100e+04      13863
+
+
+% 2003 lunch april tag frames
+% 9339 9814 10289 10810 11388
 
 %{ 
 

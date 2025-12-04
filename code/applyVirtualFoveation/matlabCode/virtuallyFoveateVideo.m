@@ -121,10 +121,19 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
         options.pupil_fps {mustBeNumeric} = 120; 
         options.pupil_world_phase_offset {mustBeNumeric} = 0.005; 
         options.verbose = false; 
-        options.manual_offset = [0, 0]; % Manual offset for FLIC_2001 walkIndoor = [-4.75, 4.75] 
+        options.manual_offset = [0, 0]; 
+        % walkIndoor
+        % Manual offset for FLIC_2001 = [-4.75, 4.75] 
         % Manual offset for FLIC 2003 = [-6, -1.5];
         % Manual offset for FLIC 2004 = [-11.5, -12.5]
         % Manual offset for FLIC 2005 = [-7.5, -7.5]
+
+        % lunch 
+        % Manual offset for FLIC_2001 = [2.5, 5]
+        % Manual offset for FLIC_2003 = [-6.25, -2.5]
+        % Manual offset for FLIC_2004 = [-6, 2.5]
+        % Manual offset for FLIC_2005.= [-9, -7.5]
+
         options.testing = false; 
         options.nan_deg_threshold = 45; 
     end     

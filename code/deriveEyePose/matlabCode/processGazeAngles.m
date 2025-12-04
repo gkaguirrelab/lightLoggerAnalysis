@@ -5,9 +5,9 @@ dropboxBasedir = fullfile(getpref("lightLoggerAnalysis", 'dropboxBaseDir'));
 activity = 'lunch';
 for subjIdx = 1: length(subjectID)
     if strcmp(subjectID{subjIdx}, 'FLIC_2004') % in the future, it would be better to search for the contrast and gamma in the perimeterFile name
-        gamma = '1x5'
+        gamma = '1x5';
     else
-        gamma = '1'
+        gamma = '1';
     end
     saveFolders = [dropboxBasedir, '/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/', subjectID{subjIdx}, '/' activity '/temporalFrequency/'];
     sceneGeometryFile = [dropboxBasedir, '/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/', subjectID{subjIdx}, '/gazeCalibration/temporalFrequency/', subjectID{subjIdx}, '_gazeCal_SceneGeometry.mat'];

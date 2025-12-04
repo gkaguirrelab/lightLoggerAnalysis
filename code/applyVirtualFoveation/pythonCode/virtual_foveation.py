@@ -25,10 +25,24 @@ def find_sensor_start_end_times(path_to_recording: str) -> dict[str, tuple]:
         if(len(files) == 0): 
             continue 
 
-        # Load in the first and last files 
-        start_chunk_path, end_chunk_path = files[0], files[-1]
+        # Let's load in the first chunk. This is simple
+        start_chunk_path = files[0]
         start_chunk: np.ndarray = np.load(start_chunk_path) 
-        end_chunk: np.ndarray = np.load(end_chunk_path)
+
+        # If there is a single file for the recording, this is simple.
+        # The last chunk cannot be empty 
+        end_chunk: np.ndarray | None = None
+        if(len(files) == 1):
+            end_chunk_path: str = files[-1]
+            end_chunk = np.load(end_chunk_path)
+
+        # Otherwise, let's check the last two chunks 
+        else:
+            for chunk_num in range(-2, 0):
+                end_chunk_path: str = files[chunk_num]
+                temp_chunk = np.load(end_chunk_path)
+                if(len(temp_chunk) != 0):
+                    end_chunk = temp_chunk
 
         # Find the start and end time 
         start: float = start_chunk[0] if start_chunk.ndim == 1 else start_chunk[0, 0]
