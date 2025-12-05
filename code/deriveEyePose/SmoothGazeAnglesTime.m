@@ -1,14 +1,26 @@
 subjectID = 'FLIC_2001';
 dropboxBasedir = fullfile(getpref("lightLoggerAnalysis", 'dropboxBaseDir'));
 
+%activity = 'walkIndoor';
+activity = 'lunch'; % 'lunch'
 % load files
-saveFolders = [dropboxBasedir, '/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/', subjectID, '/lunch/temporalFrequency/'];
+saveFolders = [dropboxBasedir, '/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/', subjectID, '/', activity, '/temporalFrequency/'];
 sceneGeometryFile = [dropboxBasedir, '/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/', subjectID, '/gazeCalibration/temporalFrequency/', subjectID, '_gazeCal_SceneGeometry.mat'];
-perimeterFile = [saveFolders, subjectID, '_lunch_tf_perimeter_contrast1x25gamma1.mat']; % path to perimeter file
-gazeCalMetaFile = [dropboxBasedir, '/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/', subjectID, '/gazeCalibration/temporalFrequency/', subjectID, '_gazeCal_SceneGeometryMetadata.mat'];
-load(gazeCalMetaFile);
+searchPattern = [saveFolders, subjectID, '_', activity, '_tf_perimeter_contrast*'];
+fileList = dir(searchPattern);
+if isempty(fileList)
+    error('No files found matching the pattern: %s', searchPattern);
+end
+fileName = fileList(1).name;
+perimeterFile = [saveFolders, fileName];
+% gazeCalMetaFile = [dropboxBasedir, '/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/', subjectID, '/gazeCalibration/temporalFrequency/', subjectID, '_gazeCal_SceneGeometryMetadata.mat'];
+% load(gazeCalMetaFile);
 
 pupilFileName = [saveFolders, subjectID, '_lunch_pupilData_contrast1x25gamma1.mat'];
+if ~isfile(pupilFileName)
+    confidenceThreshold = 0.65;
+    fitPupilPerimeter(perimeterFile,pupilFileName, 'sceneGeometryFileName',sceneGeometryFile,'useParallel',true,'verbose',true, 'nWorkers', 5, 'confidenceThreshold', confidenceThreshold);
+end
 load(pupilFileName);
 
 %% see how things would look after smoothing
@@ -20,7 +32,7 @@ load(pupilFileName);
 % plotting to check
 nFrames = length(priorPupilRadius);
 timeIndex = 1:nFrames;
-goodIdxOrig = ~isnan(pupilData.smoothPupilTime_02.eyePoses.values(:,4));
+%goodIdxOrig = ~isnan(pupilData.smoothPupilTime_02.eyePoses.values(:,4));
 figure; hold on;
 plot(pupilData.sceneConstrained.eyePoses.values(:,4), 'DisplayName', 'Original Prior Radius');
 plot(priorPupilRadius,'DisplayName', 'Smoothed Radius Constraint');

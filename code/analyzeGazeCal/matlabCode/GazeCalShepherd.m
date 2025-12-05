@@ -107,8 +107,8 @@ x0 = [-28.6484   -7.3094   51.0564   24.3158    0.5042   12.1706    0.9918 0.992
 %fullFrameSet = sort([fullFrameSet; 13776; 21995]); % use if adding frames
 %manually
 %fullFrameSet = fullFrameSet(1:end-2);
-frameSet = fullFrameSet(1:16);
-gazeTargets = gazeTargetsDeg(1:16,:).*[-1,1];
+frameSet = fullFrameSet(1:17);
+gazeTargets = gazeTargetsDeg(1:17,:).*[-1,1];
 [sceneGeometry,p17] = estimateSceneGeometry(perimeterFile, frameSet, gazeTargets, 'setupArgs', setupArgs, 'x0', p5, 'confidenceThreshold', confidenceThreshold, 'nWorkers', 6);
 
 % CHECK the graphs. Do the xs and os overlap well? Is the f value below 4?
@@ -116,7 +116,7 @@ gazeTargets = gazeTargetsDeg(1:16,:).*[-1,1];
 %of the points look poorly outlined. They may need to be omitted from the
 %procedure.
 %% now again with the second half of the gaze targets
-subset = [17:30];
+subset = [17:34];
 frameSet = fullFrameSet(subset);
 gazeTargets = gazeTargetsDeg(subset,:).*[-1,1];
 
@@ -152,7 +152,7 @@ gazeTargets = gazeTargetsDeg.*[-1,1];
 % and frames used for this participant in a file!
 
 % what is the gaze offset?? HUMAN
-gazeOffset = [-7.2, 1.9]; % [azi, ele]
+gazeOffset = [-4.6, 3.9]; % [azi, ele]
 
 sceneGeometryFile = [saveFolders, subjectID, '_gazeCal_SceneGeometry.mat'];
 saveFileMeta = [saveFolders, subjectID, '_gazeCal_SceneGeometryMetadata.mat'];
@@ -160,7 +160,7 @@ save(sceneGeometryFile, 'sceneGeometry')
 save(saveFileMeta, "p34", "gazeOffset", "fullFrameSet", "gazeTargets", "startTime", "observerArgs", "confidenceThreshold", "targetDurSec");
 
 % Save the figure 1 as a MATLAB figure file
-fig1_handle = figure(1);
+fig1_handle = figure(36);
 saveas(fig1_handle, [saveFolders, subjectID, '_gazeCal_SceneGeometryTargetsPlot'], 'pdf');
 %% How to turn pupil perimeters into gaze angles now that you have scene geometry
 % Define variables for the path to the sceneGeometry file, perimeter file, and a _pupilData.mat file (which is to be created).
