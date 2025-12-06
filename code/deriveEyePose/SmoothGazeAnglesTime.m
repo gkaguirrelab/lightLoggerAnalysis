@@ -18,7 +18,7 @@ for subjIdx = 1:length(subjectID)
     % gazeCalMetaFile = [dropboxBasedir, '/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/', subjectID, '/gazeCalibration/temporalFrequency/', subjectID, '_gazeCal_SceneGeometryMetadata.mat'];
     % load(gazeCalMetaFile);
 
-    pupilFileName = [saveFolders, subjectID{subjIdx}, '_lunch_pupilData_contrast1x25gamma1.mat'];
+    pupilFileName = [saveFolders, subjectID{subjIdx}, '_', activity, '_pupilData_contrast1x25gamma1.mat'];
     if ~isfile(pupilFileName)
         confidenceThreshold = 0.7;
         fitPupilPerimeter(perimeterFile,pupilFileName, 'sceneGeometryFileName',sceneGeometryFile,'useParallel',true,'verbose',true, 'nWorkers', 5, 'confidenceThreshold', confidenceThreshold);
