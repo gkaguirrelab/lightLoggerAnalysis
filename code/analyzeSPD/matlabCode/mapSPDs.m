@@ -1,5 +1,5 @@
-function [slopeMap, aucMap, spdByRegion, frq, medianImage] = mapSPDs(videoPath, options)
-% Computes slope and Area Under the Curve (AUC) maps of temporal SPD across
+function [exponentMap, varianceMap, spdByRegion, frq, medianImage] = mapSPDs(videoPath, options)
+% Computes the exponent and intercept of a 1/f fit to temporal SPD across
 % image regions and projects them onto a 1 m visual field surface, then
 % plots both maps.
 %
@@ -14,15 +14,13 @@ function [slopeMap, aucMap, spdByRegion, frq, medianImage] = mapSPDs(videoPath, 
 %   affineMat         - 2x3 affine matrix to apply to [az, el] before XYZ
 %
 % Outputs:
-%   slopeMap          - local 1/f slope per pixel
-%   aucMap            - local Area Under the Curve (integrated power) per pixel
+%   exponentMap       - exponent of 1/f function at each location
+%   interceptMap      - power (in units of contrast) at 1 Hz.
 %   frq               - frequency vector used in SPD
-%   hFigSlope         - figure handle for slope map
-%   hFigAUC           - figure handle for AUC map
 %
 % Example Usage:
 %{
-    [slopeMap, aucMap, frq] = mapSlopeAUCSPD(video, fps, [40 40], 20, True, theta, phi, R)
+    [exponentMap, interceptMap, spdByRegion, frq, medianImage] = mapSPDs(videoPath)
 %}
 arguments
     videoPath {mustBeText}
@@ -81,18 +79,22 @@ nColPatches = length(colStarts);
 % Total number of patches (windowSpacePixels positions across the image)
 nPatches = nRowPatches * nColPatches;
 
-% Allocate average Slope3D and AUC3D variables across all chunks
-slopeMap = nan(nRows, nCols, nChunks);
-aucMap = nan(nRows, nCols, nChunks);
+% Allocate average exponent and AUC variables across all chunks
+exponentMap = nan(nRows, nCols, nChunks);
+varianceMap = nan(nRows, nCols, nChunks);
 
 % Allocate storage for the spds
-spdByRegion = nan(nRowPatches, nColPatches, nChunks, floor(framesPerChunk/2));
+spdByRegion = nan(nRowPatches, nColPatches, nChunks, floor(framesPerChunk/2)-1);
 
 % Allocate storage for the median image
 medianImage = nan(nRows, nCols, nChunks);
 
 % Allocate storage for the frq variable
 frq = nan(1,floor(framesPerChunk/2)+1);
+
+% Define the fmincon options
+optSearch = optimoptions('fmincon');
+optSearch.Display = 'off';
 
 % Move over the chunks of the video
 for ff = 1:nChunks
@@ -105,8 +107,8 @@ for ff = 1:nChunks
     layer = 0;
 
     % Initialize 3D arrays for slope and AUC values per windowSpacePixels layer
-    slope3D = nan(nRows, nCols, nPatches);
-    auc3D = nan(nRows, nCols, nPatches);
+    exponent3D = nan(nRows, nCols, nPatches);
+    variance3D = nan(nRows, nCols, nPatches);
 
     % Inform the user
     startTime = datetime('now');
@@ -149,24 +151,27 @@ for ff = 1:nChunks
             end
 
             % Save the raw spd
-            spdByRegion(rr,cc,ff,:) = spd(2:end);
+            spdByRegion(rr,cc,ff,:) = spd(2:end-1);
 
-            % Fit a straight line in log-log space for the slope
-            C = robustfit(log10(frq(2:end)'), log10(spd(2:end)) );
+            % Fit a generalized 1/f model to the data
+            myFit = @(p) p(1)./frq(2:end-1).^p(2);
+            myObj = @(p) norm(myFit(p)-spd(2:end-1));
+            p = fmincon(myObj,[0.05,1],[],[],[],[],[],[],[],optSearch);
 
-            % Calculate the auc
-            auc = (mean(polyval(C,options.aucFreqRangeHz))/2)*diff(options.aucFreqRangeHz);
+            % Derive the total variance of the fitted signal in units of
+            % contrast (which is the same as the area under the curve)
+            varVal = sum(myFit(p)) * diff(frq(1:2));
 
-            % Assign slope and AUC values to current region layer
-            slope3D(row:row+windowSpacePixels(1)-1, col:col+windowSpacePixels(2)-1, layer) = C(1);
-            auc3D(row:row+windowSpacePixels(1)-1, col:col+windowSpacePixels(2)-1, layer) = auc;
+            % Assign exponent and AUC values to current region layer
+            variance3D(row:row+windowSpacePixels(1)-1, col:col+windowSpacePixels(2)-1, layer) = varVal;
+            exponent3D(row:row+windowSpacePixels(1)-1, col:col+windowSpacePixels(2)-1, layer) = p(2);
 
         end % col
     end % row
 
     % Add this to the growing average for the whole video
-    slopeMap(:,:,ff) = mean(slope3D, 3,'omitnan');
-    aucMap(:,:,ff) =  mean(auc3D,3,'omitnan');
+    exponentMap(:,:,ff) = mean(exponent3D, 3,'omitnan');
+    varianceMap(:,:,ff) =  mean(variance3D,3,'omitnan');
 
     % Finish the console report
     endTime = datetime('now');
@@ -177,12 +182,12 @@ for ff = 1:nChunks
 
 end % end chunks
 
-% Drop the zeroeth frequency
-frq = frq(2:end);
+% Drop the zeroeth and nyquist frequencies
+frq = frq(2:end-1);
 
 % Obtain the average slope and  AUC map, and the median image
-slopeMap = mean(slopeMap,3,'omitmissing');
-aucMap = mean(aucMap,3,'omitmissing');
+exponentMap = mean(exponentMap,3,'omitmissing');
+varianceMap = mean(varianceMap,3,'omitmissing');
 medianImage = median(medianImage,3,'omitmissing');
 
 % Get the mean spd by region
@@ -195,14 +200,14 @@ if options.doPlot
     tiledlayout(1,3,'TileSpacing','compact','Padding','compact');
 
     nexttile
-    imagesc(slopeMap)
+    imagesc(exponentMap)
     title(sprintf("Slope Map"));
     axis image;
     colormap('hot');
     colorbar;
 
     nexttile
-    imagesc(aucMap)
+    imagesc(varianceMap)
     title(sprintf("AUC Map"));
     axis image;
     colormap('hot');
