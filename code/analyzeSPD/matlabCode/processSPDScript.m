@@ -1,4 +1,4 @@
-subjectIDs = {'2006','2001','2003','2004'};
+subjectIDs = {'2001','2003','2004','2006'};
 dropBoxDir = getpref("lightLoggerAnalysis", "dropboxBaseDir");
 
 for ss = 1:length(subjectIDs)
@@ -43,12 +43,12 @@ for ii = 1:39
     plot([idxStarts(ii),idxStarts(ii)],[1 480],'-','Color',[0.5 0.5 0.5]);
     plot([1 480],[idxStarts(ii),idxStarts(ii)],'-','Color',[0.5 0.5 0.5]);
 end
-title('Average Slope')
+title('Average Exponent')
 axis square
 colorbar
 
 figure
-imagesc(avgVarianceMap,[0.005 0.01]);
+imagesc(avgVarianceMap,[0.025 0.05]);
 hold on
 plot(240,240,'+k')
 for ii = [5, 10, 20, 40]

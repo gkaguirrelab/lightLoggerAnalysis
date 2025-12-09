@@ -116,10 +116,15 @@ for ff = 1:nChunks
 
     % Initialize a frame chunk we will populate
     frameChunk = h5read(videoPath, "/video", [1, 1, chunkStarts(ff)], [inf, inf, framesPerChunk]);
+    readTime = datetime('now');
+
     frameChunk = permute(frameChunk, [3 2 1]);  % flip back to nFrames x nRows x nCols
 
     % Get the median image across time for this chunk
     medianImage(:,:,ff) = median(frameChunk,1,'omitmissing');
+    
+    % Set up a variable to hold the process time
+    processTime = nan(nRowPatches,nColPatches);
 
     % Slide the analysis windowSpacePixels across the image in row and column directions
     for rr = 1:nRowPatches
@@ -156,7 +161,9 @@ for ff = 1:nChunks
             % Fit a generalized 1/f model to the data
             myFit = @(p) p(1)./frq(2:end-1).^p(2);
             myObj = @(p) norm(myFit(p)-spd(2:end-1));
-            p = fmincon(myObj,[0.05,1],[],[],[],[],[],[],[],optSearch);
+            tic
+            p = fmincon(myObj,[0.005,1],[],[],[],[],[],[],[],optSearch);
+            processTime(rr,cc)=toc;
 
             % Derive the total variance of the fitted signal in units of
             % contrast (which is the same as the area under the curve)
@@ -175,7 +182,8 @@ for ff = 1:nChunks
 
     % Finish the console report
     endTime = datetime('now');
-    fprintf("%2.2f seconds\n", seconds(endTime-startTime))
+    fprintf("read: %2.2fs, process: %2.2fs, meanFit: %2.2f, maxFit: %2.2f\n", ...
+        seconds(readTime-startTime),seconds(endTime-readTime),mean(processTime(:),'omitmissing'),max(processTime(:),[],'omitmissing'));
 
     % Restore the warning state
     warning(warnState);
