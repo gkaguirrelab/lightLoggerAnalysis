@@ -35,6 +35,9 @@ function generateVirtuallyFoveatedVideos(subjectIDs, start_ends, options)
         gaze_angles = gaze_angles_struct.pupilData.(gaze_angles_field).eyePoses.values; 
         if(options.just_projection)
             gaze_angles(:, :, :, :) = 0; 
+            if(any(gaze_angles(:)) ~= 0)
+                error("Projection only mode was selected but non zero gaze angles detected");
+            end 
         end 
 
         offsets_path = fullfile(dropbox_base_dir, sprintf("/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/%s/gazeCalibration/temporalFrequency/%s_gazeCal_SceneGeometryMetadata.mat", subjectID, subjectID)); 
@@ -72,7 +75,7 @@ function generateVirtuallyFoveatedVideos(subjectIDs, start_ends, options)
             fprintf("\tusing projection: %s\n", path_to_perspective_projection); 
             fprintf("\tusing start/end = [%d %d]\n", start_end(1), start_end(2));
             fprintf("\tusing manual offset = [%d %d]\n", manual_offset(1), manual_offset(2)); 
-            fprintf("\twith testing output: %d", options.testing)
+            fprintf("\twith testing output: %d\n", options.testing)
             fprintf("\toutputting to: %s\n", output_path);
         end     
 
