@@ -153,18 +153,17 @@ for ff = 1:nChunks
             % Save the raw spd
             spdByRegion(rr,cc,ff,:) = spd(2:end-1);
 
-            % Fit a generalized 1/f model to the data
-            myFit = @(p) p(1)./frq(2:end-1).^p(2);
-            myObj = @(p) norm(myFit(p)-spd(2:end-1));
-            p = fmincon(myObj,[0.05,1],[],[],[],[],[],[],[],optSearch);
+            % Obtain the slope of the data in the log-log domain, which
+            % amounts to the exponent of 1/f^2 model
+            p = polyfit(log10(frq(2:end-1)),log10(spd(2:end-1)),1);
 
             % Derive the total variance of the fitted signal in units of
             % contrast (which is the same as the area under the curve)
-            varVal = sum(myFit(p)) * diff(frq(1:2));
+            varVal = sum(10.^polyval(p,log10(frq(2:end-1)))) * diff(frq(1:2));
 
             % Assign exponent and AUC values to current region layer
             variance3D(row:row+windowSpacePixels(1)-1, col:col+windowSpacePixels(2)-1, layer) = varVal;
-            exponent3D(row:row+windowSpacePixels(1)-1, col:col+windowSpacePixels(2)-1, layer) = p(2);
+            exponent3D(row:row+windowSpacePixels(1)-1, col:col+windowSpacePixels(2)-1, layer) = p(1);
 
         end % col
     end % row
