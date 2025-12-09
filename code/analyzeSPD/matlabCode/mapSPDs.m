@@ -30,7 +30,6 @@ arguments
     options.stepSpacePixels            (1,1) {mustBeNumeric}   = 12
     options.windowTimeSecs {mustBeNumeric} = 1
     options.stepTimeSecs {mustBeNumeric} = 0.5
-    options.aucFreqRangeHz {mustBeNumeric} = [log10(0.1),log10(60)]
     options.doPlot  (1,1) logical           = true
     options.nWorkers (1,1) {mustBeNumeric}   = 6
 end
@@ -117,15 +116,11 @@ for ff = 1:nChunks
     % Initialize a frame chunk we will populate
     frameChunk = h5read(videoPath, "/video", [1, 1, chunkStarts(ff)], [inf, inf, framesPerChunk]);
     readTime = datetime('now');
-
     frameChunk = permute(frameChunk, [3 2 1]);  % flip back to nFrames x nRows x nCols
 
     % Get the median image across time for this chunk
     medianImage(:,:,ff) = median(frameChunk,1,'omitmissing');
     
-    % Set up a variable to hold the process time
-    processTime = nan(nRowPatches,nColPatches);
-
     % Slide the analysis windowSpacePixels across the image in row and column directions
     for rr = 1:nRowPatches
         for cc = 1:nColPatches
@@ -161,9 +156,7 @@ for ff = 1:nChunks
             % Fit a generalized 1/f model to the data
             myFit = @(p) p(1)./frq(2:end-1).^p(2);
             myObj = @(p) norm(myFit(p)-spd(2:end-1));
-            tic
-            p = fmincon(myObj,[0.005,1],[],[],[],[],[],[],[],optSearch);
-            processTime(rr,cc)=toc;
+            p = fmincon(myObj,[0.05,1],[],[],[],[],[],[],[],optSearch);
 
             % Derive the total variance of the fitted signal in units of
             % contrast (which is the same as the area under the curve)
@@ -182,8 +175,8 @@ for ff = 1:nChunks
 
     % Finish the console report
     endTime = datetime('now');
-    fprintf("read: %2.2fs, process: %2.2fs, meanFit: %2.2f, maxFit: %2.2f\n", ...
-        seconds(readTime-startTime),seconds(endTime-readTime),mean(processTime(:),'omitmissing'),max(processTime(:),[],'omitmissing'));
+    fprintf("read: %2.2fs, process: %2.2fs\n", ...
+        seconds(readTime-startTime),seconds(endTime-readTime));
 
     % Restore the warning state
     warning(warnState);
@@ -209,14 +202,14 @@ if options.doPlot
 
     nexttile
     imagesc(exponentMap)
-    title(sprintf("Slope Map"));
+    title(sprintf("Exponent Map"));
     axis image;
     colormap('hot');
     colorbar;
 
     nexttile
     imagesc(varianceMap)
-    title(sprintf("AUC Map"));
+    title(sprintf("Variance Map"));
     axis image;
     colormap('hot');
     colorbar;
