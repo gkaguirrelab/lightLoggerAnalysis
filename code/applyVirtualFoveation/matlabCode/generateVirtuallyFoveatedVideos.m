@@ -5,10 +5,11 @@ function generateVirtuallyFoveatedVideos(subjectIDs, start_ends, options)
         start_ends 
         options.manual_offsets = {};
         options.activity (1, 1) string = "activityUnspecified"
-        options.video_type (1,1) string {mustBeMember(options.video_type, ["virtuallyFoveatedVideoUnspecified", "virtuallyFoveatedVideo", "virtuallyFoveatedVideoAprilTag"])} = "virtuallyFoveatedVideoUnspecified"
+        options.video_type (1,1) string {mustBeMember(options.video_type, ["virtuallyFoveatedVideoUnspecified", "virtuallyFoveatedVideo", "virtuallyFoveatedVideoAprilTag", "projectionNoFoveation"])} = "virtuallyFoveatedVideoUnspecified"
         options.output_dir (1, 1) string = "./"
         options.verbose (1, 1) logical = false
         options.testing (1, 1) logical = false; 
+        options.just_projection (1, 1) logical = false; 
     end 
 
     % Let's get the dropbox base dir for any references we make to dropbox 
@@ -26,10 +27,18 @@ function generateVirtuallyFoveatedVideos(subjectIDs, start_ends, options)
         path_to_recording_chunks = sprintf("/Volumes/EXTERNAL_1/scriptedIndoorOutdoorVideos/%s/%s/temporalFrequency", subjectID, activity);
         
         % Load in the gaze angles and the constant offset
-        gaze_angles_path = fullfile(dropbox_base_dir, sprintf("FLIC_analysis/lightLogger/scriptedIndoorOutdoor/%s/%s/temporalFrequency/%s_%s_pupilData_contrast1x25gamma1.mat", subjectID, activity, subjectID, activity));
+        gaze_angles_folder = fullfile(dropbox_base_dir, sprintf("FLIC_analysis/lightLogger/scriptedIndoorOutdoor/%s/%s/temporalFrequency", subjectID, activity));
+        gaze_angles_file = find_gaze_angles_file(gaze_angles_folder); 
+        gaze_angles_path = fullfile(gaze_angles_folder, gaze_angles_file); 
         gaze_angles_struct = load(gaze_angles_path); % .pupilData.smoothPupilTime_02.eyePoses.values; 
         gaze_angles_field = gaze_angles_struct.pupilData.currentField; 
         gaze_angles = gaze_angles_struct.pupilData.(gaze_angles_field).eyePoses.values; 
+        if(options.just_projection)
+            gaze_angles(:, :, :, :) = 0; 
+            if(any(gaze_angles(:)) ~= 0)
+                error("Projection only mode was selected but non zero gaze angles detected");
+            end 
+        end 
 
         offsets_path = fullfile(dropbox_base_dir, sprintf("/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/%s/gazeCalibration/temporalFrequency/%s_gazeCal_SceneGeometryMetadata.mat", subjectID, subjectID)); 
         offsets = load(offsets_path).gazeOffset;
@@ -56,7 +65,8 @@ function generateVirtuallyFoveatedVideos(subjectIDs, start_ends, options)
 
         % Output information before we process if we would like 
         if(options.verbose)
-            fprintf("Virtually foveating subject: %s\n", subjectID); 
+            fprintf("Virtually foveating subject: %s\n", subjectID);
+            fprintf("\tusing projection only (no gaze angle) mode: %d\n", options.just_projection); 
             fprintf("\tusing world video: %s\n", path_to_world_video);
             fprintf("\tusing recording chunks: %s\n", path_to_recording_chunks); 
             fprintf("\tusing gaze angles from field (%s): %s\n", gaze_angles_field, gaze_angles_path)
@@ -65,7 +75,7 @@ function generateVirtuallyFoveatedVideos(subjectIDs, start_ends, options)
             fprintf("\tusing projection: %s\n", path_to_perspective_projection); 
             fprintf("\tusing start/end = [%d %d]\n", start_end(1), start_end(2));
             fprintf("\tusing manual offset = [%d %d]\n", manual_offset(1), manual_offset(2)); 
-            fprintf("\twith testing output: %d", options.testing)
+            fprintf("\twith testing output: %d\n", options.testing)
             fprintf("\toutputting to: %s\n", output_path);
         end     
 
@@ -83,7 +93,30 @@ function generateVirtuallyFoveatedVideos(subjectIDs, start_ends, options)
     end 
 end 
 
+function gaze_angles_file = find_gaze_angles_file(folder)
+    % Get all files in the folder
+    files = dir(folder);
 
+    % Keep only files (ignore folders)
+    files = files(~[files.isdir]);
+
+    % Extract filenames
+    names = {files.name};
+
+    % Select those containing the keyword
+    matches = names(contains(names, "pupilData_contrast", 'IgnoreCase', true));
+
+    % Output the list
+    gaze_angles_file = matches;
+    if((numel(gaze_angles_file)) == 0)
+        error(sprintf("No gaze angle files found in %s", folder));
+    end 
+
+    if(numel(gaze_angles_file) > 1)
+        error(sprintf("Multiple gaze angle files detected in %s", folder)); 
+    end 
+
+end 
 
 
 % 2001 lunch april tag frames 
