@@ -127,6 +127,7 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
         % Manual offset for FLIC 2003 = [-6, -1.5];
         % Manual offset for FLIC 2004 = [-11.5, -12.5]
         % Manual offset for FLIC 2005 = [-7.5, -7.5]
+        % Manual offset for FLIC 2006 = [-3, 13]
 
         % lunch 
         % Manual offset for FLIC_2001 = [2.5, 5]
@@ -243,7 +244,7 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
         end
         
         % Load in the world frame
-        world_frame = world_frame_reader.readFrame('frameNum', ii, 'grayscale', true); 
+        world_frame = world_frame_reader.readFrame('frameNum', ii, 'color', 'GRAY'); 
 
         % Virtually foveat the frame 
         virtually_foveated_frame = [];

@@ -34,7 +34,7 @@ function generateVirtuallyFoveatedVideos(subjectIDs, start_ends, options)
         gaze_angles_field = gaze_angles_struct.pupilData.currentField; 
         gaze_angles = gaze_angles_struct.pupilData.(gaze_angles_field).eyePoses.values; 
         if(options.just_projection)
-            gaze_angles(:, :, :, :) = 0; 
+            gaze_angles(:, :) = 0; 
             if(any(gaze_angles(:)) ~= 0)
                 error("Projection only mode was selected but non zero gaze angles detected");
             end 

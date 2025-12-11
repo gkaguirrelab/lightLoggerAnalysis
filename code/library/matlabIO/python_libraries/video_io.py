@@ -325,7 +325,8 @@ def video_to_hdf5(video_path: str, output_path: str,
                  color_mode: Literal["GRAY", "RGB", "BGR"]="RGB",
                  start_frame: int=0, 
                  end_frame: int | float = float("inf"),
-                 zeros_as_nans: bool=False
+                 zeros_as_nans: bool=False,
+                 visualize_results: bool=False
                 ) -> None:
     assert os.path.exists(video_path), f"Video path: {video_path} does not exist"
     assert output_path.endswith(".hdf5"), f"Output path: {output_path} must end in .hdf5"
@@ -366,8 +367,8 @@ def video_to_hdf5(video_path: str, output_path: str,
 
         # Read frames from the interval 
         written_frame_idx: int = 0
-        for frame_num in tqdm.tqdm(range(start_frame, end_frame)):
-
+        iterator: Iterable = tqdm.tqdm(range(start_frame, end_frame)) if visualize_results is True else range(start_frame, end_frame)
+        for frame_num in iterator:
             # Attempt to read in a video 
             # from the stream 
             ret, frame = video_stream.read() 
