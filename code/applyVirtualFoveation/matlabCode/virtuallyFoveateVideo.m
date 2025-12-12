@@ -41,7 +41,7 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
 %                                    Generated with calculate_perspective_transform_w2e.m
 % % Optional key/value pairs:
 %   
-%  'num_frames_to_process'         - 2x1 or 1x2 Double array. The range of frames 
+%  'frames_to_process'             - 2x1 or 1x2 Double array. The range of frames 
 %                                    to virtually foveate, inclusive and 1 indexed. 
 %   
 %  'pupil_fps'                     - Double. The FPS of the pupil camera for this recording
@@ -117,11 +117,14 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
         path_to_recording_chunks {mustBeText};
         path_to_intrinsics {mustBeText};
         path_to_perspective_projection {mustBeText}; 
-        options.num_frames_to_process = [1, inf]; 
+        options.frames_to_process = [1, inf]; 
         options.pupil_fps {mustBeNumeric} = 120; 
         options.pupil_world_phase_offset {mustBeNumeric} = 0.005; 
         options.verbose = false; 
-        options.manual_offset = [0, 0];  
+        options.manual_offset = [0, 0]; 
+        options.non_contiguous_target_frames = [];  
+        options.testing = false; 
+        options.nan_deg_threshold = 45;
         % walkIndoor
         % Manual offset for FLIC_2001 = [-4.75, 4.75] 
         % Manual offset for FLIC 2003 = [-6, -1.5];
@@ -141,11 +144,7 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
         % Manual offset for FLIC_2003 = [-4.5, -2]
         % Manual offset for FLIC_2004 = [-5, -12]
         % Manual offset for FLIC 2005 = [-10, -14.5]
-        % Manual offset for FLIC 2006 = [8.75, 33.75]
-
-
-        options.testing = false; 
-        options.nan_deg_threshold = 45; 
+        % Manual offset for FLIC 2006 = [8.75, 33.75] 
     end     
 
     % Import the Python util library 
@@ -163,6 +162,15 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
     if(options.testing)
         output_path = "/Users/zacharykelly/Desktop/testing.avi"
     end 
+
+    % If we passed a group of non-contiguous target frames to analyze, 
+    % the full range of the video must be inf 
+    if(numel(options.non_contiguous_target_frames) > 0)
+        if(options.frames_to_process ~= [1, inf])
+            error("When selecting a group of non-contiguous target frames, frames to process must be [1, inf]")
+        end 
+    end 
+
 
     world_frame_writer = videoIOWrapper(output_path, "ioAction", 'write'); 
     world_frame_writer.FrameRate = 120; 
@@ -208,10 +216,10 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
     gaze_angles(:, 1:2) = ( ( gaze_angles(:, 1:2) - gaze_offsets ) .* [-1, -1] ) + options.manual_offset;
 
     % Choose the bounds for our virtual foveation 
-    start_frame = options.num_frames_to_process(1); 
+    start_frame = options.frames_to_process(1); 
     end_frame = world_frame_reader.NumFrames; 
-    if(options.num_frames_to_process(2) ~= inf)
-        end_frame = options.num_frames_to_process(2);
+    if(options.frames_to_process(2) ~= inf)
+        end_frame = options.frames_to_process(2);
     end 
 
     % Open the writer to start writing frames 
@@ -230,6 +238,13 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
 
         if(options.verbose)
             fprintf("Processing frame: %d/%d\n", ii, end_frame);
+        end 
+
+        % If we are solely processing a group of non contiguous target 
+        % frames, then let's check if this frame is in that group, otherwise 
+        % continue 
+        if(numel(options.non_contiguous_target_frames) > 0 && ~ismember(ii, options.non_contiguous_target_frames))    
+            continue; 
         end 
 
         % Retrieve the world frame timestamp 

@@ -10,6 +10,7 @@ function generateVirtuallyFoveatedVideos(subjectIDs, start_ends, options)
         options.verbose (1, 1) logical = false
         options.testing (1, 1) logical = false; 
         options.just_projection (1, 1) logical = false; 
+        options.non_contiguous_target_frames {mustBeNumeric} = [];
     end 
 
     % Let's get the dropbox base dir for any references we make to dropbox 
@@ -63,6 +64,13 @@ function generateVirtuallyFoveatedVideos(subjectIDs, start_ends, options)
             manual_offset = options.manual_offsets{ii};
         end 
 
+        % Retrieve the non contiguous target frames if provided 
+        if(numel(options.non_contiguous_target_frames) == 0)
+            non_contiguous_target_frames = [];
+        else 
+            non_contiguous_target_frames = options.non_contiguous_target_frames{ii};
+        end 
+
         % Output information before we process if we would like 
         if(options.verbose)
             fprintf("Virtually foveating subject: %s\n", subjectID);
@@ -88,7 +96,8 @@ function generateVirtuallyFoveatedVideos(subjectIDs, start_ends, options)
                               "num_frames_to_process", start_end,...
                               "verbose", options.verbose,...
                               "manual_offset", manual_offset,...
-                              "testing", options.testing...
+                              "testing", options.testing,...
+                              "non_contiguous_target_frames",non_contiguous_target_frames...
                              );
     end 
 end 
