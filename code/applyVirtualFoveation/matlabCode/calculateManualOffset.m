@@ -1,4 +1,4 @@
-function [x_offset, y_offset] = calculateManualOffset(subjectID, activity, options)
+function [x_offset, y_offset] = calculateManualOffset(subjectID, activity, intrinsics, options)
     arguments
         subjectID; 
         activity;
@@ -35,14 +35,17 @@ function [x_offset, y_offset] = calculateManualOffset(subjectID, activity, optio
             disp([video_reader.Height, video_reader.Width])
             error("Frame size does not equal video reader metadata")
         end 
+        frames(frame_num, :, :) = frame; 
     end 
 
-    % Pass the frames to Python to calculate the offset from the frames 
-    virtual_foveation_util = import_pyfile(getpref("lightLoggerAnalysis", "virtual_foveation_util_path"));
-    manual_offsets = double(virtual_foveation_util.calculate_manual_offsets(frames)); 
-    x_offset_raw = manual_offsets(1);
-    y_offset_raw = manual_offsets(2); 
-    
+    % Click the targets to get the manual offsets
+    manual_offsets_screen = click_points(frames)
+
+    % Next, we need to convert it to degrees
+    manual_offsets_deg = anglesFromIntrinsics(manual_offsets, intrinsics)
+    x_offset_raw = manual_offsets_deg(1);
+    y_offset_raw = manual_offsets_deg(2);
+
     % Next, we need to convert the offsets to the correct coordinate space. 
     % + is left for x and + is up for y 
     x_offset = -x_offset_raw; 
@@ -57,4 +60,34 @@ function [x_offset, y_offset] = calculateManualOffset(subjectID, activity, optio
     return; 
 end 
 
+% Local function to do the clicking in screen coordinates for manual offsets
+function mean_manual_offsets = click_points(frames)
 
+    % Initialize output array for our offsets 
+    nFrames = size(frames, 1);
+    manual_offsets_per_target = nan(nFrames, 2);
+
+    % Determine subplot grid size based on number of frames
+    [rows, cols] = find_min_figsize(nFrames);
+
+    figure;
+    for ii = 1:nFrames
+        % Show the image 
+        subplot(rows, cols, ii);
+        imshow(squeeze(frames(ii, :, :)), []);
+        title(sprintf("Target: %d", ii))
+        axis image off;
+        
+        % Wait for one click on the image 
+        [x, y] = ginput(1);  
+        manual_offsets_per_target(ii, :) = [x, y];
+        
+        % Plot the results of that click
+        hold on;
+        plot(x, y, 'r+', 'MarkerSize', 6, 'LineWidth', 1);
+    end
+
+    % Return the mean manual offset 
+    mean_manual_offsets = mean(manual_offsets_per_target, 1, 'omitnan');
+
+end

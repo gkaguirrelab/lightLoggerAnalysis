@@ -1,6 +1,7 @@
 import numpy as np 
 import natsort
 import os 
+import matplotlib.pyplot as plt
 
 """Find the start times of each of the sensors in the recording"""
 def find_sensor_start_end_times(path_to_recording: str) -> dict[str, tuple]:
@@ -57,14 +58,6 @@ def find_sensor_start_end_times(path_to_recording: str) -> dict[str, tuple]:
         sensor_start_ends[sensor] = (start, end)
 
     return sensor_start_ends
-
-"""Calculate the manual offsets for a single virtually 
-   foveated video given a list of virtually foveated 
-   gaze target frames 
-"""
-def calculate_manual_offsets(frames: np.ndarray) -> np.array:
-    return np.array([0, 0])
-
 
 def main():
     pass 
