@@ -125,6 +125,7 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
         options.non_contiguous_target_frames = [];  
         options.testing = false; 
         options.nan_deg_threshold = 45;
+        options.video_read_cache_size = 1000;
         % walkIndoor
         % Manual offset for FLIC_2001 = [-4.75, 4.75] 
         % Manual offset for FLIC 2003 = [-6, -1.5];
@@ -157,7 +158,7 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
     if(options.verbose)
         disp("Opening video reader/writer")
     end 
-    world_frame_reader = videoIOWrapper(world_video, "ioAction", 'read'); 
+    world_frame_reader = videoIOWrapper(world_video, "ioAction", 'read', "readAheadBufferSize", options.video_read_cache_size); 
 
     if(options.testing)
         output_path = "/Users/zacharykelly/Desktop/testing.avi"

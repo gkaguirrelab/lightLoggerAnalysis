@@ -4,7 +4,7 @@ function frame = readFrame(obj, options)
         options.frameNum {mustBeNumeric} = []; 
         options.color {mustBeMember(options.color, ["RGB","BGR","GRAY"])} = "RGB";
         options.zeros_as_nans = false; 
-        options.verbose = true; 
+        options.verbose = false; 
     end 
 
     if(options.verbose)

@@ -29,7 +29,7 @@ classdef videoIOWrapper < handle
         temporary_reading_hdf5_filepath
         current_reading_color_mode 
         read_ahead_buffer
-        read_ahead_buffer_size = 1000;
+        read_ahead_buffer_size;
         buffer_start_frame
     end
 
@@ -53,12 +53,10 @@ classdef videoIOWrapper < handle
             % syntax fails under Matlab 2025a.
             p = inputParser; p.KeepUnmatched = false;            
             p.addParameter('ioAction','read',@ischar);
-            p.addParameter('colorMode','RGB',@ischar);
-            p.addParameter('zerosAsNan',false,@isNumericOrLogical);
+            p.addParameter('readAheadBufferSize',1000);
             p.parse(varargin{:})
-            options.ioAction = p.Results.ioAction;
-            options.colorMode = p.Results.colorMode; 
-            options.zerosAsNan = p.Results.zerosAsNan; 
+            options.ioAction = p.Results.ioAction; 
+            options.readAheadBufferSize = p.Results.readAheadBufferSize;
 
             % Import the Python helper library 
             obj.utility_library = import_pyfile(getpref("lightLoggerAnalysis", "video_io_util_path")); 
@@ -72,6 +70,9 @@ classdef videoIOWrapper < handle
             
             % Store the mode this was opened with 
             obj.mode = options.ioAction; 
+
+            % Store the read ahead buffer size for making reads faster 
+            obj.read_ahead_buffer_size = options.readAheadBufferSize;
 
             switch(options.ioAction)
                 % In the case of read, load in some information about the video 
