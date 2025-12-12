@@ -9,6 +9,7 @@ import os
 import hdf5storage
 import tqdm
 import h5py
+import dill
 
 """Given a directory of frames, read them in and convert to video"""
 def dir_to_video(dir_path: str, output_path: str, fps: float=30) -> None:
@@ -414,12 +415,165 @@ def video_to_hdf5(video_path: str, output_path: str,
             # Increment the written frame number
             written_frame_idx += 1
 
-
-
     # Close the capture stream 
     video_stream.release()  
 
     return 
+
+
+"""
+def world_chunks_to_video(output_path: str, 
+                          fps: float) -> None:
+     # Initialize the video writer to construct our video. Note: here we denote an FPS, 
+    # assuming that it is constant, but we will need to handle dropped frames accordingly 
+    # in terms of when we change frames. 
+    fourcc = cv2.VideoWriter_fourcc(*"FFV1")
+    video_writer = cv2.VideoWriter(output_path, fourcc, FPS, (frame_width, frame_height), isColor= (debayer_images is True or convert_to_lms is True) ) 
+
+    # Initialize a dummy frame to fill in missing frames if desired 
+    dummy_frame: np.ndarray =  np.squeeze(np.full((frame_height, frame_width, 3 if debayer_images is True else 1), 0, dtype=np.uint8))
+
+    # Iterate over the chunks for this sensor 
+    previous_chunk_end_time: float = 0 
+    current_chunk_start_time: float = 0 
+
+    for chunk_num, (metadata_matrix_path, frame_buffer_path) in enumerate(chunks_paths):    
+        # First, we will retrieve the metadata for this buffer 
+        metadata: np.ndarray = np.load(metadata_matrix_path) if ".blosc" not in metadata_matrix_path else decompress_and_decrypt(metadata_matrix_path, encryption_password, contains_agc_metadata=contains_agc_metadata) 
+        
+        # Then, we will read in the timestamps and frame buffer for this chunk 
+        # World timestamps are in nanoseconds and thus must be converted to seconds 
+        t_vector: np.ndarray = np.ascontiguousarray(metadata[:, 0]) / ( (10**9) if sensor == "W" else 1)
+        frame_buffer: np.ndarray = np.load(frame_buffer_path) if ".blosc" not in frame_buffer_path else decompress_and_decrypt(frame_buffer_path, encryption_password) 
+
+        # Assert the t vector and frame vector are the same size 
+        assert(len(t_vector) == len(frame_buffer))
+        
+        # Assert the frames are of appropriate dtype 
+        assert(frame_buffer.dtype == np.uint8)
+
+        # If we somehow got an empty chunk, skip it 
+        if(len(t_vector) == 0): continue
+
+        # Now, we will apply the requested transformations to the frames 
+        frame_buffer = frame_buffer.astype(np.float64) # First, convert to float for float multiplications 
+
+        # Apply Dgain if requested
+        dgain_col: int = 1 + ( world_util.WORLD_AGC_METADATA_COLS.index("Dgain") if sensor == "W" else pupil_util.PUPIL_AGC_METADATA_COLS.index("Dgain"))
+        buffer_dgains: np.ndarray = np.full((len(frame_buffer,)), 1) if (len(metadata.shape) == 1 or metadata.shape[1] == 1 or apply_digital_gain is False) else metadata[:, dgain_col]
+        buffer_dgains = buffer_dgains[:, np.newaxis, np.newaxis]
+        frame_buffer *= buffer_dgains
+
+        # If we want to apply the color weight correction 
+        if(apply_color_weights is True):
+            frame_buffer[:] = [ world_util.apply_color_weights(frame)
+                                for frame in frame_buffer
+                              ] 
+
+
+        # If we want to debayer the image
+        if(debayer_images is True):
+            # Debayer the image. This function expects a uint8 frame, so round and convert to that. 
+            # Note: When writing color images to cv2.VideoWriter, it expects a BGR instead of RGB 
+            # frame, so also convert now 
+            assert frame_buffer.dtype == np.uint8, f"Dtype mistmatch. Frame buffer is type {frame_buffer.dtype} should be uint8"
+            frame_buffer = np.array([ cv2.cvtColor(world_util.debayer_image(frame), cv2.COLOR_RGB2BGR) 
+                                      for frame in frame_buffer 
+                                    ]
+                                   )
+
+        # Convert the frame buffer back into uint8 format 
+        frame_buffer = np.clip(np.round(frame_buffer), 0, 255).astype(np.uint8)
+
+        # If we are utilizing the pupil camera, we need to rotate 180 degrees 
+        # if desired
+        if(sensor == 'P' and pupil_image_rotation_correction is True):
+            frame_buffer[:] = [ cv2.rotate(frame, cv2.ROTATE_180)  
+                                for frame in frame_buffer
+                            ]
+
+        # Retrieve the current chunk start time 
+        current_chunk_start_time = t_vector[0]
+
+        # Before we write the frames for this chunk, we must write the dummy frame (if desired)
+        # for those frames between the previous chunk and the current chunk 
+        
+        # Find the total elapsed time in seconds between the two chunks 
+        time_between_chunks: int = current_chunk_start_time - previous_chunk_end_time
+
+        # Calculate the number of missed frames as the elapsed time divided 
+        # by the seconds per frame, minus one frame as we have to count the current frame 
+        # as captured during this interval 
+        missed_frames: int = 0 if chunk_num == 0 or fill_missing_frames is False else int( (time_between_chunks / (1/FPS ) ) -  1) 
+
+        # Write the number of missing frames in between as the previous frame 
+        for _ in range(missed_frames):
+            video_writer.write(dummy_frame)
+
+        # Initialize variables to track the previous timestamp 
+        # We will use this delta with the current timestamp 
+        # to track dropped frames and add dummy frames in the meantime
+        previous_timestamp: float = t_vector[0]
+
+        # Write frames to the video 
+        for frame_num, (timestamp, frame) in enumerate(zip(t_vector, frame_buffer)):
+            # Draw the pupil ROI if desired 
+            if(draw_pupil_ROI is True):
+                cv2.rectangle(frame, *pupil_util.PUPIL_AGC_ROI, (0, 0, 255), 2) 
+
+            # Assert the frame is of the appropriate type after transformation 
+            assert(frame.dtype == np.uint8 and dummy_frame.dtype == np.uint8)
+
+            # Otherwise, let's calculate the time delta between the current timestamp and the previous timestamp 
+            time_between_frames: float = timestamp - previous_timestamp
+
+            # Calculate the number of missed frames as the elapsed time divided 
+            # by the seconds per frame, minus one frame as we have to count the current frame 
+            # as captured during this interval 
+            missed_frames: int = 0 if frame_num == 0 or fill_missing_frames is False else int( (time_between_frames / (1/FPS ) ) -  1) 
+    
+            # Write the number of missing frames in between as the previous frame 
+            for _ in range(missed_frames):
+                video_writer.write(dummy_frame)
+            
+            # Write the current frame 
+            video_writer.write(frame)
+
+            # Save the current timestamp as the previous timestamp
+            # so we can reference it for the next frame 
+            previous_timestamp = timestamp 
+        
+        # Save the end time of this chunk 
+        previous_chunk_end_time = t_vector[-1]
+
+    return 
+
+
+def chunks_to_video(recording_path: str, 
+                    output_path: str,
+                    apply_digital_gain: bool=False, 
+                    debayer_images: bool=False,
+                    apply_color_weights: bool=False, 
+                    fill_missing_frames: bool=False,
+                    convert_to_lms: bool=False    
+                   ) -> None:
+   
+    # Next, let's load the config file from this recording 
+    config_data: dict | None = None 
+    with open(os.path.join(recording_path, "config.pkl"), 'rb') as f:
+        config_data = dill.load(f)
+    assert(config_data is not None)
+
+    # Next, let's generate the output path 
+    os.makedirs(output_path, exist_ok=True)
+
+    world_chunks_to_video(recording_path, 
+                          output_path,
+                          config["sensors"])
+    
+"""
+    
+
 
 def main():
     return 
