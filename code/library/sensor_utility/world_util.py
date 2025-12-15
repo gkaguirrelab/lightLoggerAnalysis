@@ -188,3 +188,35 @@ def apply_color_correction(original_frame: np.ndarray, visualize_results: bool=F
     # Return the modified frame
     return modified_frame
 
+"""Embed a world frame's timestamp into the 8 bit image itself"""
+def embed_timestamp(original_frame: np.ndarray, timestamp: np.float64, visualize_results: bool) -> tuple[np.ndarray, object] | np.ndarray:
+    assert original_frame.dtype == np.uint8, f"To do proper embedding, the frame must be uint8"
+    assert type(timestamp) == np.float64, f"To do proper embedding, the timestamp must be float64"
+
+    # Allocate a copy of the image we will edit and flatten it so we can directly 
+    # edit the pixels 
+    embedded_frame: np.ndarray = original_frame.copy().flatten() 
+
+    # Let's convert the timestamp to its bytes representation 
+    timestamp_as_u8: np.ndarray = timestamp.view('<u1')  # view as little endian uint8
+    embedded_frame[:len(timestamp_as_u8)] = timestamp_as_u8
+
+    return embedded_frame.reshape(original_frame.shape)
+
+
+"""Extract the world frame timestamp's from an embedded 8 bit image"""
+def extract_timestamp(embedded_frame: np.ndarray) -> np.float64:
+    assert embedded_frame.dtype == np.uint8, f"To extract a timestamp, the frame must be uint8"
+    
+    # First, let's flatten the image to get the bytes as a sequence 
+    flattened_image: np.ndarray = embedded_frame.flatten() 
+
+    # Next, we will take the first 8 bytes and view them as np.float64, 
+    # interpreting them as little endian 
+    timestamp_bytes: np.ndarray = flattened_image[:8]
+
+    # Convert the timestamp back to np.float64 
+    timestamp: np.float64 = timestamp_bytes.view('<f8')[0]
+
+    return timestamp
+

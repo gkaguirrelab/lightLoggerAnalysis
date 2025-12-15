@@ -430,6 +430,8 @@ def video_to_hdf5(video_path: str, output_path: str,
 
     return 
 
+
+"""Convert the world chunks of a recording into a playable video"""
 def world_chunks_to_video(recording_path: str,
                           output_path: str,
                           debayer_images: bool=False, 
@@ -468,6 +470,8 @@ def world_chunks_to_video(recording_path: str,
     # Initialize a dummy frame to fill in missing frames if desired 
     dummy_frame: np.ndarray =  np.squeeze(np.full((frame_height, frame_width, 3 if debayer_images is True else 1), 0, dtype=np.uint8))
 
+    # Retrive the sorted chunks for this sensor
+
     # Iterate over the chunks for this sensor 
     previous_chunk_end_time: float = 0 
     current_chunk_start_time: float = 0 
@@ -478,7 +482,7 @@ def world_chunks_to_video(recording_path: str,
         
         # Then, we will read in the timestamps and frame buffer for this chunk 
         # World timestamps are in nanoseconds and thus must be converted to seconds 
-        t_vector: np.ndarray = np.ascontiguousarray(metadata[:, 0]) / ( (10 ** 9) if convert_to_seconds is True else 1)
+        t_vector: np.ndarray = np.ascontiguousarray(metadata[:, 0], dtype=np.float64) / ( (10 ** 9) if convert_to_seconds is True else 1)
         frame_buffer: np.ndarray = np.load(frame_buffer_path)
 
         # Assert the t vector and frame vector are the same size 
@@ -516,18 +520,22 @@ def world_chunks_to_video(recording_path: str,
         if(convert_to_lms is True):
             pass
 
-
         # If we want to debayer the image
         if(debayer_images is True):
             # Note: When writing color images to cv2.VideoWriter, it expects a BGR instead of RGB 
             # frame, so also convert now 
-            frame_buffer = np.array([ cv2.cvtColor(world_util.debayer_image(frame), cv2.COLOR_RGB2BGR) 
-                                      for frame in frame_buffer 
-                                    ]
-                                   )
+            frame_buffer[:] = [cv2.cvtColor(world_util.debayer_image(frame), cv2.COLOR_RGB2BGR) 
+                               for frame in frame_buffer 
+                              ]
 
         # Convert the frame buffer back into uint8 format 
         frame_buffer = np.clip(np.round(frame_buffer), 0, 255).astype(np.uint8)
+
+        # If we want to embed the timestamps in the frame buffer, do that now
+        if(embed_timestamps is True):
+            frame_buffer = [world_util.embed_timestamp(frame, timestamp)
+                            for frame, timestamp in zip(frame_buffer, t_vector)
+                           ]
 
         # Retrieve the current chunk start time 
         current_chunk_start_time = t_vector[0]
@@ -542,10 +550,12 @@ def world_chunks_to_video(recording_path: str,
         # by the seconds per frame, minus one frame as we have to count the current frame 
         # as captured during this interval 
         missed_frames: int = 0 if chunk_num == 0 or fill_missing_frames is False else int( (time_between_chunks / (1/FPS ) ) -  1) 
+        missing_timestamps: np.ndarray = np.linspace(previous_chunk_end_time + (1/FPS), current_chunk_start_time, missed_frames, endpoint=False)
 
         # Write the number of missing frames in between as the previous frame 
-        for _ in range(missed_frames):
-            video_writer.write(dummy_frame)
+        for missing_timestamp in missing_timestamps:
+            missing_frame: np.ndarray = world_util.embed_timestamp(dummy_frame, missing_timestamp) if embed_timestamps is True else dummy_frame
+            video_writer.write(missing_frame)
 
         # Initialize variables to track the previous timestamp 
         # We will use this delta with the current timestamp 
@@ -564,10 +574,12 @@ def world_chunks_to_video(recording_path: str,
             # by the seconds per frame, minus one frame as we have to count the current frame 
             # as captured during this interval 
             missed_frames: int = 0 if frame_num == 0 or fill_missing_frames is False else int( (time_between_frames / (1/FPS ) ) -  1) 
-    
+            missing_timestamps: np.ndarray = np.linspace(previous_timestamp + (1/FPS), timestamp, missed_frames, endpoint=False)
+
             # Write the number of missing frames in between as the previous frame 
-            for _ in range(missed_frames):
-                video_writer.write(dummy_frame)
+            for missing_timestamp in missing_timestamps:
+                missing_frame: np.ndarray = world_util.embed_timestamp(dummy_frame, missing_timestamp) if embed_timestamps is True else dummy_frame
+                video_writer.write(missing_frame)
             
             # Write the current frame 
             video_writer.write(frame)
