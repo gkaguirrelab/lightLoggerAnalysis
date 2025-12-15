@@ -24,13 +24,13 @@ import h5py
 # Import relevant custom libraries with helper functions and constants 
 light_logger_analysis_dir_path: str = os.path.expanduser("~/Documents/MATLAB/projects/lightLoggerAnalysis")
 video_io_util_path: str = os.path.join(light_logger_analysis_dir_path, "code", "library", "matlabIO", "python_libraries")
-world_camera_constants_path: str = os.path.join(light_logger_analysis_dir_path, "data")
-for path in (light_logger_analysis_dir_path, video_io_util_path, world_camera_constants_path):
+world_util: str = os.path.join(light_logger_analysis_dir_path, "code", "library", "sensor_utility")
+for path in (light_logger_analysis_dir_path, video_io_util_path, world_util):
     assert os.path.exists(path), f"Expected path: {path} does not exist"
     sys.path.append(path)
 
 import video_io 
-import world_camera_constants
+import world_util
 
 def parse_args() -> str:
     # Initialize argument parser 
@@ -92,7 +92,7 @@ def find_stimulus_period(video: str | np.ndarray,
     # Define the RGB mask variable. We will use this to calculate 
     # just the red pixels. It will be calculated based on the size 
     # of the images in the video 
-    RGB_mask: np.ndarray = world_camera_constants.RGB_mask(video_io.inspect_video_framesize(video))
+    RGB_mask: np.ndarray = world_util.generate_RGB_mask(video_io.inspect_video_framesize(video))
     red_pixel_locations: tuple[np.ndarray] = np.where(RGB_mask == "R")
     red_pixel_rows: np.ndarray = red_pixel_locations[0]
     red_pixel_cols: np.ndarray = red_pixel_locations[1] 
