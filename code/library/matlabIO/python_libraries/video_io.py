@@ -510,7 +510,7 @@ def world_chunks_to_video(recording_path: str,
     # Define the iterator we will use to iterate over the chunks 
     start_chunk: int = start_end[0]
     end_chunk: int = start_end[1] if start_end[1] != float("inf") else len(chunks_paths)
-    chunk_iterator: Iterable = range(start_chunk, end_chunk) if verbose is False else tqdm(range(start_chunk, end_chunk), position=0, desc="Processing chunks", leave=False)
+    chunk_iterator: Iterable = range(start_chunk, end_chunk) if verbose is False else tqdm(range(start_chunk, end_chunk), position=0, desc="Processing chunks", leave=True)
     for chunk_num in chunk_iterator:
         metadata_matrix_path, frame_buffer_path = chunks_paths[chunk_num]
 
@@ -606,7 +606,7 @@ def world_chunks_to_video(recording_path: str,
         previous_timestamp: float = t_vector[0]
 
         # Write frames to the video 
-        frame_iterator: Iterable = range(len(frame_buffer)) if verbose is False else tqdm(range(len(frame_buffer)), position=1, desc="Processing frames", mininterval=0, miniters=1, leave=False)
+        frame_iterator: Iterable = range(len(frame_buffer)) if verbose is False else tqdm(range(len(frame_buffer)), position=1, desc="Processing frames", leave=False)
         for frame_num in frame_iterator:
             timestamp, frame = t_vector[frame_num], frame_buffer[frame_num]
 
