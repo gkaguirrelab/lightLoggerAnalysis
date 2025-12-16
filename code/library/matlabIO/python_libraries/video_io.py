@@ -7,7 +7,7 @@ from natsort import natsorted
 from typing import Literal, Iterable
 import os
 import hdf5storage
-import tqdm
+from tqdm.auto import tqdm
 import h5py
 import dill
 import pathlib
@@ -15,10 +15,31 @@ import sys
 
 # Import utility libraries
 light_logger_analysis_dir_path: str = os.path.expanduser("~/Documents/MATLAB/projects/lightLoggerAnalysis")
-world_util: str = os.path.join(light_logger_analysis_dir_path, "code", "library", "sensor_utility")
-for path in (light_logger_analysis_dir_path, world_util):
+world_util_path: str = os.path.join(light_logger_analysis_dir_path, "code", "library", "sensor_utility")
+for path in (light_logger_analysis_dir_path, world_util_path):
     assert os.path.exists(path), f"Expected path: {path} does not exist"
     sys.path.append(path)
+
+# Import world camera utility library
+import world_util
+
+"""Inspect a recording directory and return a dictionary of sensor names
+   with all of the paths to the chunks for that sensor in order
+"""
+def group_sensors_files(recording_path: str) -> dict[str, list[tuple]]:    
+    """Find all of the chunk filepaths of the sensors and group them into tuples of (t, frames)
+    Do this by iterating over the files over the recording in numerically sorted order (to order the chunks properly),
+    then find the files that denote they are the metadata of the sensors. Then, simply remove the metadata part of 
+    the filename and you arrive at the value file"""
+    def group_sensor_files(sensor_name: str) -> list:
+        return [ ( os.path.join(recording_path, file), os.path.join(recording_path, file.replace("_metadata", "") ) ) 
+                   for file in natsorted(os.listdir(recording_path)) 
+                   if sensor_name in file and "metadata" in file
+               ]
+
+    return {sensor[0].upper(): group_sensor_files(sensor) # n chunks = [ (metadata_path, frame_buffer_path), ...  ]
+            for sensor in ("world", "pupil", "ms")
+           }
 
 
 """Given a directory of frames, read them in and convert to video"""
@@ -378,7 +399,7 @@ def video_to_hdf5(video_path: str, output_path: str,
 
         # Read frames from the interval 
         written_frame_idx: int = 0
-        iterator: Iterable = tqdm.tqdm(range(start_frame, end_frame)) if visualize_results is True else range(start_frame, end_frame)
+        iterator: Iterable = tqdm(range(start_frame, end_frame)) if visualize_results is True else range(start_frame, end_frame)
         for frame_num in iterator:
             # Attempt to read in a video 
             # from the stream 
@@ -441,9 +462,15 @@ def world_chunks_to_video(recording_path: str,
                           apply_digital_gain: bool=False,
                           fill_missing_frames: bool=False,
                           convert_to_seconds: bool=True,
-                          embed_timestamps: bool=True
+                          embed_timestamps: bool=True,
+                          verbose: bool=False,
+                          start_end: tuple[int | float] = (0, float("inf"))
                          ) -> None:
-    
+    assert output_path.endswith(".avi"), f"Output path: {output_path} must end in .avi"
+
+    # Make the directories to the output path if they do not exist already 
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
     # First let's read the config file of this recording 
     # to gather some information about how the images look 
     config_filepath: str = os.path.join(recording_path, "config.pkl")
@@ -466,17 +493,27 @@ def world_chunks_to_video(recording_path: str,
                                    (frame_width, frame_height), 
                                    isColor= (debayer_images is True or convert_to_lms is True) 
                                   ) 
+    if(not video_writer.isOpened()):
+        raise RuntimeError(f"Failed to open VideoWriter for {output_path}")
 
     # Initialize a dummy frame to fill in missing frames if desired 
     dummy_frame: np.ndarray =  np.squeeze(np.full((frame_height, frame_width, 3 if debayer_images is True else 1), 0, dtype=np.uint8))
 
     # Retrive the sorted chunks for this sensor
+    chunks_paths: dict[str, list[tuple]] = group_sensors_files(recording_path)['W']
+    assert len(chunks_paths) > 0, f"No chunks found in: {recording_path}"
 
     # Iterate over the chunks for this sensor 
     previous_chunk_end_time: float = 0 
     current_chunk_start_time: float = 0 
 
-    for chunk_num, (metadata_matrix_path, frame_buffer_path) in enumerate(chunks_paths):    
+    # Define the iterator we will use to iterate over the chunks 
+    start_chunk: int = start_end[0]
+    end_chunk: int = start_end[1] if start_end[1] != float("inf") else len(chunks_paths)
+    chunk_iterator: Iterable = range(start_chunk, end_chunk) if verbose is False else tqdm(range(start_chunk, end_chunk), position=0, desc="Processing chunks", leave=False)
+    for chunk_num in chunk_iterator:
+        metadata_matrix_path, frame_buffer_path = chunks_paths[chunk_num]
+
         # First, we will retrieve the metadata for this buffer 
         metadata: np.ndarray = np.load(metadata_matrix_path)
         
@@ -487,6 +524,10 @@ def world_chunks_to_video(recording_path: str,
 
         # Assert the t vector and frame vector are the same size 
         assert(len(t_vector) == len(frame_buffer))
+
+        # Ensure the frame size is consistent 
+        buffer_frame_shape: tuple[int] = tuple(frame_buffer.shape[1:3])
+        assert buffer_frame_shape == (frame_height, frame_width), f"Frame shape unequal after initialization: {(frame_height, frame_width)}"
         
         # Assert the frames are of appropriate dtype 
         assert(frame_buffer.dtype == np.uint8)
@@ -506,7 +547,7 @@ def world_chunks_to_video(recording_path: str,
 
         # If we want to apply the color weight correction 
         if(apply_color_correction is True):
-            frame_buffer[:] = [ world_util.apply_color_weights(frame)
+            frame_buffer[:] = [ world_util.apply_color_correction(frame)
                                 for frame in frame_buffer
                                 ] 
 
@@ -524,9 +565,11 @@ def world_chunks_to_video(recording_path: str,
         if(debayer_images is True):
             # Note: When writing color images to cv2.VideoWriter, it expects a BGR instead of RGB 
             # frame, so also convert now 
-            frame_buffer[:] = [cv2.cvtColor(world_util.debayer_image(frame), cv2.COLOR_RGB2BGR) 
-                               for frame in frame_buffer 
-                              ]
+            frame_buffer = np.array([cv2.cvtColor(world_util.debayer_image(frame), cv2.COLOR_RGB2BGR) 
+                                     for frame in frame_buffer 
+                                    ],
+                                    dtype=np.uint8
+                                   )
 
         # Convert the frame buffer back into uint8 format 
         frame_buffer = np.clip(np.round(frame_buffer), 0, 255).astype(np.uint8)
@@ -563,7 +606,10 @@ def world_chunks_to_video(recording_path: str,
         previous_timestamp: float = t_vector[0]
 
         # Write frames to the video 
-        for frame_num, (timestamp, frame) in enumerate(zip(t_vector, frame_buffer)):
+        frame_iterator: Iterable = range(len(frame_buffer)) if verbose is False else tqdm(range(len(frame_buffer)), position=1, desc="Processing frames", mininterval=0, miniters=1, leave=False)
+        for frame_num in frame_iterator:
+            timestamp, frame = t_vector[frame_num], frame_buffer[frame_num]
+
             # Assert the frame is of the appropriate type after transformation 
             assert(frame.dtype == np.uint8 and dummy_frame.dtype == np.uint8)
 
