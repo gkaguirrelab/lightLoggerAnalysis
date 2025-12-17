@@ -1,4 +1,4 @@
-function [exponentMap, varianceMap, spdByRegion, frq, medianImage] = mapSPDs(videoPath, options)
+function [exponentMap, varianceMap, spdByRegion, frq, medianImage, frameDropVector] = mapSPDs(videoPath, options)
 % Computes the exponent and intercept of a 1/f fit to temporal SPD across
 % image regions and projects them onto a 1 m visual field surface, then
 % plots both maps.
@@ -32,6 +32,7 @@ arguments
     options.stepTimeSecs {mustBeNumeric} = 0.5
     options.doPlot  (1,1) logical           = true
     options.nWorkers (1,1) {mustBeNumeric}   = 6
+    options.frameDropVector {mustBeNumeric}  = [];
 end
 
 % Load in some info about the video to get us started
@@ -95,6 +96,19 @@ frq = nan(1,floor(framesPerChunk/2)+1);
 optSearch = optimoptions('fmincon');
 optSearch.Display = 'off';
 
+% Define or extract a frameDropVector
+if ~isempty(options.frameDropVector)
+    if length(options.frameDropVector) >= nFrames
+        frameDropVector = options.frameDropVector(1:nFrames);
+    else
+        frameDropVector = zeros(1,nFrames);
+        frameDropVector(1:length(options.frameDropVector)) = options.frameDropVector;
+    end
+else
+    frameDropVector = nan(1,nFrames);
+end
+
+
 % Move over the chunks of the video
 for ff = 1:nChunks
 
@@ -118,6 +132,17 @@ for ff = 1:nChunks
     readTime = datetime('now');
     frameChunk = permute(frameChunk, [3 2 1]);  % flip back to nFrames x nRows x nCols
 
+    % Nan any frames that we have already specified are dropped
+    frameChunkDropVector = frameDropVector(1,chunkStarts(ff):chunkStarts(ff)+framesPerChunk-1);
+    frameChunk(frameChunkDropVector==1,:,:) = nan;
+
+    % Write frame drop back into the vector for storage
+    for ii = 1:framesPerChunk
+        thisFrame = squeeze(frameChunk(ii,:,:));
+        frameDropVector(1,chunkStarts(ff)-1+ii) = ...
+            all(isnan(thisFrame(:)));
+    end
+
     % Get the median image across time for this chunk
     medianImage(:,:,ff) = median(frameChunk,1,'omitmissing');
     
@@ -139,7 +164,7 @@ for ff = 1:nChunks
                 % Compute temporal SPD restricted to this region
                 [spd, fLoc] = calcTemporalSPD(frameChunk, fps, 'lineResolution', false, 'regionMatrix', regionMatrix);
             catch
-                % If computation failes, skip that patch
+                % If computation fails, skip that patch
                 continue;
             end
 
