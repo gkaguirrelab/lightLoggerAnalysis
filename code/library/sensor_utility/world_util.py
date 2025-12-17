@@ -3,6 +3,10 @@ import matplotlib.pyplot as plt
 import cv2
 import os 
 import sys
+from typing import Literal
+import pandas as pd
+import mat73
+import matlab
 
 # Store the scalar multipliers for all of the different colors of pixel's in an image 
 # required to equalize the color to the R pixel values in that frame.
@@ -274,8 +278,55 @@ def extract_timestamp(embedded_frame: np.ndarray) -> np.float64:
     return timestamp
 
 """Convert a bayer image to LMS color space"""
-def bayer_to_lms(original_image: np.ndarray, visualize_results: bool=False) -> tuple[object, np.ndarray] | np.ndarray:
-    # First, let's make a copy 
+def bayer_to_lms(original_image: np.ndarray, 
+                 camera: Literal["IMX219", "standard"]="IMX219",
+                 path_to_spectral_sensitivities: str="", 
+                 visualize_results: bool=False,
+                 matlab_engine: object | None=None
+                ) -> tuple[object, np.ndarray] | np.ndarray:  
+    # We need a Psychtoobox function to complete this (sadge)
+    # namely  WlsToS 
+    if(matlab_engine is None):
+        import matlab.engine
+        matlab_engine = matlab.engine.start_matlab()
+        matlab_engine.tbUseProject('lightLoggerAnalysis', nargout=0)
+
+    # First, let's make a copy of the original image
+    modified_image: np.ndarray = original_image.copy() 
+
+    # Load in the dataframe and then convert to numpy and not evil pandas (because i am less fluent in it ;-;)
+    table: np.ndarray | None = None
+    if(path_to_spectral_sensitivities.endswith(".mat")):
+        table = pd.DataFrame(mat73.loadmat(path_to_spectral_sensitivities)["T"]).to_numpy()
+    else:
+        table = pd.read_excel(path_to_spectral_sensitivities).to_numpy() 
+
+    # Extract the wavelengths from the table 
+    wavelengths: np.ndarray = table[:, 0]
+    rgb_values: np.ndarray = table[:, (-3, -2, -1)]
+
+    # Convert wavelengths to sampling format
+    samples: np.ndarray = np.array(matlab_engine.WlsToS(matlab.double(wavelengths), nargout=1), dtype=np.float64)
+    
+    # Get the sensitivities for the foveal cone classes
+    field_size_degrees: int = 30
+    observer_age_in_years: int = 30
+    pupil_diameter_mm: int = 2
+    t_receptors: np.ndarray = np.array(matlab_engine.GetHumanPhotoreceptorSS(matlab.double(samples),
+                                                                    {'LConeTabulatedAbsorbance2Deg', 'MConeTabulatedAbsorbance2Deg','SConeTabulatedAbsorbance2Deg'},
+                                                                    *[matlab.double(item) for item in (field_size_degrees, observer_age_in_years, pupil_diameter_mm)], [], [], [], [], 
+                                                                    nargout=1
+                                                                   ), dtype=np.float64)
+
+    #Create the spectrum implied by the rgb camera weights, and then project
+    # % that on the receptors
+
+    # Splice the RGB pixels from the image into another matrix  [nPixels, [R, G, B] ]
+
+    # Multiply the result below 
+   #  cone_vec: np.ndarray = np.transpose(( t_receptors * np.transpose((rgbVec @ rgb_values)) ))
+
+    # Then put them back in their place
 
     """
     % Convert RGB --> LMS contrast relative to background
