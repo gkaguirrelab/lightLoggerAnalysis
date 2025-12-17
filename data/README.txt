@@ -1,0 +1,7 @@
+Directory contents:
+
+- ASM7341_spectralSensitivity.mat: spectral sensitivity functions for the first 10 channels of the "minispect" chip. These values were taken from the spreadsheet "AS7341_Filter_Templates.xlsx" which was supplied by the manufacturer. The values in this table correspond to Figures 18 and 19 of the white paper AMS Datasheet DS000504 "AS7341; 11-Channel Multi-Spectral Digital Sensor; v3-00 • 2020-Jun-25"
+- TSL2591_spectralSensitivity.mat: spectral sensitivity functions for the first 2 channels of the TSL2591 chip. These values were generated via web digitizing figure 12 from the TSL2591 datasheet, then feeding these csv files into generate_spectral_sensitivity_plot.py. This returns a dataframe, which was then converted to a MATLAB table.
+- IMX219_spectralSensitivity.mat: spectral sensitivity functions for the three channels (RGB) of the IMX camera chip. These values (provided by the first author) correspond to Figure 18 of the paper Pagnutti 2017 J. Electron. Imaging 26(1), 013014. The SPDs were then scaled by the radiometric calibration coefficients that we measured in the lab, with the scalar weights being (RGB): [1.0 0.83 1.06].
+- D65_SPD.mat: spectral power distribution for the CIE D65 illuminant standard as a table variable with wavelengths and relative power. Downloaded from:  http://files.cie.co.at/204.xls
+- CIEDaylightComponents_T.mat: basis set for reconstruction of daylight illuminant. https://cie.co.at/datatable/components-relative-spectral-distribution-daylight
