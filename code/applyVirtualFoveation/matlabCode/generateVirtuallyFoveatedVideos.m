@@ -10,6 +10,8 @@ function generateVirtuallyFoveatedVideos(subjectIDs, start_ends, options)
         options.verbose (1, 1) logical = false
         options.testing (1, 1) logical = false; 
         options.just_projection (1, 1) logical = false; 
+        options.non_contiguous_target_frames = {};
+        options.video_read_cache_size = 1000;
     end 
 
     % Let's get the dropbox base dir for any references we make to dropbox 
@@ -34,7 +36,7 @@ function generateVirtuallyFoveatedVideos(subjectIDs, start_ends, options)
         gaze_angles_field = gaze_angles_struct.pupilData.currentField; 
         gaze_angles = gaze_angles_struct.pupilData.(gaze_angles_field).eyePoses.values; 
         if(options.just_projection)
-            gaze_angles(:, :, :, :) = 0; 
+            gaze_angles(:, :) = 0; 
             if(any(gaze_angles(:)) ~= 0)
                 error("Projection only mode was selected but non zero gaze angles detected");
             end 
@@ -63,6 +65,13 @@ function generateVirtuallyFoveatedVideos(subjectIDs, start_ends, options)
             manual_offset = options.manual_offsets{ii};
         end 
 
+        % Retrieve the non contiguous target frames if provided 
+        if(numel(options.non_contiguous_target_frames) == 0)
+            non_contiguous_target_frames = [];
+        else 
+            non_contiguous_target_frames = options.non_contiguous_target_frames{ii};
+        end 
+
         % Output information before we process if we would like 
         if(options.verbose)
             fprintf("Virtually foveating subject: %s\n", subjectID);
@@ -85,10 +94,12 @@ function generateVirtuallyFoveatedVideos(subjectIDs, start_ends, options)
 
         % Virtually foveate and output the video 
         virtuallyFoveateVideo(path_to_world_video, gaze_angles, offsets, output_path, path_to_recording_chunks, path_to_intrinsics, path_to_perspective_projection,... 
-                              "num_frames_to_process", start_end,...
+                              "frames_to_process", start_end,...
                               "verbose", options.verbose,...
                               "manual_offset", manual_offset,...
-                              "testing", options.testing...
+                              "testing", options.testing,...
+                              "non_contiguous_target_frames",non_contiguous_target_frames,...
+                              "video_read_cache_size", options.video_read_cache_size...
                              );
     end 
 end 

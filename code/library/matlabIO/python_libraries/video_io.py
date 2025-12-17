@@ -7,8 +7,40 @@ from natsort import natsorted
 from typing import Literal, Iterable
 import os
 import hdf5storage
-import tqdm
+from tqdm.auto import tqdm
 import h5py
+import dill
+import pathlib
+import sys
+
+# Import utility libraries
+light_logger_analysis_dir_path: str = os.path.expanduser("~/Documents/MATLAB/projects/lightLoggerAnalysis")
+world_util_path: str = os.path.join(light_logger_analysis_dir_path, "code", "library", "sensor_utility")
+for path in (light_logger_analysis_dir_path, world_util_path):
+    assert os.path.exists(path), f"Expected path: {path} does not exist"
+    sys.path.append(path)
+
+# Import world camera utility library
+import world_util
+
+"""Inspect a recording directory and return a dictionary of sensor names
+   with all of the paths to the chunks for that sensor in order
+"""
+def group_sensors_files(recording_path: str) -> dict[str, list[tuple]]:    
+    """Find all of the chunk filepaths of the sensors and group them into tuples of (t, frames)
+    Do this by iterating over the files over the recording in numerically sorted order (to order the chunks properly),
+    then find the files that denote they are the metadata of the sensors. Then, simply remove the metadata part of 
+    the filename and you arrive at the value file"""
+    def group_sensor_files(sensor_name: str) -> list:
+        return [ ( os.path.join(recording_path, file), os.path.join(recording_path, file.replace("_metadata", "") ) ) 
+                   for file in natsorted(os.listdir(recording_path)) 
+                   if sensor_name in file and "metadata" in file
+               ]
+
+    return {sensor[0].upper(): group_sensor_files(sensor) # n chunks = [ (metadata_path, frame_buffer_path), ...  ]
+            for sensor in ("world", "pupil", "ms")
+           }
+
 
 """Given a directory of frames, read them in and convert to video"""
 def dir_to_video(dir_path: str, output_path: str, fps: float=30) -> None:
@@ -325,7 +357,8 @@ def video_to_hdf5(video_path: str, output_path: str,
                  color_mode: Literal["GRAY", "RGB", "BGR"]="RGB",
                  start_frame: int=0, 
                  end_frame: int | float = float("inf"),
-                 zeros_as_nans: bool=False
+                 zeros_as_nans: bool=False,
+                 visualize_results: bool=False
                 ) -> None:
     assert os.path.exists(video_path), f"Video path: {video_path} does not exist"
     assert output_path.endswith(".hdf5"), f"Output path: {output_path} must end in .hdf5"
@@ -366,8 +399,8 @@ def video_to_hdf5(video_path: str, output_path: str,
 
         # Read frames from the interval 
         written_frame_idx: int = 0
-        for frame_num in tqdm.tqdm(range(start_frame, end_frame)):
-
+        iterator: Iterable = tqdm(range(start_frame, end_frame)) if visualize_results is True else range(start_frame, end_frame)
+        for frame_num in iterator:
             # Attempt to read in a video 
             # from the stream 
             ret, frame = video_stream.read() 
@@ -413,12 +446,199 @@ def video_to_hdf5(video_path: str, output_path: str,
             # Increment the written frame number
             written_frame_idx += 1
 
-
-
     # Close the capture stream 
     video_stream.release()  
 
     return 
+
+
+"""Convert the world chunks of a recording into a playable video"""
+def world_chunks_to_video(recording_path: str,
+                          output_path: str,
+                          debayer_images: bool=False, 
+                          convert_to_lms: bool=False, 
+                          apply_color_correction: bool=False, 
+                          apply_fielding_function: bool=False, 
+                          apply_digital_gain: bool=False,
+                          fill_missing_frames: bool=False,
+                          convert_to_seconds: bool=True,
+                          embed_timestamps: bool=True,
+                          verbose: bool=False,
+                          start_end: tuple[int | float] = (0, float("inf"))
+                         ) -> None:
+    assert output_path.endswith(".avi"), f"Output path: {output_path} must end in .avi"
+
+    # Make the directories to the output path if they do not exist already 
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+    # First let's read the config file of this recording 
+    # to gather some information about how the images look 
+    config_filepath: str = os.path.join(recording_path, "config.pkl")
+    config_data: dict | None = None 
+    with open(config_filepath, 'rb') as f:
+        config_data = dill.load(f)
+    assert(config_data is not None)
+
+    # Retrieve the FPS and the dimensions of the recording 
+    frame_height, frame_width = config_data["sensors"]['W']["sensor_mode"]['size'][::-1]
+    FPS = config_data["sensors"]['W']["sensor_mode"]['fps']
+
+    # Initialize the video writer to construct our video. Note: here we denote an FPS, 
+    # assuming that it is constant, but we will need to handle dropped frames accordingly 
+    # in terms of when we change frames. 
+    fourcc = cv2.VideoWriter_fourcc(*"FFV1")
+    video_writer = cv2.VideoWriter(output_path, 
+                                   fourcc, 
+                                   FPS, 
+                                   (frame_width, frame_height), 
+                                   isColor= (debayer_images is True or convert_to_lms is True) 
+                                  ) 
+    if(not video_writer.isOpened()):
+        raise RuntimeError(f"Failed to open VideoWriter for {output_path}")
+
+    # Initialize a dummy frame to fill in missing frames if desired 
+    dummy_frame: np.ndarray =  np.squeeze(np.full((frame_height, frame_width, 3 if debayer_images is True else 1), 0, dtype=np.uint8))
+
+    # Retrive the sorted chunks for this sensor
+    chunks_paths: dict[str, list[tuple]] = group_sensors_files(recording_path)['W']
+    assert len(chunks_paths) > 0, f"No chunks found in: {recording_path}"
+
+    # Iterate over the chunks for this sensor 
+    previous_chunk_end_time: float = 0 
+    current_chunk_start_time: float = 0 
+
+    # Define the iterator we will use to iterate over the chunks 
+    start_chunk: int = start_end[0]
+    end_chunk: int = start_end[1] if start_end[1] != float("inf") else len(chunks_paths)
+    chunk_iterator: Iterable = range(start_chunk, end_chunk) if verbose is False else tqdm(range(start_chunk, end_chunk), position=0, desc="Processing chunks", leave=True)
+    for chunk_num in chunk_iterator:
+        metadata_matrix_path, frame_buffer_path = chunks_paths[chunk_num]
+
+        # First, we will retrieve the metadata for this buffer 
+        metadata: np.ndarray = np.load(metadata_matrix_path)
+        
+        # Then, we will read in the timestamps and frame buffer for this chunk 
+        # World timestamps are in nanoseconds and thus must be converted to seconds 
+        t_vector: np.ndarray = np.ascontiguousarray(metadata[:, 0], dtype=np.float64) / ( (10 ** 9) if convert_to_seconds is True else 1)
+        frame_buffer: np.ndarray = np.load(frame_buffer_path)
+
+        # Assert the t vector and frame vector are the same size 
+        assert(len(t_vector) == len(frame_buffer))
+
+        # Ensure the frame size is consistent 
+        buffer_frame_shape: tuple[int] = tuple(frame_buffer.shape[1:3])
+        assert buffer_frame_shape == (frame_height, frame_width), f"Frame shape unequal after initialization: {(frame_height, frame_width)}"
+        
+        # Assert the frames are of appropriate dtype 
+        assert(frame_buffer.dtype == np.uint8)
+
+        # If we somehow got an empty chunk, skip it 
+        if(len(t_vector) == 0): 
+            continue
+
+        # Now, we will apply the requested transformations to the frames 
+        frame_buffer = frame_buffer.astype(np.float64) # First, convert to float for float multiplications 
+
+        # Apply Dgain if requested
+        if(apply_digital_gain is True):
+            buffer_dgains: np.ndarray = metadata[:, 1]
+            buffer_dgains = buffer_dgains[:, np.newaxis, np.newaxis]
+            frame_buffer *= buffer_dgains
+
+        # If we want to apply the color weight correction 
+        if(apply_color_correction is True):
+            frame_buffer[:] = [ world_util.apply_color_correction(frame)
+                                for frame in frame_buffer
+                                ] 
+
+        # Apply the fielding function if desired 
+        if(apply_fielding_function is True):
+            frame_buffer[:] = [ world_util.apply_fielding_function(frame)
+                               for frame in frame_buffer 
+                              ]
+
+        # If we want to convert to LMS, do so 
+        if(convert_to_lms is True):
+            pass
+
+        # If we want to debayer the image
+        if(debayer_images is True):
+            # Note: When writing color images to cv2.VideoWriter, it expects a BGR instead of RGB 
+            # frame, so also convert now 
+            frame_buffer = np.array([cv2.cvtColor(world_util.debayer_image(frame), cv2.COLOR_RGB2BGR) 
+                                     for frame in frame_buffer 
+                                    ],
+                                    dtype=np.uint8
+                                   )
+
+        # Convert the frame buffer back into uint8 format 
+        frame_buffer = np.clip(np.round(frame_buffer), 0, 255).astype(np.uint8)
+
+        # If we want to embed the timestamps in the frame buffer, do that now
+        if(embed_timestamps is True):
+            frame_buffer = [world_util.embed_timestamp(frame, timestamp)
+                            for frame, timestamp in zip(frame_buffer, t_vector)
+                           ]
+
+        # Retrieve the current chunk start time 
+        current_chunk_start_time = t_vector[0]
+
+        # Before we write the frames for this chunk, we must write the dummy frame (if desired)
+        # for those frames between the previous chunk and the current chunk 
+        
+        # Find the total elapsed time in seconds between the two chunks 
+        time_between_chunks: int = current_chunk_start_time - previous_chunk_end_time
+
+        # Calculate the number of missed frames as the elapsed time divided 
+        # by the seconds per frame, minus one frame as we have to count the current frame 
+        # as captured during this interval 
+        missed_frames: int = 0 if chunk_num == 0 or fill_missing_frames is False else int( (time_between_chunks / (1/FPS ) ) -  1) 
+        missing_timestamps: np.ndarray = np.linspace(previous_chunk_end_time + (1/FPS), current_chunk_start_time, missed_frames, endpoint=False)
+
+        # Write the number of missing frames in between as the previous frame 
+        for missing_timestamp in missing_timestamps:
+            missing_frame: np.ndarray = world_util.embed_timestamp(dummy_frame, missing_timestamp) if embed_timestamps is True else dummy_frame
+            video_writer.write(missing_frame)
+
+        # Initialize variables to track the previous timestamp 
+        # We will use this delta with the current timestamp 
+        # to track dropped frames and add dummy frames in the meantime
+        previous_timestamp: float = t_vector[0]
+
+        # Write frames to the video 
+        frame_iterator: Iterable = range(len(frame_buffer)) if verbose is False else tqdm(range(len(frame_buffer)), position=1, desc="Processing frames", leave=False)
+        for frame_num in frame_iterator:
+            timestamp, frame = t_vector[frame_num], frame_buffer[frame_num]
+
+            # Assert the frame is of the appropriate type after transformation 
+            assert(frame.dtype == np.uint8 and dummy_frame.dtype == np.uint8)
+
+            # Otherwise, let's calculate the time delta between the current timestamp and the previous timestamp 
+            time_between_frames: float = timestamp - previous_timestamp
+
+            # Calculate the number of missed frames as the elapsed time divided 
+            # by the seconds per frame, minus one frame as we have to count the current frame 
+            # as captured during this interval 
+            missed_frames: int = 0 if frame_num == 0 or fill_missing_frames is False else int( (time_between_frames / (1/FPS ) ) -  1) 
+            missing_timestamps: np.ndarray = np.linspace(previous_timestamp + (1/FPS), timestamp, missed_frames, endpoint=False)
+
+            # Write the number of missing frames in between as the previous frame 
+            for missing_timestamp in missing_timestamps:
+                missing_frame: np.ndarray = world_util.embed_timestamp(dummy_frame, missing_timestamp) if embed_timestamps is True else dummy_frame
+                video_writer.write(missing_frame)
+            
+            # Write the current frame 
+            video_writer.write(frame)
+
+            # Save the current timestamp as the previous timestamp
+            # so we can reference it for the next frame 
+            previous_timestamp = timestamp 
+        
+        # Save the end time of this chunk 
+        previous_chunk_end_time = t_vector[-1]
+
+    return 
+
 
 def main():
     return 
