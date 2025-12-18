@@ -361,7 +361,7 @@ def rgb_to_lms(original_image: np.ndarray, visualize_results: bool=False) -> tup
 """Calculate the per color weights to apply to each color 
    in order to equalize them to the R channel 
 """
-def calculate_color_weights(chunks: list[dict] | list[np.ndarray]) -> np.ndarray:
+def calculate_color_weights(chunks: list[dict] | list[np.ndarray], guard_saturation: bool=False) -> np.ndarray:
     # Initialize a dict to keep track of mean pixel values by color per frame 
     spacial_averages: dict[str, float] = {let: [] 
                                           for let in 'RGB'
@@ -381,8 +381,14 @@ def calculate_color_weights(chunks: list[dict] | list[np.ndarray]) -> np.ndarray
         for frame in world_frames:
             # Iterate over the colors and their pixels in each frame
             for color, pixels in zip(spacial_averages.keys(), (r_pixels, g_pixels, b_pixels)):
+                # Find the pixel colors 
+                color_pixels: np.ndarray = frame[pixels[:, 0], pixels[:, 1]]
+                
+                if(guard_saturation is True and np.any(color_pixels >= 255)):
+                    raise Exception("Found saturated pixels")
+                
                 # Calculate the mean of the pixels of this color in this frame 
-                color_frame_mean: float = np.mean(frame[pixels[:, 0], pixels[:, 1]])
+                color_frame_mean: float = np.mean(color_pixels)
 
                 # Save this value 
                 spacial_averages[color].append(color_frame_mean)
