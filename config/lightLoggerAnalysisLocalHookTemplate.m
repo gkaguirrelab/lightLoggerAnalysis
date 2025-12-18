@@ -65,8 +65,8 @@ setpref(projectName, "bluetooth_central_path", bluetooth_central_path);
 
 Pi_util_path = fullfile(light_logger_path, "raspberry_pi_firmware", "utility", "Pi_util.py");
 setpref(projectName, 'Pi_util_path', Pi_util_path); 
-world_util_path = fullfile(light_logger_path, "world", "world_util.py"); 
-setpref(projectName, 'world_util_path', world_util_path); 
+
+% BELIEVE TO BE DEPRECATED
 pupil_util_path = fullfile(light_logger_path, "pupil", "pupil_util.py"); 
 setpref(projectName, 'pupil_util_path', pupil_util_path); 
 ms_util_path = fullfile(light_logger_path, "ms", "ms_util.py"); 
@@ -77,11 +77,9 @@ light_logger_analysis_path = tbLocateProject('lightLoggerAnalysis');
 setpref(projectName, "light_logger_analysis_path", light_logger_analysis_path);
 addpath(genpath(light_logger_analysis_path));
 
-% Save the path to light logger analysis libraries python 
-light_logger_analysis_libraries_python_path = fullfile(light_logger_analysis_path, "code", "libraries_python"); 
-setpref(projectName, "light_logger_analysis_libraries_python_path", light_logger_analysis_libraries_python_path); 
-
-
+% Add the path to 
+world_util_path = fullfile(light_logger_analysis_path, "code", "library", "sensor_utility", "world_util.py"); 
+setpref(projectName, 'world_util_path', world_util_path); 
 
 % Save the path to the MATLAB I/O python library helper 
 video_io_util_path = fullfile(light_logger_analysis_path, "code", "library", "matlabIO", "python_libraries", "video_io.py");
@@ -90,3 +88,10 @@ setpref(projectName, "video_io_util_path", video_io_util_path);
 % Save the path to the virtual foveation python helper file
 virtual_foveation_util_path = fullfile(light_logger_analysis_path, "code", "applyVirtualFoveation", "pythonCode", "virtual_foveation.py");
 setpref(projectName, "virtual_foveation_util_path", virtual_foveation_util_path); 
+
+
+% BELIEVE TO BE DEPRECATED
+% Save the path to light logger analysis libraries python 
+light_logger_analysis_libraries_python_path = fullfile(light_logger_analysis_path, "code", "libraries_python"); 
+setpref(projectName, "light_logger_analysis_libraries_python_path", light_logger_analysis_libraries_python_path); 
+

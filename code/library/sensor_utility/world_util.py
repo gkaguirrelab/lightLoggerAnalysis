@@ -358,3 +358,44 @@ def rgb_to_lms(original_image: np.ndarray, visualize_results: bool=False) -> tup
     return 
 
 
+"""Calculate the per color weights to apply to each color 
+   in order to equalize them to the R channel 
+"""
+def calculate_color_weights(chunks: list[dict] | list[np.ndarray]) -> np.ndarray:
+    # Initialize a dict to keep track of mean pixel values by color per frame 
+    spacial_averages: dict[str, float] = {let: [] 
+                                          for let in 'RGB'
+                                         }
+
+    # Iterate over each chunk
+    for chunk_idx, chunk in enumerate(chunks):    
+        # Extract the world frames for this chunk 
+        world_frames: np.ndarray = chunk['W']['v'] if isinstance(chunk, dict) else chunk
+
+        # Find the bayer pattern matching this size 
+        # of the frames in this chunk 
+        RGB_mask: np.ndarray = generate_RGB_mask(world_frames[0])
+        r_pixels, g_pixels, b_pixels = [ np.argwhere(RGB_mask == color) for color in "RGB" ]
+
+        # Iterate over the frames in this chunk 
+        for frame in world_frames:
+            # Iterate over the colors and their pixels in each frame
+            for color, pixels in zip(spacial_averages.keys(), (r_pixels, g_pixels, b_pixels)):
+                # Calculate the mean of the pixels of this color in this frame 
+                color_frame_mean: float = np.mean(frame[pixels[:, 0], pixels[:, 1]])
+
+                # Save this value 
+                spacial_averages[color].append(color_frame_mean)
+
+
+    # Construct the average pixel value over time in addition to over space (per frame)
+    temporal_averages: dict[str, float] = {let: np.mean(means)
+                                           for let, means in spacial_averages.items()
+                                          }
+
+    # Construct the scalars in order to equalize all colors to the R pixels 
+    scalars: np.ndarray = np.array([1, temporal_averages['R'] / temporal_averages['G'],  temporal_averages['B'] /  temporal_averages['R'] ], dtype=np.float64)
+
+    return scalars
+
+
