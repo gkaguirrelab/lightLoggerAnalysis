@@ -142,10 +142,12 @@ function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, 
         KbWait(-1);
     end
     
-    % First, import the bluetooth library for light logger communication 
-    bluetooth_central = import_pyfile(getpref("lightLoggerAnalysis", "bluetooth_central_path")); 
-    % If a key has been pressed and we are not in simulation mode, 
-    % start recording on the light logger 
+    % First, import the bluetooth library for light logger communication
+    if(simulation_mode == "full" || simulation_mode == "bluetooth")
+        bluetooth_central = import_pyfile(getpref("lightLoggerAnalysis", "bluetooth_central_path"));
+    end
+    % If a key has been pressed and we are not in simulation mode,
+    % start recording on the light logger
     fileNameLL = [subjectId,'_', experiment_name,'_tf_session' num2str(session)];
     if(simulation_mode == "full" || simulation_mode == "bluetooth")
         disp("Main | Starting recording on light logger..."); 
