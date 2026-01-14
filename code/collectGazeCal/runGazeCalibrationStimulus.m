@@ -42,7 +42,7 @@ function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, 
         widthCm = 192.4; % 2nd floor LGTV
         viewingDistCm = 100; % 1 meter standard
     end
-    % Hard-coded parametersk
+    % Hard-coded parameters
    
     outerDotRadiusDeg = 1.5;
     innerDotRadiusDeg = 0.25;
