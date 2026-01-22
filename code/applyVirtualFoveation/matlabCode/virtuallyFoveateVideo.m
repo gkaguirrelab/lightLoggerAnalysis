@@ -1,8 +1,8 @@
-function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_path, path_to_recording_chunks, path_to_intrinsics, path_to_perspective_projection, options)
+function virtuallyFoveateVideo(world_video, world_t, gaze_angles, gaze_offsets, output_path, path_to_intrinsics, path_to_perspective_projection, options)
 % Virtually foveate desired frames of a video with given gaze angles
 %
 % Syntax:
-%   virtuallyFoveateVideo(world_video, gaze_angles, offsets, output_path, path_to_recording_chunks, path_to_intrinsics, path_to_perspective_projection, options)
+%   virtuallyFoveateVideo(world_video, gaze_angles, offsets, output_path, path_to_intrinsics, path_to_perspective_projection, options)
 %
 % Description:
 %   This function will virtually foveate a world camera video, given the gaze 
@@ -22,7 +22,7 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
 % Inputs:
 %   world_video                    - String. Path to the playable .avi world video
 %
-%   gaze_angles                    - Matrix Double. Matrix of gaze angles [azi, ele]
+%   gaze_angles                    - Matrix Double. Matrix of gaze angles in px [x, y]
 %                                    for each frame of the pupil camera
 %   
 %   gaze_offsets                   - 1x2 or 2x1 Double. Constant offset to be applied 
@@ -30,8 +30,6 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
 %
 %   output_path                    - String. Path to the playable output .avi video
 %
-%   path_to_recording_chunks       - String. Path to the original recording chunks 
-%                                    of this video 
 %
 %   path_to_intrinscis             - String. Path to the camera calibration intrinsics
 %                                    object for the world camera. 
@@ -62,7 +60,6 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
     % First, we will define a path to the playable video of the world camera we want to virtually foveate
     % and its original chunks, to get the respective timestamps of all the sensors 
     world_video = "/Volumes/T7 Shield/scriptedIndoorOutdoorVideos/FLIC_2001/walkIndoor/temporalFrequency/W.avi"; 
-    path_to_recording_chunks = "/Volumes/EXTERNAL_1/FLIC_2001/walkIndoor/temporalFrequency";
 
     % Load in the gaze angles and the constant offset we will apply to the gaze angles
     gaze_angles = load("/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/FLIC_2001/walkIndoor/temporalFrequency/FLIC_2001_walkIndoor_pupilData_contrast-1x5.mat").pupilData.radiusSmoothed.eyePoses.values; 
@@ -85,7 +82,6 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
     % First, we will define a path to the playable video of the world camera we want to virtually foveate
     % and its original chunks, to get the respective timestamps of all the sensors 
     world_video = "/Volumes/T7 Shield/scriptedIndoorOutdoorVideos/FLIC_2003/walkIndoor/temporalFrequency/W.avi"; 
-    path_to_recording_chunks = "/Volumes/EXTERNAL_1/FLIC_2003/walkIndoor/temporalFrequency";
 
     % Load in the gaze angles and the constant offset we will apply to the gaze angles
     gaze_angles = load("/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/FLIC_2003/walkIndoor/temporalFrequency/FLIC_2003_walkIndoor_pupilData_contrast-1x5.mat").pupilData.radiusSmoothed.eyePoses.values; 
@@ -111,10 +107,10 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
 
     arguments 
         world_video {mustBeText}; 
+        world_t; 
         gaze_angles {mustBeMatrix}; 
         gaze_offsets {mustBeNumeric}; 
         output_path {mustBeText}; 
-        path_to_recording_chunks {mustBeText};
         path_to_intrinsics {mustBeText};
         path_to_perspective_projection {mustBeText}; 
         options.frames_to_process = [1, inf]; 
@@ -126,6 +122,7 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
         options.testing = false; 
         options.nan_deg_threshold = 45;
         options.video_read_cache_size = 1000;
+        options.world_fps = 30; 
         % walkIndoor
         % Manual offset for FLIC_2001 = [-4.75, 4.75] 
         % Manual offset for FLIC 2003 = [-6, -1.5];
@@ -158,7 +155,10 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
     if(options.verbose)
         disp("Opening video reader/writer")
     end 
-    world_frame_reader = videoIOWrapper(world_video, "ioAction", 'read', "readAheadBufferSize", options.video_read_cache_size); 
+    world_frame_reader = videoIOWrapper(world_video,... 
+                                        "ioAction", 'read', ...
+                                        "readAheadBufferSize", options.video_read_cache_size...
+                                        ); 
 
     if(options.testing)
         output_path = "/Users/zacharykelly/Desktop/testing.avi"
@@ -174,32 +174,15 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
 
 
     world_frame_writer = videoIOWrapper(output_path, "ioAction", 'write'); 
-    world_frame_writer.FrameRate = 120; 
+    world_frame_writer.FrameRate = options.world_fps; 
 
     % Now we will retrieve the start and end time of all of the sensors 
     if(options.verbose)
         disp("Finding sensor start end times")
     end 
-    start_ends = find_sensor_start_ends(virutal_foveation_util, path_to_recording_chunks); 
-    world_start_end = start_ends.("world");
-    pupil_start_end = start_ends.("pupil");
 
-    % Create the T vectors that will be used to do mapping of gaze angles to frames, given 
-    % that the sensors may sometimes be off on FPS 
-    world_t = linspace(world_start_end(1), world_start_end(2), world_frame_reader.NumFrames);
-    pupil_t = linspace(pupil_start_end(1), pupil_start_end(2), size(gaze_angles, 1));
-
-    if(numel(pupil_t) ~= size(gaze_angles, 1))
-        error("Miscalculation of pupil timestamps");
-    end 
-
-    if(numel(world_t) ~= world_frame_reader.NumFrames)
-        error("Miscalculation of world timestamps");
-    end 
-
-    % Next, add the slight offset that we measured in the calibration procedure. That is, the pupil 
-    % is actually 0.005 seconds phase advanced
-    pupil_t = pupil_t + options.pupil_world_phase_offset; 
+    % Next, we will extract the pupil t from the gaze angles 
+    pupil_t = gaze_angles(:, 1);
 
     % Initialize a blank frame we will use to pad frames that have nan gaze angles 
     blank_frame = zeros(480, 480); 
@@ -208,13 +191,13 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
     if(options.verbose)
         disp("Modifying gaze angles")
     end 
-    gaze_angles_original = gaze_angles(:, 1:2) - gaze_offsets; 
+    gaze_angles_original = gaze_angles(:, 2:3) - gaze_offsets; 
 
     % We first subtract the constant gaze offset from the gaze angles (measured once per pariticpant)
     % Then, we flip the signs to be upsidedown and left handed. Then, 
     % we apply a manual offset from the April Tag. The sign of this corresponds to the follow
     % +azi = move right, +ele = move up
-    gaze_angles(:, 1:2) = ( ( gaze_angles(:, 1:2) - gaze_offsets ) .* [-1, -1] ) + options.manual_offset;
+    gaze_angles(:, 2:3) = ( ( gaze_angles(:, 2:3) - gaze_offsets ) .* [-1, -1] ) + options.manual_offset;
 
     % Choose the bounds for our virtual foveation 
     start_frame = options.frames_to_process(1); 
@@ -253,12 +236,13 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
         
         % Find the gaze angle that corresponds to this frame 
         [~, gaze_angle_idx] = min(abs(pupil_t - world_timestamp));
-        gaze_angle = gaze_angles(gaze_angle_idx, 1:2); 
+        gaze_angle = gaze_angles(gaze_angle_idx, 2:3); 
 
         if( any(abs(gaze_angle) > options.nan_deg_threshold) )
+            disp("OVER THE THRESHOLD")
+            disp(gaze_angle)
             gaze_angle(:) = nan;
         end
-        
         % Load in the world frame
         world_frame = world_frame_reader.readFrame('frameNum', ii, 'color', 'GRAY'); 
 
@@ -301,16 +285,5 @@ function virtuallyFoveateVideo(world_video, gaze_angles, gaze_offsets, output_pa
     fprintf("Elapsed Time: %f seconds\n", elapsed_seconds); 
 
     return; 
-
-end 
-
-% Local function to find the start and end time of all the sensors in the recording 
-function start_ends = find_sensor_start_ends(virutal_foveation_util, path_to_recording_chunks)
-    % Find the start ends 
-    start_ends = struct(virutal_foveation_util.find_sensor_start_end_times(path_to_recording_chunks));
-    field_names = fieldnames(start_ends);
-    for ff = 1:numel(field_names)
-        start_ends.(field_names{ff}) = double(start_ends.(field_names{ff})); 
-    end 
 
 end 

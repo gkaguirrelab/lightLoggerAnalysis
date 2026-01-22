@@ -95,18 +95,11 @@ function retinalImage = virtuallyFoveateFrame(I, gaze_angle, fisheyeIntrinsicsPa
         sensorPoints      = [xg(:),yg(:)];
         worldCoordsInDegrees = anglesFromIntrinsics(sensorPoints, fisheyeIntrinsics);
 
-        % Load the projection matrix
-        lastTransformationPath = transformationPath;
-        transformation = load(transformationPath).perspective_projection.fit.geometric_transform;
-
-        % Calculate world degrees --> eye degrees
-        eyeDegreesVisualAngle = transformPointsForward(transformation, worldCoordsInDegrees);
-
     end
 
     % Extract x, y, v from the eyeRotationCoordinates
-    x = eyeDegreesVisualAngle(:, 1);
-    y = eyeDegreesVisualAngle(:, 2);
+    x = worldCoordsInDegrees(:, 1);
+    y = worldCoordsInDegrees(:, 2);
     v = I(:);
 
     % Define the Regular Grid for Interpolation

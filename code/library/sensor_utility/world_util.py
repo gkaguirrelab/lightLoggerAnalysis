@@ -404,4 +404,3 @@ def calculate_color_weights(chunks: list[dict] | list[np.ndarray], guard_saturat
 
     return scalars
 
-

@@ -25,6 +25,8 @@ function visualFieldPoints = anglesFromIntrinsics(sensorPoints, fisheyeIntrinsic
         func = @(t) a0*t + a2*t^3 + a3*t^4 + a4*t^5 - r(k);
         theta(k) = fzero(func,[0,pi]);
     end
+
+    %theta = interp1(rr, tt, r, 'pchip', NaN);
     
     phi = atan2(yC,xC); 
     R = 1;

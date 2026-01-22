@@ -31,7 +31,7 @@ function all_corrections_struct = calcIMX219RadiometricSensitivity(options)
     world_ttf_metadata = world_ttf_data.metadata.temporal_sensitivity; 
     contrast_gamma_metadata = contrast_gamma_data.metadata.contrast_gamma;
 
-    ttf_all_corrections = calculate_corrections_by_experiment("TemporalSensitivity", world_ttf_data_dir, world_ttf_metadata, sensorS, T, verbose)
+    %ttf_all_corrections = calculate_corrections_by_experiment("TemporalSensitivity", world_ttf_data_dir, world_ttf_metadata, sensorS, T, verbose)
     contrast_gamma_all_corrections = calculate_corrections_by_experiment("ContrastGamma_TemporalSensitivity", contrast_gamma_data_dir, contrast_gamma_metadata, sensorS, T, verbose);
     
     all_corrections_struct.ttf_corrections = ttf_all_corrections; 
@@ -68,7 +68,7 @@ function all_corrections_struct = calculate_corrections_by_experiment(experiment
         start = 1;
         endpoint = 1; 
     else 
-        start = 2; 
+        start = 4; 
         endpoint = 4; 
     end 
 
