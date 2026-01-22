@@ -1,6 +1,8 @@
 function plotGazeAccuracyNeon(startFixationId, endFixationId)
     % 1. Setup and Data Loading
-    filePath = '/Users/samanthamontoya/Downloads/Timeseries Data + Scene Video-7/2026-01-16_20-48-06-8dd5fc8b/gaze.csv';
+    %filePath = '/Users/samanthamontoya/Downloads/Timeseries Data + Scene Video-7/2026-01-16_20-48-06-8dd5fc8b/gaze.csv';
+    filePath = '/Users/samanthamontoya/Downloads/GazeCalSM_20260122/2026-01-22_15-48-38-c56b057d/gaze.csv';
+    %filePath = '/Users/samanthamontoya/Downloads/GazeCalZK_20260122/2026-01-22_15-36-32-0224686c/gaze.csv';
     data = readtable(filePath);
     
     ts_ns = data.timestamp_ns_; 
@@ -78,7 +80,10 @@ function plotGazeAccuracyNeon(startFixationId, endFixationId)
     yOffsets = actualGaze(:,2) - intendedGaze(:,2);
     avgXOffset = mean(xOffsets);
     avgYOffset = mean(yOffsets);
+    % calculate euclidean distance error (mean of vector in degrees)
     totalErr = mean(sqrt(xOffsets.^2 + yOffsets.^2));
+    % calculate mean-corrected euclidean distance error (mean of vector in degrees)
+    correctedErr = mean(sqrt((xOffsets-avgXOffset).^2 + (yOffsets-avgYOffset).^2));
 
     % 7. Plotting
     figure('Position', [100 100 800 750]);
@@ -132,14 +137,14 @@ function plotGazeAccuracyNeon(startFixationId, endFixationId)
         line([intendedGaze(i,1), actualGaze(i,1)- avgXOffset], [intendedGaze(i,2), actualGaze(i,2)- avgYOffset], ...
              'Color', [0.5 0.5 0.5], 'LineStyle', '-');
          
-        text(actualGaze(i,1) + 0.6, actualGaze(i,2) + 0.6, num2str(i), ...
+        text(actualGaze(i,1)- avgXOffset + 0.6, actualGaze(i,2)- avgYOffset + 0.6, num2str(i), ...
             'Color', 'w', 'FontSize', 10, 'FontWeight', 'bold');
     end
     
     % Construct Title with Offsets
     titleStr = {sprintf('Gaze Accuracy (N=%d)', numFound), ...
-                sprintf('Avg Offset: X=%.2f°, Y=%.2f° | Mean Error: %.2f°', ...
-                avgXOffset, avgYOffset, totalErr)};
+                sprintf('Avg Offset: X=%.2f°, Y=%.2f° | Mean Corrected Error: %.2f°', ...
+                avgXOffset, avgYOffset, correctedErr)};
     title(titleStr);
     
     xlabel('Azimuth (degrees)'); ylabel('Elevation (degrees)');
