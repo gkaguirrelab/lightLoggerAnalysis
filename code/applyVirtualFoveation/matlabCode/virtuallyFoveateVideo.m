@@ -1,4 +1,4 @@
-function virtuallyFoveateVideo(world_video, world_t, gaze_angles, gaze_offsets, output_path, path_to_intrinsics, path_to_perspective_projection, options)
+function virtuallyFoveateVideo(world_video, sensor_t_cell, gaze_angles, gaze_offsets, output_path, path_to_intrinsics, path_to_perspective_projection, options)
 % Virtually foveate desired frames of a video with given gaze angles
 %
 % Syntax:
@@ -107,7 +107,7 @@ function virtuallyFoveateVideo(world_video, world_t, gaze_angles, gaze_offsets, 
 
     arguments 
         world_video {mustBeText}; 
-        world_t; 
+        sensor_t_cell; 
         gaze_angles {mustBeMatrix}; 
         gaze_offsets {mustBeNumeric}; 
         output_path {mustBeText}; 
@@ -191,13 +191,17 @@ function virtuallyFoveateVideo(world_video, world_t, gaze_angles, gaze_offsets, 
     if(options.verbose)
         disp("Modifying gaze angles")
     end 
-    gaze_angles_original = gaze_angles(:, 2:3) - gaze_offsets; 
+    gaze_angles_original = gaze_angles(:, 1:2) - gaze_offsets; 
 
     % We first subtract the constant gaze offset from the gaze angles (measured once per pariticpant)
     % Then, we flip the signs to be upsidedown and left handed. Then, 
     % we apply a manual offset from the April Tag. The sign of this corresponds to the follow
     % +azi = move right, +ele = move up
-    gaze_angles(:, 2:3) = ( ( gaze_angles(:, 2:3) - gaze_offsets ) .* [-1, -1] ) + options.manual_offset;
+    gaze_angles(:, 1:2) = ( ( gaze_angles(:, 1:2) - gaze_offsets ) .* [1, -1] ) + options.manual_offset;
+
+    % Extract world and pupil t 
+    world_t = sensor_t_cell{1};
+    pupil_t = sensor_t_cell{2};
 
     % Choose the bounds for our virtual foveation 
     start_frame = options.frames_to_process(1); 
@@ -236,7 +240,7 @@ function virtuallyFoveateVideo(world_video, world_t, gaze_angles, gaze_offsets, 
         
         % Find the gaze angle that corresponds to this frame 
         [~, gaze_angle_idx] = min(abs(pupil_t - world_timestamp));
-        gaze_angle = gaze_angles(gaze_angle_idx, 2:3); 
+        gaze_angle = gaze_angles(gaze_angle_idx, 1:2); 
 
         if( any(abs(gaze_angle) > options.nan_deg_threshold) )
             disp("OVER THE THRESHOLD")

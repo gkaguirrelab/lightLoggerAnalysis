@@ -245,6 +245,9 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
     % Initialize an object to save the parameters and metadata of this calibration data 
     CalibrationData = struct; 
 
+    % Extract the world camera sensor mode 
+    sensor_mode = world_util.WORLD_CAMERA_CUSTOM_MODES{1}; 
+
     % A. Set up the substructs we will use for each of the Calibration measures 
     CalibrationData.ms_linearity = struct; 
     CalibrationData.temporal_sensitivity = struct; 
@@ -318,6 +321,9 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
         sensors.W.exposure = int32(fixed_settings(3)); 
         sensors.W.agc = false;  % TODO: Turn this back on 
         sensors.W.save_agc_metadata = true; 
+        sensors.W.sensor_mode = sensor_mode;
+        sensors.W.awb = false; 
+        sensors.W.noise_mode = false; 
 
         disp(sensors.W)
         
@@ -372,15 +378,9 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
         sensors.W.exposure = int32(fixed_settings(3)); 
         sensors.W.agc = false;  
         sensors.W.save_agc_metadata = true;
-
-        % Build the settings for the P at this NDF level
-        sensors.P = struct; % Initialize the Pupil struct 
-        fixed_settings = double(pupil_util.PUPIL_NDF_LEVEL_SETTINGS{NDF});
-        sensors.P.Again = int32(fixed_settings(1));
-        sensors.P.Dgain = fixed_settings(2); 
-        sensors.P.exposure = int32(fixed_settings(3)); 
-        sensors.P.agc = false; 
-        sensors.P.save_agc_metadata = false;     
+        sensors.W.sensor_mode = sensor_mode;
+        sensors.W.awb = false; 
+        sensors.W.noise_mode = false; 
         
         % Save this struct 
         sensors_and_settings{ii} = sensors; 
@@ -429,6 +429,9 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
         sensors.W.exposure = int32(fixed_settings(3)); 
         sensors.W.agc = false;  
         sensors.W.save_agc_metadata = true; 
+        sensors.W.sensor_mode = sensor_mode;
+        sensors.W.awb = false; 
+        sensors.W.noise_mode = false; 
         
         % Save this struct 
         sensors_and_settings{ii} = sensors; 

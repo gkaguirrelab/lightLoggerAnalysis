@@ -20,9 +20,12 @@ function visualFieldPoints = anglesFromIntrinsics(sensorPoints, fisheyeIntrinsic
     rr = a0*tt + a2*tt.^3 + a3*tt.^4 + a4*tt.^5;
     assert(all(diff(rr)>0), 'Non-monotonic r(θ) on [0,π].');
 
+    rmax = a0*pi + a2*pi^3 + a3*pi^4 + a4*pi^5;
+    rClamped = min(r, rmax - eps(rmax));  % keep strictly inside
+
     theta = nan(size(r));
-    for k=1:numel(r)
-        func = @(t) a0*t + a2*t^3 + a3*t^4 + a4*t^5 - r(k);
+    for k=1:numel(rClamped)
+        func = @(t) a0*t + a2*t^3 + a3*t^4 + a4*t^5 - rClamped(k);
         theta(k) = fzero(func,[0,pi]);
     end
 

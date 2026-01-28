@@ -35,7 +35,7 @@ function generateVirtuallyFoveatedVideos(subjectIDs, options)
         path_to_intrinsics = "~/Documents/MATLAB/projects/lightLoggerAnalysis/data/intrinsics_calibration.mat"; 
 
         % Next, we will load in the gaze angles (originally in px form, but we will convert)
-        gaze_angles = load_gaze_angles("/Users/zacharykelly/Desktop/SAM_1_22_26_GAZECAL/alternative_camera_gaze.csv", path_to_intrinsics); %gaze_angles_struct.pupilData.(gaze_angles_field).eyePoses.values; 
+        [pupil_t, gaze_angles] = load_gaze_angles("/Users/zacharykelly/Desktop/SAM_1_22_26_GAZECAL/alternative_camera_gaze.csv", path_to_intrinsics); %gaze_angles_struct.pupilData.(gaze_angles_field).eyePoses.values; 
         if(options.just_projection)
             gaze_angles(:, :) = 0; 
             if(any(gaze_angles(:)) ~= 0)
@@ -88,7 +88,8 @@ function generateVirtuallyFoveatedVideos(subjectIDs, options)
         end 
 
         % Virtually foveate and output the video 
-        virtuallyFoveateVideo(path_to_world_video, world_t, gaze_angles, offsets, output_path, path_to_intrinsics, path_to_perspective_projection,... 
+        sensor_t_matrix = {world_t, pupil_t};
+        virtuallyFoveateVideo(path_to_world_video, sensor_t_matrix, gaze_angles, offsets, output_path, path_to_intrinsics, path_to_perspective_projection,... 
                               "frames_to_process", start_end,...
                               "verbose", options.verbose,...
                               "manual_offset", manual_offset,...
@@ -102,24 +103,36 @@ end
 % Local function to load in the gaze angles from a given path 
 % Gaze angles are stored in a .csv in px form, so we need to load 
 % them in and also convert to deg 
-function gaze_angles = load_gaze_angles(path, intrinsics_path)
-    % Read in the gaze angles csv table
-    gaze_table = readtable(path, 'VariableNamingRule', 'preserve');
+function [pupil_t, gaze_angles] = load_gaze_angles(path, intrinsics_path)
 
-    % Just select the x and y columns in px and convert to matrix
-    gaze_angles = anglesFromIntrinsics(table2array(gaze_table(:, {'timestamp [ns]', 'gaze x [px]', 'gaze y [px]'})), ...
-                                       load(intrinsics_path).camera_intrinsics_calibration.results.Intrinsics...
-                                      ); 
+    opts = detectImportOptions(path, 'VariableNamingRule', 'preserve');
 
-    return ;
-end 
+    % Force timestamp column to int64 (preserves ns precision)
+    opts = setvartype(opts, 'timestamp [ns]', 'int64');
+
+    gaze_table = readtable(path, opts);
+
+    pupil_t = gaze_table.('timestamp [ns]');   % seconds (safe in double))
+    gx = double(gaze_table.('gaze x [px]'));
+    gy = double(gaze_table.('gaze y [px]'));
+
+    gaze_angles_px = [gx, gy];
+
+    intr = load(intrinsics_path).camera_intrinsics_calibration.results.Intrinsics;
+    gaze_angles = anglesFromIntrinsics(gaze_angles_px, intr);
+end
 
 
 % Load in the world timestamps 
 function world_t = load_world_timestamps(path)
-    world_timestamps_table = readtable(path, 'VariableNamingRule', 'preserve'); 
-    world_t = table2array(world_timestamps_table(:, {'timestamp [ns]'}));
+    opts = detectImportOptions(path, 'VariableNamingRule', 'preserve');
 
+    % Force timestamp column to int64 (preserves ns precision)
+    opts = setvartype(opts, 'timestamp [ns]', 'int64');
+
+    world_timestamps_table = readtable(path, opts); 
+    world_t = int64(world_timestamps_table.('timestamp [ns]')); 
+    
     return 
 
 end 
