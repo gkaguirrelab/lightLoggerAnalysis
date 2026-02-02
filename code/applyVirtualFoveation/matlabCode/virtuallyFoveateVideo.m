@@ -1,4 +1,4 @@
-function virtuallyFoveateVideo(world_video, sensor_t_cell, gaze_angles, gaze_offsets, output_path, path_to_intrinsics, path_to_perspective_projection, options)
+function virtuallyFoveateVideo(world_video, sensor_t_cell, gaze_angles, gaze_offsets, blnk_events, output_path, path_to_intrinsics, path_to_perspective_projection, options)
 % Virtually foveate desired frames of a video with given gaze angles
 %
 % Syntax:
@@ -122,27 +122,7 @@ function virtuallyFoveateVideo(world_video, sensor_t_cell, gaze_angles, gaze_off
         options.testing = false; 
         options.nan_deg_threshold = 45;
         options.video_read_cache_size = 1000;
-        options.world_fps = 30; 
-        % walkIndoor
-        % Manual offset for FLIC_2001 = [-4.75, 4.75] 
-        % Manual offset for FLIC 2003 = [-6, -1.5];
-        % Manual offset for FLIC 2004 = [-11.5, -12.5]
-        % Manual offset for FLIC 2005 = [-7.5, -7.5]
-        % Manual offset for FLIC 2006 = [-3, 13]
-
-        % lunch 
-        % Manual offset for FLIC_2001 = [2.5, 5]
-        % Manual offset for FLIC_2003 = [-6.25, -2.5]
-        % Manual offset for FLIC_2004 = [-6, 2.5]
-        % Manual offset for FLIC_2005.= [-9, -7.5]
-        % Manual offset for FLIC_2006 = [-5, 10]
-
-        % work 
-        % Manual offset for FLIC_2001 = [-3, 4.5]
-        % Manual offset for FLIC_2003 = [-4.5, -2]
-        % Manual offset for FLIC_2004 = [-5, -12]
-        % Manual offset for FLIC 2005 = [-10, -14.5]
-        % Manual offset for FLIC 2006 = [8.75, 33.75] 
+        options.world_fps = 120; 
     end     
 
     % Import the Python util library 
@@ -242,29 +222,38 @@ function virtuallyFoveateVideo(world_video, sensor_t_cell, gaze_angles, gaze_off
         [~, gaze_angle_idx] = min(abs(pupil_t - world_timestamp));
         gaze_angle = gaze_angles(gaze_angle_idx, 1:2); 
 
+        % NaN the gaze angle if it's above a large threshold
         if( any(abs(gaze_angle) > options.nan_deg_threshold) )
             disp("OVER THE THRESHOLD")
             disp(gaze_angle)
             gaze_angle(:) = nan;
         end
-        % Load in the world frame
-        world_frame = world_frame_reader.readFrame('frameNum', ii, 'color', 'GRAY'); 
-
+        
         % Virtually foveat the frame 
         virtually_foveated_frame = [];
+
+        % If the gaze angle is NaN, immediately just 
+        % use the NaN frame
+        if(any(isnan(gaze_angle)))
+            virtually_foveated_frame = blank_frame; 
         
-        % Ensure we only send valid world frames to be virtually foveated
-        if(~any(world_frame(:))) 
-            virtually_foveated_frame = blank_frame; 
+        % If the pupil timestamp is during a blink event 
+        % we should also just use the NaN frame 
+        elseif(is_blnk_event(pupil_t, blnk_events))
+            virtually_foveated_frame = blank_frame
 
-        % If the gaze angle is nan, just output a blank frame 
-        elseif(any(isnan(gaze_angle)))
-            virtually_foveated_frame = blank_frame; 
-
-        % If we have a valid frame to virtually foveate 
+        % Otherwise, let's read in a real frame 
+        % and virtually foveate 
         else
-            virtually_foveated_frame = uint8(virtuallyFoveateFrame(world_frame, gaze_angle, path_to_intrinsics, path_to_perspective_projection)); 
-        end 
+            % Read in the frame  
+            world_frame = world_frame_reader.readFrame('frameNum', ii, 'color', 'GRAY'); 
+            
+            % If it is a NaN frame, just use the NaN frame for writing
+            if(~any(world_frame(:))) 
+                virtually_foveated_frame = blank_frame; 
+            else
+                virtually_foveated_frame = uint8(virtuallyFoveateFrame(world_frame, gaze_angle, path_to_intrinsics, path_to_perspective_projection));
+        end
 
 
         % Imshow the virtually foveated frame 
@@ -291,3 +280,37 @@ function virtuallyFoveateVideo(world_video, sensor_t_cell, gaze_angles, gaze_off
     return; 
 
 end 
+
+
+% Local function to determine if a given pupil frame timestamp 
+% is in a range of blink events 
+function is_blink = is_blnk_event(timestamp, blnk_events)
+    is_blnk = false
+
+    % Iterate over the blnk_events
+    for rr = 1:size(blnk_events)
+        [event_start, event_end] = blnk_events(rr, :); 
+        
+        % If the current event end time is before the current event, we can just skip 
+        if(event_end < timestamp)
+            continue; 
+        end 
+
+        % If the current event start time is after the timestamp 
+        % we are searching for, just return early. No event after this 
+        % could be a range where this timestamp lies 
+        if(event_start > timestamp)
+            return; 
+        end 
+
+        % If the timestamp is in this range, it is a BLNK event, so 
+        % return true 
+        if(event_start <= timestamp && event_end >= timestamp)
+            is_blink = true 
+            return ; 
+    end 
+
+
+    return ; 
+
+end

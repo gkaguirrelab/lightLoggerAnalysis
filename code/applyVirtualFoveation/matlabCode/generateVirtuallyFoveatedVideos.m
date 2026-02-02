@@ -28,20 +28,23 @@ function generateVirtuallyFoveatedVideos(subjectIDs, options)
         
         % First, we will define a path to the playable video of the world camera we want to virtually foveate
         % and its original chunks, to get the respective timestamps of all the sensors 
-        path_to_world_video = "/Users/zacharykelly/Desktop/FLIC_1222026_gazeCalibration_temporalSensitivity_2/W.avi" %sprintf("/Volumes/GKA spare/scriptedIndoorOutdoorVideos/%s/%s/temporalFrequency/W.avi", subjectID, activity);
-        world_t = load_world_timestamps("/Users/zacharykelly/Desktop/SAM_1_22_26_GAZECAL/alternative_camera_timestamps.csv");
+        path_to_world_video = "/Users/zacharykelly/Desktop/generated_videos/FLIC_2001_work_temporalSensitivity_1/W.avi" 
+        world_t = load_world_timestamps("/Users/zacharykelly/Desktop/NeonWorkResult/alternative_camera_timestamps.csv");
 
         % Load in the camera intrinscis of the world camera 
         path_to_intrinsics = "~/Documents/MATLAB/projects/lightLoggerAnalysis/data/intrinsics_calibration.mat"; 
 
         % Next, we will load in the gaze angles (originally in px form, but we will convert)
-        [pupil_t, gaze_angles] = load_gaze_angles("/Users/zacharykelly/Desktop/SAM_1_22_26_GAZECAL/alternative_camera_gaze.csv", path_to_intrinsics); %gaze_angles_struct.pupilData.(gaze_angles_field).eyePoses.values; 
+        % and we will also load in the BLNK events 
+        [pupil_t, gaze_angles] = load_gaze_angles("/Users/zacharykelly/Desktop/NeonWorkRESULT/alternative_camera_gaze.csv", path_to_intrinsics); %gaze_angles_struct.pupilData.(gaze_angles_field).eyePoses.values; 
         if(options.just_projection)
             gaze_angles(:, :) = 0; 
             if(any(gaze_angles(:)) ~= 0)
                 error("Projection only mode was selected but non zero gaze angles detected");
             end 
         end 
+        blnk_events = load_blnk_events("/Users/zacharykelly/Desktop/NeonWorkRESULT/blink.csv")
+
 
         % Offset just set to 0, 0 since we assume Neon calculates this
         offsets = [0, 0]; 
@@ -89,7 +92,7 @@ function generateVirtuallyFoveatedVideos(subjectIDs, options)
 
         % Virtually foveate and output the video 
         sensor_t_matrix = {world_t, pupil_t};
-        virtuallyFoveateVideo(path_to_world_video, sensor_t_matrix, gaze_angles, offsets, output_path, path_to_intrinsics, path_to_perspective_projection,... 
+        virtuallyFoveateVideo(path_to_world_video, sensor_t_matrix, gaze_angles, offsets, blnk_events, output_path, path_to_intrinsics, path_to_perspective_projection,... 
                               "frames_to_process", start_end,...
                               "verbose", options.verbose,...
                               "manual_offset", manual_offset,...
@@ -135,4 +138,18 @@ function world_t = load_world_timestamps(path)
     
     return 
 
+end 
+
+
+% Local function to load in the timestamp ranges of blinks
+function blnk_events = load_blnk_events(path)
+    opts = detectImportOptions(path, 'VariableNamingRule', 'preserve');
+
+    % Force timestamp column to int64 (preserves ns precision)
+    opts = setvartype(opts, 'timestamp [ns]', 'int64');
+
+    blnk_events_table = readtable(path, opts); 
+    blnk_events = int64(blnk_events_table{:, {'start timestamp [ns]', 'end_timestamp [ns]'}}); 
+
+    return 
 end 
