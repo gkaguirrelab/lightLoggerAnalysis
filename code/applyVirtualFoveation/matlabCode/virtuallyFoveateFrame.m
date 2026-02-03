@@ -73,11 +73,14 @@ function retinalImage = virtuallyFoveateFrame(I, gaze_angle, fisheyeIntrinsicsPa
     % Check for conditions that would trigger a re-calculation of the angles
     % from intrinsics
     recalcFlag = false;
-    if isempty(fisheyeIntrinsics) || ...
-            ~strcmp(lastFisheyeIntrinsicsPath,fisheyeIntrinsicsPath) || ...
-            ~isequal(nRowsLast,nRows) || ~isequal(nColsLast,nCols) || ...
-            ~strcmp(lastTransformationPath,transformationPath) || ...
-            options.forceRecalc
+    no_fisheye_intrinsics = isempty(fisheyeIntrinsics);
+    new_fisheye_intrinsics_path = ~strcmp(lastFisheyeIntrinsicsPath,fisheyeIntrinsicsPath); 
+    new_transformation_path = ~strcmp(lastTransformationPath,transformationPath); 
+    new_image_shape = ~isequal(nRowsLast,nRows) || ~isequal(nColsLast,nCols); 
+    recalc_conditions = [no_fisheye_intrinsics, new_fisheye_intrinsics_path, new_transformation_path, new_image_shape];
+    if any(recalc_conditions)
+        disp("RECALCULATING ANGLES FROM INTRINSICS DUE TO CONDITIONS");
+        disp(recalc_conditions);
         recalcFlag = true;
     end
 
@@ -94,6 +97,7 @@ function retinalImage = virtuallyFoveateFrame(I, gaze_angle, fisheyeIntrinsicsPa
         [xg, yg]          = meshgrid(1:nCols, 1:nRows);
         sensorPoints      = [xg(:),yg(:)];
         worldCoordsInDegrees = anglesFromIntrinsics(sensorPoints, fisheyeIntrinsics);
+        lastTransformationPath = transformationPath;
 
     end
 

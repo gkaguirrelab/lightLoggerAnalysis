@@ -43,7 +43,7 @@ function generateVirtuallyFoveatedVideos(subjectIDs, options)
                 error("Projection only mode was selected but non zero gaze angles detected");
             end 
         end 
-        blnk_events = load_blnk_events("/Users/zacharykelly/Desktop/NeonWorkRESULT/blink.csv")
+        blnk_events = load_blnk_events("/Volumes/EXTERNAL_1/PilotWorkNeon/2026-01-29_16-16-52-59eb727c/blinks.csv");
 
 
         % Offset just set to 0, 0 since we assume Neon calculates this
@@ -146,10 +146,12 @@ function blnk_events = load_blnk_events(path)
     opts = detectImportOptions(path, 'VariableNamingRule', 'preserve');
 
     % Force timestamp column to int64 (preserves ns precision)
-    opts = setvartype(opts, 'timestamp [ns]', 'int64');
+    opts = setvartype(opts, {'start timestamp [ns]', 'end timestamp [ns]'}, 'int64');
 
     blnk_events_table = readtable(path, opts); 
-    blnk_events = int64(blnk_events_table{:, {'start timestamp [ns]', 'end_timestamp [ns]'}}); 
+    blnk_events = int64(blnk_events_table{:, {'start timestamp [ns]', 'end timestamp [ns]'}}); 
+
+    assert(size(blnk_events, 2) == 2);
 
     return 
 end 

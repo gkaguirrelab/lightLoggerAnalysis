@@ -110,6 +110,7 @@ function virtuallyFoveateVideo(world_video, sensor_t_cell, gaze_angles, gaze_off
         sensor_t_cell; 
         gaze_angles {mustBeMatrix}; 
         gaze_offsets {mustBeNumeric}; 
+        blnk_events;
         output_path {mustBeText}; 
         path_to_intrinsics {mustBeText};
         path_to_perspective_projection {mustBeText}; 
@@ -141,7 +142,7 @@ function virtuallyFoveateVideo(world_video, sensor_t_cell, gaze_angles, gaze_off
                                         ); 
 
     if(options.testing)
-        output_path = "/Users/zacharykelly/Desktop/testing.avi"
+        output_path = "/Users/zacharykelly/Desktop/testing.avi";
     end 
 
     % If we passed a group of non-contiguous target frames to analyze, 
@@ -165,7 +166,7 @@ function virtuallyFoveateVideo(world_video, sensor_t_cell, gaze_angles, gaze_off
     pupil_t = gaze_angles(:, 1);
 
     % Initialize a blank frame we will use to pad frames that have nan gaze angles 
-    blank_frame = zeros(480, 480); 
+    blank_frame = uint8(zeros(480, 480)); 
 
     % Apply the gaze offsets to the gaze angles, and adjust their coordinate system 
     if(options.verbose)
@@ -197,12 +198,13 @@ function virtuallyFoveateVideo(world_video, sensor_t_cell, gaze_angles, gaze_off
     if(options.verbose)
         disp("Beginning frame processing")
     end 
+
     tic; 
     for ii = start_frame:end_frame
         if(ii > world_frame_reader.NumFrames)
             warning(sprintf("Frame %d is out of bounds for video with NumFrames %d. Quitting early.", ii, world_reader.NumFrames));
             break ; 
-        end 
+        end
 
         if(options.verbose)
             fprintf("Processing frame: %d/%d\n", ii, end_frame);
@@ -212,6 +214,7 @@ function virtuallyFoveateVideo(world_video, sensor_t_cell, gaze_angles, gaze_off
         % frames, then let's check if this frame is in that group, otherwise 
         % continue 
         if(numel(options.non_contiguous_target_frames) > 0 && ~ismember(ii, options.non_contiguous_target_frames))    
+            disp("SKIPPING SINCE NOT IN TARGET FRAMES")
             continue; 
         end 
 
@@ -235,12 +238,14 @@ function virtuallyFoveateVideo(world_video, sensor_t_cell, gaze_angles, gaze_off
         % If the gaze angle is NaN, immediately just 
         % use the NaN frame
         if(any(isnan(gaze_angle)))
+            disp('GAZE ANGLE IS NAN')
             virtually_foveated_frame = blank_frame; 
         
         % If the pupil timestamp is during a blink event 
         % we should also just use the NaN frame 
-        elseif(is_blnk_event(pupil_t, blnk_events))
-            virtually_foveated_frame = blank_frame
+        elseif(is_blnk_event(pupil_t(gaze_angle_idx), blnk_events))
+            disp("BLINK EVENT")
+            virtually_foveated_frame = blank_frame;
 
         % Otherwise, let's read in a real frame 
         % and virtually foveate 
@@ -253,6 +258,8 @@ function virtuallyFoveateVideo(world_video, sensor_t_cell, gaze_angles, gaze_off
                 virtually_foveated_frame = blank_frame; 
             else
                 virtually_foveated_frame = uint8(virtuallyFoveateFrame(world_frame, gaze_angle, path_to_intrinsics, path_to_perspective_projection));
+    
+            end
         end
 
 
@@ -268,7 +275,6 @@ function virtuallyFoveateVideo(world_video, sensor_t_cell, gaze_angles, gaze_off
 
         % Write the frame to the video 
         world_frame_writer.writeVideo(virtually_foveated_frame);  
-
     end     
 
     % Close the world video writer 
@@ -285,11 +291,13 @@ end
 % Local function to determine if a given pupil frame timestamp 
 % is in a range of blink events 
 function is_blink = is_blnk_event(timestamp, blnk_events)
-    is_blnk = false
+    is_blink = false; 
 
     % Iterate over the blnk_events
-    for rr = 1:size(blnk_events)
-        [event_start, event_end] = blnk_events(rr, :); 
+    for rr = 1:size(blnk_events, 1)
+        row = blnk_events(rr, :);
+        event_start = row(1);
+        event_end = row(2);
         
         % If the current event end time is before the current event, we can just skip 
         if(event_end < timestamp)
@@ -305,9 +313,10 @@ function is_blink = is_blnk_event(timestamp, blnk_events)
 
         % If the timestamp is in this range, it is a BLNK event, so 
         % return true 
-        if(event_start <= timestamp && event_end >= timestamp)
-            is_blink = true 
+        if((event_start <= timestamp) && (event_end >= timestamp))
+            is_blink = true;
             return ; 
+        end 
     end 
 
 
