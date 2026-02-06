@@ -26,9 +26,9 @@ function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, 
 % 
 % Example:
 %{
-    subjectId = 'FLIC_2006';
+    subjectId = 'FLIC_2004';
     sessionNum = 1;
-    runGazeCalibrationStimulus("full", 2, 60, subjectId, 'GazeCalibration',sessionNum, 106.7, 192.4)
+    runGazeCalibrationStimulus("visual", 2, 60, subjectId, 'GazeCalibration',sessionNum, 106.7, 192.4)
 %}
                           
     arguments 

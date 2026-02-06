@@ -36,10 +36,9 @@ arguments
 end
 
 % Load in some info about the video to get us started
-video_info = h5info(videoPath, "/video");
-video_size = video_info.Dataspace.Size;
-nRows = video_size(1);
-nCols = video_size(2);
+video_reader = videoIOWrapper(videoPath, 'ioAction', 'read');
+nRows = video_reader.Height;
+nCols = video_reader.Width;
 nFrames = video_size(3);
 
 if(nFrames <= 0)
@@ -127,10 +126,10 @@ for ff = 1:nChunks
     startTime = datetime('now');
     fprintf("Processing chunk: %d/%d...", ff, nChunks);
 
-    % Initialize a frame chunk we will populate
-    frameChunk = h5read(videoPath, "/video", [1, 1, chunkStarts(ff)], [inf, inf, framesPerChunk]);
+    % Load in a desired amount of frames for this chunk 
+    chunk_start_frame = chunkStarts(ff); 
+    frameChunk = load_frame_chunk(video_reader, chunk_start_frame, framesPerChunk); 
     readTime = datetime('now');
-    frameChunk = permute(frameChunk, [3 2 1]);  % flip back to nFrames x nRows x nCols
 
     % Nan any frames that we have already specified are dropped
     frameChunkDropVector = frameDropVector(1,chunkStarts(ff):chunkStarts(ff)+framesPerChunk-1);
@@ -248,3 +247,25 @@ if options.doPlot
 end
 
 end
+
+% Define location function to read in a number of frames
+% from the video 
+function frame_chunk = load_frame_chunk(video_reader, start_frame, num_frames_to_read)
+    % Determine the true number of frames to read (e.g. on the last chunk
+    % there may not be an equal number to read) 
+    num_frames_to_read = min([num_frames_to_read, video_reader.NumFrames - start_frame]);
+
+    frame_chunk = zeros(num_frames_to_read, ...
+                        video_reader.Height, ...
+                        video_reader.Width, ...
+                        'uint8' ...
+                        );
+    % Read the target amount of frames 
+    for ii = start_frame:start_frame+num_frames_to_read
+        frame_chunk(ii, :, :) = uint8(video_reader.readFrame('frameNum', ii, "zeros_as_nans", true, 'color', 'GRAY'));
+        
+    end 
+
+
+
+end 
