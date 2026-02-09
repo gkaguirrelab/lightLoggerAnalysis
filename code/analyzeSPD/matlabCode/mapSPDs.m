@@ -260,9 +260,10 @@ function frame_chunk = load_frame_chunk(video_reader, start_frame, num_frames_to
                         'uint8' ...
                         );
     % Read the target amount of frames 
+    insertion_index = 1; 
     for ii = start_frame:start_frame+num_frames_to_read
-        frame_chunk(ii, :, :) = uint8(video_reader.readFrame('frameNum', ii, "zeros_as_nans", true, 'color', 'GRAY'));
-        
+        frame_chunk(insertion_index, :, :) = uint8(video_reader.readFrame('frameNum', ii, "zeros_as_nans", true, 'color', 'GRAY'));
+        insertion_index = insertion_index + 1; 
     end 
 
 
