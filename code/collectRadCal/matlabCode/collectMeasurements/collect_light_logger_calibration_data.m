@@ -352,7 +352,7 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
 
     % { PHASE FITTING } - We will collect this for only NDF 1 
     contrast_levels = [0.5]; % Define the list of contrast levels we will explore
-    frequencies = [0.1, 5]; % Define the list of frequencies we will modulate at 
+    frequencies = [0.1]; % Define the list of frequencies we will modulate at 
     n_measures = 3; % The number of measurements to make at each combination of contrast + frequency 
     contrast_levels_orders = randomize_contrast_orders(numel(NDFs.phase_fitting), numel(contrast_levels), n_measures); % The order we will expose contrasts in, randomized per measure 
     frequencies_orders = randomize_frequency_orders(numel(NDFs.phase_fitting), n_measures, numel(contrast_levels), numel(frequencies)); % The orders in which we will expose the frequencies at a given contrast, randomized per contrast
