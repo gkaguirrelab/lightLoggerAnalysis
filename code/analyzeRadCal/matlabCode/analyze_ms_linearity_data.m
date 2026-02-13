@@ -54,7 +54,7 @@ arguments
     measurements; % Parsed and converted recordings from the light logger
     opts.plotSettingLevel logical = false;
     opts.plotAllNDF logical = true;
-    opts.plotIllum logical = false;
+    opts.plotIllum logical = true;
     opts.save_illum_to_MS logical = false;
 end
 
@@ -62,10 +62,14 @@ end
 % path to find other files
 combiExperiments_path = getpref('lightLoggerAnalysis', 'combiExperiments_path');
 
+% Save the path to light logger analysis. 
+% We will use this to construct local paths
+lightLoggerAnalysis_path = getpref("lightLoggerAnalysis", "light_logger_analysis_path");
+
 % Load the minispect SPDs
 spectral_sensitivity_map = containers.Map({'ASM7341', 'TSL2591'},...
-    {fullfile(combiExperiments_path,'data','ASM7341_spectralSensitivity.mat');
-    fullfile(combiExperiments_path,'data','TSL2591_spectralSensitivity.mat')...
+    {fullfile(lightLoggerAnalysis_path, 'data','ASM7341_spectralSensitivity.mat');
+    fullfile(lightLoggerAnalysis_path, 'data','TSL2591_spectralSensitivity.mat')...
     }...
     );
 
@@ -132,7 +136,7 @@ colorList = [
 
 % add path to isetBIO CIE luminous efficiency function
 addpath('~/Documents/MATLAB/toolboxes/Psychtoolbox-3/Psychtoolbox/PsychColorimetricData/PsychColorimetricMatFiles');
-load("T_CIE_Y2.mat");
+load("T_CIE_Y2.mat");   
 wls_CIE_Y2 = SToWls(S_CIE_Y2); % convert to wavelength
 
 % First, let's iterate over the chips
@@ -278,6 +282,7 @@ for cc = 1:numel(chips)
         illum_to_MS = nan((n_detector_channels - 1), 2);
     end
 
+
     for ch = 1:n_detector_channels
         figure;
         across_NDF_channel_ax = axes;
@@ -288,7 +293,8 @@ for cc = 1:numel(chips)
         else
             n_ndfs_to_plot = 5;
         end
-
+        
+        measured_all_NDF_this_chip = nan(n_ndfs_to_plot, n_settings_levels);
         if ~opts.plotIllum
             for nn = 1:n_ndfs_to_plot
                 NDF_measured_predicted = measured_predicted_by_NDF{nn};
@@ -345,6 +351,8 @@ for cc = 1:numel(chips)
         x = x(:);
         y = y(:);
         valid_idx = isfinite(x) & isfinite(y);
+        disp(valid_idx)
+
         x = x(valid_idx);
         y = y(valid_idx);
 
@@ -352,6 +360,14 @@ for cc = 1:numel(chips)
         %store the coefficients for chip one, all channels except IR
         if cc ==1 && ch<10
             illum_to_MS(ch,:) = coeffs;
+        end
+
+        xmin = min(x); 
+        xmax = max(x); 
+        if isempty(xmin) || isempty(xmax) || ~isfinite(xmin) || ~isfinite(xmax) || xmin == xmax
+            warning("Invalid x range for fit: xmin=%s xmax=%s", mat2str(xmin), mat2str(xmax));
+            disp("Does the TS chip have valid data?");
+            continue;
         end
 
         x_fit = linspace(min(x), max(x), 100);
