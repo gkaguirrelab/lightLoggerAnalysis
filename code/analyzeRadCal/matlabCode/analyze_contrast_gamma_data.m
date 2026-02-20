@@ -40,6 +40,7 @@ function analyze_contrast_gamma_data(calibration_metadata, measurements)
     %if we ever rerun this with multiple NDFs, we should change the colors.
 
     % First, let's iterate over NDF level
+    fit_slopes_per_NDF = zeros(numel(NDFs), 1);
     for nn = 1:numel(NDFs)
         % Retrieve the current NDF 
         NDF = NDFs(nn); 
@@ -107,6 +108,7 @@ function analyze_contrast_gamma_data(calibration_metadata, measurements)
 
             % Add a linear fit
             p = polyfit(contrast_levels, mean_amplitudes_by_contrast, 1);
+            fit_slopes_per_NDF(nn) = p(1); 
             plot(contrast_levels, polyval(p, contrast_levels), '-r', 'DisplayName', 'Fit');
             plot([0 1], [0 1], ':k', 'DisplayName', 'Reference Line');
 
@@ -116,5 +118,25 @@ function analyze_contrast_gamma_data(calibration_metadata, measurements)
         end % Frequency 
 
     end % NDF 
+
+
+    % Plot the slopes of the fits per NDF 
+    figure; 
+    title("Fit Slope By NDF Level"); 
+    hold on; 
+
+
+    plot(NDFs, fit_slopes_per_NDF, '-o', ...
+    'DisplayName', 'Slopes', ...
+    'MarkerSize', 10, ...
+    'LineWidth', 2.5, ...
+    'Color', [0 1 1], ...          % cyan line
+    'MarkerFaceColor', [0 1 1], ... % filled cyan marker
+    'MarkerEdgeColor', [1 1 1]);    % white edge for contrast
+    xlabel("NDF"); 
+    xticks(NDFs);
+    ylabel("Slope"); 
+    legend show; 
+
 
 end

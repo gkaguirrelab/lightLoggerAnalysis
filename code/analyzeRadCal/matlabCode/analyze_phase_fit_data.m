@@ -72,10 +72,12 @@ function analyze_phase_fit_data(calibration_metadata, measurements)
                     world_v_contrast = (world_v - mean(world_v)) / mean(world_v); 
                     
                     %%%%%%{ Extract Pupil Measurement %}%%%%%%
+                    %{
                     pupil_measurement = measurement.P; 
                     pupil_t = pupil_measurement.t; 
                     pupil_v = pupil_measurement.v; 
                     pupil_v_contrast = (pupil_v - mean(pupil_v)) / mean(pupil_v); 
+                    %}
 
                     %%%%%%{ Extract MS_AS Measurement %}%%%%%%
                     MS_AS_measurement = measurement.M; 
@@ -93,18 +95,21 @@ function analyze_phase_fit_data(calibration_metadata, measurements)
                                                                                        );
 
                     %%%%%%{ Calculate World - Pupil offset %}%%%%%%
+                    %{
                     [world_pupil_phase_diff, world_fit_fast, pupil_fit] = calculate_phase_offset(world_t, world_v_contrast, ...
                                                                                                  pupil_t(nPupilFramesToDiscard:end), pupil_v_contrast(nPupilFramesToDiscard:end), ...
                                                                                                  frequency...
                                                                                                 );
+                    %}
+
 
                     % Calculate the temporal offsets in seconds
                     world_AS_temporal_offset_seconds = (world_AS_phase_diff / (2 * pi)) / frequency;
-                    world_pupil_temporal_offset_seconds = (world_pupil_phase_diff / (2 * pi)) / frequency;
+                    %world_pupil_temporal_offset_seconds = (world_pupil_phase_diff / (2 * pi)) / frequency;
 
                     % Let's save these offsets for this measure 
                     temporal_offset_seconds_by_frequency(ms_temporal_offset_mat_row, mm) = world_AS_temporal_offset_seconds; 
-                    temporal_offset_seconds_by_frequency(pupil_temporal_offset_mat_row, mm) = world_pupil_temporal_offset_seconds; 
+                    %temporal_offset_seconds_by_frequency(pupil_temporal_offset_mat_row, mm) = world_pupil_temporal_offset_seconds; 
 
 
                     % Let's plot the results for this measure 
@@ -120,15 +125,17 @@ function analyze_phase_fit_data(calibration_metadata, measurements)
                 std_temporal_offset_seconds_by_frequency = std(temporal_offset_seconds_by_frequency, [], 2); 
 
                 % Report these values to the terminal 
-                fprintf("NDF: %.2f | C: %.2f | F: %.2f | Mean Offset (W-AS): %.3f [ms] | STD Offset: %.3f\n [ms]", NDF, contrast, frequency,...
+                fprintf("NDF: %.2f | C: %.2f | F: %.2f | Mean Offset (W-AS): %.3f [ms] | STD Offset: %.3f [ms]\n", NDF, contrast, frequency,...
                                                                                                               mean_temporal_offset_seconds_by_frequency(ms_temporal_offset_mat_row) * 1000,...
                                                                                                               (std_temporal_offset_seconds_by_frequency(ms_temporal_offset_mat_row)* 1000)...
                        );
+                %{
                 fprintf("NDF: %.2f | C: %.2f | F: %.2f | Mean Offset (W-P): %.3f [ms] | STD Offset: %3.f\n [ms]", NDF, contrast, frequency,...
                                                                                                              mean_temporal_offset_seconds_by_frequency(pupil_temporal_offset_mat_row) * 1000,...
                                                                                                              (std_temporal_offset_seconds_by_frequency(pupil_temporal_offset_mat_row)* 1000)...
                        );
-
+                %}
+                
             end % Frequency
 
         end % Contrast 
@@ -143,7 +150,7 @@ function analyze_phase_fit_data(calibration_metadata, measurements)
     for nn = 1:n_measures
         % Retrieve the sensor readings for this measurement
         slow_measurement = measurements{1, 1, 1, nn};
-        fast_measurement = measurements{1, 1, 2, nn};
+        %fast_measurement = measurements{1, 1, 2, nn};
 
         % Adjust the start times to be relative to world camera
         startTime = slow_measurement.W.t(1);
@@ -152,11 +159,11 @@ function analyze_phase_fit_data(calibration_metadata, measurements)
         slow_measurement.M.t.AS = slow_measurement.M.t.AS - startTime;
         slow_measurement.S.t = slow_measurement.S.t - startTime;
 
-            startTime = fast_measurement.W.t(1);
-        fast_measurement.W.t = fast_measurement.W.t - startTime;
-        fast_measurement.P.t = fast_measurement.P.t - startTime;
-        fast_measurement.M.t.AS = fast_measurement.M.t.AS - startTime;
-        fast_measurement.S.t = fast_measurement.S.t - startTime;
+        %startTime = fast_measurement.W.t(1);
+        %fast_measurement.W.t = fast_measurement.W.t - startTime;
+        %fast_measurement.P.t = fast_measurement.P.t - startTime;
+        %fast_measurement.M.t.AS = fast_measurement.M.t.AS - startTime;
+        %fast_measurement.S.t = fast_measurement.S.t - startTime;
         
         % Calculate the phase difference of the MS chips to the world camera
         % from the slow measurement. Calculate and store the temporal offset
@@ -168,7 +175,8 @@ function analyze_phase_fit_data(calibration_metadata, measurements)
         world_ms_AS_temporal_offset_secs = temporal_offsets_secs('W-AS');
         world_ms_AS_temporal_offset_secs(nn) = (world_ms_AS_phase_diff / (2 * pi)) / frequencies(1);
         temporal_offsets_secs('W-AS') = world_ms_AS_temporal_offset_secs;
-
+        
+        %{
         [world_ms_TS_phase_diff, world_fit_slow_TS, TS_fit] = calculate_phase_offset(slow_measurement.W.t, convert_to_contrast(slow_measurement.W.v), ...
             slow_measurement.M.t.AS, convert_to_contrast(slow_measurement.M.v.TS(:, 1)), ...
             frequencies(1));
@@ -185,6 +193,7 @@ function analyze_phase_fit_data(calibration_metadata, measurements)
         world_pupil_temporal_offset_secs = temporal_offsets_secs('W-P');
         world_pupil_temporal_offset_secs(nn) = (world_pupil_phase_diff / (2 * pi)) / frequencies(2);
         temporal_offsets_secs('W-P') = world_pupil_temporal_offset_secs;
+        %}
 
         figure ;
         t = tiledlayout(2,1);
@@ -203,6 +212,7 @@ function analyze_phase_fit_data(calibration_metadata, measurements)
         plot(slow_measurement.M.t.AS, AS_fit, '-r', 'DisplayName', 'AS Fit');
         legend show ;
 
+        %{
         % Next tile we will print the Fast video world camera and its fit
         nexttile;
         title(sprintf("World and pupil | F: %.3f", frequencies(2)));
@@ -215,6 +225,7 @@ function analyze_phase_fit_data(calibration_metadata, measurements)
         plot(fast_measurement.P.t(nPupilFramesToDiscard:end), pupil_fit, '-b', 'DisplayName', 'Pupil Fit');
         xlim([2 3]);
         legend show ;
+        %}
 
 
         % Plot the sensors before and after alignment
@@ -250,7 +261,8 @@ function analyze_phase_fit_data(calibration_metadata, measurements)
 
         % Show the legend for this plot
         legend show;
-
+        
+        %{
         % First, plot the sensors before the alignment
         nexttile;
         title(sprintf("%.3f | Before Alignment", frequencies(2)));
@@ -278,6 +290,7 @@ function analyze_phase_fit_data(calibration_metadata, measurements)
 
         % Show the legend for this plot
         legend show;
+        %}
     end
 
 end

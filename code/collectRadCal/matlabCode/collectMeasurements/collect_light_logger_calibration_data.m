@@ -54,7 +54,9 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
     calibration_metadata = false; 
     upload_video_data = false; 
     collect_light_logger_calibration_data(experiment_name, device_num, sensor_ids, NDFs, calibration_metadata, upload_video_data);
-%}
+%}  
+
+
     % Parse and validate the arguments 
     arguments
         experiment_name {mustBeText} % The name of the calibration that will determine the folder it is saved in, e.g. MSOnly 
@@ -69,7 +71,7 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
         upload_video_data = false; 
         
     end     
-   
+
     % Ensure the sensor ids is a vector with at most 3 elements 
     % [W_id, P_id, M_id]
     sensor_ids = sensor_ids(:); % Flatten the id vector 
@@ -105,9 +107,9 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
     tbUseProject('lightLogger'); 
 
     % Then, make sure the bluetooth device is available to connected 
-    if(~bluetooth_central.peripheral_is_available_matlab_wrapper(device_num)) 
-        error("ERROR: Light logger bluetooth probe failed");
-    end 
+    %if(~bluetooth_central.peripheral_is_available_matlab_wrapper(device_num)) 
+    %    error("ERROR: Light logger bluetooth probe failed");
+    %end 
 
     % Define the background we will use for the CombiLED 
     CombiLED_background = ones([1, 8]); 
@@ -122,6 +124,9 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
                                                            pupil_util...
                                                           ); 
     end 
+
+    disp("THIS IS CALIBRATION METADATA")
+    disp(calibration_metadata)
 
     % Step 2: Initialize output directories 
     dropbox_savedir = fullfile(getpref('lightLogger', 'dropbox_calibration_dir'), sensor_ids, experiment_name); 
@@ -143,8 +148,9 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
     % A. Calcualte the MS linearity at all NDF levels
     disp("Calibration | Collecting MS linearity with struct:");
     disp(calibration_metadata.ms_linearity)
-    
+
     % Attempt to collect the calibration measurements 
+     addpath(genpath("/Users/zacharykelly/Documents/MATLAB/projects/lightLoggerAnalysis/code/collectRadCal/matlabCode/collectMeasurements")); 
     [success, ms_linearity_calibration_metadata] = collect_ms_linearity_data(device_num,...
                                                                              calibration_metadata.ms_linearity,...
                                                                              bluetooth_central,...
@@ -169,6 +175,7 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
     disp(calibration_metadata.temporal_sensitivity) ;
     
     % Attempt to collect this data
+    addpath(genpath("/Users/zacharykelly/Documents/MATLAB/projects/lightLoggerAnalysis/code/collectRadCal/matlabCode/collectMeasurements")); 
     [success, temporal_sensitivity_calibration_metadata] = collect_temporal_sensitivity_data(device_num,...
                                                                                              calibration_metadata.temporal_sensitivity,...
                                                                                              bluetooth_central,...
@@ -192,6 +199,7 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
     disp(calibration_metadata.phase_fitting);
 
     % Attempt to collect this measurement 
+    addpath(genpath("/Users/zacharykelly/Documents/MATLAB/projects/lightLoggerAnalysis/code/collectRadCal/matlabCode/collectMeasurements")); 
     [succces, phase_fitting_calibration_metadata] = collect_temporal_sensitivity_data(device_num,...
                                                                                       calibration_metadata.phase_fitting,...
                                                                                       bluetooth_central,...
@@ -213,6 +221,7 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
     disp(calibration_metadata.contrast_gamma);
     
     % Attempt to collect this measurement
+     addpath(genpath("/Users/zacharykelly/Documents/MATLAB/projects/lightLoggerAnalysis/code/collectRadCal/matlabCode/collectMeasurements")); 
     [success, contrast_gamma_calibration_metadata] = collect_temporal_sensitivity_data(device_num,...
                                                                                        calibration_metadata.contrast_gamma,...
                                                                                        bluetooth_central,...
@@ -247,6 +256,7 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
 
     % Extract the world camera sensor mode 
     sensor_mode = world_util.WORLD_CAMERA_CUSTOM_MODES{1}; 
+
 
     % A. Set up the substructs we will use for each of the Calibration measures 
     CalibrationData.ms_linearity = struct; 
@@ -454,6 +464,9 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
     CalibrationData.contrast_gamma.n_measures = n_measures; 
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+
+    disp("THIS IS CALIBRATION DATA BEFORE I RETURN")
+    disp(CalibrationData)
 
     return ; 
 

@@ -77,6 +77,14 @@ light_logger_analysis_path = tbLocateProject('lightLoggerAnalysis');
 setpref(projectName, "light_logger_analysis_path", light_logger_analysis_path);
 addpath(genpath(light_logger_analysis_path));
 
+% Save the path to where the camera spectral sensitivity function lives
+camera_spectral_sensitivites_path = fullfile(light_logger_analysis_path, "data/IMX219_spectralSensitivity.mat"); 
+setpref(projectName, "camera_spectral_sensitivites_path", camera_spectral_sensitivites_path); 
+
+% Save the path to where the calfile dir lives 
+calfile_dir_path = fullfile(light_logger_analysis_path, "cal"); 
+setpref(projectName, "calfile_dir_path", calfile_dir_path); 
+
 % Add the path to 
 world_util_path = fullfile(light_logger_analysis_path, "code", "library", "sensor_utility", "world_util.py"); 
 setpref(projectName, 'world_util_path', world_util_path); 

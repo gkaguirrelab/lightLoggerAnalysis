@@ -361,46 +361,161 @@ def rgb_to_lms(original_image: np.ndarray, visualize_results: bool=False) -> tup
 """Calculate the per color weights to apply to each color 
    in order to equalize them to the R channel 
 """
-def calculate_color_weights(chunks: list[dict] | list[np.ndarray], guard_saturation: bool=False) -> np.ndarray:
-    # Initialize a dict to keep track of mean pixel values by color per frame 
-    spacial_averages: dict[str, float] = {let: [] 
-                                          for let in 'RGB'
-                                         }
+def calculate_color_weights(sorted_calibration_measurements: dict, visualize_results: bool=False) -> np.ndarray:
+    # Let's generate the bayer pattern for a 480, 640 frame 
+    bayer_pattern: np.ndarray = generate_RGB_mask(np.zeros((480, 640), dtype=np.uint8))
+    R_pixel_locations: set[tuple] = set([(y, x) for (y, x) in zip(*np.where(bayer_pattern == 'R')) ])
+    G_pixel_locations: set[tuple] = set([(y, x) for (y, x) in zip(*np.where(bayer_pattern == 'G')) ])
+    B_pixel_locations: set[tuple] = set([(y, x) for (y, x) in zip(*np.where(bayer_pattern == 'B')) ])
 
-    # Iterate over each chunk
-    for chunk_idx, chunk in enumerate(chunks):    
-        # Extract the world frames for this chunk 
-        world_frames: np.ndarray = chunk['W']['v'] if isinstance(chunk, dict) else chunk
+    # Let's splice out only contrast gamma NDF 0 
+    contrast_gamma_NDF0: list = sorted_calibration_measurements["contrast_gamma"][0]
+    
+    # Then, we will iterate over the contrast levels
+    RGB_weights: np.ndarray | None = None
+        
+    num_contrast_levels: int = len(contrast_gamma_NDF0)
+    for contrast_idx in range(num_contrast_levels):
+        # Then, we will extract just the first frequency (there is only 1)
+        num_frequencies: int = len(contrast_gamma_NDF0[contrast_idx])
+        for frequency_idx in range(num_frequencies):
+            frequency_measurement = contrast_gamma_NDF0[contrast_idx][frequency_idx]
 
-        # Find the bayer pattern matching this size 
-        # of the frames in this chunk 
-        RGB_mask: np.ndarray = generate_RGB_mask(world_frames[0])
-        r_pixels, g_pixels, b_pixels = [ np.argwhere(RGB_mask == color) for color in "RGB" ]
-
-        # Iterate over the frames in this chunk 
-        for frame in world_frames:
-            # Iterate over the colors and their pixels in each frame
-            for color, pixels in zip(spacial_averages.keys(), (r_pixels, g_pixels, b_pixels)):
-                # Find the pixel colors 
-                color_pixels: np.ndarray = frame[pixels[:, 0], pixels[:, 1]]
+            # Then, we will go over the 3 measurements 
+            avg_world_camera_v: None | np.ndarray = None
+            
+            # Find the min length of the measurements, because they may not all be the same length
+            min_world_v_length: float = float("inf")
+            num_measurements: int = len(frequency_measurement)
+            for measurement_idx in range(num_measurements):
+                measurement = frequency_measurement[measurement_idx][0]
                 
-                if(guard_saturation is True and np.any(color_pixels >= 255)):
-                    raise Exception("Found saturated pixels")
+                # Next, let's take just the world camera V values 
+                world_camera_v = measurement['W']['v']
+                min_world_v_length = min(min_world_v_length, len(world_camera_v))
+
+            # TODO: In a previous measurement, a measurement was 
+            #       weird, so I am just using a single out of the 3 measurements 
+            #       as this weird measurement messed with the averages 
+            measurements_to_consider: tuple[int] = (1, 2) # exclusive range
+            start, end = measurements_to_consider
+            for measurement_idx in range(start, end):
+                measurement = frequency_measurement[measurement_idx][0]
                 
-                # Calculate the mean of the pixels of this color in this frame 
-                color_frame_mean: float = np.mean(color_pixels)
+                # Next, let's take just the world camera V values 
+                world_camera_v = measurement['W']['v']
 
-                # Save this value 
-                spacial_averages[color].append(color_frame_mean)
+                if(avg_world_camera_v is None):
+                    avg_world_camera_v = world_camera_v[:min_world_v_length, :, :].astype(np.float64)
+                else:
+                    avg_world_camera_v += world_camera_v[:min_world_v_length, :, :].astype(np.float64)
+
+            avg_world_camera_v /= (end - start)
+
+            # Next, let's splice out the target region 
+            [midpt_y, midpt_x] = np.array(avg_world_camera_v.shape[1:]) // 2
+
+            # Let's record the ROI coords wrt to entire frame 
+            roi_frame_coords = [ (midpt_y + dy, midpt_x + dx)
+                                for dy in range(-20, 20)
+                                for dx in range(-20, 20)
+                                ]
+            
+            roi_R_pixels = np.array([coord for coord in roi_frame_coords 
+                            if coord in R_pixel_locations
+                        ])
 
 
-    # Construct the average pixel value over time in addition to over space (per frame)
-    temporal_averages: dict[str, float] = {let: np.mean(means)
-                                           for let, means in spacial_averages.items()
-                                          }
+            roi_B_pixels = np.array([coord for coord in roi_frame_coords 
+                            if coord in B_pixel_locations
+                        ])
 
-    # Construct the scalars in order to equalize all colors to the R pixels 
-    scalars: np.ndarray = np.array([1, temporal_averages['R'] / temporal_averages['G'],  temporal_averages['B'] /  temporal_averages['R'] ], dtype=np.float64)
+            roi_G_pixels = np.array([coord for coord in roi_frame_coords 
+                            if coord in G_pixel_locations
+                        ])
 
-    return scalars
+            # Now, we calculate the temporal means 
+            # for each of RGB 
+            temporal_means: list = []
+            for means_idx, (colorname, pixels) in enumerate(zip("RGB", (roi_R_pixels, roi_G_pixels, roi_B_pixels))):
+                rows: np.ndarray = pixels[:, 0]
+                cols: np.ndarray = pixels[:, 1]
+
+                roi_color_intensity = np.mean(avg_world_camera_v[:, rows, cols], axis=1) 
+
+                roi_color_temporal_mean = float(np.mean(roi_color_intensity))
+                temporal_means.append((colorname, roi_color_intensity, roi_color_temporal_mean))
+
+            # Save the weights for this combination of contrast + frequency 
+            if(RGB_weights is None):
+                RGB_weights = np.zeros((num_contrast_levels, num_frequencies, 3), dtype=np.float64)
+            
+            RGB_weights[contrast_idx][frequency_idx][:] = [m for (c, v, m) in temporal_means]
+
+
+            # If we do not want to visualize, just continue
+            if(visualize_results is False):
+                continue
+
+            # Now, plot them over time for this measurement
+            fig, axes = plt.subplots(1, 2, figsize=(12, 6))
+            ax_ts, ax_tm = axes  # time-series, temporal-mean
+
+            frame_numbers: np.ndarray = np.arange(min_world_v_length)
+            for (colorname, spatial_mean, temporal_mean) in temporal_means:
+                ax_ts.plot(
+                    frame_numbers,
+                    spatial_mean,
+                    color=colorname.lower(),
+                    linewidth=2,
+                    label=f"{colorname} ROI"
+                )
+
+            # ---- Left: time-series plot ----
+            ax_ts.set_title(f"ContrastIdx: {contrast_idx} | ROI Pixel Intensities by Frame Number", fontsize=14)
+            ax_ts.set_xlabel("Frame Number", fontsize=12)
+            ax_ts.set_ylabel("Avg Intensity", fontsize=12)
+            ax_ts.set_ylim(0, 255)
+            ax_ts.set_xlim(0, min(100, min_world_v_length - 1))
+            ax_ts.legend()
+            ax_ts.grid(alpha=0.3)
+
+            # ---- Right: temporal mean per channel ----
+            x = np.arange(len(temporal_means))
+
+            # make bars match RGB colors
+            heights = [m for (c, v, m) in temporal_means]
+            labels  = [c for (c, v, m) in temporal_means]
+            bar_colors = [c.lower() for c in labels]
+
+            bars = ax_tm.bar(x,
+                            heights,
+                            color=bar_colors,
+                            edgecolor="black",
+                            linewidth=1.2
+                            )
+
+            ax_tm.set_xticks(x)
+            ax_tm.set_xticklabels(labels)
+
+            ax_tm.set_title(f"ContrastIdx: {contrast_idx} | Temporal Mean (ROI)", fontsize=14)
+            ax_tm.set_xlabel("Channel", fontsize=12)
+            ax_tm.set_ylabel("Temporal Mean Intensity", fontsize=12)
+            ax_tm.set_xticks(x)
+            ax_tm.set_xticklabels([c.upper() for c in bar_colors])
+            ax_tm.set_ylim(0, 255)
+            ax_tm.grid(alpha=0.3, axis="y")
+
+            # Optional: annotate bar values
+            for xi, val in zip(x, heights):
+                ax_tm.text(xi, val + 3, f"{val:.1f}", ha="center", va="bottom", fontsize=10)
+
+
+            fig.tight_layout()
+            plt.show()
+            plt.close(fig)
+
+    return RGB_weights
+
+
 
