@@ -98,6 +98,7 @@ n_channels_map = containers.Map({'ASM7341', 'TSL2591'},...
 % scalar and shown to the MS
 background = calibration_metadata.background;
 
+
 % Retrieve the list of background scalars
 background_scalars = calibration_metadata.background_scalars;
 
@@ -188,7 +189,7 @@ for cc = 1:numel(chips)
         cal = calibration_metadata.cal_files{nn};
 
         % Get the source from the cal file
-        sourceS = [380 2 201];
+        sourceS = cal.rawData.S;
         sourceP_abs = cal.processedData.P_device;
 
         % Retrieve the wavelengths
@@ -196,6 +197,9 @@ for cc = 1:numel(chips)
 
         % Reformat minispect SPDs
         minipspectP_rels_map = reformat_SPDs(spectral_sensitivity_map, sourceS);
+
+        disp(size(minipspectP_rels_map('ASM7341')))
+        return ; 
 
         % Initialize detector counts
         sum_detector_counts = 0;
