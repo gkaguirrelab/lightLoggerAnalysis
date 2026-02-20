@@ -198,9 +198,6 @@ for cc = 1:numel(chips)
         % Reformat minispect SPDs
         minipspectP_rels_map = reformat_SPDs(spectral_sensitivity_map, sourceS);
 
-        disp(size(minipspectP_rels_map('ASM7341')))
-        return ; 
-
         % Initialize detector counts
         sum_detector_counts = 0;
         predictedCounts = 0;
@@ -243,6 +240,12 @@ for cc = 1:numel(chips)
             irradXCIE(ss,:) = sphereIrrad(ss,:) .* T_CIE_Y2_resamp';
             integratedIrradXCIE(ss) = sum(irradXCIE(ss,:));
             illum(ss) = integratedIrradXCIE(ss) * 683;
+
+            disp(size(sphereSPDs(ss, :)))
+            disp(size(detectorP_rel))
+            disp(size(sphereSPDs(ss,:) * detectorP_rel))
+
+            return; 
 
             predictedCounts(ss,:) = sphereSPDs(ss,:) * detectorP_rel;
         end
