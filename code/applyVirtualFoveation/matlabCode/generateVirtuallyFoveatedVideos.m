@@ -11,55 +11,113 @@ function generateVirtuallyFoveatedVideos(subjectIDs, options)
         options.testing (1, 1) logical = false; 
         options.just_projection (1, 1) logical = false; 
         options.non_contiguous_target_frames = {};
-        options.video_read_cache_size = 500;
+        options.video_read_cache_size = 1000;
     end 
 
     % Let's get the dropbox base dir for any references we make to dropbox 
     dropbox_base_dir = getpref("lightLoggerAnalysis", "dropboxBaseDir"); 
-    
+
     % Let's take out activity from options to not have to keep accessing the struct 
     activity = options.activity; 
 
     % Retrieve the start/ending frame 
     start_ends = options.start_ends;
 
+    % Iterate over the subjectIDs enteterd 
     for ii = 1:numel(subjectIDs)
+        % Format the subject IDs as they are on dropbox 
         subjectID = "FLIC_" + subjectIDs{ii};
+
+        % Now, let's make the path to this subject's files 
+        subject_dropbox_path_raw = fullfile(dropbox_base_dir, "FLIC_raw", subjectID, activity); 
+        subject_dropbox_path_processing = replace(subject_dropbox_path_raw, "FLIC_raw", "FLIC_processing");
+
+        if(options.verbose)
+            fprintf("Processing subject: %s\n", subjectID); 
+            fprintf("\tWith directories:\n"); 
+            fprintf("\t\tFLIC_raw: %s\n", subject_dropbox_path_raw); 
+            fprintf("\t\tFLIC_processing: %s\n", subject_dropbox_path_processing); 
+        end 
+
+        % Assert these folders exist 
+        assert(isfolder(subject_dropbox_path_raw) && isfolder(subject_dropbox_path_processing));
         
+
         % First, we will define a path to the playable video of the world camera we want to virtually foveate
-        % and its original chunks, to get the respective timestamps of all the sensors 
-        path_to_world_video = "/Users/zacharykelly/Desktop/generated_videos/FLIC_2001_work_temporalSensitivity_1/W.avi" 
-        world_t = load_world_timestamps("/Users/zacharykelly/Desktop/NeonWorkResult/alternative_camera_timestamps.csv");
+        % and its timestamp vector output by the neon
+        path_to_world_video = fullfile(subject_dropbox_path_processing, "GKA", "W.avi") 
+        path_to_world_t = fullfile(subject_dropbox_path_raw, "Neon", "alternative_camera_timestamps.csv")
+        
+        if(options.verbose)
+            fprintf("\twith world video paths:\n");
+            fprintf("\t\tt: %s\n", path_to_world_t);
+            fprintf("\t\tv: %s\n", path_to_world_video);
+        end     
+        assert(isfile(path_to_world_video) && isfile(path_to_world_t));
+        world_t = load_world_timestamps(path_to_world_t);
 
         % Load in the camera intrinscis of the world camera 
         path_to_intrinsics = "~/Documents/MATLAB/projects/lightLoggerAnalysis/data/intrinsics_calibration.mat"; 
 
+        if(options.verbose)
+            fprintf("\twith intrinsics:\n");
+            fprintf("\t\tpath: %s\n", path_to_intrinsics);
+        end 
+        assert(isfile(path_to_intrinsics));
+
         % Next, we will load in the gaze angles (originally in px form, but we will convert)
         % and we will also load in the BLNK events 
-        [pupil_t, gaze_angles] = load_gaze_angles("/Users/zacharykelly/Desktop/NeonWorkRESULT/alternative_camera_gaze.csv", path_to_intrinsics); %gaze_angles_struct.pupilData.(gaze_angles_field).eyePoses.values; 
+        path_to_pupil_data = fullfile(subject_dropbox_path_raw, "Neon", "alternative_camera_gaze.csv")
+        
+        if(options.verbose)
+            fprintf("\twith pupil data:\n");
+            fprintf("\t\tpath: %s\n", path_to_pupil_data);
+        end 
+        assert(isfile(path_to_pupil_data))
+        
+        [pupil_t, gaze_angles] = load_gaze_angles(path_to_pupil_data, path_to_intrinsics); 
+
+        % If we are just doing project and not full virtual foveation, set all gaze angles to 0 
         if(options.just_projection)
             gaze_angles(:, :) = 0; 
             if(any(gaze_angles(:)) ~= 0)
                 error("Projection only mode was selected but non zero gaze angles detected");
             end 
         end 
-        blnk_events = load_blnk_events("/Volumes/EXTERNAL_1/PilotWorkNeon/2026-01-29_16-16-52-59eb727c/blinks.csv");
+
+        % Next we will load in the blink events 
+        path_to_blnk_data = fullfile(subject_dropbox_path_raw, "Neon", "blinks.csv"); 
+        if(options.verbose)
+            fprintf("\twith blink events:\n");
+            fprintf("\t\tpath: %s\n", \)
+
+        end 
+        
+        assert(isfile(path_to_blnk_data));
+        blnk_events = load_blnk_events(path_to_blnk_data);
 
 
-        % Offset just set to 0, 0 since we assume Neon calculates this
+        % Constant Offset just set to 0, 0 since we assume Neon calculates this
         offsets = [0, 0]; 
 
         % Define the output path where this video will write to 
         output_path = fullfile(options.output_dir, sprintf("/%s_%s_%s.avi", subjectID, activity, options.video_type));
+        if(options.verbose)
+            fprintf("\twith output path:\n");
+            fprintf("\t\tpath: %s", output_path);
+        end 
 
         % Load in the perspective projection object used to transform sensor positions to eye coordinates 
         % NOTE: If you do not have this, please consult calculate_perspective_transform_w2e.m 
         path_to_perspective_projection = fullfile(dropbox_base_dir, sprintf("/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/%s/gazeCalibration/temporalFrequency/%s_gazeCal_perspectiveProjection.mat", subjectID, subjectID));
-        
+
+
+
         % Determine which the range of frames to virtually foveate
         start_end = start_ends{ii};
         
-        % Retrieve the manual offsets for this video
+        % Retrieve the manual offsets for this video (further manual adjsutments per video beyond 
+        % individual offset per participant)
         if(numel(options.manual_offsets) == 0)
             manual_offset = [0, 0]; 
         else 
@@ -73,18 +131,6 @@ function generateVirtuallyFoveatedVideos(subjectIDs, options)
             non_contiguous_target_frames = options.non_contiguous_target_frames{ii};
         end 
 
-        % Output information before we process if we would like 
-        if(options.verbose)
-            fprintf("Virtually foveating subject: %s\n", subjectID);
-            fprintf("\tusing projection only (no gaze angle) mode: %d\n", options.just_projection); 
-            fprintf("\tusing world video: %s\n", path_to_world_video);
-            fprintf("\tusing intrinsics: %s\n", path_to_intrinsics); 
-            fprintf("\tusing projection: %s\n", path_to_perspective_projection); 
-            fprintf("\tusing start/end = [%d %d]\n", start_end(1), start_end(2));
-            fprintf("\tusing manual offset = [%d %d]\n", manual_offset(1), manual_offset(2)); 
-            fprintf("\twith testing output: %d\n", options.testing)
-            fprintf("\toutputting to: %s\n", output_path);
-        end     
 
         if(options.testing)
             warning("Testing has been enabled. This means that for each frame a figure will appear. This will make any sort of long video unable to finish due to amount of figures");
@@ -92,6 +138,8 @@ function generateVirtuallyFoveatedVideos(subjectIDs, options)
 
         % Virtually foveate and output the video 
         sensor_t_matrix = {world_t, pupil_t};
+        
+        %{
         virtuallyFoveateVideo(path_to_world_video, sensor_t_matrix, gaze_angles, offsets, blnk_events, output_path, path_to_intrinsics, path_to_perspective_projection,... 
                               "frames_to_process", start_end,...
                               "verbose", options.verbose,...
@@ -99,6 +147,8 @@ function generateVirtuallyFoveatedVideos(subjectIDs, options)
                               "testing", options.testing,...
                               "non_contiguous_target_frames",non_contiguous_target_frames,...
                               "video_read_cache_size", options.video_read_cache_size);
+
+        %}
     end 
 end 
 
