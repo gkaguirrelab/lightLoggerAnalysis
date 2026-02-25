@@ -1,18 +1,19 @@
 function generateVirtuallyFoveatedVideos(subjectIDs, options)
 
-    arguments 
-        subjectIDs 
-        options.start_ends  = {[1, inf]};
-        options.manual_offsets = {};
-        options.activity (1, 1) string = "activityUnspecified"
-        options.video_type (1,1) string {mustBeMember(options.video_type, ["virtuallyFoveatedVideoUnspecified", "virtuallyFoveatedVideo", "virtuallyFoveatedVideoAprilTag", "projectionNoFoveation"])} = "virtuallyFoveatedVideoUnspecified"
-        options.output_dir (1, 1) string = "./"
-        options.verbose (1, 1) logical = false
-        options.testing (1, 1) logical = false; 
-        options.just_projection (1, 1) logical = false; 
-        options.non_contiguous_target_frames = {};
-        options.video_read_cache_size = 1000;
-    end 
+    arguments
+    subjectIDs
+    options.output_dir (1,1) string = "./"
+    options.activity (1,1) string = "unspecified"
+    options.video_type (1,1) string ...
+        {mustBeMember(options.video_type, ["april","task","unspecified"])} = "unspecified"
+    options.start_ends = {[1, inf]}
+    options.manual_offsets = {}
+    options.verbose (1,1) logical = true
+    options.testing (1,1) logical = false
+    options.just_projection (1,1) logical = false
+    options.non_contiguous_target_frames = {}
+    options.video_read_cache_size (1,1) double = 1000
+end
 
     % Let's get the dropbox base dir for any references we make to dropbox 
     dropbox_base_dir = getpref("lightLoggerAnalysis", "dropboxBaseDir"); 
@@ -26,7 +27,7 @@ function generateVirtuallyFoveatedVideos(subjectIDs, options)
     % Iterate over the subjectIDs enteterd 
     for ii = 1:numel(subjectIDs)
         % Format the subject IDs as they are on dropbox 
-        subjectID = "FLIC_" + subjectIDs{ii};
+        subjectID = "FLIC_" + string(subjectIDs{ii});
 
         % Now, let's make the path to this subject's files 
         subject_dropbox_path_raw = fullfile(dropbox_base_dir, "FLIC_raw", subjectID, activity); 
@@ -89,8 +90,7 @@ function generateVirtuallyFoveatedVideos(subjectIDs, options)
         path_to_blnk_data = fullfile(subject_dropbox_path_raw, "Neon", "blinks.csv"); 
         if(options.verbose)
             fprintf("\twith blink events:\n");
-            fprintf("\t\tpath: %s\n", \)
-
+            fprintf("\t\tpath: %s\n", path_to_blnk_data);
         end 
         
         assert(isfile(path_to_blnk_data));
@@ -112,9 +112,27 @@ function generateVirtuallyFoveatedVideos(subjectIDs, options)
         path_to_perspective_projection = fullfile(dropbox_base_dir, sprintf("/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/%s/gazeCalibration/temporalFrequency/%s_gazeCal_perspectiveProjection.mat", subjectID, subjectID));
 
 
-
         % Determine which the range of frames to virtually foveate
-        start_end = start_ends{ii};
+        if(options.video_type == "unspecified") % If type unspecified, then we simply manual enter 
+            start_end = start_ends{ii};    
+
+        else 
+            % Otherwise, gather the file with the start ends 
+            % for this task 
+            start_end_struct_path = fullfile(subject_dropbox_path_processing, "tag_task_start_end.mat");
+            assert(isfile(start_end_struct_path));
+            start_end = load(start_end_struct).(options.video_type); 
+        end 
+
+        if(options.verbose)
+            fprintf("\twith start_ends: "); 
+            fprintf("\t\tstart: %d\n", start_end(1));
+            fprintf("\t\tend: %d\n", start_end(end));
+        end 
+
+        
+
+
         
         % Retrieve the manual offsets for this video (further manual adjsutments per video beyond 
         % individual offset per participant)
