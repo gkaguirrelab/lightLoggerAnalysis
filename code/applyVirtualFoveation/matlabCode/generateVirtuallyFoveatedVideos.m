@@ -17,6 +17,7 @@ end
 
     % Let's get the dropbox base dir for any references we make to dropbox 
     dropbox_base_dir = getpref("lightLoggerAnalysis", "dropboxBaseDir"); 
+    NAS_base_dir = "/Volumes/";
 
     % Let's take out activity from options to not have to keep accessing the struct 
     activity = options.activity; 
@@ -30,24 +31,41 @@ end
         subjectID = "FLIC_" + string(subjectIDs{ii});
 
         % Now, let's make the path to this subject's files 
-        subject_dropbox_path_raw = fullfile(dropbox_base_dir, "FLIC_raw", subjectID, activity); 
-        subject_dropbox_path_processing = replace(subject_dropbox_path_raw, "FLIC_raw", "FLIC_processing");
+        subject_nas_path_raw = fullfile(NAS_base_dir, "FLIC_raw", "scriptedIndoorVideos", subjectID, activity); 
+        subject_nas_path_processing = replace(subject_nas_path_raw, "FLIC_raw", "FLIC_processing");
+
+        % Assert these folders exist 
+        assert(isfolder(subject_nas_path_raw) && isfolder(subject_nas_path_processing));
+
+        % Define shortcuts to neon/gka for raw and processing 
+        gka_dir_raw = fullfile(subject_nas_path_raw, "GKA"); 
+        neon_dir_raw = fullfile(subject_nas_path_raw, "Neon"); 
+
+        gka_dir_processing = fullfile(subject_nas_path_processing, "GKA"); 
+        neon_dir_processing = fullfile(subject_nas_path_processing, "Neon"); 
 
         if(options.verbose)
             fprintf("Processing subject: %s\n", subjectID); 
             fprintf("\tWith directories:\n"); 
-            fprintf("\t\tFLIC_raw: %s\n", subject_dropbox_path_raw); 
-            fprintf("\t\tFLIC_processing: %s\n", subject_dropbox_path_processing); 
+            fprintf("\t\tFLIC_raw: \n");
+            fprintf("\t\t\tGKA: %s\n", gka_dir_raw); 
+            fprintf("\t\t\tNeon: %s\n", neon_dir_raw); 
+            fprintf("\t\tFLIC_processing:\n");
+            fprintf("\t\t\tGKA: %s\n", gka_dir_processing);
+            fprintf("\t\t\tNeon: %s\n", neon_dir_processing) 
         end 
 
-        % Assert these folders exist 
-        assert(isfolder(subject_dropbox_path_raw) && isfolder(subject_dropbox_path_processing));
+
+
+        assert(isfolder(gka_dir_raw) && isfolder(neon_dir_raw) && isfolder(gka_dir_processing) && isfolder(neon_dir_processing)); 
         
+        % Fidn the neon recording name in the neon raw dir 
+        neon_recording_name = getSingleSubfolder(neon_dir_raw); 
 
         % First, we will define a path to the playable video of the world camera we want to virtually foveate
         % and its timestamp vector output by the neon
-        path_to_world_video = fullfile(subject_dropbox_path_processing, "GKA", "W.avi") 
-        path_to_world_t = fullfile(subject_dropbox_path_raw, "Neon", "alternative_camera_timestamps.csv")
+        path_to_world_video = fullfile(gka_dir_processing, "W.avi"); 
+        path_to_world_t = fullfile(neon_dir_raw, neon_recording_name, "alternative_camera_timestamps.csv");
         
         if(options.verbose)
             fprintf("\twith world video paths:\n");
@@ -68,7 +86,7 @@ end
 
         % Next, we will load in the gaze angles (originally in px form, but we will convert)
         % and we will also load in the BLNK events 
-        path_to_pupil_data = fullfile(subject_dropbox_path_raw, "Neon", "alternative_camera_gaze.csv")
+        path_to_pupil_data = fullfile(neon_dir_raw, neon_recording_name, "alternative_camera_gaze.csv")
         
         if(options.verbose)
             fprintf("\twith pupil data:\n");
@@ -87,7 +105,7 @@ end
         end 
 
         % Next we will load in the blink events 
-        path_to_blnk_data = fullfile(subject_dropbox_path_raw, "Neon", "blinks.csv"); 
+        path_to_blnk_data = fullfile(neon_dir_raw, neon_recording_name, "blinks.csv"); 
         if(options.verbose)
             fprintf("\twith blink events:\n");
             fprintf("\t\tpath: %s\n", path_to_blnk_data);
@@ -119,7 +137,7 @@ end
         else 
             % Otherwise, gather the file with the start ends 
             % for this task 
-            start_end_struct_path = fullfile(subject_dropbox_path_processing, "tag_task_start_end.mat");
+            start_end_struct_path = fullfile(subject_nas_path_processing, "tag_task_start_end.mat");
             assert(isfile(start_end_struct_path));
             start_end = load(start_end_struct).(options.video_type); 
         end 
@@ -223,3 +241,35 @@ function blnk_events = load_blnk_events(path)
 
     return 
 end 
+
+% Local function to get the name of the Neon recording given 
+% its output folder 
+function folderName = getSingleSubfolder(parentDir)
+%GETSINGLESUBFOLDER Returns the single subfolder name inside a directory.
+%
+%   folderName = getSingleSubfolder(parentDir)
+%
+%   - parentDir must exist
+%   - Exactly one subfolder (excluding . and ..) must exist
+%   - Returns the name (not full path)
+    % Ensure directory exists
+    assert(isfolder(parentDir), ...
+        "Input path does not exist or is not a folder.")
+
+    % Get directory listing
+    listing = dir(parentDir);
+
+    % Keep only folders and remove "." and ".."
+    isSubfolder = [listing.isdir] & ...
+                  ~ismember({listing.name}, {'.','..'});
+
+    subfolders = listing(isSubfolder);
+
+    % Assert exactly one subfolder exists
+    assert(numel(subfolders) == 1, ...
+        "Directory must contain exactly one subfolder. Found %d.", ...
+        numel(subfolders));
+
+    % Return folder name
+    folderName = string(subfolders.name);
+end
