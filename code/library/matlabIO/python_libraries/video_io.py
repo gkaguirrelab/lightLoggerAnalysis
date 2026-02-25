@@ -518,14 +518,11 @@ def world_chunks_to_video(recording_path: str,
         metadata_matrix_path, frame_buffer_path = chunks_paths[chunk_num]
 
         # First, we will retrieve the metadata for this buffer 
-        print(f"Loading metadata")
         metadata: np.ndarray = np.load(metadata_matrix_path)
         
         # Then, we will read in the timestamps and frame buffer for this chunk 
         # World timestamps are in nanoseconds and thus must be converted to seconds 
         t_vector: np.ndarray = np.ascontiguousarray(metadata[:, 0], dtype=np.float64) / ( (10 ** 9) if convert_to_seconds is True else 1)
-        
-        print("Loading frame buffer")
         frame_buffer: np.ndarray = np.load(frame_buffer_path)
 
         # Assert the t vector and frame vector are the same size 
@@ -636,7 +633,7 @@ def world_chunks_to_video(recording_path: str,
             # as captured during this interval 
             missed_frames: int = 0 if frame_num == 0 or fill_missing_frames is False else int( (time_between_frames / (1/FPS ) ) -  1) 
             if(missed_frames > 5 * FPS):
-                warnings.warn(f"Missed {missed_frames} frames. This may be unaturally large")
+                warnings.warn(f"Missed {missed_frames} frames between frames. This may be unaturally large")
             missing_timestamps: np.ndarray = np.linspace(previous_timestamp + (1/FPS), timestamp, missed_frames, endpoint=False)
 
             # Write the number of missing frames in between as the previous frame 
