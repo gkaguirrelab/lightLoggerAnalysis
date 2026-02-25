@@ -456,9 +456,6 @@ def video_to_hdf5(video_path: str, output_path: str,
 def world_chunks_to_video(recording_path: str,
                           output_path: str,
                           debayer_images: bool=False, 
-                          convert_to_lms: bool=False, 
-                          apply_color_correction: bool=False, 
-                          apply_fielding_function: bool=False, 
                           apply_digital_gain: bool=False,
                           fill_missing_frames: bool=False,
                           convert_to_seconds: bool=True,
@@ -491,9 +488,10 @@ def world_chunks_to_video(recording_path: str,
                                    fourcc, 
                                    FPS, 
                                    (frame_width, frame_height), 
-                                   isColor= (debayer_images is True or convert_to_lms is True) 
+                                   isColor= debayer_images is True 
                                   ) 
     if(not video_writer.isOpened()):
+        video_writer.release()
         raise RuntimeError(f"Failed to open VideoWriter for {output_path}")
 
     # Initialize a dummy frame to fill in missing frames if desired 
@@ -501,7 +499,12 @@ def world_chunks_to_video(recording_path: str,
 
     # Retrive the sorted chunks for this sensor
     chunks_paths: dict[str, list[tuple]] = group_sensors_files(recording_path)['W']
-    assert len(chunks_paths) > 0, f"No chunks found in: {recording_path}"
+    try:
+        assert len(chunks_paths) > 0, f"No chunks found in: {recording_path}"
+    except Exception as e:
+        print(e)
+        video_writer.release()
+        return 
 
     # Iterate over the chunks for this sensor 
     previous_chunk_end_time: float = 0 
@@ -515,22 +518,40 @@ def world_chunks_to_video(recording_path: str,
         metadata_matrix_path, frame_buffer_path = chunks_paths[chunk_num]
 
         # First, we will retrieve the metadata for this buffer 
+        print(f"Loading metadata")
         metadata: np.ndarray = np.load(metadata_matrix_path)
         
         # Then, we will read in the timestamps and frame buffer for this chunk 
         # World timestamps are in nanoseconds and thus must be converted to seconds 
         t_vector: np.ndarray = np.ascontiguousarray(metadata[:, 0], dtype=np.float64) / ( (10 ** 9) if convert_to_seconds is True else 1)
+        
+        print("Loading frame buffer")
         frame_buffer: np.ndarray = np.load(frame_buffer_path)
 
         # Assert the t vector and frame vector are the same size 
-        assert(len(t_vector) == len(frame_buffer))
+        try:
+            assert(len(t_vector) == len(frame_buffer))
+        except Exception as e:
+            print(e)
+            video_writer.release()
+            return 
 
         # Ensure the frame size is consistent 
         buffer_frame_shape: tuple[int] = tuple(frame_buffer.shape[1:3])
-        assert buffer_frame_shape == (frame_height, frame_width), f"Frame shape unequal after initialization: {(frame_height, frame_width)}"
-        
+        try:
+            assert buffer_frame_shape == (frame_height, frame_width), f"Frame shape unequal after initialization: {(frame_height, frame_width)}"
+        except Exception as e:
+            print(e)
+            video_writer.release() 
+            return
+
         # Assert the frames are of appropriate dtype 
-        assert(frame_buffer.dtype == np.uint8)
+        try:
+            assert(frame_buffer.dtype == np.uint8)
+        except Exception as e:
+            print(e)
+            video_writer.release()
+            return 
 
         # If we somehow got an empty chunk, skip it 
         if(len(t_vector) == 0): 
@@ -545,40 +566,27 @@ def world_chunks_to_video(recording_path: str,
             buffer_dgains = buffer_dgains[:, np.newaxis, np.newaxis]
             frame_buffer *= buffer_dgains
 
-        # If we want to apply the color weight correction 
-        if(apply_color_correction is True):
-            frame_buffer[:] = [ world_util.apply_color_correction(frame)
-                                for frame in frame_buffer
-                                ] 
-
-        # Apply the fielding function if desired 
-        if(apply_fielding_function is True):
-            frame_buffer[:] = [ world_util.apply_fielding_function(frame)
-                               for frame in frame_buffer 
-                              ]
-
-        # If we want to convert to LMS, do so 
-        if(convert_to_lms is True):
-            pass
-
         # If we want to debayer the image
         if(debayer_images is True):
             # Note: When writing color images to cv2.VideoWriter, it expects a BGR instead of RGB 
             # frame, so also convert now 
-            frame_buffer = np.array([cv2.cvtColor(world_util.debayer_image(frame), cv2.COLOR_RGB2BGR) 
+            frame_buffer = np.array([cv2.cvtColor(world_util.debayer_image( np.clip(np.round(frame), 0, 255).astype(np.uint8)  ), cv2.COLOR_RGB2BGR) 
                                      for frame in frame_buffer 
                                     ],
                                     dtype=np.uint8
                                    )
 
-        # Convert the frame buffer back into uint8 format 
-        frame_buffer = np.clip(np.round(frame_buffer), 0, 255).astype(np.uint8)
+        # Convert the frame buffer back into uint8 format
+        if(frame_buffer.dtype != np.uint8): 
+            frame_buffer = np.clip(np.round(frame_buffer), 0, 255).astype(np.uint8)
 
         # If we want to embed the timestamps in the frame buffer, do that now
         if(embed_timestamps is True):
-            frame_buffer = [world_util.embed_timestamp(frame, timestamp)
+            frame_buffer = np.array([world_util.embed_timestamp(frame, timestamp)
                             for frame, timestamp in zip(frame_buffer, t_vector)
-                           ]
+                           ],
+                           dtype=np.uint8
+                           )
 
         # Retrieve the current chunk start time 
         current_chunk_start_time = t_vector[0]
@@ -587,12 +595,14 @@ def world_chunks_to_video(recording_path: str,
         # for those frames between the previous chunk and the current chunk 
         
         # Find the total elapsed time in seconds between the two chunks 
-        time_between_chunks: int = current_chunk_start_time - previous_chunk_end_time
+        time_between_chunks: float = current_chunk_start_time - previous_chunk_end_time
 
         # Calculate the number of missed frames as the elapsed time divided 
         # by the seconds per frame, minus one frame as we have to count the current frame 
         # as captured during this interval 
-        missed_frames: int = 0 if chunk_num == 0 or fill_missing_frames is False else int( (time_between_chunks / (1/FPS ) ) -  1) 
+        missed_frames: int = 0 if chunk_num == start_end[0] or fill_missing_frames is False else int( (time_between_chunks / (1/FPS ) ) -  1) 
+        if(missed_frames > 5 * FPS):
+            warnings.warn(f"Missed {missed_frames} between chunks. This may be unnaturally large")
         missing_timestamps: np.ndarray = np.linspace(previous_chunk_end_time + (1/FPS), current_chunk_start_time, missed_frames, endpoint=False)
 
         # Write the number of missing frames in between as the previous frame 
@@ -611,7 +621,12 @@ def world_chunks_to_video(recording_path: str,
             timestamp, frame = t_vector[frame_num], frame_buffer[frame_num]
 
             # Assert the frame is of the appropriate type after transformation 
-            assert(frame.dtype == np.uint8 and dummy_frame.dtype == np.uint8)
+            try:
+                assert(frame.dtype == np.uint8 and dummy_frame.dtype == np.uint8)
+            except Exception as e:
+                print(e)
+                video_writer.release()
+                return 
 
             # Otherwise, let's calculate the time delta between the current timestamp and the previous timestamp 
             time_between_frames: float = timestamp - previous_timestamp
@@ -620,6 +635,8 @@ def world_chunks_to_video(recording_path: str,
             # by the seconds per frame, minus one frame as we have to count the current frame 
             # as captured during this interval 
             missed_frames: int = 0 if frame_num == 0 or fill_missing_frames is False else int( (time_between_frames / (1/FPS ) ) -  1) 
+            if(missed_frames > 5 * FPS):
+                warnings.warn(f"Missed {missed_frames} frames. This may be unaturally large")
             missing_timestamps: np.ndarray = np.linspace(previous_timestamp + (1/FPS), timestamp, missed_frames, endpoint=False)
 
             # Write the number of missing frames in between as the previous frame 
@@ -636,6 +653,10 @@ def world_chunks_to_video(recording_path: str,
         
         # Save the end time of this chunk 
         previous_chunk_end_time = t_vector[-1]
+
+
+    # Close the video writer 
+    video_writer.release()
 
     return 
 
