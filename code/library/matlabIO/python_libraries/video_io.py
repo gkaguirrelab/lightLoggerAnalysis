@@ -605,6 +605,7 @@ def world_chunks_to_video(recording_path: str,
         # Write the number of missing frames in between as the previous frame 
         for missing_timestamp in missing_timestamps:
             missing_frame: np.ndarray = world_util.embed_timestamp(dummy_frame, missing_timestamp) if embed_timestamps is True else dummy_frame
+            assert missing_frame.dtype == np.uint8 and len(missing_frame.shape) == 3 if debayer_images is True else 2 
             video_writer.write(missing_frame)
 
         # Initialize variables to track the previous timestamp 
@@ -639,9 +640,12 @@ def world_chunks_to_video(recording_path: str,
             # Write the number of missing frames in between as the previous frame 
             for missing_timestamp in missing_timestamps:
                 missing_frame: np.ndarray = world_util.embed_timestamp(dummy_frame, missing_timestamp) if embed_timestamps is True else dummy_frame
+                
+                assert missing_frame.dtype == np.uint8 and len(missing_frame.shape) == 3 if debayer_images is True else 2 
                 video_writer.write(missing_frame)
             
             # Write the current frame 
+            assert frame.dtype == np.uint8 and len(frame.shape) == 3 if debayer_images is True else 2 
             video_writer.write(frame)
 
             # Save the current timestamp as the previous timestamp
