@@ -1,4 +1,4 @@
-function retinalImage = virtuallyFoveateFrame(I, gaze_angle, fisheyeIntrinsicsPath, transformationPath, options)
+function retinalImage = virtuallyFoveateFrame(I, gaze_angle, fisheyeIntrinsicsPath, options)
 % Transform world camera image in pixels to retinal image in degrees
 %
 % Syntax:
@@ -48,7 +48,6 @@ function retinalImage = virtuallyFoveateFrame(I, gaze_angle, fisheyeIntrinsicsPa
         I double 
         gaze_angle double {mustBeVector}
         fisheyeIntrinsicsPath
-        transformationPath
         options.FOVradius double = 60
         options.degPerSample double = 0.25
         options.forceRecalc logical = true
@@ -68,16 +67,14 @@ function retinalImage = virtuallyFoveateFrame(I, gaze_angle, fisheyeIntrinsicsPa
     % re-calculation.
     persistent fisheyeIntrinsics lastFisheyeIntrinsicsPath
     persistent worldCoordsInDegrees nRowsLast nColsLast
-    persistent transformation lastTransformationPath eyeRotationCoordinates
 
     % Check for conditions that would trigger a re-calculation of the angles
     % from intrinsics
     recalcFlag = false;
     no_fisheye_intrinsics = isempty(fisheyeIntrinsics);
     new_fisheye_intrinsics_path = ~strcmp(lastFisheyeIntrinsicsPath,fisheyeIntrinsicsPath); 
-    new_transformation_path = ~strcmp(lastTransformationPath,transformationPath); 
     new_image_shape = ~isequal(nRowsLast,nRows) || ~isequal(nColsLast,nCols); 
-    recalc_conditions = [no_fisheye_intrinsics, new_fisheye_intrinsics_path, new_transformation_path, new_image_shape];
+    recalc_conditions = [no_fisheye_intrinsics, new_fisheye_intrinsics_path, new_image_shape];
     if any(recalc_conditions)
         disp("RECALCULATING ANGLES FROM INTRINSICS DUE TO CONDITIONS");
         disp(recalc_conditions);
@@ -97,7 +94,6 @@ function retinalImage = virtuallyFoveateFrame(I, gaze_angle, fisheyeIntrinsicsPa
         [xg, yg]          = meshgrid(1:nCols, 1:nRows);
         sensorPoints      = [xg(:),yg(:)];
         worldCoordsInDegrees = anglesFromIntrinsics(sensorPoints, fisheyeIntrinsics);
-        lastTransformationPath = transformationPath;
 
     end
 

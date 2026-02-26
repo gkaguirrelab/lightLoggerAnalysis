@@ -1,4 +1,4 @@
-function virtuallyFoveateVideo(world_video, sensor_t_cell, gaze_angles, gaze_offsets, blnk_events, output_path, path_to_intrinsics, path_to_perspective_projection, options)
+function virtuallyFoveateVideo(world_video, sensor_t_cell, gaze_angles, gaze_offsets, blnk_events, output_path, path_to_intrinsics, options)
 % Virtually foveate desired frames of a video with given gaze angles
 %
 % Syntax:
@@ -54,78 +54,27 @@ function virtuallyFoveateVideo(world_video, sensor_t_cell, gaze_angles, gaze_off
 % Examples:
 %{
 
-
-    % 2001!!!!!!!
-
-    % First, we will define a path to the playable video of the world camera we want to virtually foveate
-    % and its original chunks, to get the respective timestamps of all the sensors 
-    world_video = "/Volumes/T7 Shield/scriptedIndoorOutdoorVideos/FLIC_2001/walkIndoor/temporalFrequency/W.avi"; 
-
-    % Load in the gaze angles and the constant offset we will apply to the gaze angles
-    gaze_angles = load("/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/FLIC_2001/walkIndoor/temporalFrequency/FLIC_2001_walkIndoor_pupilData_contrast-1x5.mat").pupilData.radiusSmoothed.eyePoses.values; 
-    offsets = load("/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/FLIC_2001/gazeCalibration/temporalFrequency/FLIC_2001_gazeCal_SceneGeometryMetadata.mat").gazeOffset;
-
-    % Define the output path where this video will write to 
-    output_path = "/Users/zacharykelly/FLIC_2001_walkIndoor_virtuallyFoveatedVideo.avi"; 
-    
-    % Load in the camera intrinscis of the world camera 
-    path_to_intrinsics = "/Users/zacharykelly/Documents/MATLAB/projects/lightLoggerAnalysis/data/intrinsics_calibration.mat"; 
-
-    % Load in the perspective projection object used to transform sensor positions to eye coordinates 
-    % NOTE: If you do not have this, please consult calculate_perspective_transform_w2e.m 
-    path_to_perspective_projection = "/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/FLIC_2001/gazeCalibration/temporalFrequency/FLIC_2001_gazeCal_perspectiveProjection.mat";
-    
-
-
-    % 2003 !!!!!
-
-    % First, we will define a path to the playable video of the world camera we want to virtually foveate
-    % and its original chunks, to get the respective timestamps of all the sensors 
-    world_video = "/Volumes/T7 Shield/scriptedIndoorOutdoorVideos/FLIC_2003/walkIndoor/temporalFrequency/W.avi"; 
-
-    % Load in the gaze angles and the constant offset we will apply to the gaze angles
-    gaze_angles = load("/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/FLIC_2003/walkIndoor/temporalFrequency/FLIC_2003_walkIndoor_pupilData_contrast-1x5.mat").pupilData.radiusSmoothed.eyePoses.values; 
-    offsets = load("/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/FLIC_2003/gazeCalibration/temporalFrequency/FLIC_2003_gazeCal_SceneGeometryMetadata.mat").gazeOffset;
-
-    % Define the output path where this video will write to 
-    output_path = "/Users/zacharykelly/FLIC_2003_walkIndoor_virtuallyFoveatedVideoAprilTag.avi"; 
-
-    % Load in the camera intrinscis of the world camera 
-    path_to_intrinsics = "/Users/zacharykelly/Documents/MATLAB/projects/lightLoggerAnalysis/data/intrinsics_calibration.mat"; 
-
-    % Load in the perspective projection object used to transform sensor positions to eye coordinates 
-    % NOTE: If you do not have this, please consult calculate_perspective_transform_w2e.m 
-    path_to_perspective_projection = "/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/FLIC_2003/gazeCalibration/temporalFrequency/FLIC_2003_gazeCal_perspectiveProjection.mat";
-
-    start_end = [ENTER YOUR START, ENTER YOUR END];
-
-    % Virtually foveate a PORTION of the video 
-    % virtuallyFoveateVideo(world_video, gaze_angles, offsets, output_path, path_to_recording_chunks, path_to_intrinsics, path_to_perspective_projection, "num_frames_to_process", start_end, "verbose", true);
-
-
 %}
 
-    arguments 
-        world_video {mustBeText}; 
-        sensor_t_cell; 
-        gaze_angles {mustBeMatrix}; 
-        gaze_offsets {mustBeNumeric}; 
-        blnk_events;
-        output_path {mustBeText}; 
-        path_to_intrinsics {mustBeText};
-        path_to_perspective_projection {mustBeText}; 
-        options.frames_to_process = [1, inf]; 
-        options.pupil_fps {mustBeNumeric} = 120; 
-        options.pupil_world_phase_offset {mustBeNumeric} = 0.005; 
-        options.verbose = false; 
-        options.manual_offset = [0, 0]; 
-        options.non_contiguous_target_frames = [];  
-        options.testing = false; 
-        options.nan_deg_threshold = 45;
-        options.video_read_cache_size = 1000;
-        options.world_fps = 120; 
-    end     
-
+    arguments
+        world_video {mustBeText}
+        sensor_t_cell
+        gaze_angles {mustBeMatrix}
+        gaze_offsets {mustBeNumeric}
+        blnk_events
+        output_path {mustBeText}
+        path_to_intrinsics {mustBeText}
+        
+        options.world_fps = 120
+        options.pupil_fps {mustBeNumeric} = 120
+        options.nan_deg_threshold = 45
+        options.frames_to_process = [1, inf]
+        options.verbose = false
+        options.manual_offset = [0, 0]
+        options.non_contiguous_target_frames = []
+        options.testing = false
+        options.video_read_cache_size = 1000
+    end
     % Import the Python util library 
     if(options.verbose)
         disp("Importing Python libraries")
@@ -257,7 +206,7 @@ function virtuallyFoveateVideo(world_video, sensor_t_cell, gaze_angles, gaze_off
             if(~any(world_frame(:))) 
                 virtually_foveated_frame = blank_frame; 
             else
-                virtually_foveated_frame = uint8(virtuallyFoveateFrame(world_frame, gaze_angle, path_to_intrinsics, path_to_perspective_projection));
+                virtually_foveated_frame = uint8(virtuallyFoveateFrame(world_frame, gaze_angle, path_to_intrinsics));
     
             end
         end

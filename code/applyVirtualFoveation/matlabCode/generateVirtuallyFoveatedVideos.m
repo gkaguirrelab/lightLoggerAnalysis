@@ -87,7 +87,7 @@ end
 
         % Next, we will load in the gaze angles (originally in px form, but we will convert)
         % and we will also load in the BLNK events 
-        path_to_pupil_data = fullfile(egocentric_video_mapper_output_dir, "alternative_camera_gaze.csv")
+        path_to_pupil_data = fullfile(egocentric_video_mapper_output_dir, "alternative_camera_gaze.csv");
         
         if(options.verbose)
             fprintf("\twith pupil data:\n");
@@ -155,10 +155,6 @@ end
             fprintf("\t\tstart: %d\n", start_end(1));
             fprintf("\t\tend: %d\n", start_end(end));
         end 
-
-        
-
-
         
         % Retrieve the manual offsets for this video (further manual adjsutments per video beyond 
         % individual offset per participant)
@@ -183,16 +179,15 @@ end
         % Virtually foveate and output the video 
         sensor_t_matrix = {world_t, pupil_t};
         
-        %{
-        virtuallyFoveateVideo(path_to_world_video, sensor_t_matrix, gaze_angles, offsets, blnk_events, output_path, path_to_intrinsics, path_to_perspective_projection,... 
+        virtuallyFoveateVideo(path_to_world_video, sensor_t_matrix, gaze_angles, offsets, blnk_events, output_path, path_to_intrinsics,... 
                               "frames_to_process", start_end,...
                               "verbose", options.verbose,...
                               "manual_offset", manual_offset,...
                               "testing", options.testing,...
                               "non_contiguous_target_frames",non_contiguous_target_frames,...
-                              "video_read_cache_size", options.video_read_cache_size);
+                              "video_read_cache_size", options.video_read_cache_size...
+                            );
 
-        %}
     end 
 end 
 

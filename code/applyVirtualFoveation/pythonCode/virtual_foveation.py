@@ -9,9 +9,6 @@ from typing import Literal
 egocentric_video_mapper_path: str = os.path.join(os.path.dirname(__file__), "egocentric_video_mapper")
 assert os.path.exists(egocentric_video_mapper_path), "Could not find egocentric video mapper. Ensure it is cloned"
 sys.path.append(egocentric_video_mapper_path)
-from pupil_labs.egocentric_video_mapper.utils import show_videos_preview
-
-import pupil_labs.egocentric_video_mapper.__main__ as egocentric_main
 
 
 class Args:
@@ -136,6 +133,9 @@ def run_egocentric_video_mapper(neon_timeseries_dir: str,
                                 image_matcher: Literal["Efficient_LOFTR", "LOFTR_indoor"] = "Efficient_LOFTR",
                                 show_video_preview: bool=False
                                ) -> None:
+    
+    from pupil_labs.egocentric_video_mapper.utils import show_videos_preview
+    import pupil_labs.egocentric_video_mapper.__main__ as egocentric_main
 
     # Show a video preview of the two videos if desired 
     if(show_video_preview is True):
