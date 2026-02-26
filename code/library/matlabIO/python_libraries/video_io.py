@@ -459,7 +459,7 @@ def world_chunks_to_video(recording_path: str,
                           apply_digital_gain: bool=False,
                           fill_missing_frames: bool=False,
                           convert_to_seconds: bool=True,
-                          embed_timestamps: bool=True,
+                          embed_timestamps: bool=False,
                           verbose: bool=False,
                           start_end: tuple[int | float] = (0, float("inf"))
                          ) -> None:
@@ -495,7 +495,7 @@ def world_chunks_to_video(recording_path: str,
         raise RuntimeError(f"Failed to open VideoWriter for {output_path}")
 
     # Initialize a dummy frame to fill in missing frames if desired 
-    dummy_frame: np.ndarray =  np.squeeze(np.full((frame_height, frame_width, 3 if debayer_images is True else 1), 0, dtype=np.uint8))
+    dummy_frame: np.ndarray = np.squeeze( np.full((frame_height, frame_width, 3 if debayer_images is True else 1), 0, dtype=np.uint8))
 
     # Retrive the sorted chunks for this sensor
     chunks_paths: dict[str, list[tuple]] = group_sensors_files(recording_path)['W']
@@ -524,6 +524,17 @@ def world_chunks_to_video(recording_path: str,
         # World timestamps are in nanoseconds and thus must be converted to seconds 
         t_vector: np.ndarray = np.ascontiguousarray(metadata[:, 0], dtype=np.float64) / ( (10 ** 9) if convert_to_seconds is True else 1)
         frame_buffer: np.ndarray = np.load(frame_buffer_path)
+
+        """
+        print(metadata.shape)
+
+        print(f"Metadata col 1: {metadata[5:, 1]}")
+        print(f"Metadata col 2: {metadata[5:, 2]}")
+        print(f"Metadata col 3: {metadata[5:, 3]}")
+
+
+        return 
+        """
 
         # Assert the t vector and frame vector are the same size 
         try:
@@ -559,7 +570,7 @@ def world_chunks_to_video(recording_path: str,
 
         # Apply Dgain if requested
         if(apply_digital_gain is True):
-            buffer_dgains: np.ndarray = metadata[:, 1]
+            buffer_dgains: np.ndarray = metadata[:, 2]
             buffer_dgains = buffer_dgains[:, np.newaxis, np.newaxis]
             frame_buffer *= buffer_dgains
 
