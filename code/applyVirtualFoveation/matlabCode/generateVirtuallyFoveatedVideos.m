@@ -2,7 +2,7 @@ function generateVirtuallyFoveatedVideos(subjectIDs, options)
 
     arguments
     subjectIDs
-    options.output_dir (1,1) string = "./"
+    options.output_dir (1,1) string = ""
     options.activity (1,1) string = "unspecified"
     options.video_type (1,1) string ...
         {mustBeMember(options.video_type, ["april","task","unspecified"])} = "unspecified"
@@ -43,6 +43,9 @@ end
 
         gka_dir_processing = fullfile(subject_nas_path_processing, "GKA"); 
         neon_dir_processing = fullfile(subject_nas_path_processing, "Neon"); 
+
+        % Get the name of the neon recording (this is the data when it was recorded)
+        neon_raw_recording_name = getSingleSubfolder(neon_dir_raw); 
 
         if(options.verbose)
             fprintf("Processing subject: %s\n", subjectID); 
@@ -103,7 +106,7 @@ end
         end 
 
         % Next we will load in the blink events 
-        path_to_blnk_data = fullfile(egocentric_video_mapper_output_dir, "blinks.csv"); 
+        path_to_blnk_data = fullfile(neon_dir_raw, neon_raw_recording_name, "blinks.csv"); 
         if(options.verbose)
             fprintf("\twith blink events:\n");
             fprintf("\t\tpath: %s\n", path_to_blnk_data);
@@ -117,10 +120,17 @@ end
         offsets = [0, 0]; 
 
         % Define the output path where this video will write to 
-        output_path = fullfile(options.output_dir, sprintf("/%s_%s_%s.avi", subjectID, activity, options.video_type));
+        output_filename = sprintf("/%s_%s_%s_virtuallyFoveated.avi", subjectID, activity, options.video_type); 
+        if(options.output_dir == "")
+            output_path = fullfile(subject_nas_path_processing, output_filename); 
+        else 
+            output_path = fullfile(options.output_dir, output_filename); 
+
+        end 
+
         if(options.verbose)
             fprintf("\twith output path:\n");
-            fprintf("\t\tpath: %s", output_path);
+            fprintf("\t\tpath: %s\n", output_path);
         end 
 
         % Load in the perspective projection object used to transform sensor positions to eye coordinates 
@@ -141,7 +151,7 @@ end
         end 
 
         if(options.verbose)
-            fprintf("\twith start_ends: "); 
+            fprintf("\twith start_ends: \n"); 
             fprintf("\t\tstart: %d\n", start_end(1));
             fprintf("\t\tend: %d\n", start_end(end));
         end 
