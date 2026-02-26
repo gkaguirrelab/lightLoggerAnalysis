@@ -55,17 +55,15 @@ end
             fprintf("\t\t\tNeon: %s\n", neon_dir_processing) 
         end 
 
-
-
         assert(isfolder(gka_dir_raw) && isfolder(neon_dir_raw) && isfolder(gka_dir_processing) && isfolder(neon_dir_processing)); 
-        
-        % Fidn the neon recording name in the neon raw dir 
-        neon_recording_name = getSingleSubfolder(neon_dir_raw); 
+
+        % Also save the directory where the output of the egocentric video mapper lives 
+        egocentric_video_mapper_output_dir = fullfile(neon_dir_processing, "egocentricVideoMapperResults"); 
 
         % First, we will define a path to the playable video of the world camera we want to virtually foveate
         % and its timestamp vector output by the neon
         path_to_world_video = fullfile(gka_dir_processing, "W.avi"); 
-        path_to_world_t = fullfile(neon_dir_raw, neon_recording_name, "alternative_camera_timestamps.csv");
+        path_to_world_t = fullfile(egocentric_video_mapper_output_dir, "alternative_camera_timestamps.csv");
         
         if(options.verbose)
             fprintf("\twith world video paths:\n");
@@ -86,7 +84,7 @@ end
 
         % Next, we will load in the gaze angles (originally in px form, but we will convert)
         % and we will also load in the BLNK events 
-        path_to_pupil_data = fullfile(neon_dir_raw, neon_recording_name, "alternative_camera_gaze.csv")
+        path_to_pupil_data = fullfile(egocentric_video_mapper_output_dir, "alternative_camera_gaze.csv")
         
         if(options.verbose)
             fprintf("\twith pupil data:\n");
@@ -105,7 +103,7 @@ end
         end 
 
         % Next we will load in the blink events 
-        path_to_blnk_data = fullfile(neon_dir_raw, neon_recording_name, "blinks.csv"); 
+        path_to_blnk_data = fullfile(egocentric_video_mapper_output_dir, "blinks.csv"); 
         if(options.verbose)
             fprintf("\twith blink events:\n");
             fprintf("\t\tpath: %s\n", path_to_blnk_data);
