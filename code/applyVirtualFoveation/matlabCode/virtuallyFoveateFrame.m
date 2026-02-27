@@ -6,125 +6,98 @@ function retinalImage = virtuallyFoveateFrame(I, gaze_angle, fisheyeIntrinsicsPa
 %
 % Description:
 %   This function takes in an image (I) and transforms that image to a
-%   retinal representation through several stages:
-%     - From world camera pixels to world camera degrees of visual angle,
-%       making use of the emipirically measured world camera instrinsics.
-%     - From world camera degrees to eye coordinate degrees. This transform
-%       makes use of a projection matrix calculated for each participant
-%       based upon a gaze calibration procedure.
-%     - From eue coordinate degrees to retinal degrees. This final
-%       transform corrects for rotation of the eye from frame-to-frame.
+%   retinal representation by mapping each world-camera pixel to a (x,y)
+%   location in degrees of visual angle (via empirically measured fisheye
+%   intrinsics), then resampling onto a regular grid centered at gaze_angle.
+%
+%   NOTE: This version supports a FIXED output size via options.desiredN.
+%   If desiredN is provided, the output is always desiredN-by-desiredN
+%   (or desiredN-by-desiredN-by-3 for RGB), eliminating 480/481 jitter.
 %
 % Inputs:
 %   I                     - Matrix, double. The world camera image.
 %                           Can be grayscale (nRows x nCols) or RGB
 %                           (nRows x nCols x 3).
-%   gaze_angle            - 2x1 vector specificying the azimuth and
-%                           elevation rotation of the eye in degrees.
-%                           Coordinate frame is that defined by the
-%                           gkaModelEye.
-%   fisheyeIntrinsicsPath - String or char vector full path to previously
-%                           measured world camera intrinsics.
+%   gaze_angle            - 2x1 vector specifying azimuth and elevation
+%                           (degrees) in the SAME coordinate frame as the
+%                           output of anglesFromIntrinsics().
+%   fisheyeIntrinsicsPath - String/char full path to intrinsics .mat file.
 %
-% Optional key/value pairs:
-%  "FOVradius"            - Scalar. The field of view of the retinal image
-%                           in degrees of visual angle.
-%  "degPerSample"         - Scalar. The visual angle degrees per sample in
-%                           the returned retinal image.
-%  "forceRecalc"          - Logical. Forces reloading and recalculation
-%                           based upon the camera intrinsics and the
-%                           projection from world to eye coordinates.
+% Optional key/value pairs (name-value):
+%   "FOVradius"            - Scalar. Half-width field of view radius (deg).
+%   "degPerSample"         - Scalar. (Only used if desiredN is empty.)
+%   "desiredN"             - Integer. Fixed output width/height in samples.
+%   "forceRecalc"          - Logical. Force recomputing intrinsics mapping.
 %
-% Outputs:
-%   retinalImage          - Matrix. The retinal image in degrees of
-%                           visual angle. If input is RGB, output is
-%                           (num_y_points x num_x_points x 3).
+% Output:
+%   retinalImage           - Resampled image on regular degree grid.
 %
-% Examples:
-%{
-    % TODO
-%}
+% Example:
+%   R = virtuallyFoveateFrame(I, [0;0], intrPath, "desiredN", 480);
 
     arguments
         I double
         gaze_angle double {mustBeVector}
         fisheyeIntrinsicsPath
-        options.FOVradius double = 60
-        options.degPerSample double = 0.25
-        options.forceRecalc logical = false
+        options.FOVradius (1,1) double = 60
+        options.degPerSample (1,1) double = 0.25
+        options.desiredN (1,1) double {mustBeInteger, mustBePositive} = 480
+        options.forceRecalc (1,1) logical = false
     end
 
-    % Get the camera visual field positions corresponding to positions of all
-    % locations on the camera sensor
+    % Basic image handling
     [nRows, nCols, nChannels] = size(I);
+
+    % Keep your original orientation transform
     I = fliplr(imrotate(I, 180));
 
-    % Load the camera intrinsics and derive the conversion of world camera
-    % pixels to world camera angle degrees. We use persistent variables to
-    % avoid re-calculating all this across frames. There is a mechnanism as
-    % well to detect a change in the path to the file, or the size of the
-    % image, which triggers a re-calculation.
+    % Persistent caches to avoid recomputation across frames
     persistent fisheyeIntrinsics lastFisheyeIntrinsicsPath
     persistent worldCoordsInDegrees nRowsLast nColsLast
 
-    % Check for conditions that would trigger a re-calculation of the angles
-    % from intrinsics
+    % Recalc conditions
     recalcFlag = false;
     no_fisheye_intrinsics = isempty(fisheyeIntrinsics);
-    new_fisheye_intrinsics_path = ~strcmp(lastFisheyeIntrinsicsPath, fisheyeIntrinsicsPath);
-    new_image_shape = ~isequal(nRowsLast, nRows) || ~isequal(nColsLast, nCols);
-    recalc_conditions = [no_fisheye_intrinsics, new_fisheye_intrinsics_path, new_image_shape];
+    new_fisheye_intrinsics_path = isempty(lastFisheyeIntrinsicsPath) || ~strcmp(lastFisheyeIntrinsicsPath, fisheyeIntrinsicsPath);
+    new_image_shape = isempty(nRowsLast) || isempty(nColsLast) || ~isequal(nRowsLast, nRows) || ~isequal(nColsLast, nCols);
 
-    % Preserve your exact logic/structure: recalc if ANY conditions true.
-    if ( any(recalc_conditions) || options.forceRecalc)
-        disp("RECALCULATING ANGLES FROM INTRINSICS DUE TO CONDITIONS");
-        disp(recalc_conditions);
+    if any([no_fisheye_intrinsics, new_fisheye_intrinsics_path, new_image_shape]) || options.forceRecalc
         recalcFlag = true;
     end
 
-    % We are going to recalculate the angles from intrinsics
     if recalcFlag
-        % Update the persistent variables
         lastFisheyeIntrinsicsPath = fisheyeIntrinsicsPath;
-        nRowsLast = nRows; nColsLast = nCols;
+        nRowsLast = nRows;
+        nColsLast = nCols;
 
-        % Load the camera intrinsics
-        fisheyeIntrinsics = load(fisheyeIntrinsicsPath).camera_intrinsics_calibration.results.Intrinsics;
+        % Load intrinsics (adjust this field path if your .mat differs)
+        tmp = load(fisheyeIntrinsicsPath);
+        fisheyeIntrinsics = tmp.camera_intrinsics_calibration.results.Intrinsics;
 
-        % Calculate the world pixel --> degrees conversion
-        [xg, yg]          = meshgrid(1:nCols, 1:nRows);
-        sensorPoints      = [xg(:), yg(:)];
+        % Compute mapping from pixel -> (deg_x, deg_y)
+        [xg, yg] = meshgrid(1:nCols, 1:nRows);
+        sensorPoints = [xg(:), yg(:)];
+
+        % anglesFromIntrinsics must return Nx2 degrees
         worldCoordsInDegrees = anglesFromIntrinsics(sensorPoints, fisheyeIntrinsics);
     end
 
-    % Extract x, y from the worldCoordsInDegrees
+    % Extract scattered (x,y) degree coords for each pixel
     x = worldCoordsInDegrees(:, 1);
     y = worldCoordsInDegrees(:, 2);
 
-    % Define the Regular Grid for Interpolation
-    xmin = gaze_angle(1) - options.FOVradius;
-    xmax = gaze_angle(1) + options.FOVradius;
-    ymin = gaze_angle(2) - options.FOVradius;
-    ymax = gaze_angle(2) + options.FOVradius;
+    % ----- FIXED OUTPUT GRID SIZE -----
+    N = options.desiredN;  % the single source of truth for output size
 
-    % IMPORTANT: linspace requires integer number of points.
-    % Keep your structure but make it robust by rounding to an integer
-    % (and +1 so endpoints are included consistently).
-    num_x_points = round((xmax - xmin) / options.degPerSample) + 1;
-    num_y_points = round((ymax - ymin) / options.degPerSample) + 1;
-
-    xi = linspace(xmin, xmax, num_x_points);
-    yi = linspace(ymin, ymax, num_y_points);
+    xi = gaze_angle(1) + linspace(-options.FOVradius, options.FOVradius, N);
+    yi = gaze_angle(2) + linspace(-options.FOVradius, options.FOVradius, N);
     [XX, YY] = meshgrid(xi, yi);
 
-    % Interpolate the irregularly scattered samples onto a grid
-    % - Grayscale: identical to your original logic
-    % - RGB: do the exact same thing channel-by-channel
+    % Resample onto the grid (griddata output matches size(XX))
     if nChannels <= 1
-        v = I(:);
-        retinalImage = griddata(x, y, v, XX, YY, 'linear');
+        retinalImage = griddata(x, y, I(:), XX, YY, 'linear');
     else
-        retinalImage = zeros(num_y_points, num_x_points, nChannels, 'like', I);
+        retinalImage = zeros(N, N, nChannels, 'like', I);
         for c = 1:nChannels
             v = I(:, :, c);
             retinalImage(:, :, c) = griddata(x, y, v(:), XX, YY, 'linear');

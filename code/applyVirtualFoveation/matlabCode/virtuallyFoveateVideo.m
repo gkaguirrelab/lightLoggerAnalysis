@@ -147,7 +147,7 @@ function virtuallyFoveateVideo(world_video, sensor_t_cell, gaze_angles, gaze_off
     if(options.verbose)
         disp("Beginning frame processing")
     end 
-
+    
     tic; 
     iteration_number = 0; 
     for ii = start_frame:end_frame
@@ -211,7 +211,7 @@ function virtuallyFoveateVideo(world_video, sensor_t_cell, gaze_angles, gaze_off
             if(~any(world_frame(:))) 
                 virtually_foveated_frame = blank_frame; 
             else
-                virtually_foveated_frame = uint8(virtuallyFoveateFrame(world_frame, gaze_angle, path_to_intrinsics));
+                virtually_foveated_frame = uint8(virtuallyFoveateFrame(world_frame, gaze_angle, path_to_intrinsics, 'desiredN', size(blank_frame, 1)));
     
             end
         end

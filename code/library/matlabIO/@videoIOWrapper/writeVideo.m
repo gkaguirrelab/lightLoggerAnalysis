@@ -20,7 +20,7 @@ function writeVideo(obj, frame)
     end 
     
     % Retrieve the size of the frame to write 
-    [height, width] = size(frame);
+    [height, width, channels] = size(frame);
 
     % Save the frame dimensions for writing 
     % if not already set 
@@ -31,6 +31,9 @@ function writeVideo(obj, frame)
 
     % Ensure the frame to write has matching shape as others 
     if(height ~= obj.Height || width ~= obj.Width)
+        fprintf("Video Dimensions: (%d, %d)\n", obj.Height, obj.Width);
+        fprintf("Frame Shape: (%d, %d)\n", height, width);
+
         error("Frames of video have become inhomogenously shaped")
     end 
 
