@@ -29,7 +29,7 @@ classdef videoIOWrapper < handle
         temporary_reading_hdf5_filepath
         current_reading_color_mode 
         read_ahead_buffer
-        read_ahead_buffer_size;
+        read_ahead_buffer_size = 1000;
         buffer_start_frame
     end
 

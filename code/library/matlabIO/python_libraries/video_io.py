@@ -293,17 +293,23 @@ def extract_frames_from_video(video_path: str, frames_idx: Iterable, is_grayscal
    memory at once
 """
 def destruct_video(video_path: str, start_frame: int=0, end_frame: int=float("inf"), 
-                   is_grayscale: bool=False, q: queue.Queue=None, stop_event: object=None
+                   is_grayscale: bool=False, q: queue.Queue=None, stop_event: object=None,
+                   verbose: bool=False,
                   ) -> None | np.ndarray:
+    # Let's get some information about the video 
+    frame_height, frame_width = inspect_video_framesize(video_path)
+    output_shape: tuple = (end_frame - start_frame, frame_height, frame_width) if is_grayscale is True else (end_frame - start_frame, frame_height, frame_width, 3)
+
     # Open the video via cv2 
     video_stream: cv2.VideoCapture = cv2.VideoCapture(video_path)
 
     # Initialize a container to hold the frames 
-    frames: list[np.ndarray] = []
-    frame_num: int = start_frame
+    frames: np.ndarray | None = None if q is not None else np.empty(shape=output_shape, dtype=np.uint8)
 
     # Stream the frames in from the vidoe 
-    while(frame_num < end_frame):
+    iterator: Iterable = tqdm(range(start_frame, end_frame)) if verbose is True else range(start_frame, end_frame)
+    insertion_idx: int = 0 
+    for frame_num in iterator:
         # Jump the the target frame in the stream
         video_stream.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
 
@@ -328,16 +334,18 @@ def destruct_video(video_path: str, start_frame: int=0, end_frame: int=float("in
         # convert to grayscale
         if(is_grayscale is True): 
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        else:
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
         # Append this frame to the frame list 
         # Or add to the queue if provided for streaming
+
         if(q is not None):
             q.put(frame)
         else:
-            frames.append(frame)
+            frames[insertion_idx] = frame
 
-        # Increment the frame number 
-        frame_num += 1 
+        insertion_idx += 1 
 
     # Close the capture stream 
     video_stream.release()  
@@ -346,9 +354,6 @@ def destruct_video(video_path: str, start_frame: int=0, end_frame: int=float("in
     if(q is not None): 
         q.put(None)
         return None
-
-    # Convert to standardized np.ndarray 
-    frames: np.ndarray = np.stack(frames, axis=0)
 
     return frames
 

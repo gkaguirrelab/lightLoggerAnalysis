@@ -120,7 +120,7 @@ end
         offsets = [0, 0]; 
 
         % Define the output path where this video will write to 
-        output_filename = sprintf("/%s_%s_%s_virtuallyFoveated.avi", subjectID, activity, options.video_type); 
+        output_filename = sprintf("%s_%s_%s_virtuallyFoveated.avi", subjectID, activity, options.video_type); 
         if(options.output_dir == "")
             output_path = fullfile(subject_nas_path_processing, output_filename); 
         else 

@@ -149,6 +149,7 @@ function virtuallyFoveateVideo(world_video, sensor_t_cell, gaze_angles, gaze_off
     end 
 
     tic; 
+    iteration_number = 0; 
     for ii = start_frame:end_frame
         if(ii > world_frame_reader.NumFrames)
             warning(sprintf("Frame %d is out of bounds for video with NumFrames %d. Quitting early.", ii, world_reader.NumFrames));
@@ -200,7 +201,12 @@ function virtuallyFoveateVideo(world_video, sensor_t_cell, gaze_angles, gaze_off
         % and virtually foveate 
         else
             % Read in the frame  
-            world_frame = world_frame_reader.readFrame('frameNum', ii, 'color', 'GRAY'); 
+            force_rebuffer = iteration_number == 0; 
+            world_frame = world_frame_reader.readFrame('frameNum', ii,...
+                                                       'color', 'RGB',...
+                                                       'verbose', options.verbose,...
+                                                       'force_rebuffer', force_rebuffer...
+                                                      ); 
             
             % If it is a NaN frame, just use the NaN frame for writing
             if(~any(world_frame(:))) 
@@ -224,6 +230,9 @@ function virtuallyFoveateVideo(world_video, sensor_t_cell, gaze_angles, gaze_off
 
         % Write the frame to the video 
         world_frame_writer.writeVideo(virtually_foveated_frame);  
+
+        iteration_number = iteration_number + 1; 
+
     end     
 
     % Close the world video writer 
