@@ -21,10 +21,7 @@ function close(obj)
 
     % Delete the temporary reading file 
     if(~isempty(read_temp_file_path) && exist(read_temp_file_path, "file"))
-
-        disp("HELLO I AM TRYING TO DO THIS")
         delete(read_temp_file_path);
-        disp("THIS IS AFTER I TRIED TO DO THAT")
     end     
 
     % Check if the temp dir existed for if we were using, 
