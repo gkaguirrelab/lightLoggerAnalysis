@@ -84,7 +84,7 @@ classdef videoIOWrapper < handle
                     % generate it quickly with Python, then access it quickly 
                     % with MATLAB, removing it when the object closes 
                     % We will do this conversion when the first frame is read 
-                    obj.temporary_reading_hdf5_filepath = fullfile(filepath, name+"_temp.hdf5");
+                    obj.temporary_reading_hdf5_filepath = fullfile(getenv('HOME'), 'Desktop', name+"_temp.hdf5");
 
                     % Store the number of frames in the video 
                     obj.NumFrames = double(obj.utility_library.inspect_video_frame_count(videoFileName));
