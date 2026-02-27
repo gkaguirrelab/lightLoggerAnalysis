@@ -115,7 +115,7 @@ function virtuallyFoveateVideo(world_video, sensor_t_cell, gaze_angles, gaze_off
     pupil_t = gaze_angles(:, 1);
 
     % Initialize a blank frame we will use to pad frames that have nan gaze angles 
-    blank_frame = uint8(zeros(480, 480)); 
+    blank_frame = uint8(zeros(480, 480, 3)); 
 
     % Apply the gaze offsets to the gaze angles, and adjust their coordinate system 
     if(options.verbose)
@@ -194,7 +194,6 @@ function virtuallyFoveateVideo(world_video, sensor_t_cell, gaze_angles, gaze_off
         % If the pupil timestamp is during a blink event 
         % we should also just use the NaN frame 
         elseif(is_blnk_event(pupil_t(gaze_angle_idx), blnk_events))
-            disp("BLINK EVENT")
             virtually_foveated_frame = blank_frame;
 
         % Otherwise, let's read in a real frame 
