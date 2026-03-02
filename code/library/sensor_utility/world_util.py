@@ -13,7 +13,7 @@ import matlab
 # We are currently not using this, but calculated it off of a 10 minute 
 # video in a variety of settings (inside (office) outside (street, park))
 # Just something to note that these are inherently unequal
-WORLD_RGB_SCALARS: np.ndarray = np.array([1, 0.8223775, 0.95367937], dtype=np.float64)
+WORLD_RGB_SCALARS: np.ndarray = np.array([1.0000, 1.0100, 1.3012], dtype=np.float64)
 
 # Define a mapping between frame sizes and fielding functions of the camera
 WORLD_FIELDING_FUNCTIONS: dict[tuple[int], np.ndarray] = {(480, 640): np.ones((480, 640), dtype=np.float64)}
@@ -170,7 +170,9 @@ def generate_RGB_mask(original_frame: np.ndarray, visualize_results: bool=False)
 """Apply the per color weights to the color 
    pixels of a frame 
 """
-def apply_color_correction(original_frame: np.ndarray, visualize_results: bool=False) -> tuple[np.ndarray, object] | np.ndarray:
+def apply_color_correction(original_frame: np.ndarray, 
+                           visualize_results: bool=False
+                           ) -> tuple[np.ndarray, object] | np.ndarray:
     # Initialize a variable for the figure handle that 
     # will be used to visualize (if desired)
     fig: object | None = None
@@ -180,19 +182,26 @@ def apply_color_correction(original_frame: np.ndarray, visualize_results: bool=F
     frame_as_float: np.ndarray = original_frame.astype(np.float64)
 
     # Next, we need to generate a bayer pattern for this size of image 
-    mask: np.ndarray = generate_RGB_mask(original_frame)
-    assert mask.shape[:2] == original_frame.shape[:2], f"Mask: {mask.shape[:2]} and original frame shape {original_frame.shape[:2]} are unequal"
+    is_grayscale: bool = not (len(original_frame.shape) == 3)
+    mask: np.ndarray | None = None
+    if(is_grayscale is True):
+        mask = generate_RGB_mask(original_frame)
+        assert mask.shape[:2] == original_frame.shape[:2], f"Mask: {mask.shape[:2]} and original frame shape {original_frame.shape[:2]} are unequal"
 
     # Next, we will apply the weights 
-    for color, weight in zip("RGB", WORLD_RGB_SCALARS):
+    for channel_idx, (color, weight) in enumerate(zip("RGB", WORLD_RGB_SCALARS)):
         # Find the pixels that match this color 
-        pixels: np.ndarray = np.argwhere(mask == color)
-        rows: np.ndarray = pixels[:, 0]
-        cols: np.ndarray = pixels[:, 1]
+        if(is_grayscale is True):
+            pixels: np.ndarray = np.argwhere(mask == color)
+            rows: np.ndarray = pixels[:, 0]
+            cols: np.ndarray = pixels[:, 1]
 
-        # Apply the weight to the specified pixels 
-        frame_as_float[rows, cols] *= weight
-    
+            # Apply the weight to the specified pixels 
+            frame_as_float[rows, cols] *= weight
+
+        else:
+            frame_as_float[:, :, channel_idx] *= weight    
+
     # Round and clip values in the 255 range and cast back to uint8
     modified_frame: np.ndarray = np.clip(np.round(frame_as_float), 0, 255).astype(np.uint8)
 

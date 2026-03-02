@@ -76,12 +76,9 @@ function virtuallyFoveateVideo(world_video, sensor_t_cell, gaze_angles, gaze_off
         options.video_read_cache_size = 1000
     end
     % Import the Python util library 
-    if(options.verbose)
-        disp("Importing Python libraries")
-    end 
     virutal_foveation_util = import_pyfile(getpref("lightLoggerAnalysis", "virtual_foveation_util_path"));
 
-    % Create a video IO reader wrapper we will use to read into the original video
+    % Create a video IO reader wrapper we will use to read/write into the original video
     if(options.verbose)
         disp("Opening video reader/writer")
     end 
@@ -89,38 +86,10 @@ function virtuallyFoveateVideo(world_video, sensor_t_cell, gaze_angles, gaze_off
                                         "ioAction", 'read', ...
                                         "readAheadBufferSize", options.video_read_cache_size...
                                         ); 
-
-    if(options.testing)
-        output_path = "/Users/zacharykelly/Desktop/testing.avi";
-    end 
-
-    % If we passed a group of non-contiguous target frames to analyze, 
-    % the full range of the video must be inf 
-    if(numel(options.non_contiguous_target_frames) > 0)
-        if(options.frames_to_process ~= [1, inf])
-            error("When selecting a group of non-contiguous target frames, frames to process must be [1, inf]")
-        end 
-    end 
-
-
     world_frame_writer = videoIOWrapper(output_path, "ioAction", 'write'); 
     world_frame_writer.FrameRate = options.world_fps; 
 
-    % Now we will retrieve the start and end time of all of the sensors 
-    if(options.verbose)
-        disp("Finding sensor start end times")
-    end 
-
-    % Next, we will extract the pupil t from the gaze angles 
-    pupil_t = gaze_angles(:, 1);
-
-    % Initialize a blank frame we will use to pad frames that have nan gaze angles 
-    blank_frame = uint8(zeros(480, 480, 3)); 
-
     % Apply the gaze offsets to the gaze angles, and adjust their coordinate system 
-    if(options.verbose)
-        disp("Modifying gaze angles")
-    end 
     gaze_angles_original = gaze_angles(:, 1:2) - gaze_offsets; 
 
     % We first subtract the constant gaze offset from the gaze angles (measured once per pariticpant)
@@ -139,6 +108,7 @@ function virtuallyFoveateVideo(world_video, sensor_t_cell, gaze_angles, gaze_off
     if(options.frames_to_process(2) ~= inf)
         end_frame = options.frames_to_process(2);
     end 
+    assert(start_frame > 0 && end_frame <= world_frame_reader.NumFrames);
 
     % Open the writer to start writing frames 
     open(world_frame_writer); 
@@ -148,97 +118,114 @@ function virtuallyFoveateVideo(world_video, sensor_t_cell, gaze_angles, gaze_off
         disp("Beginning frame processing")
     end 
     
-    tic; 
-    iteration_number = 0; 
-    for ii = start_frame:end_frame
-        if(ii > world_frame_reader.NumFrames)
-            warning(sprintf("Frame %d is out of bounds for video with NumFrames %d. Quitting early.", ii, world_reader.NumFrames));
-            break ; 
-        end
+    % First, let's find the number of chunks in the portion of the
+    % video selected 
+    num_chunks = ceil( ( (end_frame - start_frame) + 1) / options.video_read_cache_size);
+    current_start = start_frame; 
 
+    % Next, we will iterate over the chunks of the video 
+    total_time = tic; 
+    for cc = 1:num_chunks
+        chunk_time = tic; 
+        
+        % If verbose, print what chunk we are on
         if(options.verbose)
-            fprintf("Processing frame: %d/%d\n", ii, end_frame);
-        end 
+            fprintf("Processing chunk: %d/%d\n", cc, num_chunks);
+        end  
 
-        % If we are solely processing a group of non contiguous target 
-        % frames, then let's check if this frame is in that group, otherwise 
-        % continue 
-        if(numel(options.non_contiguous_target_frames) > 0 && ~ismember(ii, options.non_contiguous_target_frames))    
-            disp("SKIPPING SINCE NOT IN TARGET FRAMES")
-            continue; 
-        end 
 
-        % Retrieve the world frame timestamp 
-        world_timestamp = world_t(ii); 
-        
-        % Find the gaze angle that corresponds to this frame 
-        [~, gaze_angle_idx] = min(abs(pupil_t - world_timestamp));
-        gaze_angle = gaze_angles(gaze_angle_idx, 1:2); 
+        % Find the end frame for this chunk 
+        current_end = min((current_start + options.video_read_cache_size) - 1, end_frame); 
 
-        % NaN the gaze angle if it's above a large threshold
-        if( any(abs(gaze_angle) > options.nan_deg_threshold) )
-            disp("OVER THE THRESHOLD")
-            disp(gaze_angle)
-            gaze_angle(:) = nan;
-        end
-        
-        % Virtually foveat the frame 
-        virtually_foveated_frame = [];
+        % Initialize container for the frames to be read in 
+        chunk_size = (current_end - current_start) + 1; 
+        chunk_frames = zeros(chunk_size, world_frame_reader.Height, world_frame_reader.Width, 3, 'uint8'); 
 
-        % If the gaze angle is NaN, immediately just 
-        % use the NaN frame
-        if(any(isnan(gaze_angle)))
-            disp('GAZE ANGLE IS NAN')
-            virtually_foveated_frame = blank_frame; 
-        
-        % If the pupil timestamp is during a blink event 
-        % we should also just use the NaN frame 
-        elseif(is_blnk_event(pupil_t(gaze_angle_idx), blnk_events))
-            virtually_foveated_frame = blank_frame;
+        % Initialize output buffer that will write to the disk 
+        output_buffer = zeros(chunk_size, 480, 480, 3, 'uint8');
+        desiredN = size(output_buffer, 2); 
 
-        % Otherwise, let's read in a real frame 
-        % and virtually foveate 
-        else
-            % Read in the frame  
-            force_rebuffer = iteration_number == 0; 
-            world_frame = world_frame_reader.readFrame('frameNum', ii,...
-                                                       'color', 'RGB',...
-                                                       'verbose', options.verbose,...
-                                                       'force_rebuffer', force_rebuffer...
-                                                      ); 
+        dq = parallel.pool.DataQueue;
+        h = waitbar(0, 'Processing frames...');
+
+        counter = java.util.concurrent.atomic.AtomicInteger(0);
+        afterEach(dq, @(~) waitbar(counter.incrementAndGet() / chunk_size, h));
+
+        % Next, let's read in the frames for the chunk 
+        input_buffer_insertion_idx = 1; 
+        for ff = current_start : current_end; 
+            % Force rebuffer every time a chunk starts (should not need to do this, but just for safety)
+            force_rebuffer = input_buffer_insertion_idx == 1; 
             
-            % If it is a NaN frame, just use the NaN frame for writing
-            if(~any(world_frame(:))) 
-                virtually_foveated_frame = blank_frame; 
-            else
-                virtually_foveated_frame = uint8(virtuallyFoveateFrame(world_frame, gaze_angle, path_to_intrinsics, 'desiredN', size(blank_frame, 1)));
-    
+            % Read the frame and insert it into the chunk frames buffer 
+            chunk_frames(input_buffer_insertion_idx, :, :, :) = world_frame_reader.readFrame('frameNum', ff,...
+                                                                  'color', 'RGB',...
+                                                                  'verbose', false,...
+                                                                  'force_rebuffer', force_rebuffer...
+                                                                ); 
+
+            % Update the insertion index 
+            input_buffer_insertion_idx = input_buffer_insertion_idx + 1; 
+        end  
+
+        % Now, we read in all the frames. We will now process them in parallel
+        parfor pp = 1:size(chunk_frames, 1)
+            % Find the global world frame number 
+            % that corresponds to this frame 
+            global_world_frame_number = (pp + current_start) - 1; 
+
+            % Retrieve the world frame timestamp and frame 
+            world_timestamp = world_t(global_world_frame_number); 
+            world_frame = squeeze(chunk_frames(pp, :, :, :)); 
+            
+            % Find the gaze angle that corresponds to this frame 
+            [~, gaze_angle_idx] = min(abs(pupil_t - world_timestamp));
+            gaze_angle = gaze_angles(gaze_angle_idx, 1:2); 
+
+            % NaN the gaze angle if it's above a large threshold
+            if( any(abs(gaze_angle) > options.nan_deg_threshold) )
+                gaze_angle(:) = nan;
             end
-        end
-
-
-        % Imshow the virtually foveated frame 
-        if(options.testing)
-            disp(gaze_angle)
-            disp(size(virtually_foveated_frame  ))
-
-            figure; 
-            imshow(virtually_foveated_frame)
-            axis on; 
+            
+            % If any of the cases for which we should skip a frame are true, just skip and we 
+            % will output a blank frame already pre-allocated in the output buffer 
+            if(~any(world_frame(:)) || any(isnan(gaze_angle)) || is_blnk_event(pupil_t(gaze_angle_idx), blnk_events))
+                send(dq, 1);
+                continue
+            end 
+            
+            % Otherwise, virtually foveate the frame 
+            virtually_foveated_frame = uint8(virtuallyFoveateFrame(world_frame, gaze_angle, ...
+                                                                   path_to_intrinsics, 'desiredN', desiredN...
+                                                                   )...
+                                            );
+            output_buffer(pp, :, :, :) = virtually_foveated_frame; 
+            
+            % Update the wait bar 
+            send(dq,1);
         end 
 
-        % Write the frame to the video 
-        world_frame_writer.writeVideo(virtually_foveated_frame);  
+        close(h);
 
-        iteration_number = iteration_number + 1; 
+       % Now that all these frames have been processed in parallel, let's write them out to the disk
+        for oo = 1:size(output_buffer, 1)
+            frame_to_write = squeeze(output_buffer(oo, :, :, :)); 
+            world_frame_writer.writeVideo(frame_to_write); 
+        end 
 
-    end     
+        % Update the start for the next chunk 
+        current_start = current_start + chunk_size;
+        
+        chunk_elapsed_seconds = toc(chunk_time);
+        fprintf("Chunk elpased time: %f seconds\n", chunk_elapsed_seconds);
+
+    end 
 
     % Close the world video writer 
     close(world_frame_writer); 
 
-    elapsed_seconds = toc; 
-    fprintf("Elapsed Time: %f seconds\n", elapsed_seconds); 
+    elapsed_seconds = toc(total_time); 
+    fprintf("Total Elapsed Time: %f seconds\n", elapsed_seconds); 
 
     return; 
 
