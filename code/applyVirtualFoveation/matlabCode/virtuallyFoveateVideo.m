@@ -200,7 +200,12 @@ function virtuallyFoveateVideo(world_video, sensor_t_cell, gaze_angles, gaze_off
                                                                    )...
                                             );
             output_buffer(pp, :, :, :) = virtually_foveated_frame; 
-            
+
+            % Add option to apply color weights here 
+
+
+            % Add option to apply fielding function here
+
             % Update the wait bar 
             send(dq,1);
         end 
