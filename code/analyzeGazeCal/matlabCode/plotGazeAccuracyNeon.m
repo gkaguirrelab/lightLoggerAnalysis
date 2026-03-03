@@ -1,156 +1,163 @@
-function plotGazeAccuracyNeon(startFixationId, endFixationId)
-    % 1. Setup and Data Loading
-    %filePath = '/Users/samanthamontoya/Downloads/Timeseries Data + Scene Video-7/2026-01-16_20-48-06-8dd5fc8b/gaze.csv';
-    filePath = '/Users/samanthamontoya/Downloads/GazeCalSM_20260122/2026-01-22_15-48-38-c56b057d/gaze.csv';
-    %filePath = '/Users/samanthamontoya/Downloads/GazeCalZK_20260122/2026-01-22_15-36-32-0224686c/gaze.csv';
-    data = readtable(filePath);
-    
-    ts_ns = data.timestamp_ns_; 
-    fId   = data.fixationId;
-    az    = data.azimuth_deg_;
-    el    = data.elevation_deg_;
-    
-    % 2. Define Intended Gaze Positions
-    baseTargets = [0,0; -15,15; -15,-15; 15,15; 15,-15; 0,15; 0,-15; -15,0; 15,0; ...
-                   -7.5,7.5; -7.5,-7.5; 7.5,7.5; 7.5,-7.5; 0,7.5; 0,-7.5; -7.5,0; 7.5,0];
-    intendedGaze = [baseTargets; baseTargets];
-    numTargetsExpected = 34;
-    
-    % 3. Filter to the specific Fixation ID range
-    startIndex = find(fId == startFixationId, 1, 'first');
-    endIndex   = find(fId == endFixationId, 1, 'last');
-    
-    if isempty(startIndex) || isempty(endIndex)
-        error('Specified Fixation IDs not found.');
-    end
-    
-    ts_ns = ts_ns(startIndex:endIndex);
-    fId   = fId(startIndex:endIndex);
-    az    = az(startIndex:endIndex);
-    el    = el(startIndex:endIndex);
-    
-    % 4. Identify discrete fixation blocks
-    isValid = ~isnan(fId);
-    diffValid = diff([0; isValid; 0]);
-    blockStarts = find(diffValid == 1);
-    blockEnds = find(diffValid == -1) - 1;
-    
-    actualGaze = [];
-    if isempty(blockStarts), error('No fixations found in range.'); end
-    
-    % Initialize first target
-    currTargetAz = az(blockStarts(1):blockEnds(1));
-    currTargetEl = el(blockStarts(1):blockEnds(1));
-    targetStartTime = ts_ns(blockStarts(1));
-    
-    % 5. Logic: Spatial Jump + Temporal Minimum
-    for i = 2:length(blockStarts)
-        thisBlockAz = median(az(blockStarts(i):blockEnds(i)), 'omitnan');
-        thisBlockEl = median(el(blockStarts(i):blockEnds(i)), 'omitnan');
-        
-        prevMedAz = median(currTargetAz, 'omitnan');
-        prevMedEl = median(currTargetEl, 'omitnan');
-        
-        dist = sqrt((thisBlockAz - prevMedAz)^2 + (thisBlockEl - prevMedEl)^2);
-        timeElapsed = (ts_ns(blockStarts(i)) - targetStartTime) / 1e9; 
-        
-        % Split only if jump > 6 deg AND target has lasted at least 2.5s
-        if dist > 6.0 && timeElapsed > 2.5
-            actualGaze = [actualGaze; median(currTargetAz, 'omitnan'), median(currTargetEl, 'omitnan')];
-            currTargetAz = az(blockStarts(i):blockEnds(i));
-            currTargetEl = el(blockStarts(i):blockEnds(i));
-            targetStartTime = ts_ns(blockStarts(i));
-        else
-            currTargetAz = [currTargetAz; az(blockStarts(i):blockEnds(i))];
-            currTargetEl = [currTargetEl; el(blockStarts(i):blockEnds(i))];
-        end
-    end
-    actualGaze = [actualGaze; median(currTargetAz, 'omitnan'), median(currTargetEl, 'omitnan')];
-    
-    % Ensure we match the intended targets (limit to 34)
-    numFound = size(actualGaze, 1);
-    if numFound > numTargetsExpected
-        actualGaze = actualGaze(1:numTargetsExpected, :);
-        numFound = numTargetsExpected;
-    end
-    intendedGaze = intendedGaze(1:numFound, :);
+function plotGazeAccuracyNeon(startIds, endIds, filePaths)
+%{
+    startIds = [3, 45, 5, 36, 43];
+    endIds = [82, 163, 52, 108, 120];
+    filePaths = { ...
+        '/Users/samanthamontoya/Downloads/Timeseries Data + Scene Video-13/2026-03-03_15-39-46-286215af/gaze.csv', ...
+        '/Users/samanthamontoya/Downloads/Timeseries Data + Scene Video-14/2026-03-03_16-14-03-169f6719/gaze.csv', ...
+        '/Users/samanthamontoya/Downloads/Timeseries Data + Scene Video-11/2026-03-03_15-22-52-7675bb73/gaze.csv', ...
+        '/Users/samanthamontoya/Downloads/Timeseries Data + Scene Video-12/2026-03-03_15-31-40-6c501c11/gaze.csv', ...
+        '/Users/samanthamontoya/Downloads/Timeseries Data + Scene Video-10/2026-03-02_15-20-42-4a242290/gaze.csv' ...
+    };
+    plotGazeAccuracyNeon(startIds, endIds, filePaths)
+%}
 
-    % 6. Calculate Offsets for Title
-    xOffsets = actualGaze(:,1) - intendedGaze(:,1);
-    yOffsets = actualGaze(:,2) - intendedGaze(:,2);
-    avgXOffset = mean(xOffsets);
-    avgYOffset = mean(yOffsets);
-    % calculate euclidean distance error (mean of vector in degrees)
-    totalErr = mean(sqrt(xOffsets.^2 + yOffsets.^2));
-    % calculate mean-corrected euclidean distance error (mean of vector in degrees)
-    correctedErr = mean(sqrt((xOffsets-avgXOffset).^2 + (yOffsets-avgYOffset).^2));
+numParticipants = length(startIds);
+maxTargets = 34;
+allActualGaze = NaN(maxTargets, 2, numParticipants);
+baseTargets = [0,0; -15,15; -15,-15; 15,15; 15,-15; 0,15; 0,-15; -15,0; 15,0; ...
+    -7.5,7.5; -7.5,-7.5; 7.5,7.5; 7.5,-7.5; 0,7.5; 0,-7.5; -7.5,0; 7.5,0];
+masterIntended = [baseTargets; baseTargets];
 
-    % 7. Plotting
-    figure('Position', [100 100 800 750]);
-    hold on;
-    
-    % Plot Intended (Red X)
-    hInt = scatter(intendedGaze(:,1), intendedGaze(:,2), 150, 'r', 'x', 'LineWidth', 2);
-    
-    % Plot Actual (Cyan Circle)
-    hAct = scatter(actualGaze(:,1), actualGaze(:,2), 100, 'cyan', 'filled', 'MarkerEdgeColor', 'k');
-    
-    % Error lines and numbering
-    for i = 1:numFound
-        line([intendedGaze(i,1), actualGaze(i,1)], [intendedGaze(i,2), actualGaze(i,2)], ...
-             'Color', [0.5 0.5 0.5], 'LineStyle', '-');
-         
-        text(actualGaze(i,1) + 0.6, actualGaze(i,2) + 0.6, num2str(i), ...
-            'Color', 'w', 'FontSize', 10, 'FontWeight', 'bold');
-    end
-    
-    % Construct Title with Offsets
-    titleStr = {sprintf('Gaze Accuracy (N=%d)', numFound), ...
-                sprintf('Avg Offset: X=%.2f°, Y=%.2f° | Mean Error: %.2f°', ...
-                avgXOffset, avgYOffset, totalErr)};
-    title(titleStr);
-    
-    xlabel('Azimuth (degrees)'); ylabel('Elevation (degrees)');
-    legend([hInt, hAct], {'Intended Target', 'Actual Gaze Median'}, 'Location', 'northeastoutside');
-    
-    grid on; axis equal;
-    xlim([-22 22]); ylim([-22 22]);
-    hold off;
-    
-    % Final Stats to Command Window
-    fprintf('Found %d targets.\n', numFound);
-    fprintf('Mean X Offset: %.2f°, Mean Y Offset: %.2f°\n', avgXOffset, avgYOffset);
-    fprintf('Total Mean Error: %.2f°\n', totalErr);
+% 1. Setup the main UI figure and Tab Group
+hFig = figure('Position', [100 100 900 800], 'Name', 'Gaze Accuracy Analysis');
+tGroup = uitabgroup('Parent', hFig);
 
-    % 7. Plot again with offset subtracted
-    figure('Position', [100 100 800 750]);
-    hold on;
-    
-    % Plot Intended (Red X)
-    hInt = scatter(intendedGaze(:,1), intendedGaze(:,2), 150, 'r', 'x', 'LineWidth', 2);
-    
-    % Plot Actual - offset (Cyan Circle)
-    hAct = scatter(actualGaze(:,1) - avgXOffset, actualGaze(:,2) - avgYOffset, 100, 'cyan', 'filled', 'MarkerEdgeColor', 'k');
-    
-    % Error lines and numbering
-    for i = 1:numFound
-        line([intendedGaze(i,1), actualGaze(i,1)- avgXOffset], [intendedGaze(i,2), actualGaze(i,2)- avgYOffset], ...
-             'Color', [0.5 0.5 0.5], 'LineStyle', '-');
-         
-        text(actualGaze(i,1)- avgXOffset + 0.6, actualGaze(i,2)- avgYOffset + 0.6, num2str(i), ...
-            'Color', 'w', 'FontSize', 10, 'FontWeight', 'bold');
+fprintf('Starting analysis for %d participants...\n', numParticipants);
+for i = 1:numParticipants
+    fprintf('Processing participant %d...\n', i);
+    [actGaze, intGaze] = processParticipant(startIds(i), endIds(i), filePaths{i});
+
+    biasX = mean(actGaze(:,1) - intGaze(:,1), 'omitnan');
+    biasY = mean(actGaze(:,2) - intGaze(:,2), 'omitnan');
+    actGaze_corrected = actGaze - [biasX, biasY];
+
+    numFound = size(actGaze_corrected, 1);
+    allActualGaze(1:numFound, :, i) = actGaze_corrected;
+
+    % 2. Create a Tab for this participant
+    hTab = uitab('Parent', tGroup, 'Title', sprintf('P%d', i));
+    drawGazePlot(hTab, intGaze, actGaze_corrected, sprintf('Participant %d (Avg. Offset: X=%.2f, Y=%.2f)', i, biasX, biasY));
+end
+
+% 3. Create a final Tab for the Grand Average
+grandAvgActual = mean(allActualGaze, 3, 'omitnan');
+avgTab = uitab('Parent', tGroup, 'Title', 'Grand Avg');
+drawGazePlot(avgTab, masterIntended, grandAvgActual, 'Grand Average Across All Participants');
+end
+
+function drawGazePlot(parent, intendedGaze, actualGaze, figTitle)
+% Create axes specifically inside the passed tab
+ax = axes('Parent', parent);
+hold(ax, 'on');
+
+numFound = size(actualGaze, 1);
+xOffsets = actualGaze(:,1) - intendedGaze(:,1);
+yOffsets = actualGaze(:,2) - intendedGaze(:,2);
+totalErr = mean(sqrt(xOffsets.^2 + yOffsets.^2), 'omitnan');
+
+% Plotting
+hInt = scatter(ax, intendedGaze(:,1), intendedGaze(:,2), 150, 'r', 'x', 'LineWidth', 2);
+hAct = scatter(ax, actualGaze(:,1), actualGaze(:,2), 100, 'cyan', 'filled', 'MarkerEdgeColor', 'k');
+
+for i = 1:numFound
+    if ~isnan(actualGaze(i,1))
+        line(ax, [intendedGaze(i,1), actualGaze(i,1)], [intendedGaze(i,2), actualGaze(i,2)], ...
+            'Color', [0.5 0.5 0.5], 'LineStyle', '-');
+        text(ax, actualGaze(i,1) + 0.6, actualGaze(i,2) + 0.6, num2str(i), ...
+            'Color', 'k', 'FontSize', 8);
     end
-    
-    % Construct Title with Offsets
-    titleStr = {sprintf('Gaze Accuracy (N=%d)', numFound), ...
-                sprintf('Avg Offset: X=%.2f°, Y=%.2f° | Mean Corrected Error: %.2f°', ...
-                avgXOffset, avgYOffset, correctedErr)};
-    title(titleStr);
-    
-    xlabel('Azimuth (degrees)'); ylabel('Elevation (degrees)');
-    legend([hInt, hAct], {'Intended Target', 'Actual Gaze Median minus avg offset'}, 'Location', 'northeastoutside');
-    
-    grid on; axis equal;
-    xlim([-22 22]); ylim([-22 22]);
-    hold off;
+end
+
+title(ax, {figTitle, sprintf('Mean Error: %.2f°', totalErr)});
+xlabel(ax, 'Azimuth (degrees)'); ylabel(ax, 'Elevation (degrees)');
+legend(ax, [hInt, hAct], {'Intended Target', 'Actual Gaze'}, 'Location', 'northeastoutside');
+grid(ax, 'on'); axis(ax, 'equal');
+xlim(ax, [-22 22]); ylim(ax, [-22 22]);
+end
+
+% (Keep your existing processParticipant function exactly as it was)
+
+function [actualGaze, intendedGaze] = processParticipant(startId, endId, filePath)
+% 1. FORCE IMPORT: Read as text to bypass "NaN" heuristic trap
+opts = detectImportOptions(filePath, 'FileType', 'text');
+opts = setvartype(opts, 'string');
+data = readtable(filePath, opts);
+
+% 2. DYNAMIC COLUMN FINDING
+headers = lower(data.Properties.VariableNames);
+idx_fId = find(contains(headers, 'fixation'), 1);
+idx_ts = find(contains(headers, 'timestamp'), 1);
+idx_az = find(contains(headers, 'azimuth'), 1);
+idx_el = find(contains(headers, 'elevation'), 1);
+
+if isempty(idx_fId) || isempty(idx_ts) || isempty(idx_az) || isempty(idx_el)
+    error('Could not map columns. Found these headers: %s', strjoin(headers, ', '));
+end
+
+% 3. EXTRACT AND CONVERT
+fId = str2double(data{:, idx_fId});
+ts_ns = str2double(data{:, idx_ts});
+az = str2double(data{:, idx_az});
+el = str2double(data{:, idx_el});
+
+% 4. EXTRACT RANGE
+startIndex = find(fId == startId, 1, 'first');
+endIndex = find(fId == endId, 1, 'last');
+
+if isempty(startIndex) || isempty(endIndex)
+    error('Fixation IDs %d-%d not found in this file.', startId, endId);
+end
+
+ts_ns = ts_ns(startIndex:endIndex);
+fId = fId(startIndex:endIndex);
+az = az(startIndex:endIndex);
+el = el(startIndex:endIndex);
+
+% 5. CORE PROCESSING LOGIC
+baseTargets = [0,0; -15,15; -15,-15; 15,15; 15,-15; 0,15; 0,-15; -15,0; 15,0; ...
+    -7.5,7.5; -7.5,-7.5; 7.5,7.5; 7.5,-7.5; 0,7.5; 0,-7.5; -7.5,0; 7.5,0];
+intendedGaze = [baseTargets; baseTargets];
+
+isValid = ~isnan(fId);
+diffValid = diff([0; isValid; 0]);
+blockStarts = find(diffValid == 1);
+blockEnds = find(diffValid == -1) - 1;
+
+actualGaze = [];
+
+% Initialize with first block
+currTargetAz = az(blockStarts(1):blockEnds(1));
+currTargetEl = el(blockStarts(1):blockEnds(1));
+targetStartTime = ts_ns(blockStarts(1));
+
+for i = 2:length(blockStarts)
+    thisBlockAz = median(az(blockStarts(i):blockEnds(i)), 'omitnan');
+    thisBlockEl = median(el(blockStarts(i):blockEnds(i)), 'omitnan');
+
+    prevMedAz = median(currTargetAz, 'omitnan');
+    prevMedEl = median(currTargetEl, 'omitnan');
+
+    dist = sqrt((thisBlockAz - prevMedAz)^2 + (thisBlockEl - prevMedEl)^2);
+    timeElapsed = (ts_ns(blockStarts(i)) - targetStartTime) / 1e9;
+
+    if dist > 3.5 && timeElapsed > 2.5
+        actualGaze = [actualGaze; median(currTargetAz, 'omitnan'), median(currTargetEl, 'omitnan')];
+        currTargetAz = az(blockStarts(i):blockEnds(i));
+        currTargetEl = el(blockStarts(i):blockEnds(i));
+        targetStartTime = ts_ns(blockStarts(i));
+    else
+        currTargetAz = [currTargetAz; az(blockStarts(i):blockEnds(i))];
+        currTargetEl = [currTargetEl; el(blockStarts(i):blockEnds(i))];
+    end
+end
+
+actualGaze = [actualGaze; median(currTargetAz, 'omitnan'), median(currTargetEl, 'omitnan')];
+
+% Truncate to match intended targets
+if size(actualGaze, 1) > 34
+    actualGaze = actualGaze(1:34, :);
+end
+
+intendedGaze = intendedGaze(1:size(actualGaze, 1), :);
 end
