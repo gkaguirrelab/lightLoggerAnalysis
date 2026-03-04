@@ -13,7 +13,7 @@ import matlab
 # We are currently not using this, but calculated it off of a 10 minute 
 # video in a variety of settings (inside (office) outside (street, park))
 # Just something to note that these are inherently unequal
-WORLD_RGB_SCALARS: np.ndarray = np.array([1.0000, 1.0100, 1.3012], dtype=np.float64)
+WORLD_RGB_SCALARS: np.ndarray = np.array([1.0000, 1, 1], dtype=np.float64) # solved for mean 
 
 # Define a mapping between frame sizes and fielding functions of the camera
 WORLD_FIELDING_FUNCTIONS: dict[tuple[int], np.ndarray] = {(480, 640): np.ones((480, 640), dtype=np.float64)}
@@ -526,5 +526,113 @@ def calculate_color_weights(sorted_calibration_measurements: dict, visualize_res
 
     return RGB_weights
 
+
+"""
+Calculate the per-color weights to apply to each color in order to equalize them
+to the R channel, but for a SINGLE measurement.
+
+Expected `measurement` shape/format (same as your inner-loop usage):
+    measurement['W']['v'] is a numpy array with shape (T, H, W)
+"""
+
+def calculate_color_weights_single_measurement(measurement: dict,
+                                               visualize_results: bool = False,
+                                               roi_half_size: int = 20 
+                                               ) -> np.ndarray:
+    # Generate the Bayer pattern for a 480x640 frame
+    bayer_pattern: np.ndarray = generate_RGB_mask(np.zeros((480, 640), dtype=np.uint8))
+
+    R_pixel_locations: set[tuple[int, int]] = set(zip(*np.where(bayer_pattern == "R")))
+    G_pixel_locations: set[tuple[int, int]] = set(zip(*np.where(bayer_pattern == "G")))
+    B_pixel_locations: set[tuple[int, int]] = set(zip(*np.where(bayer_pattern == "B")))
+
+    # Extract world camera V values
+    world_camera_v: np.ndarray = measurement["W"]["v"]
+
+    # We'll treat this as the averaged signal 
+    avg_world_camera_v: np.ndarray = world_camera_v.astype(np.float64)
+    min_world_v_length: int = avg_world_camera_v.shape[0]
+
+    # Splice out the target region (center ROI)
+    midpt_y, midpt_x = np.array(avg_world_camera_v.shape[1:]) // 2
+
+    roi_frame_coords: list[tuple] = [(midpt_y + dy, midpt_x + dx)
+                                    for dy in range(-roi_half_size, roi_half_size)
+                                    for dx in range(-roi_half_size, roi_half_size)
+                                    ]
+
+    roi_R_pixels: np.ndarray = np.array([coord for coord in roi_frame_coords if coord in R_pixel_locations])
+    roi_G_pixels: np.ndarray = np.array([coord for coord in roi_frame_coords if coord in G_pixel_locations])
+    roi_B_pixels: np.ndarray = np.array([coord for coord in roi_frame_coords if coord in B_pixel_locations])
+
+    # Compute per-frame ROI mean (time-series) + temporal mean for each channel
+    temporal_means: list[tuple[str, np.ndarray, float]] = []
+    for colorname, pixels in zip("RGB", (roi_R_pixels, roi_G_pixels, roi_B_pixels)):
+        rows: np.ndarray = pixels[:, 0]
+        cols: np.ndarray = pixels[:, 1]
+
+        # Per-frame mean across all ROI pixels in this channel -> shape (T,)
+        roi_mean_by_frame: np.ndarray = np.mean(avg_world_camera_v[:, rows, cols], axis=1)
+        roi_temporal_mean: float = float(np.mean(roi_mean_by_frame))
+
+        temporal_means.append((colorname, roi_mean_by_frame, roi_temporal_mean))
+
+    # Weights output: same idea as your RGB_weights[..., :] but just a single (3,) vector
+    rgb_temporal_means: np.ndarray = np.array([m for (c, v, m) in temporal_means], dtype=np.float64)  # (3,)
+
+    # If your intent is "weights to equalize to R", you typically want:
+    #   wR = 1
+    #   wG = meanR / meanG
+    #   wB = meanR / meanB
+    # But your original function returns raw per-channel means, so we keep that EXACT behavior.
+    RGB_weights: np.ndarray = rgb_temporal_means
+
+    if(visualize_results is True):
+        fig, axes = plt.subplots(1, 2, figsize=(12, 6))
+        ax_ts, ax_tm = axes
+
+        frame_numbers = np.arange(min_world_v_length)
+
+        # Left: time-series
+        for (colorname, series, tmean) in temporal_means:
+            ax_ts.plot(
+                frame_numbers,
+                series,
+                color=colorname.lower(),
+                linewidth=2,
+                label=f"{colorname} ROI",
+            )
+
+        ax_ts.set_title("ROI Pixel Intensities by Frame Number", fontsize=14)
+        ax_ts.set_xlabel("Frame Number", fontsize=12)
+        ax_ts.set_ylabel("Avg Intensity", fontsize=12)
+        ax_ts.set_ylim(0, 255)
+        ax_ts.set_xlim(0, min(100, min_world_v_length - 1))
+        ax_ts.legend()
+        ax_ts.grid(alpha=0.3)
+
+        # Right: temporal mean bars
+        x = np.arange(3)
+        heights = [m for (c, v, m) in temporal_means]
+        labels = [c for (c, v, m) in temporal_means]
+        bar_colors = [c.lower() for c in labels]
+
+        ax_tm.bar(x, heights, color=bar_colors, edgecolor="black", linewidth=1.2)
+        ax_tm.set_title("Temporal Mean (ROI)", fontsize=14)
+        ax_tm.set_xlabel("Channel", fontsize=12)
+        ax_tm.set_ylabel("Temporal Mean Intensity", fontsize=12)
+        ax_tm.set_xticks(x)
+        ax_tm.set_xticklabels(labels)
+        ax_tm.set_ylim(0, 255)
+        ax_tm.grid(alpha=0.3, axis="y")
+
+        for xi, val in zip(x, heights):
+            ax_tm.text(xi, val + 3, f"{val:.1f}", ha="center", va="bottom", fontsize=10)
+
+        fig.tight_layout()
+        plt.show()
+        plt.close(fig)
+
+    return RGB_weights
 
 

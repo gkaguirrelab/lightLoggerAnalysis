@@ -71,8 +71,6 @@ function virtuallyFoveateVideo(world_video, sensor_t_cell, gaze_angles, gaze_off
         options.frames_to_process = [1, inf]
         options.verbose = false
         options.manual_offset = [0, 0]
-        options.non_contiguous_target_frames = []
-        options.testing = false
         options.video_read_cache_size = 1000
     end
     % Import the Python util library 

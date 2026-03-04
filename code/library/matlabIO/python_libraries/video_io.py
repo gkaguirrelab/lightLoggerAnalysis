@@ -460,6 +460,7 @@ def video_to_hdf5(video_path: str, output_path: str,
 """Convert the world chunks of a recording into a playable video"""
 def world_chunks_to_video(recording_path: str,
                           output_path: str,
+                          apply_color_weights: bool=False, 
                           debayer_images: bool=False, 
                           apply_digital_gain: bool=False,
                           fill_missing_frames: bool=False,
@@ -468,6 +469,9 @@ def world_chunks_to_video(recording_path: str,
                           verbose: bool=False,
                           start_end: tuple[int | float] = (0, float("inf"))
                          ) -> None:
+    if(fill_missing_frames and not convert_to_seconds):
+        raise Exception("Haven't handled this case. This will generate millions of extra frames")
+
     assert output_path.endswith(".avi"), f"Output path: {output_path} must end in .avi"
 
     # Make the directories to the output path if they do not exist already 
@@ -530,17 +534,6 @@ def world_chunks_to_video(recording_path: str,
         t_vector: np.ndarray = np.ascontiguousarray(metadata[:, 0], dtype=np.float64) / ( (10 ** 9) if convert_to_seconds is True else 1)
         frame_buffer: np.ndarray = np.load(frame_buffer_path)
 
-        """
-        print(metadata.shape)
-
-        print(f"Metadata col 1: {metadata[5:, 1]}")
-        print(f"Metadata col 2: {metadata[5:, 2]}")
-        print(f"Metadata col 3: {metadata[5:, 3]}")
-
-
-        return 
-        """
-
         # Assert the t vector and frame vector are the same size 
         try:
             assert(len(t_vector) == len(frame_buffer))
@@ -578,6 +571,10 @@ def world_chunks_to_video(recording_path: str,
             buffer_dgains: np.ndarray = metadata[:, 2]
             buffer_dgains = buffer_dgains[:, np.newaxis, np.newaxis]
             frame_buffer *= buffer_dgains
+
+        # If we want to apply color weights, do so now 
+        if(apply_color_weights is True):
+            frame_buffer = np.array([ world_util.apply_color_correction(frame) for frame in frame_buffer], dtype=np.uint8)
 
         # If we want to debayer the image
         if(debayer_images is True):
