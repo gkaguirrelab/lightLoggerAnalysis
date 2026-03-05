@@ -86,7 +86,7 @@ def generate_world_videos(src_dir: str="/Volumes/FLIC_raw/scriptedIndoorVideos",
                                            apply_digital_gain=apply_digital_gain, 
                                            fill_missing_frames=fill_missing_frames,
                                            convert_to_seconds=True,
-                                           verbose=False
+                                           verbose=verbose
                                           )
             
     return 
