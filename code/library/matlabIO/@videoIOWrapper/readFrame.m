@@ -74,31 +74,35 @@ function frame = readFrame(obj, options)
 
         info = h5info(obj.temporary_reading_hdf5_filepath, "/video");
         % Read gray frames from the temp file 
+        read_ahead_buffer = []; 
         if(options.color == "GRAY")
             start = [1, 1, 1];
             count = [Inf, Inf, block_size];
 
-            obj.read_ahead_buffer = (h5read(obj.temporary_reading_hdf5_filepath, "/video", start, count));
-            obj.read_ahead_buffer = permute(obj.read_ahead_buffer, [3 2 1]);
+            read_ahead_buffer = (h5read(obj.temporary_reading_hdf5_filepath, "/video", start, count));
+            read_ahead_buffer = permute(read_ahead_buffer, [3 2 1]);
 
         % Read color channel frames from the temp file
         else
             start = [1, 1, 1, 1];
             count = [3, Inf, Inf, block_size];  
             
-            obj.read_ahead_buffer = h5read(obj.temporary_reading_hdf5_filepath, "/video", start, count);
-            obj.read_ahead_buffer = permute(obj.read_ahead_buffer, [4 3 2 1]);
+            read_ahead_buffer = h5read(obj.temporary_reading_hdf5_filepath, "/video", start, count);
+            read_ahead_buffer = permute(read_ahead_buffer, [4 3 2 1]);
         end 
 
         % The buffer is now in memory. If we want to convert to LMS, we should do that now
         % so the whole buffer is in LMS space
         if(options.color == "LMS")
             % Iterate over the buffer 
-            for pp = 1:size(read_ahead_buffer, 1)
+            parfor pp = 1:size(read_ahead_buffer, 1)
                 read_ahead_buffer(pp, :, :, :) = rgb2lms(read_ahead_buffer(pp, :, :, :));
             end 
         end 
         
+        % Save the read ahead buffer to the obj 
+        obj.read_ahead_buffer = read_ahead_buffer;
+
         % Garbage collect from Python and save the current color/buffer position
         py.gc.collect();                                          
         obj.current_reading_color_mode = options.color; 
