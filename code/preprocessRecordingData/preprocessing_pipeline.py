@@ -2,7 +2,7 @@ import os
 from natsort import natsorted
 import re
 from tqdm.auto import tqdm
-from typing import Iterable
+from typing import Iterable, Literal 
 import pathlib
 import sys
 
@@ -10,8 +10,9 @@ import sys
 # Construct the paths to our custom utility libraries 
 light_loger_analysis_dir: str = str(pathlib.Path(__file__).parents[2]) 
 video_util_path: str = os.path.join(light_loger_analysis_dir, "code", "library", "matlabIO", "python_libraries")
+virtual_foveation_util_path: str = os.path.join(light_loger_analysis_dir, "code", "applyVirtualFoveation", "pythonCode")
 
-custom_library_paths: list[str] = (light_loger_analysis_dir, video_util_path)
+custom_library_paths: list[str] = (light_loger_analysis_dir, video_util_path, virtual_foveation_util_path)
 assert all(os.path.exists(path) for path in custom_library_paths)
 
 for path in custom_library_paths:
@@ -19,9 +20,8 @@ for path in custom_library_paths:
 
 # Import the custom libraries 
 import video_io 
+import virtual_foveation
 
-
-"""Generate the world videos for a recorded experiment"""
 def generate_world_videos(src_dir: str="/Volumes/FLIC_raw/scriptedIndoorVideos", 
                           dst_dir: str="/Volumes/FLIC_processing/scriptedIndoorVideos", 
                           overwrite_existing: bool=False,
@@ -91,17 +91,144 @@ def generate_world_videos(src_dir: str="/Volumes/FLIC_raw/scriptedIndoorVideos",
             
     return 
 
-def generate_egocentric_mapper_results(src_dir: str="", 
-                                       dst_dir: str="",
-                                       overwrite_existing: bool=False
+def generate_egocentric_mapper_results(src_dir: str="/Volumes/FLIC_raw/scriptedIndoorVideos", 
+                                       dst_dir: str="/Volumes/FLIC_processing/scriptedIndoorVideos",
+                                       mapping_choice: Literal["Fixations", "Gaze", "Both"]='Both',
+                                       refresh_time_threshold_sec: float=0.5 ,
+                                       render_video: bool= False,
+                                       render_video_comparison: bool= False,
+                                       optic_flow_algorithm: Literal["Lucas-Kanade", "Gunnar Farneback"] = "Lucas-Kanade", 
+                                       image_matcher: Literal["Efficient_LOFTR", "LOFTR_indoor"] = "Efficient_LOFTR",
+                                       show_video_preview: bool=False, 
+                                       overwrite_existing: bool=False,
+                                       verbose: bool=False
                                       ) -> None:
-    
+    # First, let's find all of the subjects in this experiment 
+    subject_paths: list[str] = natsorted([os.path.join(src_dir, subject_name) 
+                                          for subject_name in os.listdir(src_dir) 
+                                          if re.fullmatch(r"FLIC_\d+", subject_name) 
+                                          and os.path.isdir(os.path.join(src_dir, subject_name))
+                                         ]
+                                        ) 
+    assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
+
+
+    # Now, let's iterate over all the subject paths 
+    subject_iterator: Iterable = range(len(subject_paths)) if verbose is False else tqdm(range(len(subject_paths)), desc="Processing Subjects", leave=True)
+    for subject_num in subject_iterator:
+        # Retrieve the subject path and subject name
+        subject_path: str = subject_paths[subject_num]
+        subject_id: str = os.path.basename(subject_path)
+
+        # Iterate over the activites for this subject 
+        activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in os.listdir(subject_path) 
+                                      if os.path.isdir(os.path.join(subject_path, filename))
+                                     ]
+        activities_iterator: Iterable = range(len(activites_paths)) if verbose is False else tqdm(range(len(activites_paths)), desc="Processing Activities", leave=False)
+        for activity_num in activities_iterator:
+            # Retrieve the activity path and activity name
+            activity_path: str = activites_paths[activity_num]
+            activity_name: str = os.path.basename(activity_path)
+
+            # Next, let's find the paths to both the Neon and the world videos 
+            neon_dir: str = os.path.join(activity_path, "Neon")
+            neon_video_path: str = os.path.join(neon_dir, [filename for filename in os.listdir(neon_dir) if "." not in filename][0])
+            world_video_path: str = os.path.join(dst_dir, subject_id, activity_name, "GKA", "W.avi")
+
+            # Assert these paths exist 
+            assert os.path.exists(neon_video_path) and len(os.listdir(neon_video_path)) > 0, f"Problem with: {neon_video_path}"
+            assert os.path.exists(world_video_path), f"Problem with: {world_video_path}"
+
+            # Define the output directory 
+            neon_output_dir: str = os.path.join(dst_dir, subject_id, activity_name, "Neon", "egocentric_mapper_results")
+
+            # If the output already exsits adn we do not want to overwrite, then just skip 
+            if(os.path.exists(neon_output_dir) and overwrite_existing is False):
+                continue
+
+            # Otherwise, run the egocentric video mapper 
+            if(verbose is True):
+                print(f"Input:")
+                print(f"\tNeon: {neon_video_path}")
+                print(f"\tWorld: {world_video_path}")
+                print(f"Output: {neon_output_dir}")
+
+            """
+            virtual_foveation.run_egocentric_video_mapper(neon_timeseries_dir=neon_video_path, 
+                                                          alternative_vid_path=world_video_path, 
+                                                          output_dir=neon_output_dir,
+                                                          mapping_choice=mapping_choice, 
+                                                          refresh_time_threshold_sec=refresh_time_threshold_sec, 
+                                                          render_video=render_video,
+                                                          render_video_comparison=render_video_comparison, 
+                                                          optic_flow_algorithm=optic_flow_algorithm, 
+                                                          image_matcher=image_matcher, 
+                                                          show_video_preview=show_video_preview
+                                                        )
+            """
+
     return 
 
-def generate_virtually_foveated_videos(src_dir: str="", 
-                                       dst_dir: str = "", 
-                                       overwrite_existing: bool=False
+# TODO: Have to edit a bunch of MATLAB code to work nicely with making a dynamic src/dst, so right now it only works with these 
+def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/scriptedIndoorVideos", 
+                                       dst_dir: str="/Volumes/FLIC_processing/scriptedIndoorVideos", 
+                                       video_type: Literal["april", "task"]= "task",
+                                       overwrite_existing: bool=False,
+                                       verbose: bool=False
                                       ) -> None:
+    
+    import matlab.engine
+
+    # Initialize the MATLAB engine to utilize the MATLAB function we have developed for this purpose 
+    eng: object = matlab.engine.start_matlab()  
+    eng.tbUseProject('lightLoggerAnalysis')
+    
+
+     # First, let's find all of the subjects in this experiment 
+    subject_paths: list[str] = natsorted([os.path.join(src_dir, subject_name) 
+                                          for subject_name in os.listdir(src_dir) 
+                                          if re.fullmatch(r"FLIC_\d+", subject_name) 
+                                          and os.path.isdir(os.path.join(src_dir, subject_name))
+                                         ]
+                                        ) 
+    assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
+
+
+    # Now, let's iterate over all the subject paths 
+    subject_iterator: Iterable = range(len(subject_paths)) if verbose is False else tqdm(range(len(subject_paths)), desc="Processing Subjects", leave=True)
+    for subject_num in subject_iterator:
+        # Retrieve the subject path and subject name
+        subject_path: str = subject_paths[subject_num]
+        subject_id: str = os.path.basename(subject_path)
+        subject_number: int = int(re.search("\d+", subject_id).group())
+
+        # Iterate over the activites for this subject 
+        activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in os.listdir(subject_path) 
+                                      if os.path.isdir(os.path.join(subject_path, filename))
+                                     ]
+        activities_iterator: Iterable = range(len(activites_paths)) if verbose is False else tqdm(range(len(activites_paths)), desc="Processing Activities", leave=False)
+        for activity_num in activities_iterator:
+            # Retrieve the activity path and activity name
+            activity_path: str = activites_paths[activity_num]
+            activity_name: str = os.path.basename(activity_path)
+
+            # Define the output location 
+            output_dir: str = os.path.join(dst_dir, subject_id, activity_name)
+
+            """
+            eng.generateVirtuallyFoveatedVideos([subject_num], 
+                                                "output_dir", dst_dir, 
+                                                "activity", activity_name, 
+                                                "video_type", video_type, 
+                                                "overwrite_existing", overwrite_existing, 
+                                                "verbose", verbose
+                                              )
+            """
+
+
+
+    # Close the MATLAB engine 
+    eng.close() 
     
     return 
 

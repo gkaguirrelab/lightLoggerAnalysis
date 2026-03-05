@@ -9,11 +9,23 @@ import mat73
 import matlab
 
 # Store the scalar multipliers for all of the different colors of pixel's in an image 
-# required to equalize the color to the R pixel values in that frame.
-# We are currently not using this, but calculated it off of a 10 minute 
-# video in a variety of settings (inside (office) outside (street, park))
-# Just something to note that these are inherently unequal
-WORLD_RGB_SCALARS: np.ndarray = np.array([1.0000, 1, 1], dtype=np.float64) # solved for mean 
+# We calculated this by making a measurement of the light integrating sphere in Zach's 
+# room with the combiLED at 0.5 contrast with ONLY channels 2-8 (no channel 1). 
+# The original numbers we got were [1, 1.077, 1.27]
+# Then, we altered these numbers by finding 
+"""
+Ra Ga Ba
+Example:
+1. 1.1. 1.2
+
+Solve for:
+Rb Gb Bb
+
+where:
+Mean[Rb Gb Bb] = 1
+Gb/Rb = Ga/Ra Gb/Bb = Ga/Ba Rb/Bb = Ra/Ba
+"""
+WORLD_RGB_SCALARS: np.ndarray = np.array([0.896,0.965,1.138], dtype=np.float64) 
 
 # Define a mapping between frame sizes and fielding functions of the camera
 WORLD_FIELDING_FUNCTIONS: dict[tuple[int], np.ndarray] = {(480, 640): np.ones((480, 640), dtype=np.float64)}

@@ -12,6 +12,7 @@ function generateVirtuallyFoveatedVideos(subjectIDs, options)
     options.testing (1,1) logical = false
     options.just_projection (1,1) logical = false
     options.non_contiguous_target_frames = {}
+    options.overwrite_existing = false 
     options.video_read_cache_size (1,1) double = 1000
 end
 
@@ -126,6 +127,11 @@ end
         else 
             output_path = fullfile(options.output_dir, output_filename); 
 
+        end 
+
+        % Skip existing videos if we do not want to overwrite them 
+        if(options.overwrite_existing && exists(output_path))
+            continue; 
         end 
 
         if(options.verbose)
