@@ -31,6 +31,9 @@ classdef videoIOWrapper < handle
         read_ahead_buffer
         read_ahead_buffer_size = 1000;
         buffer_start_frame
+        camera_used = "imx219"; 
+        T_receptors
+        T_camera; 
     end
 
     % These may be modified after object creation
@@ -52,8 +55,9 @@ classdef videoIOWrapper < handle
             % Using an old-fashioned input parser as the arguments block
             % syntax fails under Matlab 2025a.
             p = inputParser; p.KeepUnmatched = false;            
-            p.addParameter('ioAction','read',@ischar);
+            p.addParameter('ioAction','read', @(x) ischar(x) || @(x) isstring(x));
             p.addParameter('readAheadBufferSize',1000);
+            p.addParameter('camera_used', @(x) ischar(x) || @(x) isstring(x))
             p.parse(varargin{:})
             options.ioAction = p.Results.ioAction; 
             options.readAheadBufferSize = p.Results.readAheadBufferSize;
@@ -73,6 +77,12 @@ classdef videoIOWrapper < handle
 
             % Store the read ahead buffer size for making reads faster 
             obj.read_ahead_buffer_size = options.readAheadBufferSize;
+
+            % Let's load in the information used for
+            % converting RGB to LMS. We may want this functionality in the future
+            [T_receptors, T_camera] = generate_LMS_transformation_info(obj.camera_used);
+            obj.T_receptors = T_receptors; 
+            obj.T_camera = T_camera; 
 
             switch(options.ioAction)
                 % In the case of read, load in some information about the video 
