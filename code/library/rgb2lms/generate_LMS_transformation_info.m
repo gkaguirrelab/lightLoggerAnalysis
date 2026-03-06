@@ -18,7 +18,7 @@ function [T_receptors, T_camera] = generate_LMS_transformation_info(camera)
 %}
 
     arguments
-        camera {mustBeMember(camera, {"imx219", "standard"})}
+        camera {mustBeMember(camera, ["imx219", "standard"])}
     end
 
     % Load camera spectral sensitivity functions

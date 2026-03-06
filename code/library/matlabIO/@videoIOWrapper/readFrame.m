@@ -94,9 +94,17 @@ function frame = readFrame(obj, options)
         % The buffer is now in memory. If we want to convert to LMS, we should do that now
         % so the whole buffer is in LMS space
         if(options.color == "LMS")
+            % Retrieve the transformation matrices used to convert to LMS 
+            % and the camera choice
+            T_camera = obj.T_camera; 
+            T_receptors = obj.T_receptors;  
+            camera_used = obj.camera_used; 
+
             % Iterate over the buffer 
             parfor pp = 1:size(read_ahead_buffer, 1)
-                read_ahead_buffer(pp, :, :, :) = rgb2lms(read_ahead_buffer(pp, :, :, :));
+                read_ahead_buffer(pp, :, :, :) = rgb2lms(squeeze(read_ahead_buffer(pp, :, :, :)), T_receptors, T_camera,...
+                                                         "camera", camera_used...
+                                                        );
             end 
         end 
         

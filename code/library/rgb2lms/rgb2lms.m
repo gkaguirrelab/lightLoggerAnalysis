@@ -24,7 +24,7 @@ function converted = rgb2lms(frame, T_receptors, T_camera, options)
         frame 
         T_receptors = []
         T_camera = []
-        options.camera {mustBeMember(options.camera, {"imx219", "standard"})} = "imx219"
+        options.camera {mustBeMember(options.camera, ["imx219", "standard"])} = "imx219"
         options.dark_noise = [15.802007242838547, 15.714182405598958, 15.757531591796875]; 
     end 
 
@@ -33,8 +33,9 @@ function converted = rgb2lms(frame, T_receptors, T_camera, options)
     end 
 
     % Let's get the size of the input frame 
-    [nRows, nCols, nChannels] = size(frame); 
+    [nRows, nCols, nChannels] = size(frame);
     assert(nChannels == 3, 'Input frame must have size nRows x nCols x 3.');
+
 
     % Create the spectrum implied by the rgb camera weights, and then project
     % that on the receptors. ensure convert to double for floating point math 
@@ -44,11 +45,9 @@ function converted = rgb2lms(frame, T_receptors, T_camera, options)
     % minute long recording of the camera wrapped in completely black 
     % cloth and then taking the mean of a 40-40 center region over space 
     % and time
-    frame_flat = frame_flat - options.dark_noise; 
- 
+    frame_flat = max(min(frame_flat - options.dark_noise, 255), 0); 
     converted_flat = (T_receptors * (frame_flat * T_camera )' )';
 
     % Then we need to reshape back to the shape of the image
     converted = reshape(converted_flat, nRows, nCols, 3);
-
-end 
+    end 

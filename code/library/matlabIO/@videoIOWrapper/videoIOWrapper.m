@@ -31,7 +31,7 @@ classdef videoIOWrapper < handle
         read_ahead_buffer
         read_ahead_buffer_size = 1000;
         buffer_start_frame
-        camera_used = "imx219"; 
+        camera_used; 
         T_receptors
         T_camera; 
     end
@@ -57,10 +57,11 @@ classdef videoIOWrapper < handle
             p = inputParser; p.KeepUnmatched = false;            
             p.addParameter('ioAction','read', @(x) ischar(x) || @(x) isstring(x));
             p.addParameter('readAheadBufferSize',1000);
-            p.addParameter('camera_used', @(x) ischar(x) || @(x) isstring(x))
+            p.addParameter('camera_used', "imx219", @(x) ischar(x) || @(x) isstring(x) || @(x) ismember(x, ["imx219", "standard"]));
             p.parse(varargin{:})
             options.ioAction = p.Results.ioAction; 
             options.readAheadBufferSize = p.Results.readAheadBufferSize;
+            options.camera_used = p.Results.camera_used; 
 
             % Import the Python helper library 
             obj.utility_library = import_pyfile(getpref("lightLoggerAnalysis", "video_io_util_path")); 
@@ -80,6 +81,7 @@ classdef videoIOWrapper < handle
 
             % Let's load in the information used for
             % converting RGB to LMS. We may want this functionality in the future
+            obj.camera_used = options.camera_used; 
             [T_receptors, T_camera] = generate_LMS_transformation_info(obj.camera_used);
             obj.T_receptors = T_receptors; 
             obj.T_camera = T_camera; 
