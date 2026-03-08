@@ -214,7 +214,7 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/scriptedI
             output_dir: str = os.path.join(dst_dir, subject_id, activity_name)
 
             # Generate april tag and task for this subjecft/video
-            for video_type in ("tag", "task"):
+            for video_type in ("april", "task"):
                 if(verbose is True):
                     print("Input: ")
                     print(f"\t Subject id: {subject_id}")
