@@ -5,7 +5,7 @@ function generateVirtuallyFoveatedVideos(subjectIDs, options)
     options.output_dir (1,1) string = ""
     options.activity (1,1) string = "unspecified"
     options.video_type (1,1) string ...
-        {mustBeMember(options.video_type, ["april","task","unspecified"])} = "unspecified"
+        {mustBeMember(options.video_type, ["tag","task","unspecified"])} = "unspecified"
     options.start_ends = {[1, inf]}
     options.manual_offsets = {}
     options.verbose (1,1) logical = true
