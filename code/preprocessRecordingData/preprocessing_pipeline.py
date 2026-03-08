@@ -169,8 +169,7 @@ def generate_egocentric_mapper_results(src_dir: str="/Volumes/FLIC_raw/scriptedI
 
 # TODO: Have to edit a bunch of MATLAB code to work nicely with making a dynamic src/dst, so right now it only works with these 
 def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/scriptedIndoorVideos", 
-                                       dst_dir: str="/Volumes/FLIC_processing/scriptedIndoorVideos", 
-                                       video_type: Literal["april", "task"]= "task",
+                                       dst_dir: str="/Volumes/FLIC_processing/scriptedIndoorVideos",
                                        overwrite_existing: bool=False,
                                        verbose: bool=False
                                       ) -> None:
@@ -213,26 +212,27 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/scriptedI
 
             # Define the output location 
             output_dir: str = os.path.join(dst_dir, subject_id, activity_name)
-            print(output_dir)
 
-            if(verbose is True):
-                print("Input: ")
-                print(f"\t Subject id: {subject_id}")
-                print(f"\t Subject id number: {subject_id_number}")
-                print(f"\t Activity: {activity_name}")
-                print(f"\t Video type: {video_type}")
+            # Generate april tag and task for this subjecft/video
+            for video_type in ("tag", "task"):
+                if(verbose is True):
+                    print("Input: ")
+                    print(f"\t Subject id: {subject_id}")
+                    print(f"\t Subject id number: {subject_id_number}")
+                    print(f"\t Activity: {activity_name}")
+                    print(f"\t Video type: {video_type}")
 
-                print("Output: ")
-                print(f"\t Output dir: {output_dir}")
+                    print("Output: ")
+                    print(f"\t Output dir: {output_dir}")
 
             
-            eng.generateVirtuallyFoveatedVideos([subject_id_number], 
-                                                "output_dir", dst_dir, 
-                                                "activity", activity_name, 
-                                                "video_type", video_type, 
-                                                "verbose", verbose,
-                                                nargout=0
-                                               )
+                eng.generateVirtuallyFoveatedVideos([subject_id_number], 
+                                                    "output_dir", dst_dir, 
+                                                    "activity", activity_name, 
+                                                    "video_type", video_type, 
+                                                    "verbose", verbose,
+                                                    nargout=0
+                                                )
 
     # Close the MATLAB engine 
     eng.close() 
