@@ -153,7 +153,6 @@ def generate_egocentric_mapper_results(src_dir: str="/Volumes/FLIC_raw/scriptedI
                 print(f"\tWorld: {world_video_path}")
                 print(f"Output: {neon_output_dir}")
 
-            """
             virtual_foveation.run_egocentric_video_mapper(neon_timeseries_dir=neon_video_path, 
                                                           alternative_vid_path=world_video_path, 
                                                           output_dir=neon_output_dir,
@@ -165,7 +164,6 @@ def generate_egocentric_mapper_results(src_dir: str="/Volumes/FLIC_raw/scriptedI
                                                           image_matcher=image_matcher, 
                                                           show_video_preview=show_video_preview
                                                         )
-            """
 
     return 
 
@@ -181,7 +179,8 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/scriptedI
 
     # Initialize the MATLAB engine to utilize the MATLAB function we have developed for this purpose 
     eng: object = matlab.engine.start_matlab()  
-    eng.tbUseProject('lightLoggerAnalysis')
+    eng.pyenv('Version', '~/Documents/MATLAB/projects/lightLoggerAnalysis/analysis_env/bin/python', nargout=0)
+    eng.tbUseProject('lightLoggerAnalysis', nargout=0)
     
 
      # First, let's find all of the subjects in this experiment 
@@ -200,7 +199,7 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/scriptedI
         # Retrieve the subject path and subject name
         subject_path: str = subject_paths[subject_num]
         subject_id: str = os.path.basename(subject_path)
-        subject_number: int = int(re.search("\d+", subject_id).group())
+        subject_id_number: int = int(re.search("\d+", subject_id).group())
 
         # Iterate over the activites for this subject 
         activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in os.listdir(subject_path) 
@@ -214,18 +213,26 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/scriptedI
 
             # Define the output location 
             output_dir: str = os.path.join(dst_dir, subject_id, activity_name)
+            print(output_dir)
 
-            """
-            eng.generateVirtuallyFoveatedVideos([subject_num], 
+            if(verbose is True):
+                print("Input: ")
+                print(f"\t Subject id: {subject_id}")
+                print(f"\t Subject id number: {subject_id_number}")
+                print(f"\t Activity: {activity_name}")
+                print(f"\t Video type: {video_type}")
+
+                print("Output: ")
+                print(f"\t Output dir: {output_dir}")
+
+            
+            eng.generateVirtuallyFoveatedVideos([subject_id_number], 
                                                 "output_dir", dst_dir, 
                                                 "activity", activity_name, 
                                                 "video_type", video_type, 
-                                                "overwrite_existing", overwrite_existing, 
-                                                "verbose", verbose
-                                              )
-            """
-
-
+                                                "verbose", verbose,
+                                                nargout=0
+                                               )
 
     # Close the MATLAB engine 
     eng.close() 

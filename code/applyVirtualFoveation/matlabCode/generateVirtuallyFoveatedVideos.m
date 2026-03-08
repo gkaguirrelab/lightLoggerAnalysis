@@ -36,7 +36,7 @@ end
         subject_nas_path_processing = replace(subject_nas_path_raw, "FLIC_raw", "FLIC_processing");
 
         % Assert these folders exist 
-        assert(isfolder(subject_nas_path_raw) && isfolder(subject_nas_path_processing));
+        assert(isfolder(subject_nas_path_raw) && isfolder(subject_nas_path_processing), sprintf("Problem with %s or %s", subject_nas_path_raw, subject_nas_path_processing));
 
         % Define shortcuts to neon/gka for raw and processing 
         gka_dir_raw = fullfile(subject_nas_path_raw, "GKA"); 
@@ -62,7 +62,7 @@ end
         assert(isfolder(gka_dir_raw) && isfolder(neon_dir_raw) && isfolder(gka_dir_processing) && isfolder(neon_dir_processing)); 
 
         % Also save the directory where the output of the egocentric video mapper lives 
-        egocentric_video_mapper_output_dir = fullfile(neon_dir_processing, "egocentricVideoMapperResults"); 
+        egocentric_video_mapper_output_dir = fullfile(neon_dir_processing, "egocentric_mapper_results"); 
 
         % First, we will define a path to the playable video of the world camera we want to virtually foveate
         % and its timestamp vector output by the neon
@@ -74,7 +74,7 @@ end
             fprintf("\t\tt: %s\n", path_to_world_t);
             fprintf("\t\tv: %s\n", path_to_world_video);
         end     
-        assert(isfile(path_to_world_video) && isfile(path_to_world_t));
+        assert(isfile(path_to_world_video) && isfile(path_to_world_t), sprintf("Problem with %s or %s", path_to_world_video, path_to_world_t));
         world_t = load_world_timestamps(path_to_world_t);
 
         % Load in the camera intrinscis of the world camera 
@@ -153,7 +153,7 @@ end
             % for this task 
             start_end_struct_path = fullfile(subject_nas_path_processing, "tag_task_start_end.mat");
             assert(isfile(start_end_struct_path));
-            start_end = load(start_end_struct).(options.video_type); 
+            start_end = load(start_end_struct_path).tag_task_start_end.(options.video_type); 
         end 
 
         if(options.verbose)
@@ -189,8 +189,6 @@ end
                               "frames_to_process", start_end,...
                               "verbose", options.verbose,...
                               "manual_offset", manual_offset,...
-                              "testing", options.testing,...
-                              "non_contiguous_target_frames",non_contiguous_target_frames,...
                               "video_read_cache_size", options.video_read_cache_size...
                             );
 
