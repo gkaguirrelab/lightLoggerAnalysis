@@ -1,4 +1,5 @@
 import os
+import shutil
 from natsort import natsorted
 import re
 from tqdm.auto import tqdm
@@ -210,9 +211,11 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/scriptedI
             activity_path: str = activites_paths[activity_num]
             activity_name: str = os.path.basename(activity_path)
 
-            # Define the output location 
-            output_dir: str = os.path.join("/Users/zacharykelly/Desktop", subject_id, activity_name)
-            os.makedirs(output_dir, exist_ok=True)
+            # Define a temporary output location (to guard against permission issues)
+            temp_output_dir: str = os.path.join("~/Desktop", subject_id, activity_name+"temp")
+            output_dir: str = os.path.join(dst_dir, subject_id, activity_name)
+            os.makedirs(temp_output_dir) # Not okay for this to exist 
+            os.makedirs(output_dir, exist_ok=True) # Okay for this to exist 
 
             # Generate april tag and task for this subjecft/video
             for video_type in ("tag", "task"):
@@ -228,16 +231,95 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/scriptedI
 
             
                 eng.generateVirtuallyFoveatedVideos([subject_id_number], 
-                                                    "output_dir", output_dir, 
+                                                    "output_dir", temp_output_dir, 
                                                     "activity", activity_name, 
                                                     "video_type", video_type, 
+                                                    "overwrite_existing", overwrite_existing,
                                                     "verbose", verbose,
                                                     nargout=0
                                                 )
 
+                # Move the temp output to the target 
+                temp_output_filenames: list[str] = os.listdir(temp_output_dir)
+                assert len(temp_output_filenames) == 1, f"Found {len(temp_output_filenames)} temp output files. There should only be 1"
+                temp_output_filepath: str = os.path.join(temp_output_dir, temp_output_filenames[0])
+
+                shutil.move(temp_output_filepath, output_dir)
+
+                # Delete the temporary dir 
+                shutil.rmtree(temp_output_dir)
+
     # Close the MATLAB engine 
     eng.close() 
     
+    return 
+
+def generate_spds(src_dir: str="/Volumes/FLIC_processing/scriptedIndoorVideos", 
+                  dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/scriptedIndoorVideos",
+                  overwrite_existing: bool=False,
+                  verbose: bool=False) -> None:
+    
+    import matlab.engine
+
+    # Initialize the MATLAB engine to utilize the MATLAB function we have developed for this purpose 
+    eng: object = matlab.engine.start_matlab()  
+    eng.pyenv('Version', '~/Documents/MATLAB/projects/lightLoggerAnalysis/analysis_env/bin/python', nargout=0)
+    eng.tbUseProject('lightLoggerAnalysis', nargout=0)
+    
+
+     # First, let's find all of the subjects in this experiment 
+    subject_paths: list[str] = natsorted([os.path.join(src_dir, subject_name) 
+                                          for subject_name in os.listdir(src_dir) 
+                                          if re.fullmatch(r"FLIC_\d+", subject_name) 
+                                          and os.path.isdir(os.path.join(src_dir, subject_name))
+                                         ]
+                                        ) 
+    assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
+
+    # Now, let's iterate over all the subject paths 
+    subject_iterator: Iterable = range(len(subject_paths)) if verbose is False else tqdm(range(len(subject_paths)), desc="Processing Subjects", leave=True)
+    for subject_num in subject_iterator:
+        # Retrieve the subject path and subject name
+        subject_path: str = subject_paths[subject_num]
+        subject_id: str = os.path.basename(subject_path)
+        subject_id_number: int = int(re.search("\d+", subject_id).group())
+
+        # Iterate over the activites for this subject 
+        activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in os.listdir(subject_path) 
+                                      if os.path.isdir(os.path.join(subject_path, filename))
+                                     ]
+        activities_iterator: Iterable = range(len(activites_paths)) if verbose is False else tqdm(range(len(activites_paths)), desc="Processing Activities", leave=False)
+        for activity_num in activities_iterator:
+            # Retrieve the activity path and activity name
+            activity_path: str = activites_paths[activity_num]
+            activity_name: str = os.path.basename(activity_path)
+
+            # Generate the output path 
+            output_dir: str = os.path.join(dst_dir, subject_id, activity_name)
+            os.makedirs(output_dir, exist_ok=True)
+
+            if(verbose is True):
+                    print("Input: ")
+                    print(f"\t Subject id: {subject_id}")
+                    print(f"\t Subject id number: {subject_id_number}")
+                    print(f"\t Activity: {activity_name}")
+
+                    print("Output: ")
+                    print(f"\t Output dir: {output_dir}")
+
+            # Generate the SPDs and save at targeted output path 
+            eng.processSPDs(src_dir, 
+                            output_dir, 
+                            "subjects", [subject_id_number], 
+                            "activities", [activity_name],
+                            "verbose", verbose,
+                            "overwrite_existing", overwrite_existing,
+                            nargout=0
+                           )
+
+    # Close the MATLAB engine
+    eng.close() 
+
     return 
 
 
@@ -245,4 +327,4 @@ def main():
     pass 
 
 if(__name__ == "__main__"):
-    main() 
+    main()  

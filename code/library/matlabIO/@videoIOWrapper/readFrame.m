@@ -105,9 +105,12 @@ function frame = readFrame(obj, options)
                 read_ahead_buffer(pp, :, :, :) = rgb2lms(squeeze(read_ahead_buffer(pp, :, :, :)), T_receptors, T_camera,...
                                                          "camera", camera_used...
                                                         );
-            end 
+            end     
             
-
+            % If L+M+S, sum the channels together 
+            if(options.color == "L+M+S")
+                read_ahead_buffer = sum(read_ahead_buffer, 4); 
+            end 
 
         end 
         

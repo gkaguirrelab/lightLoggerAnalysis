@@ -130,7 +130,7 @@ end
         end 
 
         % Skip existing videos if we do not want to overwrite them 
-        if(options.overwrite_existing && exists(output_path))
+        if(~options.overwrite_existing && isfile(output_path))
             continue; 
         end 
 
