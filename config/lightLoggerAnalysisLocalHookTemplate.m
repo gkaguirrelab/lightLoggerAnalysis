@@ -97,6 +97,12 @@ setpref(projectName, "video_io_util_path", video_io_util_path);
 virtual_foveation_util_path = fullfile(light_logger_analysis_path, "code", "applyVirtualFoveation", "pythonCode", "virtual_foveation.py");
 setpref(projectName, "virtual_foveation_util_path", virtual_foveation_util_path); 
 
+% Save the path to FLIC_raw and FLIC_processing on the NAS 
+FLIC_raw_dir = "/Volumes/FLIC_raw"; 
+setpref(projectName, "FLIC_raw_dir", FLIC_raw_dir); 
+
+FLIC_processing_dir = "/Volumes/FLIC_processing"
+setpref(projectName, "FLIC_processing_dir", FLIC_processing_dir); 
 
 % BELIEVE TO BE DEPRECATED
 % Save the path to light logger analysis libraries python 

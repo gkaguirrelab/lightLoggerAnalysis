@@ -2,7 +2,7 @@ function frame = readFrame(obj, options)
     arguments 
         obj 
         options.frameNum {mustBeNumeric} = []; 
-        options.color {mustBeMember(options.color, ["RGB","BGR","GRAY", "LMS"])} = "RGB";
+        options.color {mustBeMember(options.color, ["RGB","BGR","GRAY", "LMS", "L+M+S"])} = "RGB";
         options.zeros_as_nans = false; 
         options.verbose = false; 
         options.force_rebuffer = false; 
@@ -54,7 +54,7 @@ function frame = readFrame(obj, options)
         % Because we will do MATLAB conversion of RGB -> LMS, 
         % if the desired color mode is LMS, we need to send RGB to Python and then convert the buffer in MATLAB 
         python_color = options.color; 
-        if(options.color == "LMS")
+        if(options.color == "LMS" || options.color == "L+M+S")
             python_color = "RGB";
         end     
 
@@ -93,7 +93,7 @@ function frame = readFrame(obj, options)
 
         % The buffer is now in memory. If we want to convert to LMS, we should do that now
         % so the whole buffer is in LMS space
-        if(options.color == "LMS")
+        if(options.color == "LMS" || options.color == "L+M+S")
             % Retrieve the transformation matrices used to convert to LMS 
             % and the camera choice
             T_camera = obj.T_camera; 
@@ -106,6 +106,9 @@ function frame = readFrame(obj, options)
                                                          "camera", camera_used...
                                                         );
             end 
+            
+
+
         end 
         
         % Save the read ahead buffer to the obj 
@@ -118,10 +121,11 @@ function frame = readFrame(obj, options)
 
     % Retrieve the frame from the buffer of frames we have read 
     buffer_position = (frameNum - obj.buffer_start_frame) + 1; 
-    if(obj.current_reading_color_mode == "GRAY")
+    if(obj.current_reading_color_mode == "GRAY" || obj.current_reading_color_mode == "L+M+S")
         frame = reshape(obj.read_ahead_buffer(buffer_position, :, :, :), obj.Height, obj.Width); 
     else
         frame = reshape(obj.read_ahead_buffer(buffer_position, :, :, :), obj.Height, obj.Width, 3); 
+
     end 
 
     % Ensure frame size somehow has not chnanged

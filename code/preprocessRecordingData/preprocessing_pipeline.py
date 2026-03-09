@@ -211,7 +211,8 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/scriptedI
             activity_name: str = os.path.basename(activity_path)
 
             # Define the output location 
-            output_dir: str = os.path.join(dst_dir, subject_id, activity_name)
+            output_dir: str = os.path.join("/Users/zacharykelly/Desktop", subject_id, activity_name)
+            os.makedirs(output_dir, exist_ok=True)
 
             # Generate april tag and task for this subjecft/video
             for video_type in ("tag", "task"):
