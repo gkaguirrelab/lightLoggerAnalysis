@@ -92,7 +92,7 @@ function processSPDs(input_dir, output_dir, options)
             thisVideo = fullfile(task_video(1).folder, task_video(1).name);
 
             % Call mapSPDs
-            [exponentMap, varianceMap, spdByRegion, frq, medianImage, frameDropVector] = mapSPDs(thisVideo, 'frameDropVector', frameDropVector);
+            [exponentMap, varianceMap, spdByRegion, frq, medianImage, frameDropVector] = mapSPDs(thisVideo, 'frameDropVector', frameDropVector, 'doPlot', false);
             activityData.(activityName).exponentMap = exponentMap; 
             activityData.(activityName).varianceMap = varianceMap; 
             activityData.(activityName).spdByRegion = spdByRegion; 
