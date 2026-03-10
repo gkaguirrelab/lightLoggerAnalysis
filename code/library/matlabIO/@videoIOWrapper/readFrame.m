@@ -124,10 +124,11 @@ function frame = readFrame(obj, options)
 
     % Retrieve the frame from the buffer of frames we have read 
     buffer_position = (frameNum - obj.buffer_start_frame) + 1; 
+    frame = squeeze(obj.read_ahead_buffer(buffer_position, :, :, :)); 
     if(obj.current_reading_color_mode == "GRAY" || obj.current_reading_color_mode == "L+M+S")
-        frame = reshape(obj.read_ahead_buffer(buffer_position, :, :, :), obj.Height, obj.Width); 
+        frame = reshape(frame, obj.Height, obj.Width); 
     else
-        frame = reshape(obj.read_ahead_buffer(buffer_position, :, :, :), obj.Height, obj.Width, 3); 
+        frame = reshape(frame, obj.Height, obj.Width, 3); 
 
     end 
 

@@ -51,7 +51,7 @@ def generate_world_videos(src_dir: str="/Volumes/FLIC_raw/scriptedIndoorVideos",
         subject_id: str = os.path.basename(subject_path)
 
         # Iterate over the activites for this subject 
-        activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in os.listdir(subject_path) 
+        activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in natsorted(os.listdir(subject_path))
                                       if os.path.isdir(os.path.join(subject_path, filename))
                                      ]
         activities_iterator: Iterable = range(len(activites_paths)) if verbose is False else tqdm(range(len(activites_paths)), desc="Processing Activities", leave=False)
@@ -122,7 +122,7 @@ def generate_egocentric_mapper_results(src_dir: str="/Volumes/FLIC_raw/scriptedI
         subject_id: str = os.path.basename(subject_path)
 
         # Iterate over the activites for this subject 
-        activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in os.listdir(subject_path) 
+        activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in natsorted(os.listdir(subject_path))
                                       if os.path.isdir(os.path.join(subject_path, filename))
                                      ]
         activities_iterator: Iterable = range(len(activites_paths)) if verbose is False else tqdm(range(len(activites_paths)), desc="Processing Activities", leave=False)
@@ -202,7 +202,7 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/scriptedI
         subject_id_number: int = int(re.search("\d+", subject_id).group())
 
         # Iterate over the activites for this subject 
-        activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in os.listdir(subject_path) 
+        activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in natsorted(os.listdir(subject_path))
                                       if os.path.isdir(os.path.join(subject_path, filename))
                                      ]
         activities_iterator: Iterable = range(len(activites_paths)) if verbose is False else tqdm(range(len(activites_paths)), desc="Processing Activities", leave=False)
@@ -218,7 +218,7 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/scriptedI
             os.makedirs(output_dir, exist_ok=True) # Okay for this to exist 
 
             # Generate april tag and task for this subjecft/video
-            for video_type in ("tag", "task"):
+            for video_type in ("tag", "task"):    
                 if(verbose is True):
                     print("Input: ")
                     print(f"\t Subject id: {subject_id}")
@@ -285,7 +285,7 @@ def generate_spds(src_dir: str="/Volumes/FLIC_processing/scriptedIndoorVideos",
         subject_id_number: int = int(re.search("\d+", subject_id).group())
 
         # Iterate over the activites for this subject 
-        activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in os.listdir(subject_path) 
+        activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in natsorted(os.listdir(subject_path))
                                       if os.path.isdir(os.path.join(subject_path, filename))
                                      ]
         activities_iterator: Iterable = range(len(activites_paths)) if verbose is False else tqdm(range(len(activites_paths)), desc="Processing Activities", leave=False)
@@ -316,7 +316,6 @@ def generate_spds(src_dir: str="/Volumes/FLIC_processing/scriptedIndoorVideos",
                             "overwrite_existing", overwrite_existing,
                             nargout=0
                            )
-
     # Close the MATLAB engine
     eng.close() 
 
