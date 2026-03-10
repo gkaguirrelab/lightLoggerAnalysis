@@ -294,7 +294,10 @@ def generate_spds(src_dir: str="/Volumes/FLIC_processing/scriptedIndoorVideos",
             activity_path: str = activites_paths[activity_num]
             activity_name: str = os.path.basename(activity_path)
 
-            # Generate the output path 
+            if("gazecalibration" in activity_name.lower()):
+                continue
+
+            # Generate the output path  
             output_dir: str = os.path.join(dst_dir, subject_id, activity_name)
             os.makedirs(output_dir, exist_ok=True)
 
