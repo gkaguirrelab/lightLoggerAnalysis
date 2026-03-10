@@ -115,7 +115,7 @@ function processSPDs(input_dir, output_dir, options)
                 end 
                 
                 % Close all the figures after we saved them 
-                close all; 
+                close([exponentMapHandle varianceMapHandle spdByRegionHandle]); 
 
             end
 
