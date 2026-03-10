@@ -7,6 +7,7 @@ function processSPDs(input_dir, output_dir, options)
         options.activities = {};   % cell array of strings, e.g. {'walkIndoorFoveate'}
         options.verbose = false;
         options.overwrite_existing = false; 
+        options.save_figures = false; 
     end
 
     % Find all subject folders matching ^FLIC_\d+$
@@ -99,11 +100,25 @@ function processSPDs(input_dir, output_dir, options)
             activityData.(activityName).frq = frq;
             activityData.(activityName).medianImage = medianImage;
             activityData.(activityName).frameDropVector = frameDropVector;
-            
+                        
             % Output the results of this if desired
             if(output_dir ~= "")
                 save(output_filepath, 'activityData');
+
+                if(save_figures)
+                    [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(activityData, "fovDegrees", 120); 
+                    
+                    exportgraphics(exponentMapHandle, fullfile(output_dir, sprintf('%s_%s_exponentMap.pdf', subjectName, activityName)), 'ContentType','vector');
+                    exportgraphics(varianceMapHandle, fullfile(output_dir, sprintf('%s_%s_varianceMap.pdf', subjectName, activityName)), 'ContentType','vector');
+                    exportgraphics(spdByRegionHandle, fullfile(output_dir, sprintf('%s_%s_spdByRegion.pdf', subjectName, activityName)), 'ContentType','vector');
+
+                end 
+                
+                % Close all the figures after we saved them 
+                close all; 
+
             end
+
         end
 
     end

@@ -1,4 +1,4 @@
-function plotSPDs(activityData, options)
+function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(activityData, options)
     arguments 
         activityData; 
         options.fovDegrees = 120; 
@@ -27,7 +27,7 @@ function plotSPDs(activityData, options)
     degPerPix = fovDegrees / size(exponentMap,1);
 
     % Display the maps
-    figure
+    exponentMapHandle = figure; 
     imagesc(-exponentMap);
     hold on
     plot(240,240,'+k')
@@ -43,7 +43,7 @@ function plotSPDs(activityData, options)
     axis square
     colorbar
 
-    figure
+    varianceMapHandle = figure;
     imagesc(varianceMap, [0.015 0.035]);
     hold on
     plot(240,240,'+k')
@@ -58,7 +58,7 @@ function plotSPDs(activityData, options)
     axis square
     colorbar
 
-    figure
+    spdByRegionHandle = figure; 
     loglog(frq, squeeze(spdByRegion(20,20,:)), '-k');
     hold on
     loglog(frq, squeeze(spdByRegion(31,20,:)), '-r');

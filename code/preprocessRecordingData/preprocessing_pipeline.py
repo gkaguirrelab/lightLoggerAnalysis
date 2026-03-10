@@ -314,6 +314,7 @@ def generate_spds(src_dir: str="/Volumes/FLIC_processing/scriptedIndoorVideos",
                             "activities", [activity_name],
                             "verbose", verbose,
                             "overwrite_existing", overwrite_existing,
+                            "save_figures", True, 
                             nargout=0
                            )
     # Close the MATLAB engine
