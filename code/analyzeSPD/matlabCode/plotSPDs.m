@@ -7,6 +7,7 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(ac
     % Extract the only 
     field_names = fieldnames(activityData);
     activityName = field_names{1};
+    fovDegrees = options.fovDegrees; 
 
     exponentMap = activityData.(activityName).exponentMap;
     varianceMap = activityData.(activityName).varianceMap;
