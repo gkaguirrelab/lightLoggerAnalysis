@@ -438,7 +438,79 @@ def rename_world_recordings(src_dir: str="/Volumes/FLIC_raw/scriptedIndoorVideos
             os.rename(os.path.join(activity_path, world_recording_filename), world_recording_output_dir)
 
     return 
+
+def verify_neon_integrity(src_dir: str="/Volumes/FLIC_raw/scriptedIndoorVideos",
+                          verbose: bool=False
+                         ) -> None:
     
+    # First, let's find all of the subjects in this experiment 
+    subject_paths: list[str] = natsorted([os.path.join(src_dir, subject_name) 
+                                          for subject_name in os.listdir(src_dir) 
+                                          if re.fullmatch(r"FLIC_\d+", subject_name) 
+                                          and os.path.isdir(os.path.join(src_dir, subject_name))
+                                         ]
+                                        ) 
+    assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
+
+
+    # Now, let's iterate over all the subject paths 
+    subject_iterator: Iterable = range(len(subject_paths)) if verbose is False else tqdm(range(len(subject_paths)), desc="Processing Subjects", leave=True)
+    for subject_num in subject_iterator:
+        # Retrieve the subject path and subject name
+        subject_path: str = subject_paths[subject_num]
+        subject_id: str = os.path.basename(subject_path)
+
+        # Iterate over the activites for this subject 
+        activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in natsorted(os.listdir(subject_path))
+                                      if os.path.isdir(os.path.join(subject_path, filename))
+                                     ]
+        activities_iterator: Iterable = range(len(activites_paths)) if verbose is False else tqdm(range(len(activites_paths)), desc="Processing Activities", leave=False)
+        for activity_num in activities_iterator:
+            # Retrieve the activity path and activity name
+            activity_path: str = activites_paths[activity_num]
+            activity_name: str = os.path.basename(activity_path)
+        
+            # Construct the path to the Neon folder
+            neon_folder_path: str = os.path.join(activity_path, "Neon")
+            folder_exists: bool = os.path.exists(neon_folder_path)
+            if(not folder_exists or len(os.listdir(neon_folder_path)) == 0):
+                warnings.warn(f"{neon_folder_path} does not exist or is empty")
+                continue 
+                
+            # If the folder exists, ensure it has the desired content 
+            for filename in ("enrichment_info.txt", "sections.csv"):
+                filepath: str = os.path.join(neon_folder_path, filename)
+                if(not os.path.exists(filepath)):
+                    warnings.warn(f"{filepath} does not exist")
+
+            # Then, there should be a single directory in this file containing other 
+            # information 
+            neon_recording_folder: str | None = None
+            try:
+                neon_recording_folder = [os.path.join(neon_folder_path, filename)
+                                            for filename in os.listdir(neon_folder_path)
+                                            if os.path.isdir(os.path.join(neon_folder_path, filename))
+                                            ][0]
+            except:
+                warnings.warn(f"Subfolder does not exist in {neon_folder_path}")
+
+            # Next, make sure the required files exist in this folder 
+            for filename in ("3d_eye_states.csv", "blinks.csv", "events.csv", "fixations.csv", "gaze.csv", "world_timestamps.csv", "saccades.csv", "template.csv"):
+                filepath: str = os.path.join(neon_recording_folder, filename)
+                if(not os.path.exists(filepath)):
+                    warnings.warn(f"{filepath} does not exist")
+            
+            # Make sure there is a .mp4 video in this folder 
+            try:
+                mp4_video_name: str = [filename for filename in os.listdir(neon_recording_folder)
+                                       if filename.endswith(".mp4")
+                                      ][0]
+            except:
+                warnings.warn(f"{neon_recording_folder} does not have an .mp4 video")
+
+
+    return 
+
 
 def main():
     pass 
