@@ -363,6 +363,7 @@ def unpack_neon_recordings(src_dir: str="/Volumes/FLIC_raw/scriptedIndoorVideos"
             # Define the output path 
             neon_recording_output_dir: str = os.path.join(activity_path, "Neon")
 
+            # Skip files we do not want to overwrite
             if(os.path.exists(neon_recording_output_dir) and len(os.listdir(neon_recording_output_dir)) > 0 and overwrite_existing is False):
                continue
 
@@ -385,6 +386,59 @@ def unpack_neon_recordings(src_dir: str="/Volumes/FLIC_raw/scriptedIndoorVideos"
             os.remove(neon_recording_zip)
 
     return 
+
+def rename_world_recordings(src_dir: str="/Volumes/FLIC_raw/scriptedIndoorVideos",
+                            overwrite_existing: bool=False,
+                            verbose: bool=False
+                           ) -> None:
+    
+    # First, let's find all of the subjects in this experiment 
+    subject_paths: list[str] = natsorted([os.path.join(src_dir, subject_name) 
+                                          for subject_name in os.listdir(src_dir) 
+                                          if re.fullmatch(r"FLIC_\d+", subject_name) 
+                                          and os.path.isdir(os.path.join(src_dir, subject_name))
+                                         ]
+                                        ) 
+    assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
+
+
+    # Now, let's iterate over all the subject paths 
+    subject_iterator: Iterable = range(len(subject_paths)) if verbose is False else tqdm(range(len(subject_paths)), desc="Processing Subjects", leave=True)
+    for subject_num in subject_iterator:
+        # Retrieve the subject path and subject name
+        subject_path: str = subject_paths[subject_num]
+        subject_id: str = os.path.basename(subject_path)
+
+        # Iterate over the activites for this subject 
+        activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in natsorted(os.listdir(subject_path))
+                                      if os.path.isdir(os.path.join(subject_path, filename))
+                                     ]
+        activities_iterator: Iterable = range(len(activites_paths)) if verbose is False else tqdm(range(len(activites_paths)), desc="Processing Activities", leave=False)
+        for activity_num in activities_iterator:
+            # Retrieve the activity path and activity name
+            activity_path: str = activites_paths[activity_num]
+            activity_name: str = os.path.basename(activity_path)
+
+            # Define the output location of this world video 
+            world_recording_output_dir: str = os.path.join(activity_path, "GKA")
+
+            # Skip files we do not want to overwrite
+            if(os.path.exists(world_recording_output_dir) and len(os.listdir(world_recording_output_dir)) > 0 and overwrite_existing is False):
+               continue
+
+            # Try to find the world recording dir
+            try:
+                world_recording_filename: str = [filename for filename in os.listdir(activity_path)
+                                                 if subject_id in filename and activity_name in filename
+                                           ][0]
+            except: 
+                raise Exception(f"No world recording file in {activity_path}")    
+
+            # Rename the file            
+            os.rename(os.path.join(activity_path, world_recording_filename), world_recording_output_dir)
+
+    return 
+    
 
 def main():
     pass 
