@@ -1,20 +1,24 @@
-function activityData = processSPDsAcrossSubjects(options)
+function activityDataAcrossSubjects = processSPDsAcrossSubjects(input_dir, output_dir, options)
 
     arguments
+        input_dir; 
+        output_dir; 
         options.subjects = {};     % cell array of ints, e.g. {2001, 2003}
         options.activities = {};   % cell array of strings, e.g. {'walkIndoorFoveate'}
         options.verbose = false; 
-        options.save_at = ""; 
+        options.save_figures = false; 
+        options.overwrite_existing = false; 
+        options.fovDegrees = 120; 
+
     end
 
-    % First, let's get the location of where the virtually foveated videos live
-    FLIC_processing_dir = getpref("lightLoggerAnalysis", "FLIC_processing_dir");
+    fovDegrees = options.fovDegrees; 
 
     % Initialize output
-    activityData = struct();
+    activityDataAcrossSubjects = struct();
 
     % Find all subject folders matching ^FLIC_\d+$
-    subjectFiles = dir(fullfile(FLIC_processing_dir, 'FLIC_*'));
+    subjectFiles = dir(fullfile(input_dir, 'FLIC_*'));
     subjectFiles = subjectFiles([subjectFiles.isdir]);
 
     subjectNames = {subjectFiles.name};
@@ -34,7 +38,7 @@ function activityData = processSPDsAcrossSubjects(options)
 
     % Save subjectIDs
     for ss = 1:nSubjects
-        activityData.subjectIDs{ss} = subjectFiles(ss).name;
+        activityDataAcrossSubjects.subjectIDs{ss} = subjectFiles(ss).name;
     end
 
     % Determine activity list
@@ -59,23 +63,32 @@ function activityData = processSPDsAcrossSubjects(options)
     % Loop over activities
     n_activities = numel(activityNames); 
     for aa = 1:length(activityNames)
-        if(verbose)
+        if(options.verbose)
             fprintf("Activity Name: %d\%d\n", aa, n_activities); 
         end     
         activityName = activityNames{aa};
 
         % Initialize activity field if needed
-        if ~isfield(activityData, activityName)
-            activityData.(activityName).exponentMaps = [];
-            activityData.(activityName).interceptMaps = [];
-            activityData.(activityName).spdsByRegion = [];
-            activityData.(activityName).medianImage = [];
-            activityData.(activityName).frameDropVector = {};
+        if ~isfield(activityDataAcrossSubjects, activityName)
+            activityDataAcrossSubjects.(activityName).exponentMaps = [];
+            activityDataAcrossSubjects.(activityName).interceptMaps = [];
+            activityDataAcrossSubjects.(activityName).spdsByRegion = [];
+            activityDataAcrossSubjects.(activityName).medianImage = [];
+            activityDataAcrossSubjects.(activityName).frameDropVector = {};
         end
+
+
+        % Check to see if we can skip because we do not want to overwrite existing activities
+        if(output_dir ~= "")
+            output_filepath = fullfile(output_dir, sprintf("%s_SPDResultsAcrossSubjects.mat", activityName)); 
+            if(~options.overwrite_existing && isfile(output_filepath))
+                continue; 
+            end
+        end 
 
         % Loop over subjects
         for ss = 1:nSubjects
-            if(vebrose)
+            if(options.verbose)
                 fprintf("Subject: %d/%d\n", ss, nSubjects);
             end 
 
@@ -94,42 +107,56 @@ function activityData = processSPDsAcrossSubjects(options)
                 end
             end
 
-            % Find task video
+            % Find the activityData struct for just this subject + activity pair
             frameDropVector = [];
-            task_video = dir(fullfile(activityPath, '*task*.avi'));
+            SPD_results = dir(fullfile(activityPath, '*SPDResults.mat'));
 
-            if isempty(task_video)
-                fprintf('No task .avi file found for subject %s, activity %s\n', subjectName, activityName);
+            if isempty(SPD_results)
+                fprintf('No SPDResults file found for subject %s, activity %s\n', subjectName, activityName);
                 continue;
             end
 
-            thisVideo = fullfile(task_video(1).folder, task_video(1).name);
+            thisVideo = fullfile(SPD_results(1).folder, SPD_results(1).name);
 
-            % Call mapSPDs
-            [activityData.(activityName).exponentMaps(:,:,ss), ...
-             activityData.(activityName).interceptMaps(:,:,ss), ...
-             activityData.(activityName).spdsByRegion(:,:,:,ss), ...
-             frq, ...
-             activityData.(activityName).medianImage(:,:,ss), ...
-             activityData.(activityName).frameDropVector{ss}] = ...
-                mapSPDs(thisVideo, 'frameDropVector', frameDropVector);
+            % Load in the per subject + activity SPD struct 
+            individual_spd_results = load(thisVideo).(activityName); 
+            
 
-            activityData.(activityName).frq = frq;
+            % Save this subject + activity pair of data 
+            activityDataAcrossSubjects.(activityName).exponentMaps(:,:,ss) = individual_spd_results.exponentMap; 
+            activityDataAcrossSubjects.(activityName).interceptMaps(:,:,ss) = individual_spd_results.interceptMap; 
+            activityDataAcrossSubjects.(activityName).spdsByRegion(:,:,:,ss) = individual_spd_results.spdByRegion; 
+            activityDataAcrossSubjects.(activityName).medianImage(:,:,ss) = individual_spd_results.medianImage; 
+            activityDataAcrossSubjects.(activityName).frameDropVector{ss} = individual_spd_results.frameDropVector; 
+            activityDataAcrossSubjects.(activityName).frq = individual_spd_results.frq;
         end
 
         % Average across the subjects processed so far for this activity
-        avgExponentMap = squeeze(mean(activityData.(activityName).exponentMaps(:,:,1:nSubjects), 3, 'omitmissing'));
-        avgVarianceMap = squeeze(mean(activityData.(activityName).interceptMaps(:,:,1:nSubjects), 3, 'omitmissing'));
-        avgSpdByRegion = squeeze(mean(activityData.(activityName).spdsByRegion(:,:,:,1:nSubjects), 4, 'omitmissing'));
+        avgExponentMap = squeeze(mean(activityDataAcrossSubjects.(activityName).exponentMaps(:,:,1:nSubjects), 3, 'omitmissing'));
+        avgVarianceMap = squeeze(mean(activityDataAcrossSubjects.(activityName).interceptMaps(:,:,1:nSubjects), 3, 'omitmissing'));
+        avgSpdByRegion = squeeze(mean(activityDataAcrossSubjects.(activityName).spdsByRegion(:,:,:,1:nSubjects), 4, 'omitmissing'));
 
         % Define the image resolution in degrees
-        fovDegrees = 120;
         degPerPix = fovDegrees / size(avgExponentMap, 1);
 
-        activityData.(activityName).fovDegrees = fovDegrees; 
-        activityData.(activityName).degPerPix = degPerPix; 
+        % Output the results of this if desired
+        if(output_dir ~= "")
+            save(output_filepath, 'activityDataAcrossSubjects');
 
-        % 
+            if(options.save_figures)
+                [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(activityDataAcrossSubjects, "fovDegrees", options.fovDegrees); 
+                
+                exportgraphics(exponentMapHandle, fullfile(output_dir, sprintf('%s_exponentMapAcrossSubjects.pdf', activityName)), 'ContentType','vector');
+                exportgraphics(varianceMapHandle, fullfile(output_dir, sprintf('%s_varianceMapAcrossSubjects.pdf', activityName)), 'ContentType','vector');
+                exportgraphics(spdByRegionHandle, fullfile(output_dir, sprintf('%s_spdByRegionAcrossSubjects.pdf', activityName)), 'ContentType','vector');
+
+                % Close all the figures after we saved them 
+                close([exponentMapHandle varianceMapHandle spdByRegionHandle]); 
+
+            end 
+
+        end
+
 
     end
 end

@@ -8,6 +8,7 @@ function processSPDs(input_dir, output_dir, options)
         options.verbose = false;
         options.overwrite_existing = false; 
         options.save_figures = false; 
+        options.fovDegrees = 120; 
     end
 
     % Find all subject folders matching ^FLIC_\d+$
@@ -106,17 +107,16 @@ function processSPDs(input_dir, output_dir, options)
                 save(output_filepath, 'activityData');
 
                 if(options.save_figures)
-                    [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(activityData, "fovDegrees", 120); 
+                    [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(activityData, "fovDegrees", options.fovDegrees); 
                     
                     exportgraphics(exponentMapHandle, fullfile(output_dir, sprintf('%s_%s_exponentMap.pdf', subjectName, activityName)), 'ContentType','vector');
                     exportgraphics(varianceMapHandle, fullfile(output_dir, sprintf('%s_%s_varianceMap.pdf', subjectName, activityName)), 'ContentType','vector');
                     exportgraphics(spdByRegionHandle, fullfile(output_dir, sprintf('%s_%s_spdByRegion.pdf', subjectName, activityName)), 'ContentType','vector');
 
-                end 
+                    % Close all the figures after we saved them 
+                    close([exponentMapHandle varianceMapHandle spdByRegionHandle]); 
+                end     
                 
-                % Close all the figures after we saved them 
-                close([exponentMapHandle varianceMapHandle spdByRegionHandle]); 
-
             end
 
         end
