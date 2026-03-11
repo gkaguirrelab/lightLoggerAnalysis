@@ -105,7 +105,7 @@ function processSPDs(input_dir, output_dir, options)
             if(output_dir ~= "")
                 save(output_filepath, 'activityData');
 
-                if(save_figures)
+                if(options.save_figures)
                     [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(activityData, "fovDegrees", 120); 
                     
                     exportgraphics(exponentMapHandle, fullfile(output_dir, sprintf('%s_%s_exponentMap.pdf', subjectName, activityName)), 'ContentType','vector');
