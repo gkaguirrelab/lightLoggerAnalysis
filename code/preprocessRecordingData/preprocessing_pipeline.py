@@ -25,6 +25,24 @@ for path in custom_library_paths:
 import video_io 
 import virtual_foveation
 
+# -----------------------------------------------------------------------------
+# generate_world_videos
+#
+# Build playable world-camera videos from raw chunk recordings.
+# Iterates over all subjects and activities, combines chunk files from the
+# GKA directory, optionally applies preprocessing (debayer, color weights,
+# digital gain, frame filling), and writes a single W.avi per recording.
+#
+# Inputs:
+#   src_dir            root directory containing raw FLIC recordings
+#   dst_dir            destination directory for processed videos
+#   overwrite_existing regenerate videos even if output exists
+#   apply_color_weights apply camera color calibration
+#   debayer_images     perform Bayer demosaicing
+#   apply_digital_gain apply gain correction
+#   fill_missing_frames interpolate missing frames
+#   verbose            print progress information
+# -----------------------------------------------------------------------------
 def generate_world_videos(src_dir: str="/Volumes/FLIC_raw/scriptedIndoorVideos", 
                           dst_dir: str="/Volumes/FLIC_processing/scriptedIndoorVideos", 
                           overwrite_existing: bool=False,
@@ -94,6 +112,26 @@ def generate_world_videos(src_dir: str="/Volumes/FLIC_raw/scriptedIndoorVideos",
             
     return 
 
+# -----------------------------------------------------------------------------
+# generate_egocentric_mapper_results
+#
+# Runs the egocentric video mapper to align Neon gaze data with the world
+# camera video. Produces gaze/fixation mappings and optional visualization
+# outputs for each subject/activity recording.
+#
+# Inputs:
+#   src_dir                    raw dataset directory
+#   dst_dir                    processing output directory
+#   mapping_choice             Fixations / Gaze / Both
+#   refresh_time_threshold_sec mapping refresh threshold
+#   render_video               render mapping visualization
+#   render_video_comparison    render comparison video
+#   optic_flow_algorithm       optical flow algorithm
+#   image_matcher              feature matcher used for alignment
+#   show_video_preview         show live preview
+#   overwrite_existing         overwrite existing results
+#   verbose                    print progress
+# -----------------------------------------------------------------------------
 def generate_egocentric_mapper_results(src_dir: str="/Volumes/FLIC_raw/scriptedIndoorVideos", 
                                        dst_dir: str="/Volumes/FLIC_processing/scriptedIndoorVideos",
                                        mapping_choice: Literal["Fixations", "Gaze", "Both"]='Both',
@@ -170,7 +208,20 @@ def generate_egocentric_mapper_results(src_dir: str="/Volumes/FLIC_raw/scriptedI
 
     return 
 
-# TODO: Have to edit a bunch of MATLAB code to work nicely with making a dynamic src/dst, so right now it only works with these 
+# -----------------------------------------------------------------------------
+# generate_virtually_foveated_videos
+#
+# Generates retinally-centered (virtually foveated) videos using MATLAB
+# routines. For each subject/activity, launches MATLAB, runs the virtual
+# foveation pipeline, and moves the resulting video into the processing
+# directory.
+#
+# Inputs:
+#   src_dir            raw dataset directory
+#   dst_dir            processed dataset directory
+#   overwrite_existing regenerate existing outputs
+#   verbose            print progress
+# -----------------------------------------------------------------------------
 def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/scriptedIndoorVideos", 
                                        dst_dir: str="/Volumes/FLIC_processing/scriptedIndoorVideos",
                                        overwrite_existing: bool=False,
@@ -256,6 +307,20 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/scriptedI
     
     return 
 
+# -----------------------------------------------------------------------------
+# generate_spds
+#
+# Computes temporal spatial power spectra (SPD) statistics from processed
+# videos using MATLAB analysis functions. Generates exponent maps, variance
+# maps, and spectral summaries for each subject/activity.
+#
+# Inputs:
+#   src_dir             directory containing processed videos
+#   dst_dir             directory for SPD outputs and figures
+#   overwrite_existing  recompute existing results
+#   activities_to_skip  set of activity names to ignore
+#   verbose             print progress
+# -----------------------------------------------------------------------------
 def generate_spds(src_dir: str="/Volumes/FLIC_processing/scriptedIndoorVideos", 
                   dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/scriptedIndoorVideos",
                   overwrite_existing: bool=False,
@@ -328,7 +393,18 @@ def generate_spds(src_dir: str="/Volumes/FLIC_processing/scriptedIndoorVideos",
 
     return 
 
-
+# -----------------------------------------------------------------------------
+# unpack_neon_recordings
+#
+# Extracts Neon eye-tracking recordings from zipped archives inside each
+# activity folder and places them into a "Neon" directory. The original
+# zip archive is removed after extraction.
+#
+# Inputs:
+#   src_dir            raw dataset directory
+#   overwrite_existing re-extract if Neon folder already exists
+#   verbose            print progress
+# -----------------------------------------------------------------------------
 def unpack_neon_recordings(src_dir: str="/Volumes/FLIC_raw/scriptedIndoorVideos",
                            overwrite_existing: bool=False,
                            verbose: bool=False
@@ -387,6 +463,18 @@ def unpack_neon_recordings(src_dir: str="/Volumes/FLIC_raw/scriptedIndoorVideos"
 
     return 
 
+# -----------------------------------------------------------------------------
+# rename_world_recordings
+#
+# Normalizes naming of raw world-camera recordings by renaming the original
+# recording directory to "GKA". Ensures the dataset follows the expected
+# structure used by downstream processing scripts.
+#
+# Inputs:
+#   src_dir            raw dataset directory
+#   overwrite_existing rename even if destination exists
+#   verbose            print progress
+# -----------------------------------------------------------------------------
 def rename_world_recordings(src_dir: str="/Volumes/FLIC_raw/scriptedIndoorVideos",
                             overwrite_existing: bool=False,
                             verbose: bool=False
@@ -439,6 +527,18 @@ def rename_world_recordings(src_dir: str="/Volumes/FLIC_raw/scriptedIndoorVideos
 
     return 
 
+# -----------------------------------------------------------------------------
+# verify_neon_integrity
+#
+# Performs sanity checks on extracted Neon eye-tracking recordings. Ensures
+# required files exist (gaze, blink, fixation, timestamps, etc.) and that
+# the recording directory contains the expected video and metadata files.
+# Missing items generate warnings.
+#
+# Inputs:
+#   src_dir   raw dataset directory
+#   verbose   print additional diagnostics
+# -----------------------------------------------------------------------------
 def verify_neon_integrity(src_dir: str="/Volumes/FLIC_raw/scriptedIndoorVideos",
                           verbose: bool=False
                          ) -> None:
