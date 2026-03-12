@@ -281,38 +281,43 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/scriptedI
 
             # Generate april tag and task for this subjecft/video
             for video_type in video_types:    
-                if(verbose is True):
-                    print("Input: ")
-                    print(f"\t Subject id: {subject_id}")
-                    print(f"\t Subject id number: {subject_id_number}")
-                    print(f"\t Activity: {activity_name}")
-                    print(f"\t Video type: {video_type}")
+                # Determine if we should generate both with/without projection or not 
+                projection_settings: list = (False, True) if video_type != "tag" else (False,)
+                for virtually_foveate_flag in projection_settings:
+                    if(verbose is True):
+                        print("Input: ")
+                        print(f"\t Subject id: {subject_id}")
+                        print(f"\t Subject id number: {subject_id_number}")
+                        print(f"\t Activity: {activity_name}")
+                        print(f"\t Video type: {video_type}")
+                        print(f"\t Projection only: {virtually_foveate_flag}")
 
-                    print("Output: ")
-                    print(f"\t Output dir: {output_dir}")
+                        print("Output: ")
+                        print(f"\t Output dir: {output_dir}")
 
-                # Generate for jsut projection only 
-                eng.generateVirtuallyFoveatedVideos([subject_id_number], 
-                                                    "output_dir", temp_output_dir, 
-                                                    "activity", activity_name, 
-                                                    "video_type", video_type, 
-                                                    "overwrite_existing", overwrite_existing,
-                                                    "verbose", verbose,
-                                                    nargout=0
-                                                )
+                    # Generate for jsut projection only 
+                    eng.generateVirtuallyFoveatedVideos([subject_id_number], 
+                                                        "output_dir", temp_output_dir, 
+                                                        "activity", activity_name, 
+                                                        "video_type", video_type, 
+                                                        "overwrite_existing", overwrite_existing,
+                                                        "verbose", verbose,
+                                                        "just_projection", virtually_foveate_flag
+                                                        nargout=0
+                                                    )
 
-                # Move the temp output to the target 
-                temp_output_filenames: list[str] = [ filename for filename in os.listdir(temp_output_dir) 
-                                                     if filename.endswith(".avi")
-                                                   ] 
+                    # Move the temp output to the target 
+                    temp_output_filenames: list[str] = [ filename for filename in os.listdir(temp_output_dir) 
+                                                        if filename.endswith(".avi")
+                                                    ] 
 
-                assert len(temp_output_filenames) == 1, f"Found {len(temp_output_filenames)} @ {temp_output_filenames} temp output files. There should only be 1"
-                temp_output_filepath: str = os.path.join(temp_output_dir, temp_output_filenames[0])
+                    assert len(temp_output_filenames) == 1, f"Found {len(temp_output_filenames)} @ {temp_output_filenames} temp output files. There should only be 1"
+                    temp_output_filepath: str = os.path.join(temp_output_dir, temp_output_filenames[0])
 
-                shutil.move(temp_output_filepath, output_dir)
+                    shutil.move(temp_output_filepath, output_dir)
 
-                # Delete the temporary dir 
-                shutil.rmtree(temp_output_dir)
+                    # Delete the temporary dir 
+                    shutil.rmtree(temp_output_dir)
 
     # Close the MATLAB engine 
     eng.close() 
