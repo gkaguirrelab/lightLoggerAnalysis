@@ -226,7 +226,9 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/scriptedI
                                        dst_dir: str="/Volumes/FLIC_processing/scriptedIndoorVideos",
                                        overwrite_existing: bool=False,
                                        verbose: bool=False,
-                                       video_types: Iterable[Literal["tag", "task"]] = ("tag", "task")
+                                       video_types: Iterable[Literal["tag", "task"]]= ("tag", "task"),
+                                       subjects_to_skip: Iterable=set(), 
+                                       activities_to_skip: Iterable= set()
                                       ) -> None:
     
     import matlab.engine
@@ -254,6 +256,10 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/scriptedI
         subject_path: str = subject_paths[subject_num]
         subject_id: str = os.path.basename(subject_path)
         subject_id_number: int = int(re.search("\d+", subject_id).group())
+        
+        # Skip desired subjects 
+        if(subject_id_number in subjects_to_skip):
+            continue 
 
         # Iterate over the activites for this subject 
         activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in natsorted(os.listdir(subject_path))
@@ -264,6 +270,10 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/scriptedI
             # Retrieve the activity path and activity name
             activity_path: str = activites_paths[activity_num]
             activity_name: str = os.path.basename(activity_path)
+
+            # Skip any desired activities
+            if(activity_name in activities_to_skip):
+                continue 
 
             # Define a temporary output location (to guard against permission issues)
             temp_output_dir: str = os.path.join(os.path.expanduser("~/Desktop"), "temp_output_dir")
