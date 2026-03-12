@@ -255,10 +255,6 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/scriptedI
         subject_id: str = os.path.basename(subject_path)
         subject_id_number: int = int(re.search("\d+", subject_id).group())
 
-        # TODO: Remove this 
-        if(subject_id_number != 2004):
-            continue
-
         # Iterate over the activites for this subject 
         activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in natsorted(os.listdir(subject_path))
                                       if os.path.isdir(os.path.join(subject_path, filename))
@@ -268,10 +264,6 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/scriptedI
             # Retrieve the activity path and activity name
             activity_path: str = activites_paths[activity_num]
             activity_name: str = os.path.basename(activity_path)
-
-            # TODO: remove this 
-            if(activity_name != "walkIndoor"):
-                continue
 
             # Define a temporary output location (to guard against permission issues)
             temp_output_dir: str = os.path.join(os.path.expanduser("~/Desktop"), "temp_output_dir")
@@ -284,14 +276,22 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/scriptedI
                 # Determine if we should generate both with/without projection or not
                 # We JUST virtually foveate the tag videos
                 projection_settings: list = (False, True) if video_type != "tag" else (False,)
-                for virtually_foveate_flag in projection_settings:
+                for projection_only_flag in projection_settings:
+
+                    # This needs to be hardcoded here because the matlab routine will receive
+                    # just the temp output, so if structure changes we will also need to change this 
+                    projection_type: str = "virtuallyFoveated" if projection_only_flag is False else "justProjection"
+                    output_filepath: str = os.path.join(dst_dir, subject_id, activity_name, f"{subject_id}_{activity_name}_{video_type}_{projection_type}.avi")
+                    if(os.path.exists(output_filepath) and overwrite_existing is False):
+                        continue 
+
                     if(verbose is True):
                         print("Input: ")
                         print(f"\t Subject id: {subject_id}")
                         print(f"\t Subject id number: {subject_id_number}")
                         print(f"\t Activity: {activity_name}")
                         print(f"\t Video type: {video_type}")
-                        print(f"\t Projection only: {virtually_foveate_flag}")
+                        print(f"\t Projection only: {projection_only_flag}")
 
                         print("Output: ")
                         print(f"\t Output dir: {output_dir}")
@@ -303,7 +303,7 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/scriptedI
                                                         "video_type", video_type, 
                                                         "overwrite_existing", overwrite_existing,
                                                         "verbose", verbose,
-                                                        "just_projection", virtually_foveate_flag,
+                                                        "just_projection", projection_only_flag,
                                                         nargout=0
                                                     )
 
