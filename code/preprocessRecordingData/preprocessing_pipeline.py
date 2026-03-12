@@ -278,7 +278,6 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/scriptedI
             # Define a temporary output location (to guard against permission issues)
             temp_output_dir: str = os.path.join(os.path.expanduser("~/Desktop"), "temp_output_dir")
             output_dir: str = os.path.join(dst_dir, subject_id, activity_name)
-            os.makedirs(temp_output_dir) # Not okay for this to exist 
             os.makedirs(output_dir, exist_ok=True) # Okay for this to exist 
 
             # Generate april tag and task for this subjecft/video
@@ -295,6 +294,9 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/scriptedI
                     if(os.path.exists(output_filepath) and overwrite_existing is False):
                         continue 
 
+                    # Make the temp output dir if necessary 
+                    os.makedirs(temp_output_dir)
+                                
                     if(verbose is True):
                         print("Input: ")
                         print(f"\t Subject id: {subject_id}")
@@ -321,7 +323,7 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/scriptedI
                     temp_output_filenames: list[str] = [ filename for filename in os.listdir(temp_output_dir) 
                                                         if filename.endswith(".avi")
                                                     ] 
-
+                
                     assert len(temp_output_filenames) == 1, f"Found {len(temp_output_filenames)} @ {temp_output_filenames} temp output files. There should only be 1"
                     temp_output_filepath: str = os.path.join(temp_output_dir, temp_output_filenames[0])
 
