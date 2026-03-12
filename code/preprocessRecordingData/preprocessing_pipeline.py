@@ -281,7 +281,8 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/scriptedI
 
             # Generate april tag and task for this subjecft/video
             for video_type in video_types:    
-                # Determine if we should generate both with/without projection or not 
+                # Determine if we should generate both with/without projection or not
+                # We JUST virtually foveate the tag videos
                 projection_settings: list = (False, True) if video_type != "tag" else (False,)
                 for virtually_foveate_flag in projection_settings:
                     if(verbose is True):
