@@ -1,4 +1,46 @@
 function visualFieldPoints = anglesFromIntrinsics(sensorPoints, fisheyeIntrinsics)
+% Convert image sensor points to visual-field angles using fisheye intrinsics
+%
+% Syntax:
+%   visualFieldPoints = anglesFromIntrinsics(sensorPoints, fisheyeIntrinsics)
+%
+% Description:
+%   This function converts image coordinates from a fisheye camera sensor
+%   into angular visual-field coordinates. Given a set of sensor points
+%   and a fisheye intrinsics calibration object, the function first shifts
+%   the points relative to the distortion center, then computes each
+%   point's radial distance on the sensor. Using the camera mapping
+%   coefficients, it numerically inverts the fisheye radial mapping to
+%   recover the incident angle theta for each point.
+%
+%   The recovered spherical coordinates are then converted into 3D unit
+%   direction vectors and expressed as azimuth and elevation in degrees.
+%   The returned coordinates are suitable for downstream use in retinal
+%   remapping and virtual foveation routines.
+%
+% Inputs:
+%   sensorPoints         - Numeric matrix. N-by-2 array of sensor/image
+%                          coordinates, where each row is a point in pixel
+%                          units [x, y].
+%   fisheyeIntrinsics    - Camera intrinsics object / struct. Fisheye
+%                          camera calibration object containing at least:
+%                              .DistortionCenter
+%                              .MappingCoefficients
+%
+% Outputs:
+%   visualFieldPoints    - Numeric matrix. N-by-2 array of visual-field
+%                          angles in degrees, where each row is:
+%                              [azimuth, elevation]
+%
+% Examples:
+%{
+    intr = load('/path/to/intrinsics_calibration.mat');
+    intr = intr.camera_intrinsics_calibration.results.Intrinsics;
+
+    sensorPoints = [240 240; 300 220; 180 260];
+    visualFieldPoints = anglesFromIntrinsics(sensorPoints, intr);
+%}    
+    
     arguments
         sensorPoints
         fisheyeIntrinsics

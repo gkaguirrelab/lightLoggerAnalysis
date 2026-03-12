@@ -1,4 +1,57 @@
 function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(activityData, options)
+% Plot temporal SPD exponent, variance, and regional spectrum summaries
+%
+% Syntax:
+%   [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(activityData)
+%   [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(activityData, options)
+%
+% Description:
+%   This function visualizes the outputs of temporal SPD analysis for a
+%   single activity stored in an activityData structure. It extracts the
+%   exponent map, variance map, regional SPD summaries, frequency support,
+%   and median image for the activity, then produces three figures.
+%
+%   The first figure displays the spatial map of fitted temporal SPD
+%   exponent values. The second figure displays the spatial map of
+%   variance values derived from the fitted spectra. Both maps are masked
+%   outside a predefined elliptical field of view and overlaid with
+%   concentric eccentricity circles and a patch grid. The third figure
+%   shows example log-log SPD curves from a central and a more peripheral
+%   image region for comparison.
+%
+% Inputs:
+%   activityData          - Struct. Structure containing temporal SPD
+%                           analysis results for a single activity. The
+%                           first field is assumed to be the activity name
+%                           and to contain:
+%                               .exponentMap
+%                               .varianceMap
+%                               .spdByRegion
+%                               .frq
+%                               .medianImage
+%                               .frameDropVector
+%
+% Optional key/value pairs:
+%   fovDegrees            - Scalar. Field of view in degrees used to
+%                           convert eccentricity ring radii from degrees
+%                           into pixels for plotting.
+%
+% Outputs:
+%   exponentMapHandle     - Figure handle. Handle to the figure showing
+%                           the exponent map.
+%   varianceMapHandle     - Figure handle. Handle to the figure showing
+%                           the variance map.
+%   spdByRegionHandle     - Figure handle. Handle to the figure showing
+%                           example regional SPD curves.
+%
+% Examples:
+%{
+    load('/path/to/FLIC_2001_walkIndoorFoveate_SPDResults.mat', 'activityData');
+
+    [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = ...
+        plotSPDs(activityData, "fovDegrees", 120);
+%}
+    
     arguments 
         activityData; 
         options.fovDegrees = 120; 

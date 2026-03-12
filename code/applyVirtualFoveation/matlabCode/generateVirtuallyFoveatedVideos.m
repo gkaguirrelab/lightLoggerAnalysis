@@ -1,24 +1,100 @@
 function generateVirtuallyFoveatedVideos(subjectIDs, options)
+% Generate virtually foveated world-camera videos for one or more subjects
+%
+% Syntax:
+%   generateVirtuallyFoveatedVideos(subjectIDs)
+%   generateVirtuallyFoveatedVideos(subjectIDs, options)
+%
+% Description:
+%   This function generates virtually foveated versions of world-camera
+%   videos for one or more FLIC subjects. For each subject, the function
+%   locates the corresponding raw and processed recording directories,
+%   loads the processed world video and its timestamps, loads gaze samples
+%   and blink events from the associated Neon outputs, and then calls
+%   virtuallyFoveateVideo to render a new video in which the sampling of
+%   the world video is centered on gaze position.
+%
+%   The function supports processing either user-specified frame ranges or
+%   frame ranges loaded from a saved tag/task start-end structure. It also
+%   supports optional per-subject manual gaze offsets, a projection-only
+%   mode in which all gaze angles are set to zero, and optional output to
+%   either the subject's processing folder or a user-specified directory.
+%
+% Inputs:
+%   subjectIDs            - Cell array / array-like container. Subject IDs
+%                           to process. Each entry should correspond to the
+%                           numeric part of a subject folder name, e.g.
+%                           {2001, 2003}, which will be converted to
+%                           "FLIC_2001", "FLIC_2003", etc.
+%
+% Optional key/value pairs:
+%   input_dir             - Char/string. Base directory containing the
+%                           FLIC_raw and FLIC_processing folders. Defaults
+%                           to "/Volumes/".
+%   output_dir            - String. Output directory for the virtually
+%                           foveated videos. If empty, videos are written
+%                           to the subject's FLIC_processing folder.
+%   activity              - String. Name of the activity folder to process.
+%   video_type            - String. Type of video range to process. Must
+%                           be one of:
+%                               "tag"
+%                               "task"
+%                               "unspecified"
+%                           If "unspecified", frame ranges are taken from
+%                           options.start_ends. Otherwise, frame ranges are
+%                           loaded from tag_task_start_end.mat.
+%   start_ends            - Cell array. Per-subject start/end frame ranges
+%                           used when video_type is "unspecified".
+%   manual_offsets        - Cell array. Optional per-subject manual gaze
+%                           offsets to apply in addition to the default
+%                           [0, 0] offset.
+%   verbose               - Logical. If true, print status information and
+%                           relevant file paths while processing.
+%   just_projection       - Logical. If true, set all gaze angles to zero
+%                           so that the output reflects projection without
+%                           gaze-dependent virtual foveation.
+%   overwrite_existing    - Logical. If false, skip subjects whose output
+%                           video already exists at the target path.
+%   video_read_cache_size - Scalar. Cache size passed to
+%                           virtuallyFoveateVideo for reading video data.
+%
+% Outputs:
+%   none
+%
+% Examples:
+%{
+    generateVirtuallyFoveatedVideos( ...
+        {2001, 2003}, ...
+        "activity", "walkIndoorFoveate", ...
+        "video_type", "task", ...
+        "verbose", true, ...
+        "overwrite_existing", false ...
+    );
 
+    generateVirtuallyFoveatedVideos( ...
+        {2005}, ...
+        "input_dir", "/Volumes/", ...
+        "activity", "taskOutdoor", ...
+        "video_type", "unspecified", ...
+        "start_ends", {[1000 2500]}, ...
+        "manual_offsets", {[1.5 -0.5]}, ...
+        "output_dir", "/path/to/output" ...
+    );
+%}
     arguments
-    subjectIDs
-    options.output_dir (1,1) string = ""
-    options.activity (1,1) string = "unspecified"
-    options.video_type (1,1) string ...
-        {mustBeMember(options.video_type, ["tag","task","unspecified"])} = "unspecified"
-    options.start_ends = {[1, inf]}
-    options.manual_offsets = {}
-    options.verbose (1,1) logical = true
-    options.testing (1,1) logical = false
-    options.just_projection (1,1) logical = false
-    options.non_contiguous_target_frames = {}
-    options.overwrite_existing = false 
-    options.video_read_cache_size (1,1) double = 1000
-end
-
-    % Let's get the dropbox base dir for any references we make to dropbox 
-    dropbox_base_dir = getpref("lightLoggerAnalysis", "dropboxBaseDir"); 
-    NAS_base_dir = "/Volumes/";
+        subjectIDs
+        options.input_dir = "/Volumes/"
+        options.output_dir (1,1) string = ""
+        options.activity (1,1) string = "unspecified"
+        options.video_type (1,1) string ...
+            {mustBeMember(options.video_type, ["tag","task","unspecified"])} = "unspecified"
+        options.start_ends = {[1, inf]}
+        options.manual_offsets = {}
+        options.verbose (1,1) logical = true
+        options.just_projection (1,1) logical = false
+        options.overwrite_existing = false 
+        options.video_read_cache_size (1,1) double = 1000
+    end
 
     % Let's take out activity from options to not have to keep accessing the struct 
     activity = options.activity; 
@@ -28,11 +104,11 @@ end
 
     % Iterate over the subjectIDs enteterd 
     for ii = 1:numel(subjectIDs)
-        % Format the subject IDs as they are on dropbox 
+        % Format the subject IDs as they are on dropbox / NAS
         subjectID = "FLIC_" + string(subjectIDs{ii});
 
         % Now, let's make the path to this subject's files 
-        subject_nas_path_raw = fullfile(NAS_base_dir, "FLIC_raw", "scriptedIndoorVideos", subjectID, activity); 
+        subject_nas_path_raw = fullfile(options.input_dir, "FLIC_raw", "scriptedIndoorVideos", subjectID, activity); 
         subject_nas_path_processing = replace(subject_nas_path_raw, "FLIC_raw", "FLIC_processing");
 
         % Assert these folders exist 
@@ -139,11 +215,6 @@ end
             fprintf("\t\tpath: %s\n", output_path);
         end 
 
-        % Load in the perspective projection object used to transform sensor positions to eye coordinates 
-        % NOTE: If you do not have this, please consult calculate_perspective_transform_w2e.m 
-        path_to_perspective_projection = fullfile(dropbox_base_dir, sprintf("/FLIC_analysis/lightLogger/scriptedIndoorOutdoor/%s/gazeCalibration/temporalFrequency/%s_gazeCal_perspectiveProjection.mat", subjectID, subjectID));
-
-
         % Determine which the range of frames to virtually foveate
         if(options.video_type == "unspecified") % If type unspecified, then we simply manual enter 
             start_end = start_ends{ii};    
@@ -168,18 +239,6 @@ end
             manual_offset = [0, 0]; 
         else 
             manual_offset = options.manual_offsets{ii};
-        end 
-
-        % Retrieve the non contiguous target frames if provided 
-        if(numel(options.non_contiguous_target_frames) == 0)
-            non_contiguous_target_frames = [];
-        else 
-            non_contiguous_target_frames = options.non_contiguous_target_frames{ii};
-        end 
-
-
-        if(options.testing)
-            warning("Testing has been enabled. This means that for each frame a figure will appear. This will make any sort of long video unable to finish due to amount of figures");
         end 
 
         % Virtually foveate and output the video 

@@ -1,39 +1,67 @@
 function retinalImage = virtuallyFoveateFrame(I, gaze_angle, fisheyeIntrinsicsPath, options)
-% Transform world camera image in pixels to retinal image in degrees
+% Resample a world-camera image onto a gaze-centered retinal coordinate grid
 %
 % Syntax:
+%   retinalImage = virtuallyFoveateFrame(I, gaze_angle, fisheyeIntrinsicsPath)
 %   retinalImage = virtuallyFoveateFrame(I, gaze_angle, fisheyeIntrinsicsPath, options)
 %
 % Description:
-%   This function takes in an image (I) and transforms that image to a
-%   retinal representation by mapping each world-camera pixel to a (x,y)
-%   location in degrees of visual angle (via empirically measured fisheye
-%   intrinsics), then resampling onto a regular grid centered at gaze_angle.
+%   This function transforms a world-camera image from pixel coordinates
+%   into a retinal image represented on a regular grid in degrees of
+%   visual angle. It uses empirically measured fisheye camera intrinsics
+%   to map each input pixel to an angular location, then resamples the
+%   image onto a gaze-centered grid spanning a specified field of view.
 %
-%   NOTE: This version supports a FIXED output size via options.desiredN.
-%   If desiredN is provided, the output is always desiredN-by-desiredN
-%   (or desiredN-by-desiredN-by-3 for RGB), eliminating 480/481 jitter.
+%   The function supports both grayscale and RGB inputs. To avoid repeated
+%   recomputation across frames, the fisheye intrinsics and the pixel-to-
+%   degrees mapping are cached using persistent variables. The output size
+%   can be fixed by specifying options.desiredN, which ensures a constant
+%   output resolution across frames.
 %
 % Inputs:
-%   I                     - Matrix, double. The world camera image.
-%                           Can be grayscale (nRows x nCols) or RGB
+%   I                     - Numeric matrix. Input world-camera image. May
+%                           be grayscale (nRows x nCols) or RGB
 %                           (nRows x nCols x 3).
-%   gaze_angle            - 2x1 vector specifying azimuth and elevation
-%                           (degrees) in the SAME coordinate frame as the
-%                           output of anglesFromIntrinsics().
-%   fisheyeIntrinsicsPath - String/char full path to intrinsics .mat file.
+%   gaze_angle            - Numeric vector. Two-element vector specifying
+%                           azimuth and elevation in degrees, in the same
+%                           coordinate frame returned by
+%                           anglesFromIntrinsics().
+%   fisheyeIntrinsicsPath - Char/string. Full path to a .mat file
+%                           containing the fisheye camera intrinsics used
+%                           for the pixel-to-angle mapping.
 %
-% Optional key/value pairs (name-value):
-%   "FOVradius"            - Scalar. Half-width field of view radius (deg).
-%   "degPerSample"         - Scalar. (Only used if desiredN is empty.)
-%   "desiredN"             - Integer. Fixed output width/height in samples.
-%   "forceRecalc"          - Logical. Force recomputing intrinsics mapping.
+% Optional key/value pairs:
+%   FOVradius             - Scalar. Half-width of the retinal field of
+%                           view in degrees around gaze center.
+%   degPerSample          - Scalar. Angular spacing per output sample in
+%                           degrees. Included for compatibility with
+%                           versions that determine output size from
+%                           sampling density.
+%   desiredN              - Positive integer. Fixed output width and height
+%                           in samples. The returned image will be
+%                           desiredN-by-desiredN for grayscale input or
+%                           desiredN-by-desiredN-by-3 for RGB input.
+%   forceRecalc           - Logical. If true, force recomputation of the
+%                           fisheye intrinsics mapping even if cached
+%                           values are available.
 %
-% Output:
-%   retinalImage           - Resampled image on regular degree grid.
+% Outputs:
+%   retinalImage          - Numeric matrix. Image resampled onto a regular
+%                           retinal grid centered at gaze_angle.
 %
-% Example:
-%   R = virtuallyFoveateFrame(I, [0;0], intrPath, "desiredN", 480);
+% Examples:
+%{
+    intrPath = "/path/to/intrinsics_calibration.mat";
+    retinalImage = virtuallyFoveateFrame(I, [0; 0], intrPath);
+
+    retinalImage = virtuallyFoveateFrame( ...
+        I, ...
+        [5; -2], ...
+        intrPath, ...
+        "FOVradius", 60, ...
+        "desiredN", 480 ...
+    );
+%}R = virtuallyFoveateFrame(I, [0;0], intrPath, "desiredN", 480);
 
     arguments
         I double

@@ -1,5 +1,82 @@
-function processSPDs(input_dir, output_dir, options)
+function activityDataAcrossSubjects = processSPDsAcrossSubjects(input_dir, output_dir, options)
+% Aggregate per-subject temporal SPD analysis results across activities
+%
+% Syntax:
+%   activityDataAcrossSubjects = processSPDsAcrossSubjects(input_dir, output_dir)
+%   activityDataAcrossSubjects = processSPDsAcrossSubjects(input_dir, output_dir, options)
+%
+% Description:
+%   This function searches a directory of subject folders and aggregates
+%   previously computed temporal SPD analysis results across subjects for
+%   each activity. Subject folders are expected to follow the naming
+%   convention "FLIC_<subjectID>", and each subject folder may contain one
+%   or more activity subfolders. Within each activity folder, the function
+%   looks for a saved "*SPDResults.mat" file that contains the per-subject
+%   SPD analysis outputs.
+%
+%   For each activity, the function collects exponent maps, variance maps,
+%   region-wise SPDs, median images, frame drop vectors, and frequency
+%   support from all subjects with available data. These are stored in a
+%   structured output indexed by activity name. The function can
+%   optionally save the aggregated results to disk and export summary
+%   figures showing the across-subject exponent map, variance map, and
+%   regional SPD summaries.
+%
+% Inputs:
+%   input_dir             - Char/string. Path to the directory containing
+%                           subject folders named like "FLIC_2001",
+%                           "FLIC_2002", etc.
+%   output_dir            - Char/string. Path to the directory where
+%                           aggregated results and optional figures should
+%                           be saved. If empty, results are returned but
+%                           not written to disk.
+%
+% Optional key/value pairs:
+%   subjects              - Cell array. List of subject numeric IDs to
+%                           include, e.g. {2001, 2003}. If empty, all
+%                           valid subject folders in input_dir are used.
+%   activities            - Cell array. List of activity folder names to
+%                           process, e.g. {'walkIndoorFoveate'}. If empty,
+%                           the function determines the union of all
+%                           activity folders found across subjects.
+%   verbose               - Logical. If true, print progress information
+%                           while processing activities and subjects.
+%   save_figures          - Logical. If true, generate and export summary
+%                           figures for each activity to output_dir.
+%   overwrite_existing    - Logical. If false, skip processing an activity
+%                           when a saved across-subject results file for
+%                           that activity already exists in output_dir.
+%   fovDegrees            - Scalar. Field of view in degrees passed to
+%                           plotSPDs when exporting summary figures.
+%
+% Outputs:
+%   activityDataAcrossSubjects
+%                         - Struct. Structure containing across-subject SPD
+%                           analysis results for each activity. Each
+%                           activity field may contain:
+%                               .exponentMaps
+%                               .varianceMaps
+%                               .spdsByRegion
+%                               .medianImage
+%                               .frameDropVector
+%                               .frq
+%                           The structure also contains:
+%                               .subjectIDs
+%
+% Examples:
+%{
+    input_dir = "/path/to/FLIC_processing";
+    output_dir = "/path/to/SPD_across_subjects";
 
+    activityDataAcrossSubjects = processSPDsAcrossSubjects( ...
+        input_dir, ...
+        output_dir, ...
+        "subjects", {2001, 2003, 2005}, ...
+        "activities", {'walkIndoorFoveate', 'taskOutdoor'}, ...
+        "verbose", true, ...
+        "save_figures", true ...
+    );
+%}
     arguments
         input_dir; 
         output_dir; 

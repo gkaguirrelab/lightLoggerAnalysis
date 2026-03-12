@@ -1,26 +1,80 @@
 function [exponentMap, varianceMap, spdByRegion, frq, medianImage, frameDropVector] = mapSPDs(videoPath, options)
-% Computes the exponent and intercept of a 1/f fit to temporal SPD across
-% image regions and projects them onto a 1 m visual field surface, then
-% plots both maps.
+% Compute temporal SPD exponent and variance maps across image regions
 %
-% Required Inputs:
-%   video             - String. path to video in hdf5 format
-%   fps               - Scalar. Sampling rate (Hz)
-%   windowSpacePixels            - [height width] of square region
-%   stepSpacePixels              - stepSpacePixels size for moving windowSpacePixels.
-%   doPlot            - (boolean) Visualize the SPD maps or not
+% Syntax:
+%   [exponentMap, varianceMap, spdByRegion, frq, medianImage, frameDropVector] = mapSPDs(videoPath)
+%   [exponentMap, varianceMap, spdByRegion, frq, medianImage, frameDropVector] = mapSPDs(videoPath, options)
 %
-% Optional:
-%   affineMat         - 2x3 affine matrix to apply to [az, el] before XYZ
+% Description:
+%   This function computes temporal spectral power distribution (SPD)
+%   summaries across local image regions of a video. The video is divided
+%   into overlapping temporal chunks and overlapping spatial patches. For
+%   each patch within each chunk, the function estimates the temporal SPD
+%   and fits a line in the log-log domain to characterize the slope of the
+%   spectrum. The fitted slope is stored as the exponent map, and the area
+%   under the fitted spectrum is used to derive a variance map.
+%
+%   The function also stores the regional SPDs, the frequency support used
+%   in the spectral analysis, the median image across time, and a vector
+%   indicating dropped or invalid frames. After processing all chunks, the
+%   function averages the exponent, variance, and SPD summaries across
+%   time. The resulting maps can optionally be displayed.
+%
+% Inputs:
+%   videoPath            - Char/string. Path to the video file to be
+%                          analyzed.
+%
+% Optional key/value pairs:
+%   fps                  - Scalar. Sampling rate of the video in Hz.
+%   frameIdxToProcess    - Two-element numeric vector. Start and end frame
+%                          indices to process. Use [1, inf] to process the
+%                          full video.
+%   windowSpacePixels    - Two-element numeric vector. Height and width of
+%                          the spatial analysis window in pixels.
+%   stepSpacePixels      - Scalar. Step size in pixels between adjacent
+%                          spatial analysis windows.
+%   windowTimeSecs       - Scalar. Duration in seconds of each temporal
+%                          chunk used for SPD estimation.
+%   stepTimeSecs         - Scalar. Step size in seconds between adjacent
+%                          temporal chunks.
+%   doPlot               - Logical. If true, display the exponent map,
+%                          variance map, and median image at the end of
+%                          processing.
+%   nWorkers             - Scalar. Number of workers requested for
+%                          parallel processing. Included for compatibility
+%                          with parallelized versions of this function.
+%   frameDropVector      - Numeric vector. Optional logical/numeric vector
+%                          indicating frames that should be treated as
+%                          dropped and replaced with NaNs before analysis.
 %
 % Outputs:
-%   exponentMap       - exponent of 1/f function at each location
-%   interceptMap      - power (in units of contrast) at 1 Hz.
-%   frq               - frequency vector used in SPD
+%   exponentMap          - Numeric matrix. Spatial map of the fitted log-log
+%                          temporal SPD slope, averaged across chunks.
+%   varianceMap          - Numeric matrix. Spatial map of the variance
+%                          derived from the fitted temporal SPD, averaged
+%                          across chunks.
+%   spdByRegion          - Numeric array. Mean temporal SPD for each
+%                          spatial patch, averaged across chunks.
+%   frq                  - Numeric vector. Frequency support used in the
+%                          SPD computation, excluding the zeroeth and
+%                          Nyquist frequencies.
+%   medianImage          - Numeric matrix. Median image across processed
+%                          chunks.
+%   frameDropVector      - Numeric vector. Updated frame drop vector
+%                          indicating frames that were treated as invalid.
 %
-% Example Usage:
+% Examples:
 %{
-    [exponentMap, interceptMap, spdByRegion, frq, medianImage] = mapSPDs(videoPath)
+    videoPath = "/path/to/task_video.avi";
+
+    [exponentMap, varianceMap, spdByRegion, frq, medianImage, frameDropVector] = ...
+        mapSPDs(videoPath, ...
+                "fps", 120, ...
+                "windowSpacePixels", [24 24], ...
+                "stepSpacePixels", 12, ...
+                "windowTimeSecs", 1, ...
+                "stepTimeSecs", 0.5, ...
+                "doPlot", true);
 %}
     arguments
         videoPath {mustBeText}
