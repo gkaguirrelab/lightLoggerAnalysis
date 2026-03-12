@@ -61,7 +61,9 @@ function retinalImage = virtuallyFoveateFrame(I, gaze_angle, fisheyeIntrinsicsPa
         "FOVradius", 60, ...
         "desiredN", 480 ...
     );
-%}R = virtuallyFoveateFrame(I, [0;0], intrPath, "desiredN", 480);
+    
+    retinalImage = virtuallyFoveateFrame(I, [0; 0], intrPath, "desiredN", 480);
+%}
 
     arguments
         I double

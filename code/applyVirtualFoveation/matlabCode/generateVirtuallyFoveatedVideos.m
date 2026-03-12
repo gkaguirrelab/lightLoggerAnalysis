@@ -197,7 +197,12 @@ function generateVirtuallyFoveatedVideos(subjectIDs, options)
         offsets = [0, 0]; 
 
         % Define the output path where this video will write to 
-        output_filename = sprintf("%s_%s_%s_virtuallyFoveated.avi", subjectID, activity, options.video_type); 
+        projection_type = "virtuallyFoveated"; 
+        if(options.just_projection)
+            projection_type = "justProjection";
+        end 
+
+        output_filename = sprintf("%s_%s_%s_%s.avi", subjectID, activity, options.video_type, projection_type); 
         if(options.output_dir == "")
             output_path = fullfile(subject_nas_path_processing, output_filename); 
         else 

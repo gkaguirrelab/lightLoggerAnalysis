@@ -126,7 +126,7 @@ function virtuallyFoveateVideo(world_video, sensor_t_cell, gaze_angles, gaze_off
     % Then, we flip the signs to be upsidedown and left handed. Then, 
     % we apply a manual offset from the April Tag. The sign of this corresponds to the follow
     % +azi = move right, +ele = move up
-    gaze_angles(:, 1:2) = ( ( gaze_angles(:, 1:2) - gaze_offsets ) .* [1, -1] ) + options.manual_offset;
+    gaze_angles(:, 1:2) = ( ( gaze_angles(:, 1:2) - gaze_offsets ) .* [1, -1    ] ) + options.manual_offset;
 
     % Extract world and pupil t 
     world_t = sensor_t_cell{1};

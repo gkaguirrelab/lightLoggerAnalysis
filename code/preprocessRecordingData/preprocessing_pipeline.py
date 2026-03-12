@@ -225,7 +225,8 @@ def generate_egocentric_mapper_results(src_dir: str="/Volumes/FLIC_raw/scriptedI
 def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/scriptedIndoorVideos", 
                                        dst_dir: str="/Volumes/FLIC_processing/scriptedIndoorVideos",
                                        overwrite_existing: bool=False,
-                                       verbose: bool=False
+                                       verbose: bool=False,
+                                       video_types: Iterable[Literal["tag", "task"]] = ("tag", "task")
                                       ) -> None:
     
     import matlab.engine
@@ -236,7 +237,7 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/scriptedI
     eng.tbUseProject('lightLoggerAnalysis', nargout=0)
     
 
-     # First, let's find all of the subjects in this experiment 
+    # First, let's find all of the subjects in this experiment 
     subject_paths: list[str] = natsorted([os.path.join(src_dir, subject_name) 
                                           for subject_name in os.listdir(src_dir) 
                                           if re.fullmatch(r"FLIC_\d+", subject_name) 
@@ -254,6 +255,10 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/scriptedI
         subject_id: str = os.path.basename(subject_path)
         subject_id_number: int = int(re.search("\d+", subject_id).group())
 
+        # TODO: Remove this 
+        if(subject_id_number != 2004):
+            continue
+
         # Iterate over the activites for this subject 
         activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in natsorted(os.listdir(subject_path))
                                       if os.path.isdir(os.path.join(subject_path, filename))
@@ -264,14 +269,18 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/scriptedI
             activity_path: str = activites_paths[activity_num]
             activity_name: str = os.path.basename(activity_path)
 
+            # TODO: remove this 
+            if(activity_name != "walkIndoor"):
+                continue
+
             # Define a temporary output location (to guard against permission issues)
-            temp_output_dir: str = os.path.join("./temp_output_dir")
+            temp_output_dir: str = os.path.join(os.path.expanduser("~/Desktop"), "temp_output_dir")
             output_dir: str = os.path.join(dst_dir, subject_id, activity_name)
             os.makedirs(temp_output_dir) # Not okay for this to exist 
             os.makedirs(output_dir, exist_ok=True) # Okay for this to exist 
 
             # Generate april tag and task for this subjecft/video
-            for video_type in ("tag", "task"):    
+            for video_type in video_types:    
                 if(verbose is True):
                     print("Input: ")
                     print(f"\t Subject id: {subject_id}")
@@ -282,7 +291,7 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/scriptedI
                     print("Output: ")
                     print(f"\t Output dir: {output_dir}")
 
-            
+                # Generate for jsut projection only 
                 eng.generateVirtuallyFoveatedVideos([subject_id_number], 
                                                     "output_dir", temp_output_dir, 
                                                     "activity", activity_name, 
@@ -293,8 +302,11 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/scriptedI
                                                 )
 
                 # Move the temp output to the target 
-                temp_output_filenames: list[str] = os.listdir(temp_output_dir)
-                assert len(temp_output_filenames) == 1, f"Found {len(temp_output_filenames)} temp output files. There should only be 1"
+                temp_output_filenames: list[str] = [ filename for filename in os.listdir(temp_output_dir) 
+                                                     if filename.endswith(".avi")
+                                                   ] 
+
+                assert len(temp_output_filenames) == 1, f"Found {len(temp_output_filenames)} @ {temp_output_filenames} temp output files. There should only be 1"
                 temp_output_filepath: str = os.path.join(temp_output_dir, temp_output_filenames[0])
 
                 shutil.move(temp_output_filepath, output_dir)
