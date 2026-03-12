@@ -302,7 +302,7 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/scriptedI
                                                         "video_type", video_type, 
                                                         "overwrite_existing", overwrite_existing,
                                                         "verbose", verbose,
-                                                        "just_projection", virtually_foveate_flag
+                                                        "just_projection", virtually_foveate_flag,
                                                         nargout=0
                                                     )
 
