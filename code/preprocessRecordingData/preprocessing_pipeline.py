@@ -288,6 +288,10 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/scriptedI
                 for projection_type in projection_types:
                     projection_only_flag: bool = projection_type == "justProjection"
 
+                    # We JUST want to foveate the tags
+                    if(video_type == "tag" and projection_type == "justProjection"):
+                        continue 
+
                     # This needs to be hardcoded here because the matlab routine will receive
                     # just the temp output, so if structure changes we will also need to change this 
                     output_filepath: str = os.path.join(dst_dir, subject_id, activity_name, f"{subject_id}_{activity_name}_{video_type}_{projection_type}.avi")
@@ -295,6 +299,8 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/scriptedI
                         continue 
 
                     # Make the temp output dir if necessary 
+                    if(os.path.exists(temp_output_dir)):
+                        shutil.rmtree(temp_output_dir)
                     os.makedirs(temp_output_dir)
                                 
                     if(verbose is True):
