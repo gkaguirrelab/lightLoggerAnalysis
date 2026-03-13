@@ -341,7 +341,7 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/scriptedI
                     shutil.rmtree(temp_output_dir)
 
     # Close the MATLAB engine 
-    eng.close() 
+    eng.quit() 
     
     return 
 
