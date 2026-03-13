@@ -178,7 +178,7 @@ function generateVirtuallyFoveatedVideos(subjectIDs, options)
         if(options.just_projection)
             size_before = size(gaze_angles);
             median_gaze_angle = median(gaze_angles, 1);
-            gaze_angles(:, :) = median_gaze_angle;
+            gaze_angles = repmat(median_gaze_angle, size(gaze_angles, 1), 1);
             size_after = size(gaze_angles);
             
             assert(isequal(size_before, size_after));
