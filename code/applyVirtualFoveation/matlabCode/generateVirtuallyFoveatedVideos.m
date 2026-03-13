@@ -174,12 +174,15 @@ function generateVirtuallyFoveatedVideos(subjectIDs, options)
         
         [pupil_t, gaze_angles] = load_gaze_angles(path_to_pupil_data, path_to_intrinsics); 
 
-        % If we are just doing project and not full virtual foveation, set all gaze angles to 0 
+        % If we are just doing project and not full virtual foveation, set all gaze angles to the median
         if(options.just_projection)
-            gaze_angles(:, :) = 0; 
-            if(any(gaze_angles(:)) ~= 0)
-                error("Projection only mode was selected but non zero gaze angles detected");
-            end 
+            size_before = size(gaze_angles);
+            median_gaze_angle = median(gaze_angles, 1);
+            gaze_angles(:, :) = median_gaze_angle;
+            size_after = size(gaze_angles);
+            
+            assert(isequal(size_before, size_after));
+
         end 
 
         % Next we will load in the blink events 
