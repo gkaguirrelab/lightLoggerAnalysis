@@ -333,6 +333,8 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/scriptedI
                     assert len(temp_output_filenames) == 1, f"Found {len(temp_output_filenames)} @ {temp_output_filenames} temp output files. There should only be 1"
                     temp_output_filepath: str = os.path.join(temp_output_dir, temp_output_filenames[0])
 
+                    if(os.path.exists(output_filepath)):
+                        os.remove(output_filepath)
                     shutil.move(temp_output_filepath, output_filepath)
 
                     # Delete the temporary dir 
