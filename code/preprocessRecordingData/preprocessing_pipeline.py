@@ -228,7 +228,8 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/scriptedI
                                        verbose: bool=False,
                                        video_types: Iterable[Literal["tag", "task"]]= ("tag", "task"),
                                        subjects_to_skip: Iterable=set(), 
-                                       activities_to_skip: Iterable= set()
+                                       activities_to_skip: Iterable= set(),
+                                       projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = set(["virtuallyFoveated", "justProjection"])
                                       ) -> None:
     
     import matlab.engine
@@ -284,12 +285,11 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/scriptedI
             for video_type in video_types:    
                 # Determine if we should generate both with/without projection or not
                 # We JUST virtually foveate the tag videos
-                projection_settings: list = (False, True) if video_type != "tag" else (False,)
-                for projection_only_flag in projection_settings:
+                for projection_type in projection_types:
+                    projection_only_flag: bool = projection_type == "justProjection"
 
                     # This needs to be hardcoded here because the matlab routine will receive
                     # just the temp output, so if structure changes we will also need to change this 
-                    projection_type: str = "virtuallyFoveated" if projection_only_flag is False else "justProjection"
                     output_filepath: str = os.path.join(dst_dir, subject_id, activity_name, f"{subject_id}_{activity_name}_{video_type}_{projection_type}.avi")
                     if(os.path.exists(output_filepath) and overwrite_existing is False):
                         continue 
