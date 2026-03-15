@@ -383,45 +383,11 @@ def generate_spds(src_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorVideos
                                         ) 
     assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
 
-    # Generate the temp dir wher we will
-    # temporarily copy the src files to. This is to avoid network interrupts 
-    # reading large files over e.g. the NAS
-    temp_output_dir: str = os.path.join(os.path.expanduser("~/Desktop"), "temp_output_dir_SPDs")
-    if(os.path.exists(temp_output_dir)):
-        shutil.rmtree(temp_output_dir)
-    os.makedirs(temp_output_dir)
-
-    # Copy over the target subjects from the source dir to the temp dir 
-    temp_subject_paths: list[str] = []
-    for subj_src_path in subject_paths:
-        # Find the subject number as the basename 
-        subject_id: str = os.path.basename(subj_src_path)
-        temp_subject_path: str = os.path.join(temp_output_dir, subject_id)
-        temp_subject_paths.append(temp_subject_path)
-
-        # Make sure the subject temp output dir exists 
-        os.makedirs(temp_subject_path, exist_ok=True)
-
-        # Iterate over the activites here and copy them to the temp dir 
-        for activity in os.listdir(subj_src_path):
-            if(activity.startswith(".") or activity in activities_to_skip):
-                continue 
-            
-            # Create the original activity path and the path where the files in 
-            # it will go 
-            activity_src_path: str = os.path.join(subj_src_path, activity)
-            temp_activity_path: str = os.path.join(temp_subject_path, activity)
-            
-            # TODO: Add only copy not processed files when not overwrite check 
-
-            # Copy them over
-            shutil.copytree(activity_src_path, temp_activity_path)
-
     # Now, let's iterate over all the subject paths 
     subject_iterator: Iterable = range(len(subject_paths)) if verbose is False else tqdm(range(len(subject_paths)), desc="Processing Subjects", leave=True)
     for subject_num in subject_iterator:
         # Retrieve the subject path and subject name
-        subject_path: str = temp_subject_paths[subject_num]
+        subject_path: str = subject_paths[subject_num]
         subject_id: str = os.path.basename(subject_path)
         subject_id_number: int = int(re.search("\d+", subject_id).group())
 
@@ -441,6 +407,18 @@ def generate_spds(src_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorVideos
             # Generate the output path
             output_dir: str = os.path.join(dst_dir, subject_id, activity_name)
             os.makedirs(output_dir, exist_ok=True)
+
+            # Generate the temp dir wher we will
+            # temporarily copy the src files to. This is to avoid network interrupts 
+            # reading large files over e.g. the NAS
+            temp_output_dir: str = os.path.join(os.path.expanduser("~/Desktop"), "temp_output_dir_SPDs")
+            if(os.path.exists(temp_output_dir)):
+                shutil.rmtree(temp_output_dir)
+            os.makedirs(temp_output_dir)
+
+            # Copy the activity to the temporary directory 
+            temp_activity_path: str = os.path.join(temp_output_dir, subject_id, activity_name)
+            shutil.copytree(activity_path, temp_activity_path)
 
             # Generate SPDs for desired projection types (e.g. justProjection and virtuallyFoveated)
             for projection_type in projection_types:
@@ -465,9 +443,9 @@ def generate_spds(src_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorVideos
                                 "projection_type", projection_type,
                                 nargout=0
                             )
-
-    # Remove the temp directory 
-    shutil.rmtree(temp_output_dir)            
+            
+            # Remove the temporary directory for this activity      
+            shutil.rmtree(temp_output_dir)
     
     # Close the MATLAB engine
     eng.quit() 
