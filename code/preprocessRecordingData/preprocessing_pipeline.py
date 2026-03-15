@@ -359,10 +359,11 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/scriptedI
 #   activities_to_skip  set of activity names to ignore
 #   verbose             print progress
 # -----------------------------------------------------------------------------
-def generate_spds(src_dir: str="/Volumes/FLIC_processing/scriptedIndoorVideos", 
-                  dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/scriptedIndoorVideos",
+def generate_spds(src_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorVideos2026", 
+                  dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026",
                   overwrite_existing: bool=False,
                   activities_to_skip: Iterable=set(), 
+                  projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = set(["virtuallyFoveated", "justProjection"]), 
                   verbose: bool=False) -> None:
     
     import matlab.engine
@@ -407,25 +408,29 @@ def generate_spds(src_dir: str="/Volumes/FLIC_processing/scriptedIndoorVideos",
             output_dir: str = os.path.join(dst_dir, subject_id, activity_name)
             os.makedirs(output_dir, exist_ok=True)
 
-            if(verbose is True):
-                    print("Input: ")
-                    print(f"\t Subject id: {subject_id}")
-                    print(f"\t Subject id number: {subject_id_number}")
-                    print(f"\t Activity: {activity_name}")
+            # Generate SPDs for desired projection types (e.g. justProjection and virtuallyFoveated)
+            for projection_type in projection_types:
+                if(verbose is True):
+                        print("Input: ")
+                        print(f"\t Subject id: {subject_id}")
+                        print(f"\t Subject id number: {subject_id_number}")
+                        print(f"\t Activity: {activity_name}")
+                        print(f"\t Projection Type: {projection_type}")
 
-                    print("Output: ")
-                    print(f"\t Output dir: {output_dir}")
+                        print("Output: ")
+                        print(f"\t Output dir: {output_dir}")
 
-            # Generate the SPDs and save at targeted output path 
-            eng.processSPDs(src_dir, 
-                            output_dir, 
-                            "subjects", [subject_id_number], 
-                            "activities", [activity_name],
-                            "verbose", verbose,
-                            "overwrite_existing", overwrite_existing,
-                            "save_figures", True, 
-                            nargout=0
-                           )
+                # Generate the SPDs and save at targeted output path 
+                eng.processSPDs(src_dir, 
+                                output_dir, 
+                                "subjects", [subject_id_number], 
+                                "activities", [activity_name],
+                                "verbose", verbose,
+                                "overwrite_existing", overwrite_existing,
+                                "save_figures", True, 
+                                "projection_type", projection_type,
+                                nargout=0
+                            )
     # Close the MATLAB engine
     eng.close() 
 
