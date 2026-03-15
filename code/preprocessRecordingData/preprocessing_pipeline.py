@@ -412,6 +412,8 @@ def generate_spds(src_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorVideos
             activity_src_path: str = os.path.join(subj_src_path, activity)
             temp_activity_path: str = os.path.join(temp_subject_path, activity)
             
+            # TODO: Add only copy not processed files when not overwrite check 
+
             # Copy them over
             shutil.copytree(activity_src_path, temp_activity_path)
 
