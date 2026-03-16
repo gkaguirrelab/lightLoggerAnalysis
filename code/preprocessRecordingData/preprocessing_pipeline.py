@@ -45,8 +45,8 @@ import virtual_foveation
 #   fill_missing_frames interpolate missing frames
 #   verbose            print progress information
 # -----------------------------------------------------------------------------
-def generate_world_videos(src_dir: str="/Volumes/FLIC_raw/scriptedIndoorVideos", 
-                          dst_dir: str="/Volumes/FLIC_processing/scriptedIndoorVideos", 
+def generate_world_videos(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026", 
+                          dst_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoorVideos2026", 
                           overwrite_existing: bool=False,
                           apply_color_weights: bool=True, 
                           debayer_images: bool=True, 
@@ -536,7 +536,7 @@ def unpack_neon_recordings(src_dir: str="/Volumes/FLIC_raw/scriptedIndoorVideos"
 #   overwrite_existing rename even if destination exists
 #   verbose            print progress
 # -----------------------------------------------------------------------------
-def rename_world_recordings(src_dir: str="/Volumes/FLIC_raw/scriptedIndoorVideos",
+def rename_world_recordings(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026",
                             overwrite_existing: bool=False,
                             verbose: bool=False
                            ) -> None:
@@ -600,7 +600,7 @@ def rename_world_recordings(src_dir: str="/Volumes/FLIC_raw/scriptedIndoorVideos
 #   src_dir   raw dataset directory
 #   verbose   print additional diagnostics
 # -----------------------------------------------------------------------------
-def verify_neon_integrity(src_dir: str="/Volumes/FLIC_raw/scriptedIndoorVideos",
+def verify_neon_integrity(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026",
                           verbose: bool=False
                          ) -> None:
     
@@ -758,7 +758,7 @@ def verify_world_neon_pairing(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorO
 
             fig, axes = plt.subplots(1, 2)
             fig.suptitle(f"{subject_id} | {activity_name}", y=0.8)
-            for ax, frame, title, frame_number in zip(axes, (world_frame, neon_frame), "WN", (world_frame_number, 100)):
+            for ax, frame, title, frame_number in zip(axes, (world_frame, neon_frame), "WN", (world_frame_number, neon_frame_number)):
                 ax.set_title(f"{title} | Frame {frame_number}")
                 ax.imshow(frame)
             plt.show()
