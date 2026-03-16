@@ -466,7 +466,7 @@ def generate_spds(src_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorVideos
 #   overwrite_existing re-extract if Neon folder already exists
 #   verbose            print progress
 # -----------------------------------------------------------------------------
-def unpack_neon_recordings(src_dir: str="/Volumes/FLIC_raw/scriptedIndoorVideos",
+def unpack_neon_recordings(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026",
                            overwrite_existing: bool=False,
                            verbose: bool=False
                           ) -> None:
@@ -514,10 +514,18 @@ def unpack_neon_recordings(src_dir: str="/Volumes/FLIC_raw/scriptedIndoorVideos"
             
             neon_recording_zip: str = os.path.join(activity_path, neon_recording_filename)
 
+            if(verbose is True):
+                print(f"Input: {neon_recording_zip}")
+                print(f"Output: {neon_recording_output_dir}")
 
             # Unzip the file
-            with zipfile.ZipFile(neon_recording_zip, 'r') as zip_ref:
-                zip_ref.extractall(neon_recording_output_dir)
+            try:
+                with zipfile.ZipFile(neon_recording_zip, 'r') as zip_ref:
+                    zip_ref.extractall(neon_recording_output_dir)
+            except Exception as e:
+                shutil.rmtree(neon_recording_output_dir)
+                raise Exception(f"Error when unzipping: {e}")
+
 
             # Remove the original file 
             os.remove(neon_recording_zip)
@@ -677,7 +685,7 @@ def verify_world_neon_pairing(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorO
                               subjects_to_skip: Iterable= set(),
                               activites_to_skip: Iterable= set(),
                               verbose: bool=False 
-                             ) -> None:
+                             ) -> dict[str, str]:
     
     # First, let's find all of the subjects in this experiment 
     subject_paths: list[str] = natsorted([os.path.join(raw_dir, subject_name) 
@@ -687,6 +695,9 @@ def verify_world_neon_pairing(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorO
                                          ]
                                         ) 
     assert len(subject_paths) > 0, f"No subject directories found in: {raw_dir}" 
+
+    # Initialize return dict 
+    analyzed_data: dict[str, list] = {}
 
     # Now, let's iterate over all the subject paths 
     subject_iterator: Iterable = range(len(subject_paths)) if verbose is False else tqdm(range(len(subject_paths)), desc="Processing Subjects", leave=True)
@@ -700,6 +711,8 @@ def verify_world_neon_pairing(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorO
         if(subject_id_number in subjects_to_skip):
             continue
 
+        analyzed_data[subject_id_number] = {}
+
         # Iterate over the activites for this subject 
         activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in natsorted(os.listdir(subject_path))
                                       if os.path.isdir(os.path.join(subject_path, filename))
@@ -710,6 +723,12 @@ def verify_world_neon_pairing(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorO
             # Retrieve the activity path and activity name
             activity_path: str = activites_paths[activity_num]
             activity_name: str = os.path.basename(activity_path)
+
+            # Skip desired activites 
+            if(activity_name in activites_to_skip):
+                continue 
+                
+            analyzed_data[subject_id_number][activity_name] = True
 
             # Now, we will find the Neon recording in the RAW dir 
             # and the world recording in the processing dir 
@@ -763,7 +782,7 @@ def verify_world_neon_pairing(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorO
                 ax.imshow(frame)
             plt.show()
 
-    return 
+    return analyzed_data
 
 def main():
     pass 
