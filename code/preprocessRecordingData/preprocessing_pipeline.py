@@ -739,13 +739,26 @@ def verify_world_neon_pairing(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorO
             world_recording_path: str = os.path.join(world_recording_dir, "W.avi")
             assert os.path.exists(world_recording_path), f"Problem with: {world_recording_path}"
 
-            # Now, let's do a comparison between the first frames of the videos 
-            world_frame: np.ndarray = video_io.destruct_video(world_recording_path, start_frame=0, end_frame=1)[0]
-            neon_frame: np.ndarray = video_io.destruct_video(neon_recording_path, start_frame=100, end_frame=101)[0]
+            # Now, let's do a comparison between the first frames of the videos. 
+            # We can just take the first world frame. That is always non null 
+            world_frame_number: int = 0 
+            world_frame: np.ndarray = video_io.destruct_video(world_recording_path, start_frame=world_frame_number, end_frame=world_frame_number+1)[0]
+
+            # Neon has a period at the start full of gray frames. We will iterate through the frames and find the 
+            # first frame that is not all gray 
+            neon_num_frames: int = video_io.inspect_video_frame_count(neon_recording_path)
+            neon_frame: np.ndarray | None = None
+            for neon_frame_number in range(neon_num_frames):
+                neon_frame = video_io.destruct_video(neon_recording_path, start_frame=neon_frame_number, end_frame=neon_frame_number+1)[0]
+
+                # If not all pixels of the 3D neon frame are equal, then it's the first 
+                # frame of video
+                if(not np.all(neon_frame == neon_frame.flat[0])):
+                    break
 
             fig, axes = plt.subplots(1, 2)
             fig.suptitle(f"{subject_id} | {activity_name}", y=0.8)
-            for ax, frame, title, frame_number in zip(axes, (world_frame, neon_frame), "WN", (0, 100)):
+            for ax, frame, title, frame_number in zip(axes, (world_frame, neon_frame), "WN", (world_frame_number, 100)):
                 ax.set_title(f"{title} | Frame {frame_number}")
                 ax.imshow(frame)
             plt.show()
