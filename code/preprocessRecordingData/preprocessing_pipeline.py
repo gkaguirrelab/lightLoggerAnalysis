@@ -672,8 +672,8 @@ def verify_neon_integrity(src_dir: str="/Volumes/FLIC_raw/scriptedIndoorVideos",
 
     return 
 
-def verify_world_neon_pairing(raw_dir: str,
-                              processing_dir: str,
+def verify_world_neon_pairing(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026",
+                              processing_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoorVideos2026",
                               subjects_to_skip: Iterable= set(),
                               activites_to_skip: Iterable= set(),
                               verbose: bool=False 
@@ -740,13 +740,13 @@ def verify_world_neon_pairing(raw_dir: str,
             assert os.path.exists(world_recording_path), f"Problem with: {world_recording_path}"
 
             # Now, let's do a comparison between the first frames of the videos 
-            world_frame: np.ndarray = video_io.destruct_video(world_recording_path, start=0, end=1)[0]
-            neon_frame: np.ndarray = video_io.destruct_video(neon_recording_path, start=0, end=1)[0]
+            world_frame: np.ndarray = video_io.destruct_video(world_recording_path, start_frame=0, end_frame=1)[0]
+            neon_frame: np.ndarray = video_io.destruct_video(neon_recording_path, start_frame=100, end_frame=101)[0]
 
             fig, axes = plt.subplots(1, 2)
-            fig.suptitle(f"{subject_id} | {activity_name}")
-            for ax, frame, title in zip(axes, (world_frame, neon_frame), "WN"):
-                ax.set_title(f"{title} | Frame 0")
+            fig.suptitle(f"{subject_id} | {activity_name}", y=0.8)
+            for ax, frame, title, frame_number in zip(axes, (world_frame, neon_frame), "WN", (0, 100)):
+                ax.set_title(f"{title} | Frame {frame_number}")
                 ax.imshow(frame)
             plt.show()
 
