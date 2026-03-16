@@ -8,6 +8,8 @@ import pathlib
 import sys
 import zipfile
 import warnings
+import matplotlib.pyplot as plt
+import numpy as np
 
 
 # Construct the paths to our custom utility libraries 
@@ -670,17 +672,21 @@ def verify_neon_integrity(src_dir: str="/Volumes/FLIC_raw/scriptedIndoorVideos",
 
     return 
 
-"""
-def verify_foveated_integrity(src_dir: str="/Volumes/FLIC_raw/scriptedIndoorVideos") -> dict[str, str]:
-   
+def verify_world_neon_pairing(raw_dir: str,
+                              processing_dir: str,
+                              subjects_to_skip: Iterable= set(),
+                              activites_to_skip: Iterable= set(),
+                              verbose: bool=False 
+                             ) -> None:
+    
     # First, let's find all of the subjects in this experiment 
-    subject_paths: list[str] = natsorted([os.path.join(src_dir, subject_name) 
-                                          for subject_name in os.listdir(src_dir) 
+    subject_paths: list[str] = natsorted([os.path.join(raw_dir, subject_name) 
+                                          for subject_name in os.listdir(raw_dir) 
                                           if re.fullmatch(r"FLIC_\d+", subject_name) 
-                                          and os.path.isdir(os.path.join(src_dir, subject_name))
+                                          and os.path.isdir(os.path.join(raw_dir, subject_name))
                                          ]
                                         ) 
-    assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
+    assert len(subject_paths) > 0, f"No subject directories found in: {raw_dir}" 
 
     # Now, let's iterate over all the subject paths 
     subject_iterator: Iterable = range(len(subject_paths)) if verbose is False else tqdm(range(len(subject_paths)), desc="Processing Subjects", leave=True)
@@ -690,22 +696,61 @@ def verify_foveated_integrity(src_dir: str="/Volumes/FLIC_raw/scriptedIndoorVide
         subject_id: str = os.path.basename(subject_path)
         subject_id_number: int = int(re.search("\d+", subject_id).group())
 
+        # Skip subjects we are not interested in examining 
+        if(subject_id_number in subjects_to_skip):
+            continue
+
         # Iterate over the activites for this subject 
         activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in natsorted(os.listdir(subject_path))
                                       if os.path.isdir(os.path.join(subject_path, filename))
                                      ]
+        
         activities_iterator: Iterable = range(len(activites_paths)) if verbose is False else tqdm(range(len(activites_paths)), desc="Processing Activities", leave=False)
         for activity_num in activities_iterator:
             # Retrieve the activity path and activity name
             activity_path: str = activites_paths[activity_num]
             activity_name: str = os.path.basename(activity_path)
 
-            if(activity_name in activities_to_skip):
-                continue
+            # Now, we will find the Neon recording in the RAW dir 
+            # and the world recording in the processing dir 
+            neon_dir: str = os.path.join(activity_path, "Neon")
+            assert os.path.exists(neon_dir) and len(os.listdir(neon_dir)) > 0, f"Problem with: {neon_dir}"
+            neon_recording_subdir_name: str | None = None
+            try:
+                neon_recording_subdir_name = [filename for filename in os.listdir(neon_dir) 
+                                              if os.path.isdir(os.path.join(neon_dir, filename))
+                                             ][0]
+            except:
+                raise Exception(f"No neon recording subdir @: {neon_dir}")
+            neon_recording_subdir: str = os.path.join(neon_dir, neon_recording_subdir_name)
 
+            neon_recording_filename: str | None
+            try:   
+                neon_recording_filename = [filename for filename in os.listdir(neon_recording_subdir)
+                                           if filename.endswith(".mp4")
+                                          ][0]
+            except:
+                raise Exception(f"No neon recording @: {neon_recording_subdir}")
+            neon_recording_path: str = os.path.join(neon_recording_subdir, neon_recording_filename)
+            assert os.path.exists(neon_recording_path), f"Problem with: {neon_recording_path}"
+
+            world_recording_dir: str = os.path.join(processing_dir, subject_id, activity_name, "GKA")
+            assert os.path.exists(world_recording_dir) and len(os.listdir(world_recording_dir)) > 0, f"Problem with: {world_recording_dir}"
+            world_recording_path: str = os.path.join(world_recording_dir, "W.avi")
+            assert os.path.exists(world_recording_path), f"Problem with: {world_recording_path}"
+
+            # Now, let's do a comparison between the first frames of the videos 
+            world_frame: np.ndarray = video_io.destruct_video(world_recording_path, start=0, end=1)[0]
+            neon_frame: np.ndarray = video_io.destruct_video(neon_recording_path, start=0, end=1)[0]
+
+            fig, axes = plt.subplots(1, 2)
+            fig.suptitle(f"{subject_id} | {activity_name}")
+            for ax, frame, title in zip(axes, (world_frame, neon_frame), "WN"):
+                ax.set_title(f"{title} | Frame 0")
+                ax.imshow(frame)
+            plt.show()
 
     return 
-"""
 
 def main():
     pass 
