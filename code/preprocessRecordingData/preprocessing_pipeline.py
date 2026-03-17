@@ -9,6 +9,7 @@ import sys
 import zipfile
 import warnings
 import matplotlib.pyplot as plt
+import scipy.io
 import numpy as np
 
 
@@ -134,8 +135,8 @@ def generate_world_videos(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
 #   overwrite_existing         overwrite existing results
 #   verbose                    print progress
 # -----------------------------------------------------------------------------
-def generate_egocentric_mapper_results(src_dir: str="/Volumes/FLIC_raw/scriptedIndoorVideos", 
-                                       dst_dir: str="/Volumes/FLIC_processing/scriptedIndoorVideos",
+def generate_egocentric_mapper_results(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026", 
+                                       dst_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoorVideos2026",
                                        mapping_choice: Literal["Fixations", "Gaze", "Both"]='Both',
                                        refresh_time_threshold_sec: float=0.5 ,
                                        render_video: bool= False,
@@ -783,6 +784,97 @@ def verify_world_neon_pairing(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorO
             plt.show()
 
     return analyzed_data
+
+def generate_tag_task_start_ends(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026",
+                                 processing_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoorVideos2026",
+                                 overwrite_existing: bool=False, 
+                                 verbose: bool=False, 
+                                 tag_end_offset: int= -120 * 2,
+                                 task_start_offset: int=120 * 5, 
+                                 task_length_seconds: int = 4 * 60, 
+                                 min_confidence: float=60.0,
+                                 frame_step: int=120
+                                ) -> dict[str, dict[str, bool]]:
+
+    # First, let's find all of the subjects in this experiment 
+    subject_paths: list[str] = natsorted([os.path.join(raw_dir, subject_name) 
+                                          for subject_name in os.listdir(raw_dir) 
+                                          if re.fullmatch(r"FLIC_\d+", subject_name) 
+                                          and os.path.isdir(os.path.join(raw_dir, subject_name))
+                                         ]
+                                        ) 
+    assert len(subject_paths) > 0, f"No subject directories found in: {raw_dir}" 
+
+    # Initialize a dict to store the unanalyzable videos 
+    videos_for_manual_review: dict[str, dict[str, bool]] = {}
+
+    # Now, let's iterate over all the subject paths 
+    subject_iterator: Iterable = range(len(subject_paths)) if verbose is False else tqdm(range(len(subject_paths)), desc="Processing Subjects", leave=True)
+    for subject_num in subject_iterator:
+        # Retrieve the subject path and subject name
+        subject_path: str = subject_paths[subject_num]
+        subject_id: str = os.path.basename(subject_path)
+        subject_id_number: int = int(re.search("\d+", subject_id).group())
+
+        # Iterate over the activites for this subject 
+        activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in natsorted(os.listdir(subject_path))
+                                      if os.path.isdir(os.path.join(subject_path, filename))
+                                     ]
+        activities_iterator: Iterable = range(len(activites_paths)) if verbose is False else tqdm(range(len(activites_paths)), desc="Processing Activities", leave=False)
+        for activity_num in activities_iterator:
+            # Retrieve the activity path and activity name
+            activity_path: str = activites_paths[activity_num]
+            activity_name: str = os.path.basename(activity_path)
+
+            # Skip already created files if we want to skip them 
+            tag_task_output_path: str = os.path.join(processing_dir, subject_id, activity_name, "tag_task_start_end.mat")
+            if(os.path.exists(tag_task_output_path) and overwrite_existing is False):
+                continue 
+            
+            # Generate the path to the world video 
+            world_video_path: str = os.path.join(processing_dir, subject_id, activity_name, "GKA", "W.avi")
+            assert os.path.exists(world_video_path), f"Problem with: {world_video_path}"
+
+            # Otherwise, let's make the tag_task struct 
+            tag_task_start_end: dict[str, np.ndarray] = {}
+
+            # Let's now try to find the event marker in the video 
+            event_marker_last_frame: int | None = video_io.find_events(world_video_path, 
+                                                                       search_text="front",
+                                                                       min_conf=min_confidence,
+                                                                       frame_step=frame_step,
+                                                                       verbose=verbose
+                                                                      )
+
+            # If we couldn't find the text, mark it for manual review 
+            if(event_marker_last_frame is None):
+                warnings.warn(f"Could not find start/end for video: {world_video_path}")
+
+                if(subject_id_number not in videos_for_manual_review):
+                    videos_for_manual_review[subject_id_number] = {activity_name: True}
+                else:
+                    videos_for_manual_review[subject_id_number][activity_name] = True
+                
+                continue 
+
+            # Otherwise, we can make and save the struct 
+            tag_start, tag_end = 1, event_marker_last_frame + tag_end_offset
+            tag_task_start_end["tag"] = np.array([tag_start, tag_end])
+
+            world_camera_fps: float = video_io.inspect_video_FPS(world_video_path)
+            video_frame_count: int = video_io.inspect_video_framecount(world_video_path)
+
+            task_start: int = event_marker_last_frame + task_start_offset
+            task_end: int = int(np.ceil(task_start + (world_camera_fps * task_length_seconds)))
+            assert task_end < video_frame_count, f"Task end: {task_end} > video frame count {video_frame_count} for video @: {world_video_path}"
+            
+            tag_task_start_end["task"] = np.array([task_start, task_end])
+
+            # Output the .mat file 
+            scipy.io.savemat(tag_task_output_path, {"tag_task_start_end": tag_task_start_end})
+
+
+    return 
 
 def main():
     pass 

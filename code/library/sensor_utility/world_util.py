@@ -538,7 +538,6 @@ def calculate_color_weights(sorted_calibration_measurements: dict, visualize_res
 
     return RGB_weights
 
-
 """
 Calculate the per-color weights to apply to each color in order to equalize them
 to the R channel, but for a SINGLE measurement.

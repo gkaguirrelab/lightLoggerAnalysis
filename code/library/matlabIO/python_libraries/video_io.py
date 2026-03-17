@@ -12,6 +12,10 @@ import h5py
 import dill
 import pathlib
 import sys
+from scipy.signal import find_peaks
+import pytesseract
+import matplotlib.pyplot as plt
+import re
 
 # Import utility libraries
 light_logger_analysis_dir_path: str = os.path.expanduser("~/Documents/MATLAB/projects/lightLoggerAnalysis")
@@ -674,6 +678,259 @@ def world_chunks_to_video(recording_path: str,
 
     return 
 
+
+def find_events(video_path: str,
+                search_text: str,
+                min_conf: float = 60.0,
+                case_sensitive: bool = False,
+                frame_step: int = 5,
+                roi: tuple[int, int, int, int] | None = None,
+                refine_hits: bool = True,
+                refine_radius: int = 5,
+                verbose: bool = False
+               ) -> int | None:
+    """
+    Detect frames in a video that contain a target text string using OCR.
+
+    Strategy:
+    1. Coarse pass (fast): sample every `frame_step` frames and detect text presence.
+    2. Refinement pass (optional): densely check frames near coarse detections.
+    3. Return indices of frames where text is detected.
+
+    If verbose:
+        - Plot detection scores over time
+        - Display detected frames
+
+    NOTE:
+    - Returns ONLY the last detected frame index (as in original behavior).
+    """
+
+    # -------------------------
+    # Helper: normalize text
+    # -------------------------
+    def normalize_text(txt: str) -> str:
+        """
+        Normalize text by:
+        - collapsing whitespace
+        - optional lowercasing
+        """
+        txt = re.sub(r"\s+", " ", txt).strip()
+        return txt if case_sensitive else txt.lower()
+
+    # -------------------------
+    # Helper: preprocess frame
+    # -------------------------
+    def preprocess_frame(frame: np.ndarray) -> np.ndarray:
+        """
+        Prepare frame for OCR:
+        - optional cropping (ROI)
+        - grayscale conversion
+        - slight blur
+        - thresholding (binarization)
+        """
+        if (roi is not None):
+            y0, y1, x0, x1 = roi
+            frame = frame[y0:y1, x0:x1]
+
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        gray = cv2.GaussianBlur(gray, (3, 3), 0)
+        _, gray = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+        return gray
+
+    # -------------------------
+    # Fast check (binary match)
+    # -------------------------
+    def frame_contains_text_fast(frame: np.ndarray, target_text: str) -> float:
+        """
+        Fast OCR check using image_to_string.
+        Returns 1.0 if text is found, else 0.0.
+        """
+        gray = preprocess_frame(frame)
+
+        text = pytesseract.image_to_string(gray, config="--psm 6")
+        text = normalize_text(text)
+        target = normalize_text(target_text)
+
+        return 1.0 if (target in text) else 0.0
+
+    # -------------------------
+    # Accurate check (with confidence)
+    # -------------------------
+    def frame_contains_text_conf(frame: np.ndarray, target_text: str) -> float:
+        """
+        More precise OCR using word-level confidence.
+        Returns average confidence if text is found, else 0.0.
+        """
+        gray = preprocess_frame(frame)
+
+        ocr_data = pytesseract.image_to_data(
+            gray,
+            output_type=pytesseract.Output.DICT,
+            config="--psm 6"
+        )
+
+        words: list[str] = []
+        confs: list[float] = []
+
+        for txt, conf in zip(ocr_data["text"], ocr_data["conf"]):
+            txt = str(txt).strip()
+
+            try:
+                conf = float(conf)
+            except ValueError:
+                conf = -1.0
+
+            if ((txt != "") and (conf >= min_conf)):
+                words.append(txt)
+                confs.append(conf)
+
+        if (len(words) == 0):
+            return 0.0
+
+        joined_text = normalize_text(" ".join(words))
+        target = normalize_text(target_text)
+
+        if (target in joined_text):
+            return float(np.mean(confs))
+
+        return 0.0
+
+    # -------------------------
+    # Open video
+    # -------------------------
+    video_stream = cv2.VideoCapture(video_path)
+
+    if (not video_stream.isOpened()):
+        raise RuntimeError(f"Error: Could not open video @: {video_path}")
+
+    num_frames: int = int(video_stream.get(cv2.CAP_PROP_FRAME_COUNT))
+
+    # Array storing coarse detection results
+    coarse_scores: np.ndarray = np.zeros(num_frames, dtype=np.float64)
+
+    # Determine which frames to sample
+    coarse_frame_nums = range(0, num_frames, frame_step)
+
+    if (verbose is True):
+        coarse_frame_nums = tqdm(coarse_frame_nums, desc="Coarse OCR")
+
+    # -------------------------
+    # Coarse pass
+    # -------------------------
+    for frame_num in coarse_frame_nums:
+        video_stream.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
+
+        ret, frame = video_stream.read()
+
+        if (not ret):
+            continue
+
+        coarse_scores[frame_num] = frame_contains_text_fast(frame, search_text)
+
+    video_stream.release()
+
+    # Frames where coarse detection found text
+    coarse_hits: np.ndarray = np.flatnonzero(coarse_scores > 0)
+
+    # -------------------------
+    # Refinement pass
+    # -------------------------
+    final_scores: np.ndarray = np.zeros(num_frames, dtype=np.float64)
+
+    if ((refine_hits is True) and (len(coarse_hits) > 0)):
+
+        # Build set of frames around coarse hits
+        candidate_frames: set[int] = set()
+
+        for hit in coarse_hits:
+            start = max(0, hit - refine_radius)
+            end = min(num_frames, hit + refine_radius + 1)
+            candidate_frames.update(range(start, end))
+
+        candidate_frames = sorted(candidate_frames)
+
+        video_stream = cv2.VideoCapture(video_path)
+
+        if (not video_stream.isOpened()):
+            raise RuntimeError(f"Error: Could not reopen video @: {video_path}")
+
+        frame_iter = candidate_frames
+
+        if (verbose is True):
+            frame_iter = tqdm(frame_iter, desc="Refining OCR")
+
+        for frame_num in frame_iter:
+            video_stream.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
+
+            ret, frame = video_stream.read()
+
+            if (not ret):
+                continue
+
+            final_scores[frame_num] = frame_contains_text_conf(frame, search_text)
+
+        video_stream.release()
+
+    else:
+        # If no refinement, just use coarse results
+        final_scores = coarse_scores.copy()
+
+    # -------------------------
+    # Extract matched frames
+    # -------------------------
+    matched_frame_nums: np.ndarray = np.flatnonzero(final_scores > 0)
+
+    # -------------------------
+    # Visualization (optional)
+    # -------------------------
+    if (verbose is True):
+
+        plt.figure(figsize=(12, 4))
+        plt.plot(np.arange(len(final_scores)), final_scores, label=f'"{search_text}" score')
+
+        plt.scatter(
+            matched_frame_nums,
+            final_scores[matched_frame_nums],
+            marker="x",
+            s=80,
+            color="red",
+            label="Detected text"
+        )
+
+        plt.xlabel("Frame Number")
+        plt.ylabel("OCR Match Score")
+        plt.title("Detected text plotted")
+        plt.grid(True)
+        plt.legend()
+        plt.show()
+
+        # Re-open video to display detected frames
+        video_stream = cv2.VideoCapture(video_path)
+
+        if (not video_stream.isOpened()):
+            raise RuntimeError(f"Error: Could not reopen video @: {video_path}")
+
+        for frame_num in matched_frame_nums:
+            video_stream.set(cv2.CAP_PROP_POS_FRAMES, int(frame_num))
+
+            ret, frame = video_stream.read()
+
+            if (not ret):
+                continue
+
+            plt.figure(figsize=(8, 6))
+            plt.imshow(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            plt.title(
+                f'Frame: {frame_num} | Text: "{search_text}" | Score: {final_scores[frame_num]:.2f}'
+            )
+            plt.axis("off")
+            plt.show()
+
+        video_stream.release()
+
+    # IMPORTANT: preserve original behavior (return last match)
+    return matched_frame_nums[-1] if len(matched_frame_nums) > 0 else None
 
 def main():
     return 
