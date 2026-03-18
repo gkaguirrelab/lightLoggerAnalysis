@@ -365,7 +365,8 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/NEWscript
 def generate_spds(src_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorVideos2026", 
                   dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026",
                   overwrite_existing: bool=False,
-                  activities_to_skip: Iterable=set(), 
+                  subjects_to_skip: Iterable=set(), 
+                  activities_to_skip: Iterable=set(["lunch", "phone"]), 
                   projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = set(["virtuallyFoveated", "justProjection"]), 
                   verbose: bool=False) -> None:
     
@@ -393,6 +394,10 @@ def generate_spds(src_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorVideos
         subject_path: str = subject_paths[subject_num]
         subject_id: str = os.path.basename(subject_path)
         subject_id_number: int = int(re.search("\d+", subject_id).group())
+
+        # Skip subjects we dont want to process 
+        if(subject_id_number in subjects_to_skip):
+            continue
 
         # Iterate over the activites for this subject 
         activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in natsorted(os.listdir(subject_path))
