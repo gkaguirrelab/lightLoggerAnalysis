@@ -304,9 +304,13 @@ end
 % Define location function to read in a number of frames
 % from the video 
 function frame_chunk = load_frame_chunk(video_reader, start_frame, num_frames_to_read)
+    if(start_frame > video_reader.NumFrames)
+        error(sprintf("Start frame %d is out of bounds for video with NumFrames %d", start_frame, video_reader.NumFrames));
+    end 
+    
     % Determine the true number of frames to read (e.g. on the last chunk
     % there may not be an equal number to read) 
-    num_frames_to_read = min([num_frames_to_read, video_reader.NumFrames - start_frame]);
+    num_frames_to_read = min([num_frames_to_read, video_reader.NumFrames - start_frame + 1]);
 
     frame_chunk = zeros(num_frames_to_read, ...
                         video_reader.Height, ...
@@ -315,8 +319,15 @@ function frame_chunk = load_frame_chunk(video_reader, start_frame, num_frames_to
                         );
     % Read the target amount of frames 
     insertion_index = 1; 
-    for ii = start_frame:start_frame+num_frames_to_read
-        frame_chunk(insertion_index, :, :) = video_reader.readFrame('frameNum', ii, "zeros_as_nans", true, 'color', 'L+M+S');
+    for ii = start_frame : start_frame + num_frames_to_read - 1
+        read_frame = video_reader.readFrame('frameNum', ii, "zeros_as_nans", true, 'color', 'L+M+S');
+        [read_height, read_width] = size(read_frame);
+        if(read_height ~= video_reader.Height || read_width ~= video_reader.Width)
+            fprintf("Frame shape (%d, %d) does not match video shape (%d, %d)\n", read_height, read_width, video_reader.Height, video_reader.Width); 
+            error("FRAME SHAPE HAS BECOME INHOMOGENOUS\n"); 
+        end 
+
+        frame_chunk(insertion_index, :, :) = read_frame; 
         insertion_index = insertion_index + 1; 
     end 
 

@@ -687,7 +687,8 @@ def find_events(video_path: str,
                 roi: tuple[int, int, int, int] | None = None,
                 refine_hits: bool = True,
                 refine_radius: int = 5,
-                verbose: bool = False
+                verbose: bool = False,
+                show_images: bool=False
                ) -> int | None:
     """
     Detect frames in a video that contain a target text string using OCR.
@@ -905,29 +906,30 @@ def find_events(video_path: str,
         plt.legend()
         plt.show()
 
-        # Re-open video to display detected frames
-        video_stream = cv2.VideoCapture(video_path)
+        if(show_images is True):
+            # Re-open video to display detected frames
+            video_stream = cv2.VideoCapture(video_path)
 
-        if (not video_stream.isOpened()):
-            raise RuntimeError(f"Error: Could not reopen video @: {video_path}")
+            if (not video_stream.isOpened()):
+                raise RuntimeError(f"Error: Could not reopen video @: {video_path}")
 
-        for frame_num in matched_frame_nums:
-            video_stream.set(cv2.CAP_PROP_POS_FRAMES, int(frame_num))
+            for frame_num in matched_frame_nums:
+                video_stream.set(cv2.CAP_PROP_POS_FRAMES, int(frame_num))
 
-            ret, frame = video_stream.read()
+                ret, frame = video_stream.read()
 
-            if (not ret):
-                continue
+                if (not ret):
+                    continue
 
-            plt.figure(figsize=(8, 6))
-            plt.imshow(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-            plt.title(
-                f'Frame: {frame_num} | Text: "{search_text}" | Score: {final_scores[frame_num]:.2f}'
-            )
-            plt.axis("off")
-            plt.show()
+                plt.figure(figsize=(8, 6))
+                plt.imshow(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+                plt.title(
+                    f'Frame: {frame_num} | Text: "{search_text}" | Score: {final_scores[frame_num]:.2f}'
+                )
+                plt.axis("off")
+                plt.show()
 
-        video_stream.release()
+            video_stream.release()
 
     # IMPORTANT: preserve original behavior (return last match)
     return matched_frame_nums[-1] if len(matched_frame_nums) > 0 else None

@@ -108,7 +108,7 @@ function generateVirtuallyFoveatedVideos(subjectIDs, options)
         subjectID = "FLIC_" + string(subjectIDs{ii});
 
         % Now, let's make the path to this subject's files 
-        subject_nas_path_raw = fullfile(options.input_dir, "FLIC_raw", "scriptedIndoorVideos", subjectID, activity); 
+        subject_nas_path_raw = fullfile(options.input_dir, "FLIC_raw", "NEWscriptedIndoorOutdoorVideos2026", subjectID, activity); 
         subject_nas_path_processing = replace(subject_nas_path_raw, "FLIC_raw", "FLIC_processing");
 
         % Assert these folders exist 

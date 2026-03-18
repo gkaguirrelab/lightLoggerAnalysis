@@ -225,8 +225,8 @@ def generate_egocentric_mapper_results(src_dir: str="/Volumes/FLIC_raw/NEWscript
 #   overwrite_existing regenerate existing outputs
 #   verbose            print progress
 # -----------------------------------------------------------------------------
-def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/scriptedIndoorVideos", 
-                                       dst_dir: str="/Volumes/FLIC_processing/scriptedIndoorVideos",
+def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026", 
+                                       dst_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoorVideos2026",
                                        overwrite_existing: bool=False,
                                        verbose: bool=False,
                                        video_types: Iterable[Literal["tag", "task"]]= ("tag", "task"),
@@ -792,8 +792,8 @@ def generate_tag_task_start_ends(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndo
                                  tag_end_offset: int= -120 * 2,
                                  task_start_offset: int=120 * 5, 
                                  task_length_seconds: int = 4 * 60, 
-                                 min_confidence: float=60.0,
-                                 frame_step: int=120
+                                 min_confidence: float=30.0,
+                                 frame_step: int=10
                                 ) -> dict[str, dict[str, bool]]:
 
     # First, let's find all of the subjects in this experiment 
@@ -838,13 +838,21 @@ def generate_tag_task_start_ends(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndo
             # Otherwise, let's make the tag_task struct 
             tag_task_start_end: dict[str, np.ndarray] = {}
 
+            if(verbose is True):
+                print(f"Input: {world_video_path}")
+                print(f"Output: {tag_task_output_path}")
+
             # Let's now try to find the event marker in the video 
-            event_marker_last_frame: int | None = video_io.find_events(world_video_path, 
-                                                                       search_text="front",
-                                                                       min_conf=min_confidence,
-                                                                       frame_step=frame_step,
-                                                                       verbose=verbose
+            event_marker_last_frame: int | None = None
+            for keyword in ("place", "front", "camera"):
+                event_marker_last_frame = video_io.find_events(world_video_path, 
+                                                                           search_text=keyword,
+                                                                           min_conf=min_confidence,
+                                                                           frame_step=frame_step,
+                                                                           verbose=verbose
                                                                       )
+                if(event_marker_last_frame is not None):
+                    break 
 
             # If we couldn't find the text, mark it for manual review 
             if(event_marker_last_frame is None):
@@ -862,7 +870,7 @@ def generate_tag_task_start_ends(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndo
             tag_task_start_end["tag"] = np.array([tag_start, tag_end])
 
             world_camera_fps: float = video_io.inspect_video_FPS(world_video_path)
-            video_frame_count: int = video_io.inspect_video_framecount(world_video_path)
+            video_frame_count: int = video_io.inspect_video_frame_count(world_video_path)
 
             task_start: int = event_marker_last_frame + task_start_offset
             task_end: int = int(np.ceil(task_start + (world_camera_fps * task_length_seconds)))
@@ -874,7 +882,7 @@ def generate_tag_task_start_ends(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndo
             scipy.io.savemat(tag_task_output_path, {"tag_task_start_end": tag_task_start_end})
 
 
-    return 
+    return videos_for_manual_review
 
 def main():
     pass 
