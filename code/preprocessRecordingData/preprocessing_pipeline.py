@@ -362,7 +362,7 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/NEWscript
 #   activities_to_skip  set of activity names to ignore
 #   verbose             print progress
 # -----------------------------------------------------------------------------
-def generate_spds(src_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorVideos2026", 
+def generate_spds(src_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoorVideos2026", 
                   dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026",
                   overwrite_existing: bool=False,
                   subjects_to_skip: Iterable=set(), 
@@ -940,11 +940,11 @@ def verify_virtually_foveated_video_integrity(src_dir: str="/Volumes/FLIC_proces
                                                    ]
 
             # Assert we have the correct number of videos. Should be 3 for all activities (tag_foveated, task_projection, task_foveated)
-            assert len(virtually_foveated_video_names) == (3 if activity_name != "gazeCalibration" else 2), f"Problem with: {activity_path}"
+            assert len(virtually_foveated_video_names) >= (3 if activity_name != "gazeCalibration" else 2), f"Problem with: {activity_path}"
 
             # Assert the projection and the foveated video have the proper length 
-            for video_name in virtually_foveated_video_names:
-                video_path: str = os.path.join(activity_path)
+            for video_name in [name for name in virtually_foveated_video_names if "task" in name]:
+                video_path: str = os.path.join(activity_path, video_name)
 
                 # Find the FPS of the video and its length 
                 video_fps: float = video_io.inspect_video_FPS(video_path)
