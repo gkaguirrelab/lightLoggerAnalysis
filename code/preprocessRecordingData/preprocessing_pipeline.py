@@ -889,6 +889,71 @@ def generate_tag_task_start_ends(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndo
 
     return videos_for_manual_review
 
+
+
+def verify_virtually_foveated_video_integrity(src_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoorVideos2026",
+                                              subjects_to_skip: Iterable=set(), 
+                                              activities_to_skip: Iterable=set(),
+                                              verbose: bool=False, 
+                                              target_length_seconds: int= 4 * 60
+                                             ) -> None:
+    
+    # First, let's find all of the subjects in this experiment 
+    subject_paths: list[str] = natsorted([os.path.join(src_dir, subject_name) 
+                                          for subject_name in os.listdir(src_dir) 
+                                          if re.fullmatch(r"FLIC_\d+", subject_name) 
+                                          and os.path.isdir(os.path.join(src_dir, subject_name))
+                                         ]
+                                        ) 
+    assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
+
+
+    # Now, let's iterate over all the subject paths 
+    subject_iterator: Iterable = range(len(subject_paths)) if verbose is False else tqdm(range(len(subject_paths)), desc="Processing Subjects", leave=True)
+    for subject_num in subject_iterator:
+        # Retrieve the subject path and subject name
+        subject_path: str = subject_paths[subject_num]
+        subject_id: str = os.path.basename(subject_path)
+        subject_id_number: int = int(re.search("\d+", subject_id).group())
+
+        # Skip subjects we want ot skip 
+        if(subject_id_number in subjects_to_skip):
+            continue
+
+        # Iterate over the activites for this subject 
+        activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in natsorted(os.listdir(subject_path))
+                                      if os.path.isdir(os.path.join(subject_path, filename))
+                                     ]
+        activities_iterator: Iterable = range(len(activites_paths)) if verbose is False else tqdm(range(len(activites_paths)), desc="Processing Activities", leave=False)
+        for activity_num in activities_iterator:
+            # Retrieve the activity path and activity name
+            activity_path: str = activites_paths[activity_num]
+            activity_name: str = os.path.basename(activity_path)
+
+            # Skip acticvities we want to skip 
+            if(activity_name in activities_to_skip):
+                continue
+
+            # Find all the virtually foveated videos in this directory 
+            virtually_foveated_video_names: list = [filename for filename in os.listdir(activity_path)
+                                                    if filename.endswith(".avi")
+                                                   ]
+
+            # Assert we have the correct number of videos. Should be 3 for all activities (tag_foveated, task_projection, task_foveated)
+            assert len(virtually_foveated_video_names) == (3 if activity_name != "gazeCalibration" else 2), f"Problem with: {activity_path}"
+
+            # Assert the projection and the foveated video have the proper length 
+            for video_name in virtually_foveated_video_names:
+                video_path: str = os.path.join(activity_path)
+
+                # Find the FPS of the video and its length 
+                video_fps: float = video_io.inspect_video_FPS(video_path)
+                video_num_frames: int = video_io.inspect_video_frame_count(video_path)
+                video_length: float = video_fps * video_num_frames
+
+                assert video_length >= target_length_seconds, f"Video: {video_path} has length: {video_length}s which is less than target: {target_length_seconds}s"
+
+
 def main():
     pass 
 
