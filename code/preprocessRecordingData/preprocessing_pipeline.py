@@ -463,10 +463,10 @@ def generate_spds(src_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoo
 
 def adjust_spd_axes(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026",
                     dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026",
-                    axes_target: Literal['across_all', 'per_activity']="across_all",
                     subjects_to_skip: Iterable= set(),
                     activites_to_skip: Iterable= set(),
                     projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = set(["virtuallyFoveated", "justProjection"]), 
+                    combine_figures: bool=True,
                     overwrite_existing: bool=False, 
                     verbose: bool=False
                    ) -> None:
@@ -487,42 +487,91 @@ def adjust_spd_axes(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropb
                                         ) 
     assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
 
-    # If we want to simply get the min/max for the axes of the SPD
-    # plot across ALL subjects and all activities 
-    if(axes_target == "across_all"):
-        axes_min_maxes: dict[str, list[float]] = _find_spd_axes_across_all(subject_paths, 
-                                                                           subjects_to_skip,
-                                                                           activites_to_skip,
-                                                                           projection_types,
-                                                                           verbose=False
-                                                                          )
+    # First, we will find the min/max axes across all activites. 
+    # This will let us build the power by freq graph 
+    across_all_axes_min_maxes: dict[str, np.ndarray[float]] = _find_spd_axes_across_all(subject_paths, 
+                                                                        subjects_to_skip,
+                                                                        activites_to_skip,
+                                                                        projection_types,
+                                                                        verbose=False
+                                                                        )
 
-        # Now, let's iterate over all the subject paths 
-        subject_iterator: Iterable = range(len(subject_paths)) if verbose is False else tqdm(range(len(subject_paths)), desc="Processing Subjects", leave=False)
-        for subject_num in subject_iterator:
-            # Retrieve the subject path and subject name
-            subject_path: str = subject_paths[subject_num]
-            subject_id: str = os.path.basename(subject_path)
-            subject_id_number: int = int(re.search("\d+", subject_id).group())
+    # Next we will find the colorbar min/maxs by subject 
+    per_subject_axes_min_maxes: dict[str, np.ndarray[float]] = _find_spd_axes_per_subject(subject_paths, 
+                                                                        subjects_to_skip,
+                                                                        activites_to_skip,
+                                                                        projection_types,
+                                                                        verbose=False
+                                                                    )
 
-            # Skip unwatned subjects 
-            if(subject_id_number in subjects_to_skip):
+    # Now, let's iterate over all the subject paths 
+    subject_iterator: Iterable = range(len(subject_paths)) if verbose is False else tqdm(range(len(subject_paths)), desc="Processing Subjects", leave=False)
+    for subject_num in subject_iterator:
+        # Retrieve the subject path and subject name
+        subject_path: str = subject_paths[subject_num]
+        subject_id: str = os.path.basename(subject_path)
+        subject_id_number: int = int(re.search("\d+", subject_id).group())
+
+        # Skip unwatned subjects 
+        if(subject_id_number in subjects_to_skip):
+            continue 
+
+        # Construct the min maxes for this subject 
+        axes_min_maxes: dict[str, np.ndarray] = {key: value 
+                                            for key, value in across_all_axes_min_maxes.items()
+                                            if key == "frq"} | {key: value 
+                                                                for key, value in per_subject_axes_min_maxes[subject_id_number].items()
+                                                                if key != "frq"}
+
+        # Iterate over the activites for this subject 
+        activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in natsorted(os.listdir(subject_path))
+                                    if os.path.isdir(os.path.join(subject_path, filename))
+                                    ]
+        activities_iterator: Iterable = range(len(activites_paths)) if verbose is False else tqdm(range(len(activites_paths)), desc="Processing Activities", leave=False)
+        for activity_num in activities_iterator:
+            # Retrieve the activity path and activity name
+            activity_path: str = activites_paths[activity_num]
+            activity_name: str = os.path.basename(activity_path)
+
+            # Skip unwanted activites 
+            if(activity_name in activites_to_skip):
                 continue 
 
-            # Iterate over the activites for this subject 
-            activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in natsorted(os.listdir(subject_path))
-                                        if os.path.isdir(os.path.join(subject_path, filename))
-                                        ]
-            activities_iterator: Iterable = range(len(activites_paths)) if verbose is False else tqdm(range(len(activites_paths)), desc="Processing Activities", leave=False)
-            for activity_num in activities_iterator:
-                # Retrieve the activity path and activity name
-                activity_path: str = activites_paths[activity_num]
-                activity_name: str = os.path.basename(activity_path)
 
-                # Skip unwanted activites 
-                if(activity_name in activites_to_skip):
-                    continue 
+            # We will put both projection types onto the same graph
+            # so make a temporary .mat file that contains the path to do this 
+            if(combine_figures is True):
+                # Generate the path to the SPD results file
+                temp_combined_dict: dict = {activity_name: {projection_type: os.path.join(activity_path, f"{subject_id}_{activity_name}_{projection_type}_SPDResults.mat")
+                                                            for projection_type in projection_types}
+                                            }
+                
+                # Assert that these paths exist
+                assert all(os.path.exists(path) for projection_type, path in temp_combined_dict[activity_name].items())
+                
+                # Output as a temporary matfile 
+                temp_matfile_path: str = os.path.expanduser("~/Desktop/temp_spd_axes_matfile.mat")
+                temp_struct: dict = {"activityData": temp_combined_dict}
+                scipy.io.savemat(temp_matfile_path, temp_struct)
 
+                output_dir: str = os.path.join(dst_dir, subject_id, activity_name)
+                title: str = f"{subject_id}_{activity_name}_modesCombined"
+                eng.plotSPDs(temp_matfile_path,
+                                "exponent_clim", axes_min_maxes["exponentMap"], 
+                                "variance_clim", axes_min_maxes["varianceMap"], 
+                                "spd_xlim", axes_min_maxes["frq"], 
+                                "spd_ylim", axes_min_maxes["spdByRegion"],
+                                "overwrite_existing", overwrite_existing, 
+                                "output_dir", output_dir,
+                                "title", title,
+                                nargout=0
+                            ) 
+
+                # Remove the temporary matfile
+                os.remove(temp_matfile_path)
+
+            # Otherwise output separate figures
+            else:
                 # Iterate over the projection types 
                 for projection_type in projection_types:
                     # Generate the path to the SPD results file
@@ -542,11 +591,6 @@ def adjust_spd_axes(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropb
                                  nargout=0
                                 ) 
 
-
-    # Otherwise, if we want to get the min/max of the axes 
-    # per activity across all subject 
-    elif(axes_target == "per_activity"):
-        axes_min_maxes: dict[str, list[float]] = _find_spd_axes_per_activity
 
     # Close the matlab engine 
     eng.quit() 
@@ -624,13 +668,78 @@ def _find_spd_axes_across_all(subject_paths: list[str],
     return min_maxes
 
 
-def _find_spd_axes_per_activity(subject_paths: list[str],
+def _find_spd_axes_per_subject(subject_paths: list[str],
                                    subjects_to_skip: Iterable[str] = set(),
                                    activites_to_skip: Iterable[str] = set(),
-                                   verbose: bool=False, 
-                                   projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = set(["virtuallyFoveated", "justProjection"]) 
+                                   projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = set(["virtuallyFoveated", "justProjection"]),
+                                   verbose: bool=False
                               ) -> None:
-    raise NotImplementedError()
+    
+    # Initialize min max per type of graph 
+    min_maxes: dict[int, list[float]] = {}
+
+
+    # Now, let's iterate over all the subject paths 
+    subject_iterator: Iterable = range(len(subject_paths)) if verbose is False else tqdm(range(len(subject_paths)), desc="Processing Subjects", leave=False)
+    for subject_num in subject_iterator:
+        # Retrieve the subject path and subject name
+        subject_path: str = subject_paths[subject_num]
+        subject_id: str = os.path.basename(subject_path)
+        subject_id_number: int = int(re.search("\d+", subject_id).group())
+
+        # Skip unwatned subjects 
+        if(subject_id_number in subjects_to_skip):
+            continue 
+
+        # Insert this subject into the min-maxes dict 
+        min_maxes[subject_id_number] = {"exponentMap": [float("inf"), float("-inf")],
+                                        "varianceMap": [float("inf"), float("-inf")],
+                                        "spdByRegion": [float("inf"), float("-inf")],
+                                        "frq": [float("inf"), float("-inf")]
+                                       }
+
+        # Iterate over the activites for this subject 
+        activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in natsorted(os.listdir(subject_path))
+                                    if os.path.isdir(os.path.join(subject_path, filename))
+                                    ]
+        activities_iterator: Iterable = range(len(activites_paths)) if verbose is False else tqdm(range(len(activites_paths)), desc="Processing Activities", leave=False)
+        for activity_num in activities_iterator:
+            # Retrieve the activity path and activity name
+            activity_path: str = activites_paths[activity_num]
+            activity_name: str = os.path.basename(activity_path)
+
+            # Skip unwanted activites 
+            if(activity_name in activites_to_skip):
+                continue 
+
+            # Iterate over the projection types 
+            for projection_type in projection_types:
+                # load the SPD results from this activity
+                spd_results_filepath: str = os.path.join(activity_path, f"{subject_id}_{activity_name}_{projection_type}_SPDResults.mat")
+                assert os.path.exists(spd_results_filepath), f"SPD Results path does not exist: {spd_results_filepath}"
+                spd_results: object = scipy.io.loadmat(spd_results_filepath)['activityData'][0, 0][activity_name]
+
+                # Extract the per graph info 
+                for graph_type in min_maxes[subject_id_number]:
+                    graph_info: np.ndarray = spd_results[graph_type][0, 0].astype(np.float64)
+                    
+                    # Find the min and max of this graph info 
+                    graph_min: float = np.nanmin(graph_info)
+                    graph_max: float = np.nanmax(graph_info)
+
+                    # Compare to the global min/max and update if needed
+                    global_min, global_max = min_maxes[subject_id_number][graph_type]
+                    if(graph_min < global_min):
+                        min_maxes[subject_id_number][graph_type][0] = graph_min
+                    if(graph_max > global_max):
+                        min_maxes[subject_id_number][graph_type][1] = graph_max
+
+    # convert min maxes to np.ndarray 
+    for subject_id_number in min_maxes:
+        for graph_type in min_maxes[subject_id_number]:
+            min_maxes[subject_id_number][graph_type] = np.array( min_maxes[subject_id_number][graph_type], dtype=np.float64)
+
+    return min_maxes
 
 # -----------------------------------------------------------------------------
 # unpack_neon_recordings
