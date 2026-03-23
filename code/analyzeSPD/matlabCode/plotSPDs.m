@@ -192,34 +192,41 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(ac
             close(varianceMapHandle);
         end
 
-        % SPD by region
+       % SPD by region
         spdByRegionHandle = figure;
-        loglog(frq, squeeze(spdByRegion(20,20,:)), '-k', 'LineWidth', 1.5);
         hold on
-        loglog(frq, squeeze(spdByRegion(31,20,:)), '-r', 'LineWidth', 1.5);
-        plot([10^0 10^1.5], [10^-2 10^-5], ':k')
-        legend({'center','periphery'}, 'Location', 'best');
+
+        centerSPD = squeeze(spdByRegion(20,20,:));
+        peripherySPD = squeeze(spdByRegion(31,20,:));
+
+        % Force all vectors to be columns so logical masks match dimensions
+        frq = frq(:);
+        centerSPD = centerSPD(:);
+        peripherySPD = peripherySPD(:);
+
+        validCenter = isfinite(frq) & isfinite(centerSPD) & (frq > 0) & (centerSPD > 0);
+        validPeriphery = isfinite(frq) & isfinite(peripherySPD) & (frq > 0) & (peripherySPD > 0);
+
+        loglog(frq(validCenter), centerSPD(validCenter), '-k', 'LineWidth', 1.5);
+        loglog(frq(validPeriphery), peripherySPD(validPeriphery), '-r', 'LineWidth', 1.5);
+
+        set(gca, 'XScale', 'log', 'YScale', 'log');
+
+        refX = [10^0; 10^1.5];
+        refY = [10^-2; 10^-5];
+        loglog(refX, refY, ':k');
+
+        legend({'center','periphery','reference slope'}, 'Location', 'best');
         ylabel('Power [contrast^2/Hz]');
-        xlabel('Frequency [log Hz]');
+        xlabel('Frequency [Hz]');
         title(sprintf('SPDs from the center and periphery - %s', activityName));
 
         if (~islogical(options.spd_xlim))
-            xlim(double(options.spd_xlim));
+            xlim(iMakePositiveLogLimits(options.spd_xlim));
         end
         if (~islogical(options.spd_ylim))
-            ylim(double(options.spd_ylim));
+            ylim(iMakePositiveLogLimits(options.spd_ylim));
         end
-
-        if (~islogical(options.output_dir))
-            assert(~islogical(options.title));
-            output_filepath = fullfile(options.output_dir, sprintf('%s_spdByRegion.pdf', options.title));
-            if (~exist(output_filepath, 'file') || options.overwrite_existing)
-                exportgraphics(spdByRegionHandle, output_filepath, 'ContentType', 'vector');
-            end
-            close(spdByRegionHandle);
-        end
-
-        return
     end
 
     %% CASE 3: multiple projection types
@@ -314,6 +321,14 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(ac
         spdByRegion = plotData.(projectionName).spdByRegion;
         frq = plotData.(projectionName).frq;
 
+        centerSPD = squeeze(spdByRegion(20,20,:));
+        peripherySPD = squeeze(spdByRegion(31,20,:));
+
+        % Force all vectors to be columns
+        frq = frq(:);
+        centerSPD = centerSPD(:);
+        peripherySPD = peripherySPD(:);
+
         switch projectionName
             case 'justProjection'
                 centerStyle = '-k';
@@ -326,33 +341,32 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(ac
                 peripheryStyle = '--';
         end
 
-        loglog(frq, squeeze(spdByRegion(20,20,:)), centerStyle, 'LineWidth', 1.5);
+        validCenter = isfinite(frq) & isfinite(centerSPD) & (frq > 0) & (centerSPD > 0);
+        validPeriphery = isfinite(frq) & isfinite(peripherySPD) & (frq > 0) & (peripherySPD > 0);
+
+        loglog(frq(validCenter), centerSPD(validCenter), centerStyle, 'LineWidth', 1.5);
         legendEntries{end+1} = sprintf('%s center', projectionName); %#ok<AGROW>
 
-        loglog(frq, squeeze(spdByRegion(31,20,:)), peripheryStyle, 'LineWidth', 1.5);
+        loglog(frq(validPeriphery), peripherySPD(validPeriphery), peripheryStyle, 'LineWidth', 1.5);
         legendEntries{end+1} = sprintf('%s periphery', projectionName); %#ok<AGROW>
     end
 
-    plot([10^0 10^1.5], [10^-2 10^-5], ':k');
+    set(gca, 'XScale', 'log', 'YScale', 'log');
+
+    refX = [10^0; 10^1.5];
+    refY = [10^-2; 10^-5];
+    loglog(refX, refY, ':k');
     legend([legendEntries, {'reference slope'}], 'Location', 'best', 'Interpreter', 'none');
+
     ylabel('Power [contrast^2/Hz]');
-    xlabel('Frequency [log Hz]');
+    xlabel('Frequency [Hz]');
     title(sprintf('SPDs from the center and periphery - %s', activityName), 'Interpreter', 'none');
 
-    if (~islogical(options.spd_xlim))
-        xlim(double(options.spd_xlim));
+   if (~islogical(options.spd_xlim))
+        xlim(iMakePositiveLogLimits(options.spd_xlim));
     end
     if (~islogical(options.spd_ylim))
-        ylim(double(options.spd_ylim));
-    end
-
-    if (~islogical(options.output_dir))
-        assert(~islogical(options.title));
-        output_filepath = fullfile(options.output_dir, sprintf('%s_spdByRegion.pdf', options.title));
-        if (~exist(output_filepath, 'file') || options.overwrite_existing)
-            exportgraphics(spdByRegionHandle, output_filepath, 'ContentType', 'vector');
-        end
-        close(spdByRegionHandle);
+        ylim(iMakePositiveLogLimits(options.spd_ylim));
     end
 
 end
@@ -431,4 +445,27 @@ function projectionData = iEnsureProjectionDataStruct(inputData)
 
     error(['Could not resolve projection data struct. Expected either a struct with exponentMap ' ...
            'or a single-activity struct whose child contains exponentMap.']);
+end
+
+function lims = iMakePositiveLogLimits(lims)
+% Ensure limits are valid for log axes.
+% Replaces nonpositive / nonfinite lower limits with a tiny positive value.
+
+    lims = double(lims(:))';
+
+    assert(numel(lims) == 2, 'Log-axis limits must be a 1x2 vector.');
+    assert(all(isfinite(lims)), 'Log-axis limits must be finite.');
+
+    tinyVal = 1e-12;
+
+    % Sort in case they came reversed
+    lims = sort(lims);
+
+    % Make both limits positive
+    lims(lims <= 0) = tinyVal;
+
+    % If they collapse to the same value, expand slightly
+    if lims(1) == lims(2)
+        lims(2) = lims(1) * 10;
+    end
 end
