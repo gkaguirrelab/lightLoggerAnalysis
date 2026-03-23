@@ -53,9 +53,21 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(ac
 %}
     
     arguments 
-        activityData; 
+        activityData;  % Can either be the activity data struct or path to the .mat file containing the struct 
         options.fovDegrees = 120; 
-    end 
+        options.exponent_clim = false; 
+        options.variance_clim = false; 
+        options.spd_xlim = false; 
+        options.spd_ylim = false; 
+        options.output_dir = false; 
+        options.overwrite_existing = false; 
+        options.title = ""; 
+    end     
+
+    % If we passed in a string to the activityData, then load it in now 
+    if(isstring(activityData) || ischar(activityData))
+        load(activityData); 
+    end     
 
     % Extract the only 
     field_names = fieldnames(activityData);
@@ -95,7 +107,19 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(ac
     end
     title(sprintf('Exponent - %s', activityName))
     axis square
+    if(~islogical(options.exponent_clim))
+        clim(double(options.exponent_clim));
+    end 
     colorbar
+
+    if(~islogical(options.output_dir))
+        assert(~islogical(options.title)); 
+        output_filepath =  fullfile(options.output_dir, sprintf('%s_exponentMap.pdf', options.title)); 
+        if(~exist(output_filepath) || options.overwrite_existing)
+            exportgraphics(exponentMapHandle, output_filepath, 'ContentType','vector')
+        end 
+        close(exponentMapHandle);
+    end 
 
     varianceMapHandle = figure;
     imagesc(varianceMap, [0.015 0.035]);
@@ -110,7 +134,19 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(ac
     end
     title(sprintf('Contrast Variance - %s', activityName))
     axis square
+    if(~islogical(options.variance_clim))
+        clim(double(options.variance_clim)); 
+    end 
     colorbar
+    if(~islogical(options.output_dir))
+        assert(~islogical(options.title)); 
+        output_filepath =  fullfile(options.output_dir, sprintf('%s_varianceMap.pdf', options.title)); 
+        if(~exist(output_filepath) || options.overwrite_existing)
+            exportgraphics(varianceMapHandle, output_filepath, 'ContentType','vector')
+        end 
+        close(varianceMapHandle);
+    end 
+
 
     spdByRegionHandle = figure; 
     loglog(frq, squeeze(spdByRegion(20,20,:)), '-k');
@@ -121,5 +157,20 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(ac
     ylabel('Power [contrast^2/Hz]');
     xlabel('Frequency [log Hz]');
     title(sprintf('SPDs from the center and periphery - %s', activityName));
+    if(~islogical(options.spd_xlim))
+        xlim(double(options.spd_xlim));
+    end 
+    if(~islogical(options.spd_ylim))
+        ylim(double(options.spd_ylim)); 
+    end     
+    if(~islogical(options.output_dir))
+        assert(~islogical(options.title)); 
+        output_filepath = fullfile(options.output_dir, sprintf('%s_spdByRegion.pdf', options.title))
+        if(~exist(output_filepath) || options.overwrite_existing)
+            exportgraphics(spdByRegionHandle, output_filepath, 'ContentType','vector')
+        end 
+        close(spdByRegionHandle);
+    end
+
 
 end
