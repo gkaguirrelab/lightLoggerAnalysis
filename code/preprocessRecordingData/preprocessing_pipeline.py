@@ -11,6 +11,7 @@ import warnings
 import matplotlib.pyplot as plt
 import scipy.io
 import numpy as np
+import copy
 
 
 # Construct the paths to our custom utility libraries 
@@ -457,6 +458,106 @@ def generate_spds(src_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoo
     
     # Close the MATLAB engine
     eng.quit() 
+
+    return 
+
+def group_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026", 
+               dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026",
+               groups: dict[str, dict[str, str | None]] = {"indoor": {"work": None, "chat": None, "walkIndoor": None}, 
+                                                           "outdoor": {"walkOutdoor": None, "walkBiopond": None, "sitBiopond": None}
+                                                          }, 
+               overwrite_existing: bool=False,
+               subjects_to_skip: Iterable=set(), 
+               activities_to_skip: Iterable=set(["lunch", "phone"]), 
+               projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = set(["virtuallyFoveated", "justProjection"]), 
+               verbose: bool=False
+            ) -> None:
+    
+    import matlab.engine
+
+    # Now we will make an inverse mapping of activities to groups rather than groups to activities 
+    activites_to_groups: dict = {activity_name: group_name 
+                                 for group_name, activity_dict in groups.items()
+                                 for activity_name, _ in activity_dict.items()  
+                                }
+
+
+
+    # Initialize the MATLAB engine to utilize the MATLAB function we have developed for this purpose 
+    #eng: object = matlab.engine.start_matlab()  
+    #eng.pyenv('Version', '~/Documents/MATLAB/projects/lightLoggerAnalysis/analysis_env/bin/python', nargout=0)
+    #eng.tbUseProject('lightLoggerAnalysis', nargout=0)
+    
+
+    # First, let's find all of the subjects in this experiment 
+    subject_paths: list[str] = natsorted([os.path.join(src_dir, subject_name) 
+                                          for subject_name in os.listdir(src_dir) 
+                                          if re.fullmatch(r"FLIC_\d+", subject_name) 
+                                          and os.path.isdir(os.path.join(src_dir, subject_name))
+                                         ]
+                                        ) 
+    assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
+
+    # Now, let's iterate over all the subject paths 
+    subject_iterator: Iterable = range(len(subject_paths)) if verbose is False else tqdm(range(len(subject_paths)), desc="Processing Subjects", leave=True)
+    for subject_num in subject_iterator:
+        # Retrieve the subject path and subject name
+        subject_path: str = subject_paths[subject_num]
+        subject_id: str = os.path.basename(subject_path)
+        subject_id_number: int = int(re.search("\d+", subject_id).group())
+
+        # Skip subjects we dont want to process 
+        if(subject_id_number in subjects_to_skip):
+            continue
+        
+         # Initialize per subject copy of the activity grouping 
+        per_subject_activity_grouping: dict = {group: 
+                                                    {activity_name: 
+                                                        {projection_type: ""
+                                                         for projection_type in projection_types
+                                                        }
+                                                    for activity_name, _ in activity_dict.items()
+                                                    if activity_name not in activities_to_skip
+                                                    }
+                                               for group, activity_dict in groups.items()
+                                              }
+
+        # Iterate over the activites for this subject 
+        activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in natsorted(os.listdir(subject_path))
+                                      if os.path.isdir(os.path.join(subject_path, filename))
+                                     ]
+        activities_iterator: Iterable = range(len(activites_paths)) if verbose is False else tqdm(range(len(activites_paths)), desc="Processing Activities", leave=False)
+        for activity_num in activities_iterator:
+            # Retrieve the activity path and activity name
+            activity_path: str = activites_paths[activity_num]
+            activity_name: str = os.path.basename(activity_path)
+
+            if(activity_name in activities_to_skip or activity_name not in activites_to_groups):
+                continue
+
+            # Now, we will gather the path to the SPD 
+            for projection_type in projection_types:
+                spd_results_mat_path: str = os.path.join(activity_path, f"{subject_id}_{activity_name}_{projection_type}_SPDResults.mat")
+                assert os.path.exists(spd_results_mat_path), f"Problem with: {spd_results_mat_path}"    
+                group_name: str = activites_to_groups[activity_name]
+                per_subject_activity_grouping[group_name][activity_name][projection_type] = spd_results_mat_path
+            
+                
+        # Now that we have the activities grouped together for this subject, pass it over to MATLAB 
+        # to do the plotting 
+
+        # First, output to a temp .mat file to make transfer easier between the two languages 
+        temp_output_filepath: str = os.path.expanduser("~/Desktop/group_spds_temp.mat")
+        scipy.io.savemat(temp_output_filepath, {"groupedActivityData": per_subject_activity_grouping})
+
+        # Define a title prefix for the figure in MATLAB 
+        title: str = "groupedActivities"
+
+        # Remove the figure after it is finisehd 
+        os.remove(temp_output_filepath)
+
+    # Close the matlab engine 
+    #eng.quit()
 
     return 
 
