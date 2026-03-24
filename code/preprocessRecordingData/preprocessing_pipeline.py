@@ -590,6 +590,7 @@ def group_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Za
                       "title", str(subject_id_number),
                       "output_dir", output_dir, 
                       "overwrite_existing", overwrite_existing,
+                      "sort_sitting_before_walking", True, 
                       nargout=0
                     )
 
@@ -657,8 +658,6 @@ def adjust_spd_axes(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropb
         # Skip unwatned subjects 
         if(subject_id_number in subjects_to_skip):
             continue 
-
-
 
         # Construct the min maxes for this subject 
         axes_min_maxes: dict[str, np.ndarray] = per_subject_axes_min_maxes[subject_id_number]

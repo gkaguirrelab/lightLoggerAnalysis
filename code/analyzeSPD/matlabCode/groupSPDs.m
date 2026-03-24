@@ -26,19 +26,27 @@ function groupedSpdHandle = groupSPDs(groupedActivityData, options)
 %   is more robust than generating temporary SPD figures and copying their
 %   graphics objects into the grouped figure.
 %
+%   Optionally, activities within each row can be reordered so that sitting
+%   activities are shown first and walking activities are shown second.
+%
 % Inputs:
 %   groupedActivityData - Struct or filepath. If a filepath is provided,
 %       it should point to a .mat file containing a variable named
 %       groupedActivityData.
 %
 % Optional key/value pairs:
-%   exponent_clim      - false or 2-element numeric vector for exponent CLim.
-%   variance_clim      - false or 2-element numeric vector for variance CLim.
-%   spd_xlim           - false or 2-element numeric vector for SPD x-limits.
-%   spd_ylim           - false or 2-element numeric vector for SPD y-limits.
-%   title              - Title stem used in the figure super-title and export.
-%   output_dir         - Output directory for saving the grouped PDF.
-%   overwrite_existing - Logical. Whether to overwrite an existing export.
+%   exponent_clim               - false or 2-element numeric vector for exponent CLim.
+%   variance_clim               - false or 2-element numeric vector for variance CLim.
+%   spd_xlim                    - false or 2-element numeric vector for SPD x-limits.
+%   spd_ylim                    - false or 2-element numeric vector for SPD y-limits.
+%   title                       - Title stem used in the figure super-title and export.
+%   output_dir                  - Output directory for saving the grouped PDF.
+%   overwrite_existing          - Logical. Whether to overwrite an existing export.
+%   sort_sitting_before_walking - Logical. If true, each row is reordered so
+%                                 activities with "sit" in the name appear first,
+%                                 then activities with "walk" in the name, then all
+%                                 remaining activities. Within each category, names
+%                                 are alphabetically sorted.
 %
 % Outputs:
 %   groupedSpdHandle   - Figure handle for the grouped SPD figure.
@@ -48,6 +56,7 @@ function groupedSpdHandle = groupSPDs(groupedActivityData, options)
 %       "title", "2001", ...
 %       "spd_xlim", [0.5 60], ...
 %       "spd_ylim", [1e-6 1e2], ...
+%       "sort_sitting_before_walking", true, ...
 %       "output_dir", "/path/to/output");
 
     arguments 
@@ -59,6 +68,7 @@ function groupedSpdHandle = groupSPDs(groupedActivityData, options)
         options.title = ""
         options.output_dir = ""
         options.overwrite_existing = false
+        options.sort_sitting_before_walking = false
     end 
 
     % If groupedActivityData was passed in as a filepath, load it now
@@ -76,6 +86,14 @@ function groupedSpdHandle = groupSPDs(groupedActivityData, options)
         group_name = group_names{gg};
         group_activities_struct = groupedActivityData.(group_name); 
         group_activities = fieldnames(group_activities_struct);
+
+        % Optionally reorder activities within this row
+        if (options.sort_sitting_before_walking)
+            group_activities = iSortActivitiesSitThenWalk(group_activities);
+        else
+            group_activities = sort(group_activities);
+        end
+
         n_graph_cols = max([n_graph_cols, numel(group_activities)]);
     end 
 
@@ -93,6 +111,13 @@ function groupedSpdHandle = groupSPDs(groupedActivityData, options)
         group_name = group_names{gg};
         group_activities_struct = groupedActivityData.(group_name); 
         group_activities = fieldnames(group_activities_struct);
+
+        % Optionally reorder activities within this row
+        if (options.sort_sitting_before_walking)
+            group_activities = iSortActivitiesSitThenWalk(group_activities);
+        else
+            group_activities = sort(group_activities);
+        end
 
         for aa = 1:numel(group_activities)
             activity_name = group_activities{aa};
@@ -180,4 +205,33 @@ function groupedSpdHandle = groupSPDs(groupedActivityData, options)
             exportgraphics(groupedSpdHandle, output_filepath, 'ContentType', 'vector');
         end
     end
+end
+
+
+function sorted_activity_names = iSortActivitiesSitThenWalk(activity_names)
+% Reorder activity names so sitting activities come first, walking
+% activities come second, and all remaining activities come last.
+% Within each category, names are sorted alphabetically.
+
+    % Normalize to a row cell array of char/string-like names
+    activity_names = sort(activity_names);
+
+    sitting_names = {};
+    walking_names = {};
+    other_names = {};
+
+    for ii = 1:numel(activity_names)
+        current_name = activity_names{ii};
+        lower_name = lower(current_name);
+
+        if contains(lower_name, 'sit')
+            sitting_names{end+1} = current_name; %#ok<AGROW>
+        elseif contains(lower_name, 'walk')
+            walking_names{end+1} = current_name; %#ok<AGROW>
+        else
+            other_names{end+1} = current_name; %#ok<AGROW>
+        end
+    end
+
+    sorted_activity_names = [sort(sitting_names), sort(walking_names), sort(other_names)];
 end
