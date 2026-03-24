@@ -1,258 +1,217 @@
-function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(activityData, options)
+function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(virtuallyFoveatedActivityData, options)
 % Plot temporal SPD exponent, variance, and regional spectrum summaries
 %
 % Syntax:
-%   [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(activityData)
-%   [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(activityData, options)
+%   [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(virtuallyFoveatedActivityData)
+%   [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(virtuallyFoveatedActivityData, options)
 %
 % Description:
-%   This function visualizes temporal SPD analysis results.
+%   This function visualizes the outputs of temporal SPD analysis for a
+%   single activity stored in a virtuallyFoveatedActivityData structure.
+%   It extracts the exponent map, variance map, regional SPD summaries,
+%   frequency support, and other metadata for the activity, then produces
+%   three figures.
 %
-%   Supported input cases:
+%   When justProjectionActivityData is provided, the exponent and variance
+%   plots are displayed as side-by-side comparisons:
+%       left  = just projection
+%       right = virtually foveated
 %
-%   CASE 1:
-%       activityData is a string/char path to a .mat file containing either
-%       a variable named activityData or a single struct variable.
+%   In that same case, the SPD-by-region plot overlays all regional curves
+%   from both datasets onto a single axes.
 %
-%   CASE 2:
-%       activityData is a struct for a single activity where:
-%           activityData.(activityName).exponentMap
-%           activityData.(activityName).varianceMap
-%           activityData.(activityName).spdByRegion
-%           activityData.(activityName).frq
-%           activityData.(activityName).medianImage
-%           activityData.(activityName).frameDropVector
-%
-%   CASE 3:
-%       activityData.(activityName).justProjection and/or
-%       activityData.(activityName).virtuallyFoveated exist, and each one is
-%       either:
-%           (a) a struct with exponentMap / varianceMap / spdByRegion / frq
-%       or  (b) a string/char path to a .mat file containing such a struct.
-%
-%       In this case:
-%           - exponent maps are shown side-by-side in one figure
-%           - variance maps are shown side-by-side in one figure
-%           - SPD curves from both projection types are overlaid on one plot
+% Inputs:
+%   virtuallyFoveatedActivityData - Struct or filepath. Contains temporal
+%       SPD analysis results for a single activity. The first field is
+%       assumed to be the activity name and to contain:
+%           .exponentMap
+%           .varianceMap
+%           .spdByRegion
+%           .frq
+%           .medianImage
+%           .frameDropVector
 %
 % Optional key/value pairs:
-%   fovDegrees         - Scalar FOV in degrees used to convert eccentricity
-%                        ring radii into pixels.
-%   exponent_clim      - false or 1x2 numeric for exponent map color limits.
-%   variance_clim      - false or 1x2 numeric for variance map color limits.
-%   spd_xlim           - false or 1x2 numeric for SPD x-limits.
-%   spd_ylim           - false or 1x2 numeric for SPD y-limits.
-%   output_dir         - false or string/char output directory for exports.
-%   overwrite_existing - logical, whether to overwrite existing exports.
-%   title              - title stem used in exported filenames.
+%   fovDegrees               - Scalar. Field of view in degrees used to
+%                              convert eccentricity ring radii from
+%                              degrees into pixels for plotting.
+%   exponent_clim            - false or 2-element numeric vector for CLim.
+%   variance_clim            - false or 2-element numeric vector for CLim.
+%   spd_xlim                 - false or 2-element numeric vector for xlim.
+%   spd_ylim                 - false or 2-element numeric vector for ylim.
+%   output_dir               - false or output directory path.
+%   overwrite_existing       - Logical. Whether to overwrite exported files.
+%   title                    - String used in exported filenames.
+%   justProjectionActivityData - false, struct, or filepath containing the
+%                              matching activity results for just-projection
+%                              plotting comparisons.
 %
 % Outputs:
-%   exponentMapHandle  - Figure handle for exponent figure.
-%   varianceMapHandle  - Figure handle for variance figure.
-%   spdByRegionHandle  - Figure handle for SPD-by-region figure.
+%   exponentMapHandle        - Figure handle for the exponent map figure.
+%   varianceMapHandle        - Figure handle for the variance map figure.
+%   spdByRegionHandle        - Figure handle for the SPD summary figure.
+%
+% Examples:
+%{
+    load('/path/to/FLIC_2001_walkIndoorFoveate_SPDResults.mat', 'virtuallyFoveatedActivityData');
+
+    [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = ...
+        plotSPDs(virtuallyFoveatedActivityData, "fovDegrees", 120);
+%}
 
     arguments
-        activityData
-        options.fovDegrees = 120
-        options.exponent_clim = false
-        options.variance_clim = false
-        options.spd_xlim = false
-        options.spd_ylim = false
-        options.output_dir = false
-        options.overwrite_existing = false
-        options.title = ""
+        virtuallyFoveatedActivityData;  % May be either the activity-data struct or a path to a .mat file containing activityData
+        options.fovDegrees = 120;
+        options.exponent_clim = false;
+        options.variance_clim = false;
+        options.spd_xlim = false;
+        options.spd_ylim = false;
+        options.output_dir = false;
+        options.overwrite_existing = false;
+        options.title = "";
+        options.justProjectionActivityData = false;
     end
 
-    %% Case 1 support: if the top-level input is a path, load it
-    if (ischar(activityData) || isstring(activityData))
-        activityData = iLoadActivityDataStruct(activityData);
+    % Pull the optional just-projection dataset out of the options struct so
+    % we can treat it the same way as the virtually foveated data below.
+    justProjectionActivityData = options.justProjectionActivityData;
+
+    % If the virtually foveated input was passed in as a file path, load the
+    % activityData variable from disk now.
+    if (isstring(virtuallyFoveatedActivityData) || ischar(virtuallyFoveatedActivityData))
+        virtuallyFoveatedActivityData = load(virtuallyFoveatedActivityData).activityData;
     end
 
-    %% Determine the activity name
-    activityNames = fieldnames(activityData);
-    assert(~isempty(activityNames), 'activityData has no fields.');
-    activityName = activityNames{1};
-
-    % Main activity container
-    activityStruct = activityData.(activityName);
-
-    %% Determine whether this is case 2 or case 3
-    isSingleProjectionCase = isfield(activityStruct, 'exponentMap');
-
-    projectionNamesPreferredOrder = {'justProjection', 'virtuallyFoveated'};
-
-    if (isSingleProjectionCase)
-        projectionNames = {'singleProjection'};
-    else
-        projectionNames = {};
-        for ii = 1:numel(projectionNamesPreferredOrder)
-            if (isfield(activityStruct, projectionNamesPreferredOrder{ii}))
-                projectionNames{end+1} = projectionNamesPreferredOrder{ii}; %#ok<AGROW>
-            end
-        end
-
-        assert(~isempty(projectionNames), ...
-            ['Could not detect supported input structure. Expected either direct data fields ' ...
-             '(case 2) or projection-type fields such as justProjection / virtuallyFoveated (case 3).']);
+    % If the just-projection input was passed in as a file path, load that
+    % activityData variable from disk as well.
+    if (isstring(justProjectionActivityData) || ischar(justProjectionActivityData))
+        justProjectionActivityData = load(justProjectionActivityData).activityData;
     end
 
-    %% Standardize all projection data into one struct
-    % After this block, plotData.(projectionName) will always directly contain:
-    %   exponentMap, varianceMap, spdByRegion, frq, ...
-    plotData = struct();
+    % The activity-data struct is expected to contain exactly one top-level
+    % field corresponding to the activity name. Pull that field name out so
+    % the remaining code can access the data consistently.
+    field_names = fieldnames(virtuallyFoveatedActivityData);
+    activityName = field_names{1};
 
-    if (isSingleProjectionCase)
-        plotData.singleProjection = iEnsureProjectionDataStruct(activityStruct);
-    else
-        for ii = 1:numel(projectionNames)
-            projectionName = projectionNames{ii};
-            plotData.(projectionName) = iEnsureProjectionDataStruct(activityStruct.(projectionName));
-        end
-    end
+    % Cache the field-of-view setting locally for plotting conversions.
+    fovDegrees = options.fovDegrees;
 
-    %% Build FOV mask from the first available projection
-    firstProjectionNames = fieldnames(plotData);
-    firstProjectionName = firstProjectionNames{1};
+    % Extract all of the virtually foveated quantities using descriptive
+    % variable names so it is always obvious which dataset they belong to.
+    virtuallyFoveatedExponentMap = virtuallyFoveatedActivityData.(activityName).exponentMap;
+    virtuallyFoveatedVarianceMap = virtuallyFoveatedActivityData.(activityName).varianceMap;
+    virtuallyFoveatedSpdByRegion = virtuallyFoveatedActivityData.(activityName).spdByRegion;
+    virtuallyFoveatedFrq = virtuallyFoveatedActivityData.(activityName).frq;
+    medianImage = virtuallyFoveatedActivityData.(activityName).medianImage;
+    frameDropVector = virtuallyFoveatedActivityData.(activityName).frameDropVector;
 
-    exampleExponentMap = plotData.(firstProjectionName).exponentMap;
-
+    % Build an elliptical mask corresponding to the valid field of view.
+    % Values outside this ellipse are set to NaN so they do not appear in
+    % the exponent/variance images.
     ellipseTransparentParams = [240, 240, 120000, .75, 0];
     p = ellipse_ex2im(ellipse_transparent2ex(ellipseTransparentParams));
     myEllipse = @(x,y) p(1).*x.^2 + p(2).*x.*y + p(3).*y.^2 + p(4).*x + p(5).*y + p(6);
     [X, Y] = meshgrid(1:480, 1:480);
     mask = double(myEllipse(X,Y) < 1e-9);
 
-    degPerPix = options.fovDegrees / size(exampleExponentMap, 1);
+    % Apply the mask to the virtually foveated maps.
+    virtuallyFoveatedExponentMap(mask == 0) = nan;
+    virtuallyFoveatedVarianceMap(mask == 0) = nan;
+
+    % If just-projection data was provided, extract the analogous variables
+    % and apply the same field-of-view mask so the comparison is visually
+    % consistent across the two conditions.
+    if (~islogical(justProjectionActivityData))
+        justProjectionExponentMap = justProjectionActivityData.(activityName).exponentMap;
+        justProjectionVarianceMap = justProjectionActivityData.(activityName).varianceMap;
+        justProjectionSpdByRegion = justProjectionActivityData.(activityName).spdByRegion;
+        justProjectionFrq = justProjectionActivityData.(activityName).frq;
+
+        justProjectionExponentMap(mask == 0) = nan;
+        justProjectionVarianceMap(mask == 0) = nan;
+    end
+
+    % Convert degrees of visual angle into pixels so that the concentric
+    % eccentricity circles are drawn at the intended radii on the map.
+    degPerPix = fovDegrees / size(virtuallyFoveatedExponentMap,1);
+
+    % Precompute the top-left pixel indices of the 39x39 regional grid used
+    % for overlaying the patch boundaries on the map images.
     idxStarts = 1:12:(480 - 24 + 1);
 
-    %% CASE 2: single projection
-    if (isSingleProjectionCase)
-
-        exponentMap = plotData.singleProjection.exponentMap;
-        varianceMap = plotData.singleProjection.varianceMap;
-        spdByRegion = plotData.singleProjection.spdByRegion;
-        frq = plotData.singleProjection.frq;
-
-        exponentMap(mask == 0) = nan;
-        varianceMap(mask == 0) = nan;
-
-        % Exponent map
-        exponentMapHandle = figure;
-        imagesc(-exponentMap);
-        hold on
-        plot(240,240,'+k')
-        for ii = [5, 10, 20, 40]
-            viscircles([240 240], ii/degPerPix, 'Color', 'k', 'LineWidth', 1, 'EnhanceVisibility', false);
-        end
-        for ii = 1:39
-            plot([idxStarts(ii), idxStarts(ii)], [1 480], '-', 'Color', [0.5 0.5 0.5]);
-            plot([1 480], [idxStarts(ii), idxStarts(ii)], '-', 'Color', [0.5 0.5 0.5]);
-        end
-        title(sprintf('Exponent - %s', activityName))
-        axis square
-        if (~islogical(options.exponent_clim))
-            clim(double(options.exponent_clim));
-        end
-        colorbar
-
-        if (~islogical(options.output_dir))
-            assert(~islogical(options.title));
-            output_filepath = fullfile(options.output_dir, sprintf('%s_exponentMap.pdf', options.title));
-            if (~exist(output_filepath, 'file') || options.overwrite_existing)
-                exportgraphics(exponentMapHandle, output_filepath, 'ContentType', 'vector');
-            end
-            close(exponentMapHandle);
-        end
-
-        % Variance map
-        varianceMapHandle = figure;
-        imagesc(varianceMap);
-        hold on
-        plot(240,240,'+k')
-        for ii = [5, 10, 20, 40]
-            viscircles([240 240], ii/degPerPix, 'Color', 'k', 'LineWidth', 1, 'EnhanceVisibility', false);
-        end
-        for ii = 1:39
-            plot([idxStarts(ii), idxStarts(ii)], [1 480], '-', 'Color', [0.5 0.5 0.5]);
-            plot([1 480], [idxStarts(ii), idxStarts(ii)], '-', 'Color', [0.5 0.5 0.5]);
-        end
-        title(sprintf('Contrast Variance - %s', activityName))
-        axis square
-        if (~islogical(options.variance_clim))
-            clim(double(options.variance_clim));
-        end
-        colorbar
-
-        if (~islogical(options.output_dir))
-            assert(~islogical(options.title));
-            output_filepath = fullfile(options.output_dir, sprintf('%s_varianceMap.pdf', options.title));
-            if (~exist(output_filepath, 'file') || options.overwrite_existing)
-                exportgraphics(varianceMapHandle, output_filepath, 'ContentType', 'vector');
-            end
-            close(varianceMapHandle);
-        end
-
-       % SPD by region
-        spdByRegionHandle = figure;
-        hold on
-
-        centerSPD = squeeze(spdByRegion(20,20,:));
-        peripherySPD = squeeze(spdByRegion(31,20,:));
-
-        % Force all vectors to be columns so logical masks match dimensions
-        frq = frq(:);
-        centerSPD = centerSPD(:);
-        peripherySPD = peripherySPD(:);
-
-        validCenter = isfinite(frq) & isfinite(centerSPD) & (frq > 0) & (centerSPD > 0);
-        validPeriphery = isfinite(frq) & isfinite(peripherySPD) & (frq > 0) & (peripherySPD > 0);
-
-        loglog(frq(validCenter), centerSPD(validCenter), '-k', 'LineWidth', 1.5);
-        loglog(frq(validPeriphery), peripherySPD(validPeriphery), '-r', 'LineWidth', 1.5);
-
-        set(gca, 'XScale', 'log', 'YScale', 'log');
-
-        refX = [10^0; 10^1.5];
-        refY = [10^-2; 10^-5];
-        loglog(refX, refY, ':k');
-
-        legend({'center','periphery','reference slope'}, 'Location', 'best');
-        ylabel('Power [contrast^2/Hz]');
-        xlabel('Frequency [Hz]');
-        title(sprintf('SPDs from the center and periphery - %s', activityName));
-
-        if (~islogical(options.spd_xlim))
-            xlim(iMakePositiveLogLimits(options.spd_xlim));
-        end
-        if (~islogical(options.spd_ylim))
-            ylim(iMakePositiveLogLimits(options.spd_ylim));
-        end
-    end
-
-    %% CASE 3: multiple projection types
-    nProjections = numel(projectionNames);
-
-    % Exponent maps side-by-side
+    % ---------------------------------------------------------------------
+    % Exponent map figure
+    % ---------------------------------------------------------------------
+    % If just-projection data exists, show a 1x2 comparison:
+    %   left  = just projection
+    %   right = virtually foveated
+    %
+    % Otherwise preserve the original single-map behavior.
     exponentMapHandle = figure;
-    tiledlayout(1, nProjections, 'Padding', 'compact', 'TileSpacing', 'compact');
 
-    for pp = 1:nProjections
-        projectionName = projectionNames{pp};
-        exponentMap = plotData.(projectionName).exponentMap;
-        exponentMap(mask == 0) = nan;
+    if (~islogical(justProjectionActivityData))
+        tiledlayout(1,2);
 
+        % ---------------- Left tile: just projection exponent map ---------
         nexttile;
-        imagesc(-exponentMap);
+        imagesc(-justProjectionExponentMap);
         hold on
-        plot(240,240,'+k')
+
+        % Mark the image center and overlay eccentricity rings plus the
+        % underlying 39x39 regional grid.
+        plot(240, 240, '+k');
         for ii = [5, 10, 20, 40]
-            viscircles([240 240], ii/degPerPix, 'Color', 'k', 'LineWidth', 1, 'EnhanceVisibility', false);
+            viscircles([240 240], ii / degPerPix, 'Color', 'k', 'LineWidth', 1, 'EnhanceVisibility', false);
         end
         for ii = 1:39
             plot([idxStarts(ii), idxStarts(ii)], [1 480], '-', 'Color', [0.5 0.5 0.5]);
             plot([1 480], [idxStarts(ii), idxStarts(ii)], '-', 'Color', [0.5 0.5 0.5]);
         end
-        title(sprintf('Exponent - %s', projectionName), 'Interpreter', 'none');
+
+        title(sprintf('Exponent - Just Projection - %s', activityName));
+        axis square
+
+        % Only apply a custom color limit if the user supplied one.
+        if (~islogical(options.exponent_clim))
+            clim(double(options.exponent_clim));
+        end
+        colorbar
+
+        % ------------- Right tile: virtually foveated exponent map --------
+        nexttile;
+        imagesc(-virtuallyFoveatedExponentMap);
+        hold on
+        plot(240, 240, '+k');
+        for ii = [5, 10, 20, 40]
+            viscircles([240 240], ii / degPerPix, 'Color', 'k', 'LineWidth', 1, 'EnhanceVisibility', false);
+        end
+        for ii = 1:39
+            plot([idxStarts(ii), idxStarts(ii)], [1 480], '-', 'Color', [0.5 0.5 0.5]);
+            plot([1 480], [idxStarts(ii), idxStarts(ii)], '-', 'Color', [0.5 0.5 0.5]);
+        end
+
+        title(sprintf('Exponent - Virtually Foveated - %s', activityName));
+        axis square
+
+        if (~islogical(options.exponent_clim))
+            clim(double(options.exponent_clim));
+        end
+        colorbar
+
+    else
+        % Original single-dataset exponent map behavior.
+        imagesc(-virtuallyFoveatedExponentMap);
+        hold on
+        plot(240, 240, '+k');
+        for ii = [5, 10, 20, 40]
+            viscircles([240 240], ii / degPerPix, 'Color', 'k', 'LineWidth', 1, 'EnhanceVisibility', false);
+        end
+        for ii = 1:39
+            plot([idxStarts(ii), idxStarts(ii)], [1 480], '-', 'Color', [0.5 0.5 0.5]);
+            plot([1 480], [idxStarts(ii), idxStarts(ii)], '-', 'Color', [0.5 0.5 0.5]);
+        end
+        title(sprintf('Exponent - %s', activityName));
         axis square
         if (~islogical(options.exponent_clim))
             clim(double(options.exponent_clim));
@@ -260,38 +219,79 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(ac
         colorbar
     end
 
-    sgtitle(sprintf('Exponent Maps - %s', activityName), 'Interpreter', 'none');
-
+    % Export the exponent figure if an output directory was supplied.
     if (~islogical(options.output_dir))
         assert(~islogical(options.title));
         output_filepath = fullfile(options.output_dir, sprintf('%s_exponentMap.pdf', options.title));
-        if (~exist(output_filepath, 'file') || options.overwrite_existing)
-            exportgraphics(exponentMapHandle, output_filepath, 'ContentType', 'vector');
+        if (~exist(output_filepath) || options.overwrite_existing)
+            exportgraphics(exponentMapHandle, output_filepath, 'ContentType', 'vector')
         end
         close(exponentMapHandle);
     end
 
-    % Variance maps side-by-side
+    % ---------------------------------------------------------------------
+    % Variance map figure
+    % ---------------------------------------------------------------------
+    % Same logic as above: two-panel comparison if just-projection data is
+    % available, otherwise preserve the original single-map behavior.
     varianceMapHandle = figure;
-    tiledlayout(1, nProjections, 'Padding', 'compact', 'TileSpacing', 'compact');
 
-    for pp = 1:nProjections
-        projectionName = projectionNames{pp};
-        varianceMap = plotData.(projectionName).varianceMap;
-        varianceMap(mask == 0) = nan;
+    if (~islogical(justProjectionActivityData))
+        tiledlayout(1,2);
 
+        % ---------------- Left tile: just projection variance map ---------
         nexttile;
-        imagesc(varianceMap);
+        imagesc(justProjectionVarianceMap, [0.015 0.035]);
         hold on
-        plot(240,240,'+k')
+        plot(240, 240, '+k');
         for ii = [5, 10, 20, 40]
-            viscircles([240 240], ii/degPerPix, 'Color', 'k', 'LineWidth', 1, 'EnhanceVisibility', false);
+            viscircles([240 240], ii / degPerPix, 'Color', 'k', 'LineWidth', 1, 'EnhanceVisibility', false);
         end
         for ii = 1:39
             plot([idxStarts(ii), idxStarts(ii)], [1 480], '-', 'Color', [0.5 0.5 0.5]);
             plot([1 480], [idxStarts(ii), idxStarts(ii)], '-', 'Color', [0.5 0.5 0.5]);
         end
-        title(sprintf('Contrast Variance - %s', projectionName), 'Interpreter', 'none');
+
+        title(sprintf('Contrast Variance - Just Projection - %s', activityName));
+        axis square
+        if (~islogical(options.variance_clim))
+            clim(double(options.variance_clim));
+        end
+        colorbar
+
+        % ----------- Right tile: virtually foveated variance map ----------
+        nexttile;
+        imagesc(virtuallyFoveatedVarianceMap, [0.015 0.035]);
+        hold on
+        plot(240, 240, '+k');
+        for ii = [5, 10, 20, 40]
+            viscircles([240 240], ii / degPerPix, 'Color', 'k', 'LineWidth', 1, 'EnhanceVisibility', false);
+        end
+        for ii = 1:39
+            plot([idxStarts(ii), idxStarts(ii)], [1 480], '-', 'Color', [0.5 0.5 0.5]);
+            plot([1 480], [idxStarts(ii), idxStarts(ii)], '-', 'Color', [0.5 0.5 0.5]);
+        end
+
+        title(sprintf('Contrast Variance - Virtually Foveated - %s', activityName));
+        axis square
+        if (~islogical(options.variance_clim))
+            clim(double(options.variance_clim));
+        end
+        colorbar
+
+    else
+        % Original single-dataset variance map behavior.
+        imagesc(virtuallyFoveatedVarianceMap, [0.015 0.035]);
+        hold on
+        plot(240, 240, '+k');
+        for ii = [5, 10, 20, 40]
+            viscircles([240 240], ii / degPerPix, 'Color', 'k', 'LineWidth', 1, 'EnhanceVisibility', false);
+        end
+        for ii = 1:39
+            plot([idxStarts(ii), idxStarts(ii)], [1 480], '-', 'Color', [0.5 0.5 0.5]);
+            plot([1 480], [idxStarts(ii), idxStarts(ii)], '-', 'Color', [0.5 0.5 0.5]);
+        end
+        title(sprintf('Contrast Variance - %s', activityName));
         axis square
         if (~islogical(options.variance_clim))
             clim(double(options.variance_clim));
@@ -299,173 +299,178 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(ac
         colorbar
     end
 
-    sgtitle(sprintf('Variance Maps - %s', activityName), 'Interpreter', 'none');
-
+    % Export the variance figure if requested.
     if (~islogical(options.output_dir))
         assert(~islogical(options.title));
         output_filepath = fullfile(options.output_dir, sprintf('%s_varianceMap.pdf', options.title));
-        if (~exist(output_filepath, 'file') || options.overwrite_existing)
-            exportgraphics(varianceMapHandle, output_filepath, 'ContentType', 'vector');
+        if (~exist(output_filepath) || options.overwrite_existing)
+            exportgraphics(varianceMapHandle, output_filepath, 'ContentType', 'vector')
         end
         close(varianceMapHandle);
     end
 
-    % SPD-by-region on same graph
+        % ---------------------------------------------------------------------
+    % SPD-by-region figure
+    % ---------------------------------------------------------------------
+    % Keep the original plotting style:
+    %   - loglog plot
+    %   - same axis labels
+    %   - same title format
+    %   - same reference line
+    %   - same black/red center/periphery styling
+    %
+    % The only change is:
+    %   - if justProjectionActivityData exists, also plot its center and
+    %     periphery curves on the same axes.
     spdByRegionHandle = figure;
-    hold on
 
-    legendEntries = {};
+    if (~islogical(justProjectionActivityData))
+        % Extract center/periphery SPD curves
+        virtuallyFoveatedCenterSpd = squeeze(virtuallyFoveatedSpdByRegion(20,20,:));
+        virtuallyFoveatedPeripherySpd = squeeze(virtuallyFoveatedSpdByRegion(31,20,:));
+        justProjectionCenterSpd = squeeze(justProjectionSpdByRegion(20,20,:));
+        justProjectionPeripherySpd = squeeze(justProjectionSpdByRegion(31,20,:));
 
-    for pp = 1:nProjections
-        projectionName = projectionNames{pp};
-        spdByRegion = plotData.(projectionName).spdByRegion;
-        frq = plotData.(projectionName).frq;
+        % Force column vectors (prevents logical indexing bugs)
+        virtuallyFoveatedFrqVector = virtuallyFoveatedFrq(:);
+        justProjectionFrqVector = justProjectionFrq(:);
 
-        centerSPD = squeeze(spdByRegion(20,20,:));
-        peripherySPD = squeeze(spdByRegion(31,20,:));
+        virtuallyFoveatedCenterSpd = virtuallyFoveatedCenterSpd(:);
+        virtuallyFoveatedPeripherySpd = virtuallyFoveatedPeripherySpd(:);
+        justProjectionCenterSpd = justProjectionCenterSpd(:);
+        justProjectionPeripherySpd = justProjectionPeripherySpd(:);
 
-        % Force all vectors to be columns
-        frq = frq(:);
-        centerSPD = centerSPD(:);
-        peripherySPD = peripherySPD(:);
+        % Build valid masks
+        virtuallyFoveatedCenterValidIdx = isfinite(virtuallyFoveatedFrqVector) & ...
+                                            isfinite(virtuallyFoveatedCenterSpd) & ...
+                                            (virtuallyFoveatedFrqVector > 0) & ...
+                                            (virtuallyFoveatedCenterSpd > 0);
 
-        switch projectionName
-            case 'justProjection'
-                centerStyle = '-k';
-                peripheryStyle = '-r';
-            case 'virtuallyFoveated'
-                centerStyle = '--k';
-                peripheryStyle = '--r';
-            otherwise
-                centerStyle = '-';
-                peripheryStyle = '--';
+        virtuallyFoveatedPeripheryValidIdx = isfinite(virtuallyFoveatedFrqVector) & ...
+                                                isfinite(virtuallyFoveatedPeripherySpd) & ...
+                                                (virtuallyFoveatedFrqVector > 0) & ...
+                                                (virtuallyFoveatedPeripherySpd > 0);
+
+        justProjectionCenterValidIdx = isfinite(justProjectionFrqVector) & ...
+                                        isfinite(justProjectionCenterSpd) & ...
+                                        (justProjectionFrqVector > 0) & ...
+                                        (justProjectionCenterSpd > 0);
+
+        justProjectionPeripheryValidIdx = isfinite(justProjectionFrqVector) & ...
+                                            isfinite(justProjectionPeripherySpd) & ...
+                                            (justProjectionFrqVector > 0) & ...
+                                            (justProjectionPeripherySpd > 0);
+
+        % -----------------------------------------------------------------
+        % SAFETY CHECKS
+        % -----------------------------------------------------------------
+        virtuallyFoveatedHasValid = any(virtuallyFoveatedCenterValidIdx) || ...
+                                    any(virtuallyFoveatedPeripheryValidIdx);
+
+        justProjectionHasValid = any(justProjectionCenterValidIdx) || ...
+                                any(justProjectionPeripheryValidIdx);
+
+        if (~virtuallyFoveatedHasValid)
+            error('plotSPDs:NoValidVirtuallyFoveatedData', ...
+                    'No valid SPD data for virtuallyFoveated (all values invalid or <= 0).');
         end
 
-        validCenter = isfinite(frq) & isfinite(centerSPD) & (frq > 0) & (centerSPD > 0);
-        validPeriphery = isfinite(frq) & isfinite(peripherySPD) & (frq > 0) & (peripherySPD > 0);
+        if (~justProjectionHasValid)
+            error('plotSPDs:NoValidJustProjectionData', ...
+                    'No valid SPD data for justProjection (all values invalid or <= 0).');
+        end
 
-        loglog(frq(validCenter), centerSPD(validCenter), centerStyle, 'LineWidth', 1.5);
-        legendEntries{end+1} = sprintf('%s center', projectionName); %#ok<AGROW>
+        % -----------------------------------------------------------------
+        % Plot 
+        % -----------------------------------------------------------------
+        if (any(virtuallyFoveatedCenterValidIdx))
+            loglog(virtuallyFoveatedFrqVector(virtuallyFoveatedCenterValidIdx), ...
+                    virtuallyFoveatedCenterSpd(virtuallyFoveatedCenterValidIdx), '-k');
+            hold on
+        else
+            hold on
+        end
 
-        loglog(frq(validPeriphery), peripherySPD(validPeriphery), peripheryStyle, 'LineWidth', 1.5);
-        legendEntries{end+1} = sprintf('%s periphery', projectionName); %#ok<AGROW>
+        if (any(virtuallyFoveatedPeripheryValidIdx))
+            loglog(virtuallyFoveatedFrqVector(virtuallyFoveatedPeripheryValidIdx), ...
+                    virtuallyFoveatedPeripherySpd(virtuallyFoveatedPeripheryValidIdx), '-r');
+        end
+
+        if (any(justProjectionCenterValidIdx))
+            loglog(justProjectionFrqVector(justProjectionCenterValidIdx), ...
+                    justProjectionCenterSpd(justProjectionCenterValidIdx), '--k');
+        end
+
+        if (any(justProjectionPeripheryValidIdx))
+            loglog(justProjectionFrqVector(justProjectionPeripheryValidIdx), ...
+                    justProjectionPeripherySpd(justProjectionPeripheryValidIdx), '--r');
+        end
+
+        plot([10^0 10^1.5], [10^-2 10^-5], ':k')
+
+        ylabel('Power [contrast^2/Hz]');
+        xlabel('Frequency [log Hz]');
+        title(sprintf('SPDs from the center and periphery - %s', activityName));
+
+        legend({'virtuallyFoveated center', ...
+                'virtuallyFoveated periphery', ...
+                'justProjection center', ...
+                'justProjection periphery'});
+
+    else
+        % Preserve the exact original single-dataset behavior.
+        virtuallyFoveatedCenterSpd = squeeze(virtuallyFoveatedSpdByRegion(20,20,:));
+        virtuallyFoveatedPeripherySpd = squeeze(virtuallyFoveatedSpdByRegion(31,20,:));
+
+        virtuallyFoveatedFrqVector = virtuallyFoveatedFrq(:);
+        virtuallyFoveatedCenterSpd = virtuallyFoveatedCenterSpd(:);
+        virtuallyFoveatedPeripherySpd = virtuallyFoveatedPeripherySpd(:);
+
+        virtuallyFoveatedCenterValidIdx = isfinite(virtuallyFoveatedFrqVector) & ...
+                                          isfinite(virtuallyFoveatedCenterSpd) & ...
+                                          (virtuallyFoveatedFrqVector > 0) & ...
+                                          (virtuallyFoveatedCenterSpd > 0);
+
+        virtuallyFoveatedPeripheryValidIdx = isfinite(virtuallyFoveatedFrqVector) & ...
+                                             isfinite(virtuallyFoveatedPeripherySpd) & ...
+                                             (virtuallyFoveatedFrqVector > 0) & ...
+                                             (virtuallyFoveatedPeripherySpd > 0);
+
+        if (any(virtuallyFoveatedCenterValidIdx))
+            loglog(virtuallyFoveatedFrqVector(virtuallyFoveatedCenterValidIdx), ...
+                   virtuallyFoveatedCenterSpd(virtuallyFoveatedCenterValidIdx), '-k');
+            hold on
+        else
+            hold on
+        end
+
+        if (any(virtuallyFoveatedPeripheryValidIdx))
+            loglog(virtuallyFoveatedFrqVector(virtuallyFoveatedPeripheryValidIdx), ...
+                   virtuallyFoveatedPeripherySpd(virtuallyFoveatedPeripheryValidIdx), '-r');
+        end
+
+        plot([10^0 10^1.5], [10^-2 10^-5], ':k')
+        legend({'center','periphery'});
+        ylabel('Power [contrast^2/Hz]');
+        xlabel('Frequency [log Hz]');
+        title(sprintf('SPDs from the center and periphery - %s', activityName));
     end
 
-    set(gca, 'XScale', 'log', 'YScale', 'log');
-
-    refX = [10^0; 10^1.5];
-    refY = [10^-2; 10^-5];
-    loglog(refX, refY, ':k');
-    legend([legendEntries, {'reference slope'}], 'Location', 'best', 'Interpreter', 'none');
-
-    ylabel('Power [contrast^2/Hz]');
-    xlabel('Frequency [Hz]');
-    title(sprintf('SPDs from the center and periphery - %s', activityName), 'Interpreter', 'none');
-
-   if (~islogical(options.spd_xlim))
-        xlim(iMakePositiveLogLimits(options.spd_xlim));
+    if (~islogical(options.spd_xlim))
+        xlim(double(options.spd_xlim));
     end
     if (~islogical(options.spd_ylim))
-        ylim(iMakePositiveLogLimits(options.spd_ylim));
+        ylim(double(options.spd_ylim));
     end
 
-end
-
-
-function activityDataStruct = iLoadActivityDataStruct(matPath)
-% Load a MAT file and return the activityData-style struct inside it.
-
-    loadedData = load(matPath);
-
-    if (isfield(loadedData, 'activityData'))
-        activityDataStruct = loadedData.activityData;
-        return
-    end
-
-    loadedFieldNames = fieldnames(loadedData);
-    assert(~isempty(loadedFieldNames), 'Loaded MAT-file contains no variables.');
-
-    % If there is only one variable, use it
-    if (numel(loadedFieldNames) == 1)
-        activityDataStruct = loadedData.(loadedFieldNames{1});
-        return
-    end
-
-    % Otherwise prefer the first struct variable
-    for ii = 1:numel(loadedFieldNames)
-        candidate = loadedData.(loadedFieldNames{ii});
-        if (isstruct(candidate))
-            activityDataStruct = candidate;
-            return
+    % Export the SPD figure if requested.
+    if (~islogical(options.output_dir))
+        assert(~islogical(options.title));
+        output_filepath = fullfile(options.output_dir, sprintf('%s_spdByRegion.pdf', options.title));
+        if (~exist(output_filepath) || options.overwrite_existing)
+            exportgraphics(spdByRegionHandle, output_filepath, 'ContentType', 'vector')
         end
+        close(spdByRegionHandle);
     end
 
-    error('Could not find an activityData-style struct in MAT-file: %s', matPath);
-end
-
-
-function projectionData = iEnsureProjectionDataStruct(inputData)
-% Standardize one projection input so the output directly contains:
-%   exponentMap, varianceMap, spdByRegion, frq, medianImage, frameDropVector
-%
-% inputData may be:
-%   1. a struct already containing exponentMap etc.
-%   2. a path to a MAT file containing either:
-%       - a struct with exponentMap etc.
-%       - an activityData-style struct with one activity field whose value
-%         contains exponentMap etc.
-
-    % If it is a path, load it
-    if (ischar(inputData) || isstring(inputData))
-        loadedStruct = iLoadActivityDataStruct(inputData);
-    else
-        loadedStruct = inputData;
-    end
-
-    assert(isstruct(loadedStruct), 'Projection input must resolve to a struct.');
-
-    % Case: already the direct projection data struct
-    if (isfield(loadedStruct, 'exponentMap'))
-        projectionData = loadedStruct;
-        return
-    end
-
-    % Case: an activityData-style struct with one activity field
-    loadedFieldNames = fieldnames(loadedStruct);
-    assert(~isempty(loadedFieldNames), 'Resolved struct has no fields.');
-
-    if (numel(loadedFieldNames) == 1)
-        candidate = loadedStruct.(loadedFieldNames{1});
-
-        if (isstruct(candidate) && isfield(candidate, 'exponentMap'))
-            projectionData = candidate;
-            return
-        end
-    end
-
-    error(['Could not resolve projection data struct. Expected either a struct with exponentMap ' ...
-           'or a single-activity struct whose child contains exponentMap.']);
-end
-
-function lims = iMakePositiveLogLimits(lims)
-% Ensure limits are valid for log axes.
-% Replaces nonpositive / nonfinite lower limits with a tiny positive value.
-
-    lims = double(lims(:))';
-
-    assert(numel(lims) == 2, 'Log-axis limits must be a 1x2 vector.');
-    assert(all(isfinite(lims)), 'Log-axis limits must be finite.');
-
-    tinyVal = 1e-12;
-
-    % Sort in case they came reversed
-    lims = sort(lims);
-
-    % Make both limits positive
-    lims(lims <= 0) = tinyVal;
-
-    % If they collapse to the same value, expand slightly
-    if lims(1) == lims(2)
-        lims(2) = lims(1) * 10;
-    end
 end

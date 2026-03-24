@@ -516,12 +516,20 @@ def adjust_spd_axes(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropb
         if(subject_id_number in subjects_to_skip):
             continue 
 
+
+
         # Construct the min maxes for this subject 
-        axes_min_maxes: dict[str, np.ndarray] = {key: value 
-                                            for key, value in across_all_axes_min_maxes.items()
-                                            if key == "frq"} | {key: value 
-                                                                for key, value in per_subject_axes_min_maxes[subject_id_number].items()
-                                                                if key != "frq"}
+        axes_min_maxes: dict[str, np.ndarray] = per_subject_axes_min_maxes[subject_id_number]
+        axes_min_maxes["spdByRegion"] = across_all_axes_min_maxes["spdByRegion"]
+        axes_min_maxes["spdByRegion"][0] = max(axes_min_maxes["spdByRegion"][0], 10e-9)
+        axes_min_maxes["frq"] = across_all_axes_min_maxes["frq"]
+
+        # We need to ensure x and y of the loglog spd plot are finite and > 0 
+        if( not (all(axes_min_maxes["spdByRegion"] > 0) and all(axes_min_maxes["frq"] > 0))):
+            raise Exception(f"Zero or negative X or Y axis in Log SPD plot: {axes_min_maxes}")
+
+        if( not (all(np.isfinite(axes_min_maxes["spdByRegion"]))) and not all(np.isfinite(axes_min_maxes["frq"]))):
+            raise Exception(f"Infinite X or Y axis in Log SPD plot: {axes_min_maxes}")
 
         # Iterate over the activites for this subject 
         activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in natsorted(os.listdir(subject_path))
@@ -549,14 +557,11 @@ def adjust_spd_axes(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropb
                 # Assert that these paths exist
                 assert all(os.path.exists(path) for projection_type, path in temp_combined_dict[activity_name].items())
                 
-                # Output as a temporary matfile 
-                temp_matfile_path: str = os.path.expanduser("~/Desktop/temp_spd_axes_matfile.mat")
-                temp_struct: dict = {"activityData": temp_combined_dict}
-                scipy.io.savemat(temp_matfile_path, temp_struct)
+            
 
                 output_dir: str = os.path.join(dst_dir, subject_id, activity_name)
                 title: str = f"{subject_id}_{activity_name}_modesCombined"
-                eng.plotSPDs(temp_matfile_path,
+                eng.plotSPDs(temp_combined_dict[activity_name]["virtuallyFoveated"],
                                 "exponent_clim", axes_min_maxes["exponentMap"], 
                                 "variance_clim", axes_min_maxes["varianceMap"], 
                                 "spd_xlim", axes_min_maxes["frq"], 
@@ -564,12 +569,10 @@ def adjust_spd_axes(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropb
                                 "overwrite_existing", overwrite_existing, 
                                 "output_dir", output_dir,
                                 "title", title,
+                                "justProjectionActivityData", temp_combined_dict[activity_name]["justProjection"], 
                                 nargout=0
                             ) 
-
-                # Remove the temporary matfile
-                os.remove(temp_matfile_path)
-
+                
             # Otherwise output separate figures
             else:
                 # Iterate over the projection types 
@@ -725,6 +728,10 @@ def _find_spd_axes_per_subject(subject_paths: list[str],
                     
                     # Find the min and max of this graph info 
                     graph_min: float = np.nanmin(graph_info)
+
+                    if(graph_min <= 0 and graph_type == "frq"):
+                        print(f"{subject_id_number} | {activity_name} | {graph_min}")
+
                     graph_max: float = np.nanmax(graph_info)
 
                     # Compare to the global min/max and update if needed
