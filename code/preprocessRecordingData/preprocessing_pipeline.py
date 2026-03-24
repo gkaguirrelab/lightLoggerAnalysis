@@ -470,6 +470,7 @@ def group_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Za
                subjects_to_skip: Iterable=set(), 
                activities_to_skip: Iterable=set(["lunch", "phone"]), 
                projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = set(["virtuallyFoveated", "justProjection"]), 
+               sort_by_experiment_ordering: bool=True, 
                verbose: bool=False
             ) -> None:
     
@@ -590,7 +591,7 @@ def group_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Za
                       "title", str(subject_id_number),
                       "output_dir", output_dir, 
                       "overwrite_existing", overwrite_existing,
-                      "sort_sitting_before_walking", True, 
+                      "sort_by_preferred_order", sort_by_experiment_ordering,
                       nargout=0
                     )
 

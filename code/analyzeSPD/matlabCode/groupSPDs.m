@@ -26,8 +26,14 @@ function groupedSpdHandle = groupSPDs(groupedActivityData, options)
 %   is more robust than generating temporary SPD figures and copying their
 %   graphics objects into the grouped figure.
 %
-%   Optionally, activities within each row can be reordered so that sitting
-%   activities are shown first and walking activities are shown second.
+%   Optionally, activities within each row can be reordered according to a
+%   fixed preferred order:
+%
+%       indoor  -> work, chat, walkIndoor
+%       outdoor -> sitBiopond, walkBiopond, walkOutdoor
+%
+%   Any remaining activities not listed above are appended to the end of
+%   the row in alphabetical order.
 %
 % Inputs:
 %   groupedActivityData - Struct or filepath. If a filepath is provided,
@@ -35,18 +41,17 @@ function groupedSpdHandle = groupSPDs(groupedActivityData, options)
 %       groupedActivityData.
 %
 % Optional key/value pairs:
-%   exponent_clim               - false or 2-element numeric vector for exponent CLim.
-%   variance_clim               - false or 2-element numeric vector for variance CLim.
-%   spd_xlim                    - false or 2-element numeric vector for SPD x-limits.
-%   spd_ylim                    - false or 2-element numeric vector for SPD y-limits.
-%   title                       - Title stem used in the figure super-title and export.
-%   output_dir                  - Output directory for saving the grouped PDF.
-%   overwrite_existing          - Logical. Whether to overwrite an existing export.
-%   sort_sitting_before_walking - Logical. If true, each row is reordered so
-%                                 activities with "sit" in the name appear first,
-%                                 then activities with "walk" in the name, then all
-%                                 remaining activities. Within each category, names
-%                                 are alphabetically sorted.
+%   exponent_clim           - false or 2-element numeric vector for exponent CLim.
+%   variance_clim           - false or 2-element numeric vector for variance CLim.
+%   spd_xlim                - false or 2-element numeric vector for SPD x-limits.
+%   spd_ylim                - false or 2-element numeric vector for SPD y-limits.
+%   title                   - Title stem used in the figure super-title and export.
+%   output_dir              - Output directory for saving the grouped PDF.
+%   overwrite_existing      - Logical. Whether to overwrite an existing export.
+%   sort_by_preferred_order - Logical. If true, each row is reordered using
+%                             the hard-coded preferred activity order for
+%                             that group, with all other activities appended
+%                             alphabetically afterward.
 %
 % Outputs:
 %   groupedSpdHandle   - Figure handle for the grouped SPD figure.
@@ -56,7 +61,7 @@ function groupedSpdHandle = groupSPDs(groupedActivityData, options)
 %       "title", "2001", ...
 %       "spd_xlim", [0.5 60], ...
 %       "spd_ylim", [1e-6 1e2], ...
-%       "sort_sitting_before_walking", true, ...
+%       "sort_by_preferred_order", true, ...
 %       "output_dir", "/path/to/output");
 
     arguments 
@@ -68,7 +73,7 @@ function groupedSpdHandle = groupSPDs(groupedActivityData, options)
         options.title = ""
         options.output_dir = ""
         options.overwrite_existing = false
-        options.sort_sitting_before_walking = false
+        options.sort_by_preferred_order = false
     end 
 
     % If groupedActivityData was passed in as a filepath, load it now
@@ -87,9 +92,10 @@ function groupedSpdHandle = groupSPDs(groupedActivityData, options)
         group_activities_struct = groupedActivityData.(group_name); 
         group_activities = fieldnames(group_activities_struct);
 
-        % Optionally reorder activities within this row
-        if (options.sort_sitting_before_walking)
-            group_activities = iSortActivitiesSitThenWalk(group_activities);
+        % Optionally reorder activities within this row using the
+        % group-specific preferred ordering
+        if (options.sort_by_preferred_order)
+            group_activities = iSortActivitiesByPreferredOrder(group_activities, group_name);
         else
             group_activities = sort(group_activities);
         end
@@ -112,9 +118,10 @@ function groupedSpdHandle = groupSPDs(groupedActivityData, options)
         group_activities_struct = groupedActivityData.(group_name); 
         group_activities = fieldnames(group_activities_struct);
 
-        % Optionally reorder activities within this row
-        if (options.sort_sitting_before_walking)
-            group_activities = iSortActivitiesSitThenWalk(group_activities);
+        % Optionally reorder activities within this row using the
+        % group-specific preferred ordering
+        if (options.sort_by_preferred_order)
+            group_activities = iSortActivitiesByPreferredOrder(group_activities, group_name);
         else
             group_activities = sort(group_activities);
         end
@@ -208,30 +215,49 @@ function groupedSpdHandle = groupSPDs(groupedActivityData, options)
 end
 
 
-function sorted_activity_names = iSortActivitiesSitThenWalk(activity_names)
-% Reorder activity names so sitting activities come first, walking
-% activities come second, and all remaining activities come last.
-% Within each category, names are sorted alphabetically.
+function sorted_activity_names = iSortActivitiesByPreferredOrder(activity_names, group_name)
+% Reorder activity names according to a fixed preferred order for each
+% group. Any activity names not explicitly listed are appended afterward in
+% alphabetical order.
+%
+% Preferred order:
+%   indoor  -> work, chat, walkIndoor
+%   outdoor -> sitBiopond, walkBiopond, walkOutdoor
 
-    % Normalize to a row cell array of char/string-like names
+    % Start from alphabetically sorted names so "other" activities are
+    % appended in a stable, predictable order
     activity_names = sort(activity_names);
 
-    sitting_names = {};
-    walking_names = {};
-    other_names = {};
+    switch lower(group_name)
+        case 'indoor'
+            preferred_order = {'work', 'chat', 'walkIndoor'};
+        case 'outdoor'
+            preferred_order = {'sitBiopond', 'walkBiopond', 'walkOutdoor'};
+        otherwise
+            preferred_order = {};
+    end
 
-    for ii = 1:numel(activity_names)
-        current_name = activity_names{ii};
-        lower_name = lower(current_name);
+    sorted_activity_names = {};
 
-        if contains(lower_name, 'sit')
-            sitting_names{end+1} = current_name; %#ok<AGROW>
-        elseif contains(lower_name, 'walk')
-            walking_names{end+1} = current_name; %#ok<AGROW>
-        else
-            other_names{end+1} = current_name; %#ok<AGROW>
+    % First, add activities that appear in the preferred order list and
+    % actually exist in this row
+    for ii = 1:numel(preferred_order)
+        preferred_name = preferred_order{ii};
+
+        for jj = 1:numel(activity_names)
+            if strcmp(activity_names{jj}, preferred_name)
+                sorted_activity_names{end+1} = activity_names{jj}; %#ok<AGROW>
+                break
+            end
         end
     end
 
-    sorted_activity_names = [sort(sitting_names), sort(walking_names), sort(other_names)];
+    % Next, append any remaining activities that were not explicitly listed
+    for ii = 1:numel(activity_names)
+        current_name = activity_names{ii};
+
+        if ~ismember(current_name, sorted_activity_names)
+            sorted_activity_names{end+1} = current_name; %#ok<AGROW>
+        end
+    end
 end
