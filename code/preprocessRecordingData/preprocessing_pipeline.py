@@ -484,10 +484,9 @@ def group_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Za
 
 
     # Initialize the MATLAB engine to utilize the MATLAB function we have developed for this purpose 
-    #eng: object = matlab.engine.start_matlab()  
-    #eng.pyenv('Version', '~/Documents/MATLAB/projects/lightLoggerAnalysis/analysis_env/bin/python', nargout=0)
-    #eng.tbUseProject('lightLoggerAnalysis', nargout=0)
-    
+    eng: object = matlab.engine.start_matlab()  
+    eng.pyenv('Version', '~/Documents/MATLAB/projects/lightLoggerAnalysis/analysis_env/bin/python', nargout=0)
+    eng.tbUseProject('lightLoggerAnalysis', nargout=0)
 
     # First, let's find all of the subjects in this experiment 
     subject_paths: list[str] = natsorted([os.path.join(src_dir, subject_name) 
@@ -497,6 +496,23 @@ def group_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Za
                                          ]
                                         ) 
     assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
+
+    # First, we will find the min/max axes across all activites. 
+    # This will let us build the power by freq graph 
+    across_all_axes_min_maxes: dict[str, np.ndarray[float]] = _find_spd_axes_across_all(subject_paths, 
+                                                                        subjects_to_skip,
+                                                                        activities_to_skip,
+                                                                        projection_types,
+                                                                        verbose=False
+                                                                        )
+
+    # Next we will find the colorbar min/maxs by subject 
+    per_subject_axes_min_maxes: dict[str, np.ndarray[float]] = _find_spd_axes_per_subject(subject_paths, 
+                                                                        subjects_to_skip,
+                                                                        activities_to_skip,
+                                                                        projection_types,
+                                                                        verbose=False
+                                                                    )
 
     # Now, let's iterate over all the subject paths 
     subject_iterator: Iterable = range(len(subject_paths)) if verbose is False else tqdm(range(len(subject_paths)), desc="Processing Subjects", leave=True)
@@ -521,6 +537,13 @@ def group_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Za
                                                     }
                                                for group, activity_dict in groups.items()
                                               }
+        
+
+        # Construct the min maxes for this subject 
+        axes_min_maxes: dict[str, np.ndarray] = per_subject_axes_min_maxes[subject_id_number]
+        axes_min_maxes["spdByRegion"] = across_all_axes_min_maxes["spdByRegion"]
+        axes_min_maxes["spdByRegion"][0] = max(axes_min_maxes["spdByRegion"][0], 10e-9)
+        axes_min_maxes["frq"] = across_all_axes_min_maxes["frq"]
 
         # Iterate over the activites for this subject 
         activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in natsorted(os.listdir(subject_path))
@@ -541,23 +564,41 @@ def group_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Za
                 assert os.path.exists(spd_results_mat_path), f"Problem with: {spd_results_mat_path}"    
                 group_name: str = activites_to_groups[activity_name]
                 per_subject_activity_grouping[group_name][activity_name][projection_type] = spd_results_mat_path
-            
+        
+        # Assert there is no empty paths before sending to matlab 
+        for group, activities_dict in per_subject_activity_grouping.items():
+            for activity, projection_dict in activities_dict.items():
+                for projection_type in projection_dict:
+                    assert projection_dict[projection_type] != "", f"{group} | {activity} | {projection_type} is not assigned a path"
+
+    
+
                 
         # Now that we have the activities grouped together for this subject, pass it over to MATLAB 
         # to do the plotting 
-
         # First, output to a temp .mat file to make transfer easier between the two languages 
         temp_output_filepath: str = os.path.expanduser("~/Desktop/group_spds_temp.mat")
         scipy.io.savemat(temp_output_filepath, {"groupedActivityData": per_subject_activity_grouping})
 
-        # Define a title prefix for the figure in MATLAB 
-        title: str = "groupedActivities"
+        # Construct the output directory 
+        output_dir: str = os.path.join(dst_dir, subject_id)
+        eng.groupSPDs(temp_output_filepath, 
+                      "exponent_clim", axes_min_maxes["exponentMap"], 
+                      "variance_clim", axes_min_maxes["varianceMap"], 
+                      "spd_xlim", axes_min_maxes["frq"], 
+                      "spd_ylim", axes_min_maxes["spdByRegion"],
+                      "title", str(subject_id_number),
+                      "output_dir", output_dir, 
+                      "overwrite_existing", overwrite_existing,
+                      nargout=0
+                    )
+
 
         # Remove the figure after it is finisehd 
         os.remove(temp_output_filepath)
 
     # Close the matlab engine 
-    #eng.quit()
+    eng.quit()
 
     return 
 
@@ -565,7 +606,7 @@ def group_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Za
 def adjust_spd_axes(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026",
                     dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026",
                     subjects_to_skip: Iterable= set(),
-                    activites_to_skip: Iterable= set(),
+                    activities_to_skip: Iterable= set(),
                     projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = set(["virtuallyFoveated", "justProjection"]), 
                     combine_figures: bool=True,
                     overwrite_existing: bool=False, 
@@ -592,7 +633,7 @@ def adjust_spd_axes(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropb
     # This will let us build the power by freq graph 
     across_all_axes_min_maxes: dict[str, np.ndarray[float]] = _find_spd_axes_across_all(subject_paths, 
                                                                         subjects_to_skip,
-                                                                        activites_to_skip,
+                                                                        activities_to_skip,
                                                                         projection_types,
                                                                         verbose=False
                                                                         )
@@ -600,7 +641,7 @@ def adjust_spd_axes(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropb
     # Next we will find the colorbar min/maxs by subject 
     per_subject_axes_min_maxes: dict[str, np.ndarray[float]] = _find_spd_axes_per_subject(subject_paths, 
                                                                         subjects_to_skip,
-                                                                        activites_to_skip,
+                                                                        activities_to_skip,
                                                                         projection_types,
                                                                         verbose=False
                                                                     )
@@ -643,7 +684,7 @@ def adjust_spd_axes(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropb
             activity_name: str = os.path.basename(activity_path)
 
             # Skip unwanted activites 
-            if(activity_name in activites_to_skip):
+            if(activity_name in activities_to_skip):
                 continue 
 
 
@@ -704,7 +745,7 @@ def adjust_spd_axes(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropb
 
 def _find_spd_axes_across_all(subject_paths: list[str],
                                    subjects_to_skip: Iterable[str] = set(),
-                                   activites_to_skip: Iterable[str] = set(),
+                                   activities_to_skip: Iterable[str] = set(),
                                    projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = set(["virtuallyFoveated", "justProjection"]), 
                                    verbose: bool=False
                                  ) -> None:
@@ -740,7 +781,7 @@ def _find_spd_axes_across_all(subject_paths: list[str],
             activity_name: str = os.path.basename(activity_path)
 
             # Skip unwanted activites 
-            if(activity_name in activites_to_skip):
+            if(activity_name in activities_to_skip):
                 continue 
 
             # Iterate over the projection types 
@@ -774,7 +815,7 @@ def _find_spd_axes_across_all(subject_paths: list[str],
 
 def _find_spd_axes_per_subject(subject_paths: list[str],
                                    subjects_to_skip: Iterable[str] = set(),
-                                   activites_to_skip: Iterable[str] = set(),
+                                   activities_to_skip: Iterable[str] = set(),
                                    projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = set(["virtuallyFoveated", "justProjection"]),
                                    verbose: bool=False
                               ) -> None:
@@ -813,7 +854,7 @@ def _find_spd_axes_per_subject(subject_paths: list[str],
             activity_name: str = os.path.basename(activity_path)
 
             # Skip unwanted activites 
-            if(activity_name in activites_to_skip):
+            if(activity_name in activities_to_skip):
                 continue 
 
             # Iterate over the projection types 
@@ -1081,7 +1122,7 @@ def verify_neon_integrity(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
 def verify_world_neon_pairing(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026",
                               processing_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoorVideos2026",
                               subjects_to_skip: Iterable= set(),
-                              activites_to_skip: Iterable= set(),
+                              activities_to_skip: Iterable= set(),
                               verbose: bool=False 
                              ) -> dict[str, str]:
     
@@ -1123,7 +1164,7 @@ def verify_world_neon_pairing(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorO
             activity_name: str = os.path.basename(activity_path)
 
             # Skip desired activites 
-            if(activity_name in activites_to_skip):
+            if(activity_name in activities_to_skip):
                 continue 
                 
             analyzed_data[subject_id_number][activity_name] = True
