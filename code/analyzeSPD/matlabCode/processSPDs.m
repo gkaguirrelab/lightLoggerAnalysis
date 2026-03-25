@@ -84,7 +84,7 @@ function activityDataAcrossSubjects = processSPDsAcrossSubjects(input_dir, outpu
         options.activities = {};   % cell array of strings, e.g. {'walkIndoorFoveate'}
         options.verbose = false;
         options.overwrite_existing = false; 
-        options.projection_type {mustBeMember(options.projection_type, ["justProjection", "virtuallyFoveated"])} = "virtuallyFoveated";
+        options.video_type {mustbeMember(options.video_type, ["justProjection", "virtuallyFoveated"])} = "virtuallyFoveated"; 
         options.save_figures = false; 
         options.fovDegrees = 120; 
     end
@@ -154,7 +154,7 @@ function activityDataAcrossSubjects = processSPDsAcrossSubjects(input_dir, outpu
 
             % Check to see if we can skip because we do not want to overwrite existing activities
             if(output_dir ~= "")
-                output_filepath = fullfile(output_dir, sprintf("%s_%s_%s_SPDResults.mat", subjectName, activityName, options.projection_type)); 
+                output_filepath = fullfile(output_dir, sprintf("%s_%s_%s_SPDResults.mat", subjectName, activityName, options.video_type)); 
                 if(~options.overwrite_existing && isfile(output_filepath))
                     continue; 
                 end
@@ -162,10 +162,10 @@ function activityDataAcrossSubjects = processSPDsAcrossSubjects(input_dir, outpu
 
             % Find task video
             frameDropVector = [];
-            task_video = dir(fullfile(activityPath, sprintf('*task_%s*.avi', options.projection_type)));
+            task_video = dir(fullfile(activityPath, sprintf('*task_%s*.avi', options.video_type)));
 
             if isempty(task_video)
-                fprintf('No task %s .avi file found for subject %s, activity %s\n', options.projection_type, subjectName, activityName);
+                fprintf('No task %s .avi file found for subject %s, activity %s\n', options.video_type, subjectName, activityName);
                 continue;
             end
 
@@ -187,9 +187,9 @@ function activityDataAcrossSubjects = processSPDsAcrossSubjects(input_dir, outpu
                 if(options.save_figures)
                     [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(activityData, "fovDegrees", options.fovDegrees); 
                     
-                    exportgraphics(exponentMapHandle, fullfile(output_dir, sprintf('%s_%s_%s_exponentMap.pdf', subjectName, activityName, options.projection_type)), 'ContentType','vector');
-                    exportgraphics(varianceMapHandle, fullfile(output_dir, sprintf('%s_%s_%s_varianceMap.pdf', subjectName, activityName, options.projection_type)), 'ContentType','vector');
-                    exportgraphics(spdByRegionHandle, fullfile(output_dir, sprintf('%s_%s_%s_spdByRegion.pdf', subjectName, activityName, options.projection_type)), 'ContentType','vector');
+                    exportgraphics(exponentMapHandle, fullfile(output_dir, sprintf('%s_%s_%s_exponentMap.pdf', subjectName, activityName, options.video_type)), 'ContentType','vector');
+                    exportgraphics(varianceMapHandle, fullfile(output_dir, sprintf('%s_%s_%s_varianceMap.pdf', subjectName, activityName, options.video_type)), 'ContentType','vector');
+                    exportgraphics(spdByRegionHandle, fullfile(output_dir, sprintf('%s_%s_%s_spdByRegion.pdf', subjectName, activityName, options.video_type)), 'ContentType','vector');
 
                     % Close all the figures after we saved them 
                     close([exponentMapHandle varianceMapHandle spdByRegionHandle]); 

@@ -86,6 +86,7 @@ function activityDataAcrossSubjects = processSPDsAcrossSubjects(input_dir, outpu
         options.verbose = false; 
         options.save_figures = false; 
         options.overwrite_existing = false; 
+        options.projection_type {mustBeMember(options.projection_type, ["justProjection", "virtuallyFoveated"])} = "virtuallyFoveated";
         options.fovDegrees = 120; 
 
     end
@@ -142,7 +143,7 @@ function activityDataAcrossSubjects = processSPDsAcrossSubjects(input_dir, outpu
     n_activities = numel(activityNames); 
     for aa = 1:length(activityNames)
         if(options.verbose)
-            fprintf("Activity Name: %d\%d\n", aa, n_activities); 
+            fprintf("Activity Name: %d/%d\n", aa, n_activities); 
         end     
         activityName = activityNames{aa};
 
@@ -158,7 +159,7 @@ function activityDataAcrossSubjects = processSPDsAcrossSubjects(input_dir, outpu
 
         % Check to see if we can skip because we do not want to overwrite existing activities
         if(output_dir ~= "")
-            output_filepath = fullfile(output_dir, sprintf("%s_SPDResultsAcrossSubjects.mat", activityName)); 
+            output_filepath = fullfile(output_dir, sprintf("%s_%s_SPDResultsAcrossSubjects.mat", activityName, options.projection_type)); 
             if(~options.overwrite_existing && isfile(output_filepath))
                 continue; 
             end
@@ -187,10 +188,10 @@ function activityDataAcrossSubjects = processSPDsAcrossSubjects(input_dir, outpu
 
             % Find the activityData struct for just this subject + activity pair
             frameDropVector = [];
-            SPD_results = dir(fullfile(activityPath, '*SPDResults.mat'));
+            SPD_results = dir(fullfile(activityPath, sprintf('*%s_SPDResults.mat', options.projection_type)));
 
             if isempty(SPD_results)
-                fprintf('No SPDResults file found for subject %s, activity %s\n', subjectName, activityName);
+                fprintf('No SPDResults file found for subject %s, activity %s @ path: %s\n', subjectName, activityName, activityPath);
                 continue;
             end
 
@@ -219,14 +220,15 @@ function activityDataAcrossSubjects = processSPDsAcrossSubjects(input_dir, outpu
 
         % Output the results of this if desired
         if(output_dir ~= "")
-            save(output_filepath, 'activityDataAcrossSubjects');
+            activityData = activityDataAcrossSubjects; 
+            save(output_filepath, 'activityData');
 
             if(options.save_figures)
                 [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(activityDataAcrossSubjects, "fovDegrees", options.fovDegrees); 
                 
-                exportgraphics(exponentMapHandle, fullfile(output_dir, sprintf('%s_exponentMapAcrossSubjects.pdf', activityName)), 'ContentType','vector');
-                exportgraphics(varianceMapHandle, fullfile(output_dir, sprintf('%s_varianceMapAcrossSubjects.pdf', activityName)), 'ContentType','vector');
-                exportgraphics(spdByRegionHandle, fullfile(output_dir, sprintf('%s_spdByRegionAcrossSubjects.pdf', activityName)), 'ContentType','vector');
+                exportgraphics(exponentMapHandle, fullfile(output_dir, sprintf('%s_%s_exponentMapAcrossSubjects.pdf', activityName, options.projection_type)), 'ContentType','vector');
+                exportgraphics(varianceMapHandle, fullfile(output_dir, sprintf('%s_%s_varianceMapAcrossSubjects.pdf', activityName, options.projection_type)), 'ContentType','vector');
+                exportgraphics(spdByRegionHandle, fullfile(output_dir, sprintf('%s_%s_spdByRegionAcrossSubjects.pdf', activityName, options.projection_type)), 'ContentType','vector');
 
                 % Close all the figures after we saved them 
                 close([exponentMapHandle varianceMapHandle spdByRegionHandle]); 
