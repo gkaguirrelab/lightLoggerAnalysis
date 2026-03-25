@@ -975,6 +975,7 @@ def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brain
                                  activities_to_skip: Iterable=set(["lunch", "phone"]), 
                                  projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = set(["virtuallyFoveated", "justProjection"]), 
                                  common_axes: bool=False, 
+                                 combine_figures: bool=False, 
                                  verbose: bool=False
                                 ) -> None:
     import matlab.engine
@@ -1066,8 +1067,14 @@ def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brain
         os.makedirs(output_dir, exist_ok=True)
 
         
+        print(output_dir)
+
+        # TODO: Don't forget the title for the combined figures. plotSPD expects this
+
+        """
+
         # iterate over desired projection types 
-        for projection_type in projection_types:
+        for projection_type in projection_types if combine_figures is False else (projection_types[0],):
             # Call the MATLAB function to do the processing
             eng.processSPDsAcrossSubjects(src_dir, 
                                           dst_dir, 
@@ -1081,8 +1088,11 @@ def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brain
                                           "variance_clim", axes_min_maxes["varianceMap"], 
                                           "spd_xlim", axes_min_maxes["frq"],
                                           "spd_ylim", axes_min_maxes["spdByRegion"], 
+                                          "combine_figures", combine_figures,
                                           nargout=0
                                         )
+
+        """
 
     # Close the matlab engine 
     eng.quit()

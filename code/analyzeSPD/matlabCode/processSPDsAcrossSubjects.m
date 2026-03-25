@@ -276,9 +276,26 @@ function virtuallyFoveatedActivityDataAcrossSubjects = processSPDsAcrossSubjects
                                                                                      "justProjectionActivityData", justProjectionActivityDataAcrossSubjects...
                                                                                      ); 
                 
-                exportgraphics(exponentMapHandle, fullfile(output_dir, sprintf('%s_%s_exponentMapAcrossSubjects.pdf', activityName, options.projection_type)), 'ContentType','vector');
-                exportgraphics(varianceMapHandle, fullfile(output_dir, sprintf('%s_%s_varianceMapAcrossSubjects.pdf', activityName, options.projection_type)), 'ContentType','vector');
-                exportgraphics(spdByRegionHandle, fullfile(output_dir, sprintf('%s_%s_spdByRegionAcrossSubjects.pdf', activityName, options.projection_type)), 'ContentType','vector');
+                % Build filepaths
+                % TODO: Need to fix this for combined here
+                expPath = fullfile(output_dir, sprintf('%s_%s_exponentMapAcrossSubjects.pdf', activityName, options.projection_type));
+                varPath = fullfile(output_dir, sprintf('%s_%s_varianceMapAcrossSubjects.pdf', activityName, options.projection_type));
+                spdPath = fullfile(output_dir, sprintf('%s_%s_spdByRegionAcrossSubjects.pdf', activityName, options.projection_type));
+
+                % Exponent map
+                if (~exist(expPath, 'file') || options.overwrite_existing)
+                    exportgraphics(exponentMapHandle, expPath, 'ContentType','vector');
+                end
+
+                % Variance map
+                if (~exist(varPath, 'file') || options.overwrite_existing)
+                    exportgraphics(varianceMapHandle, varPath, 'ContentType','vector');
+                end
+
+                % SPD by region
+                if (~exist(spdPath, 'file') || options.overwrite_existing)
+                    exportgraphics(spdByRegionHandle, spdPath, 'ContentType','vector');
+                end
 
                 % Close all the figures after we saved them 
                 close([exponentMapHandle varianceMapHandle spdByRegionHandle]); 

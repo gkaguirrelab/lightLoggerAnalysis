@@ -197,9 +197,25 @@ function activityDataAcrossSubjects = processSPDsAcrossSubjects(input_dir, outpu
                                                                                         "spd_ylim", options.spd_ylim ...
                                                                                     ); 
                     
-                    exportgraphics(exponentMapHandle, fullfile(output_dir, sprintf('%s_%s_%s_exponentMap.pdf', subjectName, activityName, options.video_type)), 'ContentType','vector');
-                    exportgraphics(varianceMapHandle, fullfile(output_dir, sprintf('%s_%s_%s_varianceMap.pdf', subjectName, activityName, options.video_type)), 'ContentType','vector');
-                    exportgraphics(spdByRegionHandle, fullfile(output_dir, sprintf('%s_%s_%s_spdByRegion.pdf', subjectName, activityName, options.video_type)), 'ContentType','vector');
+                   % Build filepaths
+                    expPath = fullfile(output_dir, sprintf('%s_%s_%s_exponentMap.pdf', subjectName, activityName, options.video_type));
+                    varPath = fullfile(output_dir, sprintf('%s_%s_%s_varianceMap.pdf', subjectName, activityName, options.video_type));
+                    spdPath = fullfile(output_dir, sprintf('%s_%s_%s_spdByRegion.pdf', subjectName, activityName, options.video_type));
+
+                    % Exponent map
+                    if (~exist(expPath, 'file') || options.overwrite_existing)
+                        exportgraphics(exponentMapHandle, expPath, 'ContentType','vector');
+                    end
+
+                    % Variance map
+                    if (~exist(varPath, 'file') || options.overwrite_existing)
+                        exportgraphics(varianceMapHandle, varPath, 'ContentType','vector');
+                    end
+
+                    % SPD by region
+                    if (~exist(spdPath, 'file') || options.overwrite_existing)
+                        exportgraphics(spdByRegionHandle, spdPath, 'ContentType','vector');
+                    end
 
                     % Close all the figures after we saved them 
                     close([exponentMapHandle varianceMapHandle spdByRegionHandle]); 
