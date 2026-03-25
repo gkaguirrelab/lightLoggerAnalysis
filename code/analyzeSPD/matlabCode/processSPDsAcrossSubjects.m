@@ -94,13 +94,16 @@ function virtuallyFoveatedActivityDataAcrossSubjects = processSPDsAcrossSubjects
         options.spd_ylim = false
         options.combine_figures = false; 
     end
-
+    
     fovDegrees = options.fovDegrees; 
     combine_figures = options.combine_figures; 
 
     % Initialize output
     virtuallyFoveatedActivityDataAcrossSubjects = struct();
     justProjectionActivityDataAcrossSubjects = false; 
+    if(combine_figures)
+        justProjectionActivityDataAcrossSubjects = struct(); 
+    end 
 
     % Find all subject folders matching ^FLIC_\d+$
     subjectFiles = dir(fullfile(input_dir, 'FLIC_*'));
@@ -258,7 +261,8 @@ function virtuallyFoveatedActivityDataAcrossSubjects = processSPDsAcrossSubjects
 
         % Output the results of this if desired
         if(output_dir ~= "")
-            activityData = virtuallyFoveatedActivityDataAcrossSubjects; 
+            activityData.virtuallyFoveatedActivityDataAcrossSubjects = virtuallyFoveatedActivityDataAcrossSubjects; 
+            activityData.justProjectionActivityDataAcrossSubjects = justProjectionActivityDataAcrossSubjects;
             save(output_filepath, 'activityData');
 
             if(options.save_figures)

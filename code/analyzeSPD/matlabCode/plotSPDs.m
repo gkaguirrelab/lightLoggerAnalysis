@@ -101,9 +101,6 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(vi
 
     fovDegrees = options.fovDegrees;
 
-    disp(virtuallyFoveatedActivityData)
-
-
     % Virtually foveated quantities
     virtuallyFoveatedExponentMap = virtuallyFoveatedActivityData.(activityName).exponentMap;
     virtuallyFoveatedVarianceMap = virtuallyFoveatedActivityData.(activityName).varianceMap;

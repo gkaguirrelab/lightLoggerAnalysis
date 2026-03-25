@@ -973,7 +973,7 @@ def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brain
                                  overwrite_existing: bool=False,
                                  subjects_to_skip: Iterable=set(), 
                                  activities_to_skip: Iterable=set(["lunch", "phone"]), 
-                                 projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = set(["virtuallyFoveated", "justProjection"]), 
+                                 projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = ["virtuallyFoveated", "justProjection"], 
                                  common_axes: bool=False, 
                                  combine_figures: bool=False, 
                                  verbose: bool=False
@@ -1001,12 +1001,14 @@ def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brain
     assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
 
     # First, let's get all of the activities  we will go over 
-    activities_list: list[str] = sorted([filename
+    activities_list: list[str] = sorted(  set([filename
                                         for subject_path in subject_paths
                                         for filename in os.listdir(subject_path)
                                         if os.path.isdir(os.path.join(subject_path, filename))
                                         and filename not in activities_to_skip
-                                    ])
+                                              ]
+                                            )
+                                        )
 
 
     # Define the axes limits (by default just automatically calculated, false)
@@ -1066,18 +1068,11 @@ def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brain
         output_dir: str = os.path.join(dst_dir, activity_name)
         os.makedirs(output_dir, exist_ok=True)
 
-        
-        print(output_dir)
-
-        # TODO: Don't forget the title for the combined figures. plotSPD expects this
-
-        """
-
         # iterate over desired projection types 
-        for projection_type in projection_types if combine_figures is False else (projection_types[0],):
+        for projection_type in projection_types if combine_figures is False else (list(projection_types)[0],):
             # Call the MATLAB function to do the processing
             eng.processSPDsAcrossSubjects(src_dir, 
-                                          dst_dir, 
+                                          output_dir, 
                                           "subjects", subject_id_numbers,
                                           "activities", [activity_name],
                                           "verbose", False, 
@@ -1091,8 +1086,6 @@ def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brain
                                           "combine_figures", combine_figures,
                                           nargout=0
                                         )
-
-        """
 
     # Close the matlab engine 
     eng.quit()
