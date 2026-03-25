@@ -9,9 +9,11 @@ import sys
 import zipfile
 import warnings
 import matplotlib.pyplot as plt
+import json
 import scipy.io
 import numpy as np
 import copy
+import requests
 
 
 # Construct the paths to our custom utility libraries 
@@ -1587,6 +1589,92 @@ def verify_virtually_foveated_video_integrity(src_dir: str="/Volumes/FLIC_proces
                 video_length: float = video_fps * video_num_frames
 
                 assert video_length >= target_length_seconds, f"Video: {video_path} has length: {video_length}s which is less than target: {target_length_seconds}s"
+
+
+
+
+def download_pupil_cloud_recordings(dst_dir: str, 
+                                    api_key: str, 
+                                    api_url = "https://api.cloud.pupil-labs.com/v2",
+                                    workspace_id: str="default", 
+                                    subjects_to_download: Iterable=set(), 
+                                    activities_to_download: Iterable=set(),
+                                    overwrite_existing: bool=False, 
+                                    verbose: bool=False
+                                ) -> None:
+
+    
+    # First, we will get a list of all the recordings on pupil cloud
+    recordings_list_url: str = f"{api_url}/workspaces/{workspace_id}/recordings"
+    r: object = requests.get(recordings_list_url, stream=True, headers={"api-key": api_key})
+    r.raise_for_status()
+    r_json: object = r.json() 
+    r_result: object = r_json["result"]
+
+    # Now, let's deconstruct the recording names into an easily parasable hashmap 
+    parsed_recording_map: dict[str, dict] = {}
+    for recording_result in r_result:
+        # Find the recording name 
+        recording_name: str = r_result["name"]
+        recording_id: str = r_result["id"]
+
+        # If the recording name does not contain FLIC, 
+        # output a warning and skip 
+        if("FLIC" not in recording_name):
+            warnings.warn(f"Recording: {recording_name} does not contain FLIC")
+            continue 
+
+        # Let's break the recording name down into the desired fields 
+        
+       # First, we will find the subject ID
+        subject_id: int = int(re.search(r"^FLIC_(\d+)", recording_name).group(1))
+
+        # Find the activity
+        activity_name: str = re.search(r"^FLIC_\d+_([A-Za-z]+)", recording_name).group(1)
+
+        # Find the recording number
+        recording_number: int = int(re.search(r"_(\d+)$", recording_name).group(1))
+
+        # Now, we will save it into the parsed recording dictionary 
+
+        # If the subject has not been seen before, this is very simple 
+        if(subject_id not in parsed_recording_map):
+            parsed_recording_map[subject_id] = {activity_name: 
+                                                    {"recording_number": recording_number, "id": recording_id}
+                                               }
+        
+        # If the subject has been seen before, let's check if the activity 
+        # has been seen before for this subject 
+        else:
+            # If the activity has not been seen before for this subject, 
+            # it is also then very easy 
+            if(activity_name not in parsed_recording_map[subject_id]):
+                parsed_recording_map[subject_id][activity_name] = {"recording_number": recording_number, "id": recording_id}
+            
+            # Otherwise, this subject and activity have been seen before, we haev a duplicate. 
+            # We need to keep only the one that has the max recording number 
+            else:
+                # If the current recording number is greater than the other one, 
+                # update 
+                if(recording_number > parsed_recording_map[subject_id][activity_name]["recording_number"]):
+                    parsed_recording_map[subject_id][activity_name] = {"recording_number": recording_number, "id": recording_id}
+
+    # Now, let's iterate over all the subject paths 
+    subjects_to_download: list[int] = list(subjects_to_download)
+    subject_iterator: Iterable = range(len(subjects_to_download)) if verbose is False else tqdm(range(len(subjects_to_download)), desc="Processing Subjects", leave=True)
+    for subject_num in subject_iterator:
+        # Retrieve the subject path and subject name
+        subject_id_num = subjects_to_download[subject_num]
+
+        activities_iterator: Iterable = range(len(activities_to_download)) if verbose is False else tqdm(range(len(activities_to_download)), desc="Processing Activities", leave=False)
+        for activity_num in activities_iterator:
+            # Retrieve the activity path and activity name
+            activity_name: str = activities_to_download[activity_num]
+
+
+
+
+    return 
 
 
 def main():
