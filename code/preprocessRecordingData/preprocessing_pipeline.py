@@ -1665,12 +1665,46 @@ def download_pupil_cloud_recordings(dst_dir: str,
     for subject_num in subject_iterator:
         # Retrieve the subject path and subject name
         subject_id_num = subjects_to_download[subject_num]
+        assert subject_id_num in parsed_recording_map, f"Subject id num: {subject_id_num} not in cloud recordings subjects: {parsed_recording_map.keys()}"
+
+        # Retrieve just the recordings for this subject 
+        subject_recordings: dict = parsed_recording_map[subject_id_num]
 
         activities_iterator: Iterable = range(len(activities_to_download)) if verbose is False else tqdm(range(len(activities_to_download)), desc="Processing Activities", leave=False)
         for activity_num in activities_iterator:
             # Retrieve the activity path and activity name
             activity_name: str = activities_to_download[activity_num]
+            assert activity_name in subject_recordings, f"Activity: {activity_name} not in subject: {subject_id_num} recordings: {subject_recordings.keys()}"
 
+            # Retrieve this activity recording's infop 
+            activity_recording: dict = subject_recordings[activity_name]
+
+            # Now, we will retrieve the recording id to download 
+            recording_id: str = activity_recording["id"]
+
+            # Construct the output path where this recording will go 
+            output_dir: str = os.path.join(dst_dir, f"FLIC_{subject_id_num}", activity_name, "Neon")
+
+            # Skip recordings that are already downloaded unless we want to overwrite 
+            if(os.path.exists(output_dir) and overwrite_existing is False):
+                continue
+            
+            # Make the output location 
+            os.makedirs(output_dir, exist_ok=True)
+
+            # Now, let's download the recording and place it where it belongs 
+            recording_zip_url: str = f"{api_url}/workspaces/{workspace_id}/recordings/{recording_id}.zip"
+            r: object = requests.get(url, stream=True, headers={"api-key": api_key})
+            r.raise_for_status()
+            save_path = pathlib.Path(output_dir) # TODO: make sure this path is right 
+            with save_path.open("wb") as fd:
+                for chunk in r.iter_content(chunk_size=128):
+                    fd.write(chunk)
+
+            # TODO: few more. thigns here 
+
+    # After all the recordings have been downloaded, we will unpack them 
+    # here 
 
 
 
