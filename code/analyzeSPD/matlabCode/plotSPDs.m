@@ -60,7 +60,7 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(vi
 %                               spd_target_axes is supplied.
 
     arguments
-        virtuallyFoveatedActivityData
+        virtuallyFoveatedActivityData {mustBeStructOrText}
         options.fovDegrees = 120
         options.exponent_clim = false
         options.variance_clim = false
@@ -412,5 +412,11 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(vi
             exportgraphics(spdByRegionHandle, output_filepath, 'ContentType', 'vector');
         end
         close(spdByRegionHandle);
+    end
+end
+
+function mustBeStructOrText(x)
+    if ~(isstruct(x) || ischar(x) || isstring(x))
+        error('Input must be a struct, char, or string.');
     end
 end

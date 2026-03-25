@@ -9,9 +9,11 @@ import sys
 import zipfile
 import warnings
 import matplotlib.pyplot as plt
+import json
 import scipy.io
 import numpy as np
 import copy
+import requests
 
 
 # Construct the paths to our custom utility libraries 
@@ -883,10 +885,6 @@ def _find_spd_axes_per_subject(subject_paths: list[str],
                     
                     # Find the min and max of this graph info 
                     graph_min: float = np.nanmin(graph_info)
-
-                    if(graph_min <= 0 and graph_type == "frq"):
-                        print(f"{subject_id_number} | {activity_name} | {graph_min}")
-
                     graph_max: float = np.nanmax(graph_info)
 
                     # Compare to the global min/max and update if needed
@@ -904,7 +902,197 @@ def _find_spd_axes_per_subject(subject_paths: list[str],
     return min_maxes
 
 
+def _find_spd_axes_per_activity(subject_paths: list[str],
+                                activities_list: list[str],
+                                activities_to_skip: list[str], 
+                                subjects_to_skip: list[str], 
+                                projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = set(["virtuallyFoveated", "justProjection"]),
+                                verbose: bool=False 
+                              ) -> None:
 
+    # Initialize min max per type of graph 
+    min_maxes: dict[int, list[float]] = {}
+
+    # First, let's go over all of the activities 
+    activities_iterator: Iterable = range(len(activities_list)) if verbose is False else tqdm(range(len(activities_list)), desc="Processing Activities", leave=False)
+    for activity_num in activities_iterator:
+        # Retrieve the activity path and activity name
+        activity_name: str = activities_list[activity_num]
+        if(activity_name in activities_to_skip):
+            continue
+        
+        # Insert this subject into the min-maxes dict 
+        min_maxes[activity_name] = {"exponentMap": [float("inf"), float("-inf")],
+                                        "varianceMap": [float("inf"), float("-inf")],
+                                        "spdByRegion": [float("inf"), float("-inf")],
+                                        "frq": [float("inf"), float("-inf")]
+                                       }
+
+
+        # Now, let's iterate over all the subject paths 
+        subject_iterator: Iterable = range(len(subject_paths)) if verbose is False else tqdm(range(len(subject_paths)), desc="Processing Subjects", leave=False)
+        for subject_num in subject_iterator:
+            # Retrieve the subject path and subject name
+            subject_path: str = subject_paths[subject_num]
+            subject_id: str = os.path.basename(subject_path)
+            subject_id_number: int = int(re.search("\d+", subject_id).group())
+
+            # Skip unwatned subjects 
+            if(subject_id_number in subjects_to_skip):
+                continue 
+            
+            # Construct the path to this subject's activity
+            activity_path: str = os.path.join(subject_path, activity_name)
+            assert os.path.exists(activity_path), f"Problem with: {activity_path}"
+
+            # Iterate over the projection types 
+            for projection_type in projection_types:
+                # load the SPD results from this activity
+                spd_results_filepath: str = os.path.join(activity_path, f"{subject_id}_{activity_name}_{projection_type}_SPDResults.mat")
+                assert os.path.exists(spd_results_filepath), f"SPD Results path does not exist: {spd_results_filepath}"
+                spd_results: object = scipy.io.loadmat(spd_results_filepath)['activityData'][0, 0][activity_name]
+
+                # Extract the per graph info 
+                for graph_type in min_maxes[activity_name]:
+                    graph_info: np.ndarray = spd_results[graph_type][0, 0].astype(np.float64)
+                    
+                    # Find the min and max of this graph info 
+                    graph_min: float = np.nanmin(graph_info)
+                    graph_max: float = np.nanmax(graph_info)
+
+                    # Compare to the global min/max and update if needed
+                    global_min, global_max = min_maxes[activity_name][graph_type]
+                    if(graph_min < global_min):
+                        min_maxes[activity_name][graph_type][0] = graph_min
+                    if(graph_max > global_max):
+                        min_maxes[activity_name][graph_type][1] = graph_max
+
+    return min_maxes
+
+
+def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026/", 
+                                 dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026/acrossSubjects",
+                                 overwrite_existing: bool=False,
+                                 subjects_to_skip: Iterable=set(), 
+                                 activities_to_skip: Iterable=set(["lunch", "phone"]), 
+                                 projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = ["virtuallyFoveated", "justProjection"], 
+                                 common_axes: bool=False, 
+                                 combine_figures: bool=False, 
+                                 verbose: bool=False
+                                ) -> None:
+    import matlab.engine
+
+     # Initialize the MATLAB engine to utilize the MATLAB function we have developed for this purpose 
+    eng: object = matlab.engine.start_matlab()  
+    eng.pyenv('Version', '~/Documents/MATLAB/projects/lightLoggerAnalysis/analysis_env/bin/python', nargout=0)
+    eng.tbUseProject('lightLoggerAnalysis', nargout=0)
+    
+
+    # First, let's find all of the subjects in this experiment 
+    subject_paths: list[str] = natsorted([os.path.join(src_dir, subject_name) 
+                                          for subject_name in os.listdir(src_dir) 
+                                          if re.fullmatch(r"FLIC_\d+", subject_name) 
+                                          and os.path.isdir(os.path.join(src_dir, subject_name))
+                                         ]
+                                        ) 
+    subject_id_numbers: list[int] = [ int(re.search(r"\d+", os.path.basename(path)).group()) 
+                                        for path in subject_paths 
+                                    ]
+    subject_id_numbers = [num for num in subject_id_numbers if num not in subjects_to_skip]
+
+    assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
+
+    # First, let's get all of the activities  we will go over 
+    activities_list: list[str] = sorted(  set([filename
+                                        for subject_path in subject_paths
+                                        for filename in os.listdir(subject_path)
+                                        if os.path.isdir(os.path.join(subject_path, filename))
+                                        and filename not in activities_to_skip
+                                              ]
+                                            )
+                                        )
+
+
+    # Define the axes limits (by default just automatically calculated, false)
+    # or find the axes limits per activity for all graph types
+    default_axes_min_maxes: dict[str, bool | list[float]] = {"exponentMap": False,
+                                                         "varianceMap": False,
+                                                         "spdByRegion": False,
+                                                         "frq": False
+                                                        }
+    if(common_axes is True):
+        all_axes_min_maxes = _find_spd_axes_per_activity(subject_paths=subject_paths,
+                                                        activities_list=activities_list, 
+                                                        activities_to_skip=activities_to_skip,
+                                                        subjects_to_skip=subjects_to_skip,
+                                                        projection_types=projection_types,
+                                                        verbose=False
+                                                        )
+        # Loglog  plots cannot have x or y <= 0     
+        # so fix that here 
+        for activity_name in activities_list:
+            all_axes_min_maxes[activity_name]["frq"][0] = max(all_axes_min_maxes[activity_name]["frq"][0], 10e-9)
+            all_axes_min_maxes[activity_name]["spdByRegion"][0] = max(all_axes_min_maxes[activity_name]["spdByRegion"][0], 10e-9)
+
+            # Make all of them numpy arrays for easy matlab conversion too 
+            for field in all_axes_min_maxes[activity_name]:
+                all_axes_min_maxes[activity_name][field] = np.array(all_axes_min_maxes[activity_name][field])
+
+    # First, let's go over all of the activities 
+    activities_iterator: Iterable = range(len(activities_list)) if verbose is False else tqdm(range(len(activities_list)), desc="Processing Activities", leave=False)
+    for activity_num in activities_iterator:
+        # Retrieve the activity path and activity name
+        activity_name: str = activities_list[activity_num]
+
+        # Gather the path to this activity for all subjects (and ensure it exists)
+        activities_paths: list[str] = [ os.path.join(subject_path, activity_name) 
+                                        for subject_path, subject_id_num in zip(subject_paths, subject_id_numbers)
+                                        if subject_id_num not in subjects_to_skip
+                                      ]
+        for path in activities_paths:
+            if(not os.path.exists(path)):
+                raise Exception(f"Path: {path} does not exist")
+
+
+        # Gather the list of numerical subject IDS 
+        subject_id_numbers: list[int] = [ int(re.search(r"\d+", os.path.basename(path)).group()) 
+                                          for path in subject_paths 
+                                        ]
+        subject_id_numbers = [num for num in subject_id_numbers if num not in subjects_to_skip]
+
+        # If common axes is true, we will find the limits of the plots 
+        # across all subjects for this activity
+        
+        # Initialize min max per type of graph 
+        axes_min_maxes = default_axes_min_maxes if common_axes is False else all_axes_min_maxes[activity_name]
+        
+        # Generate the output dir
+        output_dir: str = os.path.join(dst_dir, activity_name)
+        os.makedirs(output_dir, exist_ok=True)
+
+        # iterate over desired projection types 
+        for projection_type in projection_types if combine_figures is False else (list(projection_types)[0],):
+            # Call the MATLAB function to do the processing
+            eng.processSPDsAcrossSubjects(src_dir, 
+                                          output_dir, 
+                                          "subjects", subject_id_numbers,
+                                          "activities", [activity_name],
+                                          "verbose", False, 
+                                          "save_figures", True, 
+                                          "overwrite_existing", overwrite_existing, 
+                                          "projection_type", projection_type,
+                                          "exponent_clim", axes_min_maxes["exponentMap"],
+                                          "variance_clim", axes_min_maxes["varianceMap"], 
+                                          "spd_xlim", axes_min_maxes["frq"],
+                                          "spd_ylim", axes_min_maxes["spdByRegion"], 
+                                          "combine_figures", combine_figures,
+                                          nargout=0
+                                        )
+
+    # Close the matlab engine 
+    eng.quit()
+
+    return 
 
 # -----------------------------------------------------------------------------
 # unpack_neon_recordings
@@ -981,86 +1169,6 @@ def unpack_neon_recordings(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutd
 
             # Remove the original file 
             os.remove(neon_recording_zip)
-
-    return 
-
-def generate_spds_across_subject(src_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoorVideos2026", 
-                                 dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026/acrossSubjects",
-                                 overwrite_existing: bool=False,
-                                 subjects_to_skip: Iterable=set(), 
-                                 activities_to_skip: Iterable=set(["lunch", "phone"]), 
-                                 projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = set(["virtuallyFoveated", "justProjection"]), 
-                                 common_axes: bool=False, 
-                                 verbose: bool=False
-                                ) -> None:
-    import matlab.engine
-
-     # Initialize the MATLAB engine to utilize the MATLAB function we have developed for this purpose 
-    eng: object = matlab.engine.start_matlab()  
-    eng.pyenv('Version', '~/Documents/MATLAB/projects/lightLoggerAnalysis/analysis_env/bin/python', nargout=0)
-    eng.tbUseProject('lightLoggerAnalysis', nargout=0)
-    
-
-    # First, let's find all of the subjects in this experiment 
-    subject_paths: list[str] = natsorted([os.path.join(src_dir, subject_name) 
-                                          for subject_name in os.listdir(src_dir) 
-                                          if re.fullmatch(r"FLIC_\d+", subject_name) 
-                                          and os.path.isdir(os.path.join(src_dir, subject_name))
-                                         ]
-                                        ) 
-    assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
-
-
-    # First, let's get all of the activities  we will go over 
-    activites_list: list[str] = sorted([filename
-                                        for subject_path in subject_paths
-                                        for filename in os.listdir(subject_path)
-                                        if os.path.isdir(os.path.join(subject_path, filename))
-                                        and filename not in activities_to_skip
-                                    ])
-
-    # First, let's go over all of the activities 
-    activities_iterator: Iterable = range(len(activites_list)) if verbose is False else tqdm(range(len(activites_list)), desc="Processing Activities", leave=False)
-    for activity_num in activities_iterator:
-        # Retrieve the activity path and activity name
-        activity_name: str = activites_list[activity_num]
-
-        # Gather the path to this activity for all subjects (and ensure it exists)
-        activities_paths: list[str] = [ os.path.join(subject_path, activity_name) 
-                                        for subject_path in subject_paths
-                                      ]
-        for path in activities_paths:
-            if(not os.path.exists(path)):
-                raise Exception(f"Path: {path} does not exist")
-
-
-        # Gather the list of numerical subject IDS 
-        subject_id_numbers: list[int] = [ int(re.search(r"\d+", os.path.basename(path)).group()) 
-                                          for path in subject_paths 
-                                        ]
-
-        # Generate the output dir
-        output_dir: str = os.path.join(dst_dir, activity_name)
-        os.makedirs(output_dir, exist_ok=True)
-
-        # iterate over desired projection types 
-        for projection_type in projection_types:
-            # Call the MATLAB function to do the processing
-            eng.processSPDsAcrossSubjects(src_dir, 
-                                            dst_dir, 
-                                            "subjects", subject_id_numbers,
-                                            "activities", [activity_name],
-                                            "verbose", verbose, 
-                                            "save_figures", True, 
-                                            "overwrite_existing", overwrite_existing, 
-                                            "projection_type", projection_type,
-                                            nargout=0
-                                        )
-
-
-
-    # Close the matlab engine 
-    eng.quit()
 
     return 
 
@@ -1481,6 +1589,126 @@ def verify_virtually_foveated_video_integrity(src_dir: str="/Volumes/FLIC_proces
                 video_length: float = video_fps * video_num_frames
 
                 assert video_length >= target_length_seconds, f"Video: {video_path} has length: {video_length}s which is less than target: {target_length_seconds}s"
+
+
+
+
+def download_pupil_cloud_recordings(dst_dir: str, 
+                                    api_key: str, 
+                                    api_url = "https://api.cloud.pupil-labs.com/v2",
+                                    workspace_id: str="default", 
+                                    subjects_to_download: Iterable=set(), 
+                                    activities_to_download: Iterable=set(),
+                                    overwrite_existing: bool=False, 
+                                    verbose: bool=False
+                                ) -> None:
+
+    
+    # First, we will get a list of all the recordings on pupil cloud
+    recordings_list_url: str = f"{api_url}/workspaces/{workspace_id}/recordings"
+    r: object = requests.get(recordings_list_url, stream=True, headers={"api-key": api_key})
+    r.raise_for_status()
+    r_json: object = r.json() 
+    r_result: object = r_json["result"]
+
+    # Now, let's deconstruct the recording names into an easily parasable hashmap 
+    parsed_recording_map: dict[str, dict] = {}
+    for recording_result in r_result:
+        # Find the recording name 
+        recording_name: str = r_result["name"]
+        recording_id: str = r_result["id"]
+
+        # If the recording name does not contain FLIC, 
+        # output a warning and skip 
+        if("FLIC" not in recording_name):
+            warnings.warn(f"Recording: {recording_name} does not contain FLIC")
+            continue 
+
+        # Let's break the recording name down into the desired fields 
+        
+       # First, we will find the subject ID
+        subject_id: int = int(re.search(r"^FLIC_(\d+)", recording_name).group(1))
+
+        # Find the activity
+        activity_name: str = re.search(r"^FLIC_\d+_([A-Za-z]+)", recording_name).group(1)
+
+        # Find the recording number
+        recording_number: int = int(re.search(r"_(\d+)$", recording_name).group(1))
+
+        # Now, we will save it into the parsed recording dictionary 
+
+        # If the subject has not been seen before, this is very simple 
+        if(subject_id not in parsed_recording_map):
+            parsed_recording_map[subject_id] = {activity_name: 
+                                                    {"recording_number": recording_number, "id": recording_id}
+                                               }
+        
+        # If the subject has been seen before, let's check if the activity 
+        # has been seen before for this subject 
+        else:
+            # If the activity has not been seen before for this subject, 
+            # it is also then very easy 
+            if(activity_name not in parsed_recording_map[subject_id]):
+                parsed_recording_map[subject_id][activity_name] = {"recording_number": recording_number, "id": recording_id}
+            
+            # Otherwise, this subject and activity have been seen before, we haev a duplicate. 
+            # We need to keep only the one that has the max recording number 
+            else:
+                # If the current recording number is greater than the other one, 
+                # update 
+                if(recording_number > parsed_recording_map[subject_id][activity_name]["recording_number"]):
+                    parsed_recording_map[subject_id][activity_name] = {"recording_number": recording_number, "id": recording_id}
+
+    # Now, let's iterate over all the subject paths 
+    subjects_to_download: list[int] = list(subjects_to_download)
+    subject_iterator: Iterable = range(len(subjects_to_download)) if verbose is False else tqdm(range(len(subjects_to_download)), desc="Processing Subjects", leave=True)
+    for subject_num in subject_iterator:
+        # Retrieve the subject path and subject name
+        subject_id_num = subjects_to_download[subject_num]
+        assert subject_id_num in parsed_recording_map, f"Subject id num: {subject_id_num} not in cloud recordings subjects: {parsed_recording_map.keys()}"
+
+        # Retrieve just the recordings for this subject 
+        subject_recordings: dict = parsed_recording_map[subject_id_num]
+
+        activities_iterator: Iterable = range(len(activities_to_download)) if verbose is False else tqdm(range(len(activities_to_download)), desc="Processing Activities", leave=False)
+        for activity_num in activities_iterator:
+            # Retrieve the activity path and activity name
+            activity_name: str = activities_to_download[activity_num]
+            assert activity_name in subject_recordings, f"Activity: {activity_name} not in subject: {subject_id_num} recordings: {subject_recordings.keys()}"
+
+            # Retrieve this activity recording's infop 
+            activity_recording: dict = subject_recordings[activity_name]
+
+            # Now, we will retrieve the recording id to download 
+            recording_id: str = activity_recording["id"]
+
+            # Construct the output path where this recording will go 
+            output_dir: str = os.path.join(dst_dir, f"FLIC_{subject_id_num}", activity_name, "Neon")
+
+            # Skip recordings that are already downloaded unless we want to overwrite 
+            if(os.path.exists(output_dir) and overwrite_existing is False):
+                continue
+            
+            # Make the output location 
+            os.makedirs(output_dir, exist_ok=True)
+
+            # Now, let's download the recording and place it where it belongs 
+            recording_zip_url: str = f"{api_url}/workspaces/{workspace_id}/recordings/{recording_id}.zip"
+            r: object = requests.get(url, stream=True, headers={"api-key": api_key})
+            r.raise_for_status()
+            save_path = pathlib.Path(output_dir) # TODO: make sure this path is right 
+            with save_path.open("wb") as fd:
+                for chunk in r.iter_content(chunk_size=128):
+                    fd.write(chunk)
+
+            # TODO: few more. thigns here 
+
+    # After all the recordings have been downloaded, we will unpack them 
+    # here 
+
+
+
+    return 
 
 
 def main():

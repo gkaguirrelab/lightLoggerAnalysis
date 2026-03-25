@@ -87,6 +87,10 @@ function activityDataAcrossSubjects = processSPDsAcrossSubjects(input_dir, outpu
         options.video_type {mustbeMember(options.video_type, ["justProjection", "virtuallyFoveated"])} = "virtuallyFoveated"; 
         options.save_figures = false; 
         options.fovDegrees = 120; 
+        options.exponent_clim = false
+        options.variance_clim = false
+        options.spd_xlim = false
+        options.spd_ylim = false
     end
 
     % Find all subject folders matching ^FLIC_\d+$
@@ -185,11 +189,33 @@ function activityDataAcrossSubjects = processSPDsAcrossSubjects(input_dir, outpu
                 save(output_filepath, 'activityData');
 
                 if(options.save_figures)
-                    [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(activityData, "fovDegrees", options.fovDegrees); 
+                    [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(activityData,... 
+                                                                                         "fovDegrees", options.fovDegrees,...
+                                                                                         "exponent_clim", options.exponent_clim,... 
+                                                                                         "variance_clim", options.variance_clim, ...
+                                                                                         "spd_xlim", options.spd_xlim, ...
+                                                                                        "spd_ylim", options.spd_ylim ...
+                                                                                    ); 
                     
-                    exportgraphics(exponentMapHandle, fullfile(output_dir, sprintf('%s_%s_%s_exponentMap.pdf', subjectName, activityName, options.video_type)), 'ContentType','vector');
-                    exportgraphics(varianceMapHandle, fullfile(output_dir, sprintf('%s_%s_%s_varianceMap.pdf', subjectName, activityName, options.video_type)), 'ContentType','vector');
-                    exportgraphics(spdByRegionHandle, fullfile(output_dir, sprintf('%s_%s_%s_spdByRegion.pdf', subjectName, activityName, options.video_type)), 'ContentType','vector');
+                   % Build filepaths
+                    expPath = fullfile(output_dir, sprintf('%s_%s_%s_exponentMap.pdf', subjectName, activityName, options.video_type));
+                    varPath = fullfile(output_dir, sprintf('%s_%s_%s_varianceMap.pdf', subjectName, activityName, options.video_type));
+                    spdPath = fullfile(output_dir, sprintf('%s_%s_%s_spdByRegion.pdf', subjectName, activityName, options.video_type));
+
+                    % Exponent map
+                    if (~exist(expPath, 'file') || options.overwrite_existing)
+                        exportgraphics(exponentMapHandle, expPath, 'ContentType','vector');
+                    end
+
+                    % Variance map
+                    if (~exist(varPath, 'file') || options.overwrite_existing)
+                        exportgraphics(varianceMapHandle, varPath, 'ContentType','vector');
+                    end
+
+                    % SPD by region
+                    if (~exist(spdPath, 'file') || options.overwrite_existing)
+                        exportgraphics(spdByRegionHandle, spdPath, 'ContentType','vector');
+                    end
 
                     % Close all the figures after we saved them 
                     close([exponentMapHandle varianceMapHandle spdByRegionHandle]); 

@@ -1,9 +1,9 @@
-function activityDataAcrossSubjects = processSPDsAcrossSubjects(input_dir, output_dir, options)
+function virtuallyFoveatedActivityDataAcrossSubjects = processSPDsAcrossSubjects(input_dir, output_dir, options)
 % Aggregate per-subject temporal SPD analysis results across activities
 %
 % Syntax:
-%   activityDataAcrossSubjects = processSPDsAcrossSubjects(input_dir, output_dir)
-%   activityDataAcrossSubjects = processSPDsAcrossSubjects(input_dir, output_dir, options)
+%   virtuallyFoveatedActivityDataAcrossSubjects = processSPDsAcrossSubjects(input_dir, output_dir)
+%   virtuallyFoveatedActivityDataAcrossSubjects = processSPDsAcrossSubjects(input_dir, output_dir, options)
 %
 % Description:
 %   This function searches a directory of subject folders and aggregates
@@ -51,13 +51,13 @@ function activityDataAcrossSubjects = processSPDsAcrossSubjects(input_dir, outpu
 %                           maps.
 %
 % Outputs:
-%   activityDataAcrossSubjects
+%   virtuallyFoveatedActivityDataAcrossSubjects
 %                         - Struct. Structure containing across-subject SPD
 %                           analysis results for each activity. Each
 %                           activity field may contain:
 %                               .exponentMaps
 %                               .interceptMaps
-%                               .spdsByRegion
+%                               .spdByRegion
 %                               .medianImage
 %                               .frameDropVector
 %                               .frq
@@ -69,7 +69,7 @@ function activityDataAcrossSubjects = processSPDsAcrossSubjects(input_dir, outpu
     input_dir = "/path/to/FLIC_processing";
     output_dir = "/path/to/SPD_across_subjects";
 
-    activityDataAcrossSubjects = processSPDsAcrossSubjects( ...
+    virtuallyFoveatedActivityDataAcrossSubjects = processSPDsAcrossSubjects( ...
         input_dir, ...
         output_dir, ...
         "subjects", {2001, 2003, 2005}, ...
@@ -88,13 +88,22 @@ function activityDataAcrossSubjects = processSPDsAcrossSubjects(input_dir, outpu
         options.overwrite_existing = false; 
         options.projection_type {mustBeMember(options.projection_type, ["justProjection", "virtuallyFoveated"])} = "virtuallyFoveated";
         options.fovDegrees = 120; 
-
+        options.exponent_clim = false
+        options.variance_clim = false
+        options.spd_xlim = false
+        options.spd_ylim = false
+        options.combine_figures = false; 
     end
-
+    
     fovDegrees = options.fovDegrees; 
+    combine_figures = options.combine_figures; 
 
     % Initialize output
-    activityDataAcrossSubjects = struct();
+    virtuallyFoveatedActivityDataAcrossSubjects = struct();
+    justProjectionActivityDataAcrossSubjects = false; 
+    if(combine_figures)
+        justProjectionActivityDataAcrossSubjects = struct(); 
+    end 
 
     % Find all subject folders matching ^FLIC_\d+$
     subjectFiles = dir(fullfile(input_dir, 'FLIC_*'));
@@ -117,7 +126,7 @@ function activityDataAcrossSubjects = processSPDsAcrossSubjects(input_dir, outpu
 
     % Save subjectIDs
     for ss = 1:nSubjects
-        activityDataAcrossSubjects.subjectIDs{ss} = subjectFiles(ss).name;
+        virtuallyFoveatedActivityDataAcrossSubjects.subjectIDs{ss} = subjectFiles(ss).name;
     end
 
     % Determine activity list
@@ -148,14 +157,21 @@ function activityDataAcrossSubjects = processSPDsAcrossSubjects(input_dir, outpu
         activityName = activityNames{aa};
 
         % Initialize activity field if needed
-        if ~isfield(activityDataAcrossSubjects, activityName)
-            activityDataAcrossSubjects.(activityName).exponentMaps = [];
-            activityDataAcrossSubjects.(activityName).varianceMaps = [];
-            activityDataAcrossSubjects.(activityName).spdsByRegion = [];
-            activityDataAcrossSubjects.(activityName).medianImage = [];
-            activityDataAcrossSubjects.(activityName).frameDropVector = {};
+        if ~isfield(virtuallyFoveatedActivityDataAcrossSubjects, activityName)
+            virtuallyFoveatedActivityDataAcrossSubjects.(activityName).exponentMaps = [];
+            virtuallyFoveatedActivityDataAcrossSubjects.(activityName).varianceMaps = [];
+            virtuallyFoveatedActivityDataAcrossSubjects.(activityName).spdByRegion = [];
+            virtuallyFoveatedActivityDataAcrossSubjects.(activityName).medianImage = [];
+            virtuallyFoveatedActivityDataAcrossSubjects.(activityName).frameDropVector = {};
         end
 
+        if(combine_figures && ~isfield(justProjectionActivityDataAcrossSubjects, activityName))
+            virtuallyFoveatedActivityDataAcrossSubjects.(activityName).exponentMaps = [];
+            virtuallyFoveatedActivityDataAcrossSubjects.(activityName).varianceMaps = [];
+            virtuallyFoveatedActivityDataAcrossSubjects.(activityName).spdByRegion = [];
+            virtuallyFoveatedActivityDataAcrossSubjects.(activityName).medianImage = [];
+            virtuallyFoveatedActivityDataAcrossSubjects.(activityName).frameDropVector = {};
+        end
 
         % Check to see if we can skip because we do not want to overwrite existing activities
         if(output_dir ~= "")
@@ -188,47 +204,102 @@ function activityDataAcrossSubjects = processSPDsAcrossSubjects(input_dir, outpu
 
             % Find the activityData struct for just this subject + activity pair
             frameDropVector = [];
-            SPD_results = dir(fullfile(activityPath, sprintf('*%s_SPDResults.mat', options.projection_type)));
+            virtually_foveated_SPD_results = dir(fullfile(activityPath, sprintf('*%s_SPDResults.mat', options.projection_type)));
 
-            if isempty(SPD_results)
+            if isempty(virtually_foveated_SPD_results)
                 fprintf('No SPDResults file found for subject %s, activity %s @ path: %s\n', subjectName, activityName, activityPath);
                 continue;
             end
 
-            thisVideo = fullfile(SPD_results(1).folder, SPD_results(1).name);
+            thisVideo = fullfile(virtually_foveated_SPD_results(1).folder, virtually_foveated_SPD_results(1).name);
 
             % Load in the per subject + activity SPD struct 
-            individual_spd_results = load(thisVideo).(activityName); 
+            individual_virtually_foveated_spd_results = load(thisVideo).activityData.(activityName); 
             
-
             % Save this subject + activity pair of data 
-            activityDataAcrossSubjects.(activityName).exponentMaps(:,:,ss) = individual_spd_results.exponentMap; 
-            activityDataAcrossSubjects.(activityName).varianceMaps(:,:,ss) = individual_spd_results.varianceMap; 
-            activityDataAcrossSubjects.(activityName).spdsByRegion(:,:,:,ss) = individual_spd_results.spdByRegion; 
-            activityDataAcrossSubjects.(activityName).medianImage(:,:,ss) = individual_spd_results.medianImage; 
-            activityDataAcrossSubjects.(activityName).frameDropVector{ss} = individual_spd_results.frameDropVector; 
-            activityDataAcrossSubjects.(activityName).frq = individual_spd_results.frq;
+            virtuallyFoveatedActivityDataAcrossSubjects.(activityName).exponentMaps(:,:,ss) = individual_virtually_foveated_spd_results.exponentMap; 
+            virtuallyFoveatedActivityDataAcrossSubjects.(activityName).varianceMaps(:,:,ss) = individual_virtually_foveated_spd_results.varianceMap; 
+            virtuallyFoveatedActivityDataAcrossSubjects.(activityName).spdByRegions(:,:,:,ss) = individual_virtually_foveated_spd_results.spdByRegion; 
+            virtuallyFoveatedActivityDataAcrossSubjects.(activityName).medianImages(:,:,ss) = individual_virtually_foveated_spd_results.medianImage; 
+            virtuallyFoveatedActivityDataAcrossSubjects.(activityName).frameDropVector{ss} = individual_virtually_foveated_spd_results.frameDropVector; 
+            virtuallyFoveatedActivityDataAcrossSubjects.(activityName).frq = individual_virtually_foveated_spd_results.frq;
+
+            if(combine_figures)
+                justProjectionActivityDataAcrossSubjects.(activityName).exponentMaps(:,:,ss) = individual_virtually_foveated_spd_results.exponentMap; 
+                justProjectionActivityDataAcrossSubjects.(activityName).varianceMaps(:,:,ss) = individual_virtually_foveated_spd_results.varianceMap; 
+                justProjectionActivityDataAcrossSubjects.(activityName).spdByRegions(:,:,:,ss) = individual_virtually_foveated_spd_results.spdByRegion; 
+                justProjectionActivityDataAcrossSubjects.(activityName).medianImages(:,:,ss) = individual_virtually_foveated_spd_results.medianImage; 
+                justProjectionActivityDataAcrossSubjects.(activityName).frameDropVector{ss} = individual_virtually_foveated_spd_results.frameDropVector; 
+                justProjectionActivityDataAcrossSubjects.(activityName).frq = individual_virtually_foveated_spd_results.frq;
+
+            end 
+
+
         end
 
         % Average across the subjects processed so far for this activity
-        avgExponentMap = squeeze(mean(activityDataAcrossSubjects.(activityName).exponentMaps(:,:,1:nSubjects), 3, 'omitmissing'));
-        avgVarianceMap = squeeze(mean(activityDataAcrossSubjects.(activityName).varianceMaps(:,:,1:nSubjects), 3, 'omitmissing'));
-        avgSpdByRegion = squeeze(mean(activityDataAcrossSubjects.(activityName).spdsByRegion(:,:,:,1:nSubjects), 4, 'omitmissing'));
+        virtuallyFoveatedAvgExponentMap = squeeze(mean(virtuallyFoveatedActivityDataAcrossSubjects.(activityName).exponentMaps(:,:,1:nSubjects), 3, 'omitmissing'));
+        virtuallyFoveatedAvgVarianceMap = squeeze(mean(virtuallyFoveatedActivityDataAcrossSubjects.(activityName).varianceMaps(:,:,1:nSubjects), 3, 'omitmissing'));
+        virtuallyFoveatedAvgSpdByRegion = squeeze(mean(virtuallyFoveatedActivityDataAcrossSubjects.(activityName).spdByRegions(:,:,:,1:nSubjects), 4, 'omitmissing'));
 
-        % Define the image resolution in degrees
-        degPerPix = fovDegrees / size(avgExponentMap, 1);
+        % Store the averages
+        virtuallyFoveatedActivityDataAcrossSubjects.(activityName).exponentMap = virtuallyFoveatedAvgExponentMap; 
+        virtuallyFoveatedActivityDataAcrossSubjects.(activityName).varianceMap = virtuallyFoveatedAvgVarianceMap;
+        virtuallyFoveatedActivityDataAcrossSubjects.(activityName).spdByRegion = virtuallyFoveatedAvgSpdByRegion;  
+
+        % Store the averages for the just projection struct if desired 
+        if(combine_figures)
+            justProjectionAvgExponentMap = squeeze(mean(  justProjectionActivityDataAcrossSubjects.(activityName).exponentMaps(:,:,1:nSubjects), 3, 'omitmissing'));
+            justProjectionAvgVarianceMap = squeeze(mean(  justProjectionActivityDataAcrossSubjects.(activityName).varianceMaps(:,:,1:nSubjects), 3, 'omitmissing'));
+            justProjectionAvgSpdByRegion = squeeze(mean(  justProjectionActivityDataAcrossSubjects.(activityName).spdByRegions(:,:,:,1:nSubjects), 4, 'omitmissing'));
+
+            justProjectionActivityDataAcrossSubjects.(activityName).exponentMap = justProjectionAvgExponentMap; 
+            justProjectionActivityDataAcrossSubjects.(activityName).varianceMap = justProjectionAvgVarianceMap;
+            justProjectionActivityDataAcrossSubjects.(activityName).spdByRegion = justProjectionAvgSpdByRegion;  
+        end 
+
 
         % Output the results of this if desired
         if(output_dir ~= "")
-            activityData = activityDataAcrossSubjects; 
+            activityData.virtuallyFoveatedActivityDataAcrossSubjects = virtuallyFoveatedActivityDataAcrossSubjects; 
+            activityData.justProjectionActivityDataAcrossSubjects = justProjectionActivityDataAcrossSubjects;
             save(output_filepath, 'activityData');
 
             if(options.save_figures)
-                [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(activityDataAcrossSubjects, "fovDegrees", options.fovDegrees); 
+                assert(isstruct(virtuallyFoveatedActivityDataAcrossSubjects)); 
+
+                % Remove this field we no longer need to keep track of subjects
+                virtuallyFoveatedActivityDataAcrossSubjects = rmfield(virtuallyFoveatedActivityDataAcrossSubjects, 'subjectIDs'); 
+
+                [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(virtuallyFoveatedActivityDataAcrossSubjects, ...
+                                                                                     "fovDegrees", options.fovDegrees,...
+                                                                                     "exponent_clim", options.exponent_clim,... 
+                                                                                     "variance_clim", options.variance_clim, ...
+                                                                                     "spd_xlim", options.spd_xlim, ...
+                                                                                     "spd_ylim", options.spd_ylim, ...
+                                                                                     "justProjectionActivityData", justProjectionActivityDataAcrossSubjects...
+                                                                                     ); 
                 
-                exportgraphics(exponentMapHandle, fullfile(output_dir, sprintf('%s_%s_exponentMapAcrossSubjects.pdf', activityName, options.projection_type)), 'ContentType','vector');
-                exportgraphics(varianceMapHandle, fullfile(output_dir, sprintf('%s_%s_varianceMapAcrossSubjects.pdf', activityName, options.projection_type)), 'ContentType','vector');
-                exportgraphics(spdByRegionHandle, fullfile(output_dir, sprintf('%s_%s_spdByRegionAcrossSubjects.pdf', activityName, options.projection_type)), 'ContentType','vector');
+                % Build filepaths
+                % TODO: Need to fix this for combined here
+                expPath = fullfile(output_dir, sprintf('%s_%s_exponentMapAcrossSubjects.pdf', activityName, options.projection_type));
+                varPath = fullfile(output_dir, sprintf('%s_%s_varianceMapAcrossSubjects.pdf', activityName, options.projection_type));
+                spdPath = fullfile(output_dir, sprintf('%s_%s_spdByRegionAcrossSubjects.pdf', activityName, options.projection_type));
+
+                % Exponent map
+                if (~exist(expPath, 'file') || options.overwrite_existing)
+                    exportgraphics(exponentMapHandle, expPath, 'ContentType','vector');
+                end
+
+                % Variance map
+                if (~exist(varPath, 'file') || options.overwrite_existing)
+                    exportgraphics(varianceMapHandle, varPath, 'ContentType','vector');
+                end
+
+                % SPD by region
+                if (~exist(spdPath, 'file') || options.overwrite_existing)
+                    exportgraphics(spdByRegionHandle, spdPath, 'ContentType','vector');
+                end
 
                 % Close all the figures after we saved them 
                 close([exponentMapHandle varianceMapHandle spdByRegionHandle]); 
