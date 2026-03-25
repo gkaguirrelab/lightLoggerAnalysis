@@ -87,6 +87,10 @@ function activityDataAcrossSubjects = processSPDsAcrossSubjects(input_dir, outpu
         options.video_type {mustbeMember(options.video_type, ["justProjection", "virtuallyFoveated"])} = "virtuallyFoveated"; 
         options.save_figures = false; 
         options.fovDegrees = 120; 
+        options.exponent_clim = false
+        options.variance_clim = false
+        options.spd_xlim = false
+        options.spd_ylim = false
     end
 
     % Find all subject folders matching ^FLIC_\d+$
@@ -185,7 +189,13 @@ function activityDataAcrossSubjects = processSPDsAcrossSubjects(input_dir, outpu
                 save(output_filepath, 'activityData');
 
                 if(options.save_figures)
-                    [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(activityData, "fovDegrees", options.fovDegrees); 
+                    [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(activityData,... 
+                                                                                         "fovDegrees", options.fovDegrees,...
+                                                                                         "exponent_clim", options.exponent_clim,... 
+                                                                                         "variance_clim", options.variance_clim, ...
+                                                                                         "spd_xlim", options.spd_xlim, ...
+                                                                                        "spd_ylim", options.spd_ylim ...
+                                                                                    ); 
                     
                     exportgraphics(exponentMapHandle, fullfile(output_dir, sprintf('%s_%s_%s_exponentMap.pdf', subjectName, activityName, options.video_type)), 'ContentType','vector');
                     exportgraphics(varianceMapHandle, fullfile(output_dir, sprintf('%s_%s_%s_varianceMap.pdf', subjectName, activityName, options.video_type)), 'ContentType','vector');
