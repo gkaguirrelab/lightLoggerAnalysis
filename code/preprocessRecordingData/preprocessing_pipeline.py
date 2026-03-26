@@ -1591,10 +1591,107 @@ def verify_virtually_foveated_video_integrity(src_dir: str="/Volumes/FLIC_proces
                 assert video_length >= target_length_seconds, f"Video: {video_path} has length: {video_length}s which is less than target: {target_length_seconds}s"
 
 
+def transfer_light_logger_recordings(src_dir: str="/Volumes/T7 Shield", 
+                                     dst_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026", 
+                                     subjects_to_transfer: Iterable=set(), 
+                                     activities_to_transfer: Iterable=set(),
+                                     overwrite_existing: bool=False, 
+                                     verbose: bool=False
+                                    ) -> None:
+
+    # First, let's get all the recording names from the src dir 
+    r_result: list[str] = [filename for filename in os.listdir(src_dir)
+                           if os.path.isdir(os.path.join(src_dir, filename))
+                          ]
+
+    # Now, let's deconstruct the recording names into an easily parasable hashmap 
+    parsed_recording_map: dict[str, dict] = {}
+    for recording_name in r_result:
+
+        # If the recording name does not contain FLIC, 
+        # output a warning and skip 
+        if("FLIC" not in recording_name):
+            warnings.warn(f"Recording: {recording_name} at src_dir: {src_dir} does not contain FLIC")
+            continue 
+        
+
+        # First, we will find the subject ID
+        subject_id: int = int(re.search(r"^FLIC_(\d+)", recording_name).group(1))
+
+        # Find the activity
+        activity_name: str = re.search(r"^FLIC_\d+_([A-Za-z]+)", recording_name).group(1)
+
+        # Find the recording number
+        recording_number: int = int(re.search(r"_(\d+)$", recording_name).group(1))
+
+        # If the subject has not been seen before, this is very simple
+        if(subject_id not in parsed_recording_map):
+            parsed_recording_map[subject_id] = {activity_name: 
+                                                    {"recording_number": recording_number}
+                                               }
+        
+        # If the subject has been seen before, let's check if the activity 
+        # has been seen before for this subject 
+        else:
+            # If the activity has not been seen before for this subject, 
+            # it is also then very easy 
+            if(activity_name not in parsed_recording_map[subject_id]):
+                parsed_recording_map[subject_id][activity_name] = {"recording_number": recording_number, "recording_name": recording_name}
+            
+            # Otherwise, this subject and activity have been seen before, we haev a duplicate. 
+            # We need to keep only the one that has the max recording number 
+            else:
+                # If the current recording number is greater than the other one, 
+                # update 
+                if(recording_number > parsed_recording_map[subject_id][activity_name]["recording_number"]):
+                    parsed_recording_map[subject_id][activity_name] = {"recording_number": recording_number, "recording_name": recording_name}
 
 
-def download_pupil_cloud_recordings(dst_dir: str, 
-                                    api_key: str, 
+
+    # Now, let's iterate over all the subject paths 
+    subjects_to_download: list[int] = list(subjects_to_transfer)
+    subject_iterator: Iterable = range(len(subjects_to_transfer)) if verbose is False else tqdm(range(len(subjects_to_transfer)), desc="Processing Subjects", leave=True)
+    for subject_num in subject_iterator:
+        # Retrieve the subject path and subject name
+        subject_id_num = subjects_to_download[subject_num]
+        assert subject_id_num in parsed_recording_map, f"Subject id num: {subject_id_num} not in cloud recordings subjects: {parsed_recording_map.keys()}"
+
+        # Retrieve just the recordings for this subject 
+        subject_recordings: dict = parsed_recording_map[subject_id_num]
+
+        activities_iterator: Iterable = range(len(activities_to_transfer)) if verbose is False else tqdm(range(len(activities_to_transfer)), desc="Processing Activities", leave=False)
+        for activity_num in activities_iterator:
+            # Retrieve the activity path and activity name
+            activity_name: str = activities_to_transfer[activity_num]
+            assert activity_name in subject_recordings, f"Activity: {activity_name} not in subject: {subject_id_num} recordings: {subject_recordings.keys()}"
+
+            # Retrieve this activity recording's infop 
+            activity_recording: dict = subject_recordings[activity_name]
+            recording_name: str = activity_recording["recording_name"]
+
+            # Construct the path to this video 
+            input_path: str = os.path.join(src_dir, recording_name)
+
+            # Construct the output path where this recording will go 
+            output_dir: str = os.path.join(dst_dir, f"FLIC_{subject_id_num}", activity_name)
+            output_path: str = os.path.join(output_dir, "GKA")
+
+            # Skip recordings that are already downloaded unless we want to overwrite 
+            if(os.path.exists(output_path) and overwrite_existing is False):
+                continue
+            
+            # Make the output location 
+            os.makedirs(output_dir, exist_ok=True)
+
+            # Copy this directory to output_dir with the name described in output_path
+            shutil.copytree(input_path, output_path, dirs_exist_ok=True)
+
+
+    return 
+
+
+def download_pupil_cloud_recordings(api_key: str,
+                                    dst_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026", 
                                     api_url = "https://api.cloud.pupil-labs.com/v2",
                                     workspace_id: str="default", 
                                     subjects_to_download: Iterable=set(), 
@@ -1684,9 +1781,11 @@ def download_pupil_cloud_recordings(dst_dir: str,
 
             # Construct the output path where this recording will go 
             output_dir: str = os.path.join(dst_dir, f"FLIC_{subject_id_num}", activity_name)
+            output_filename: str = os.path.join(output_dir, "Timeseries Data + Scene Video.zip")
+            unzipped_output_filename: str = os.path.join(output_dir, "Neon")
 
             # Skip recordings that are already downloaded unless we want to overwrite 
-            if(os.path.exists(output_dir) and overwrite_existing is False):
+            if( (os.path.exists(output_filename) and os.path.exists(unzipped_output_filename)) and overwrite_existing is False):
                 continue
             
             # Make the output location 
@@ -1699,7 +1798,7 @@ def download_pupil_cloud_recordings(dst_dir: str,
                                      params=params,
                                      headers={"api-key": api_key, "workspace_id": workspace_id})
             r.raise_for_status()
-            save_path = pathlib.Path(os.path.join(output_dir, "Timeseries Data + Scene Video.zip")) 
+            save_path = pathlib.Path(output_filename) 
             if(verbose is True):
                 print(f"Downloading: {subject_id} | {activity_name} | {save_path}")
 
