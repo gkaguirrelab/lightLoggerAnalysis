@@ -1147,7 +1147,7 @@ def unpack_neon_recordings(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutd
             # Find the .zip file containing the neon recording 
             try:
                 neon_recording_filename: str = [filename for filename in os.listdir(activity_path)
-                                            if "Timeseries Data + Scene Video" in filename
+                                            if "timeseries" in filename.lower() and filename.endswith(".zip")
                                            ][0]
             except: 
                 raise Exception(f"No Neon timeseries .zip file in {activity_path}")    
@@ -1700,6 +1700,9 @@ def download_pupil_cloud_recordings(dst_dir: str,
                                      headers={"api-key": api_key, "workspace_id": workspace_id})
             r.raise_for_status()
             save_path = pathlib.Path(os.path.join(output_dir, "Timeseries Data + Scene Video.zip")) 
+            if(verbose is True):
+                print(f"Downloading: {subject_id} | {activity_name} | {save_path}")
+
             with save_path.open("wb") as fd:
                 for chunk in r.iter_content(chunk_size=1024 * 1024):
                     fd.write(chunk)
