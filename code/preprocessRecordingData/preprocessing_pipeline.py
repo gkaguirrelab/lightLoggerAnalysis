@@ -1615,13 +1615,13 @@ def download_pupil_cloud_recordings(dst_dir: str,
     parsed_recording_map: dict[str, dict] = {}
     for recording_result in r_result:
         # Find the recording name 
-        recording_name: str = r_result["name"]
-        recording_id: str = r_result["id"]
+        recording_name: str = recording_result["name"]
+        recording_id: str = recording_result["id"]
 
         # If the recording name does not contain FLIC, 
         # output a warning and skip 
         if("FLIC" not in recording_name):
-            warnings.warn(f"Recording: {recording_name} does not contain FLIC")
+            warnings.warn(f"Recording on cloud: {recording_name} does not contain FLIC")
             continue 
 
         # Let's break the recording name down into the desired fields 
@@ -1683,7 +1683,7 @@ def download_pupil_cloud_recordings(dst_dir: str,
             recording_id: str = activity_recording["id"]
 
             # Construct the output path where this recording will go 
-            output_dir: str = os.path.join(dst_dir, f"FLIC_{subject_id_num}", activity_name, "Neon")
+            output_dir: str = os.path.join(dst_dir, f"FLIC_{subject_id_num}", activity_name)
 
             # Skip recordings that are already downloaded unless we want to overwrite 
             if(os.path.exists(output_dir) and overwrite_existing is False):
@@ -1693,18 +1693,25 @@ def download_pupil_cloud_recordings(dst_dir: str,
             os.makedirs(output_dir, exist_ok=True)
 
             # Now, let's download the recording and place it where it belongs 
-            recording_zip_url: str = f"{api_url}/workspaces/{workspace_id}/recordings/{recording_id}.zip"
-            r: object = requests.get(url, stream=True, headers={"api-key": api_key})
+            recording_zip_url: str = f"{api_url}/workspaces/{workspace_id}/recordings:raw-data-export"
+            params: dict = {"ids": [recording_id], "exclude": []}
+            r: object = requests.get(recording_zip_url, stream=True, 
+                                     params=params,
+                                     headers={"api-key": api_key, "workspace_id": workspace_id})
             r.raise_for_status()
-            save_path = pathlib.Path(output_dir) # TODO: make sure this path is right 
+            save_path = pathlib.Path(os.path.join(output_dir, "Timeseries Data + Scene Video.zip")) 
             with save_path.open("wb") as fd:
-                for chunk in r.iter_content(chunk_size=128):
+                for chunk in r.iter_content(chunk_size=1024 * 1024):
                     fd.write(chunk)
 
             # TODO: few more. thigns here 
 
     # After all the recordings have been downloaded, we will unpack them 
     # here 
+    unpack_neon_recordings(dst_dir, 
+                           overwrite_existing=overwrite_existing,
+                           verbose=verbose
+                          )
 
 
 
