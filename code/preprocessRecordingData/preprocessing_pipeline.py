@@ -1021,7 +1021,16 @@ def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brain
                                                          "frq": False
                                                         }
     if(common_axes is True):
-        all_axes_min_maxes = _find_spd_axes_per_activity(subject_paths=subject_paths,
+        # We want ONLY FRQ and SpdByRegion from over all subjects and all axes 
+        all_axes_min_maxes_across_all: dict = _find_spd_axes_across_all(subject_paths=subject_paths,
+                                                                        activities_to_skip=activities_to_skip,
+                                                                        subjects_to_skip=subjects_to_skip,
+                                                                        verbose=False, 
+                                                                        projection_types=projection_types
+                                                                      )
+
+
+        all_axes_min_maxes_per_activity: dict = _find_spd_axes_per_activity(subject_paths=subject_paths,
                                                         activities_list=activities_list, 
                                                         activities_to_skip=activities_to_skip,
                                                         subjects_to_skip=subjects_to_skip,
@@ -1031,12 +1040,14 @@ def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brain
         # Loglog  plots cannot have x or y <= 0     
         # so fix that here 
         for activity_name in activities_list:
-            all_axes_min_maxes[activity_name]["frq"][0] = max(all_axes_min_maxes[activity_name]["frq"][0], 10e-9)
-            all_axes_min_maxes[activity_name]["spdByRegion"][0] = max(all_axes_min_maxes[activity_name]["spdByRegion"][0], 10e-9)
+            all_axes_min_maxes_per_activity[activity_name]["frq"] = all_axes_min_maxes_across_all["frq"] 
+            all_axes_min_maxes_per_activity[activity_name]["frq"][0] = max(all_axes_min_maxes_per_activity[activity_name]["frq"][0], 10e-9)
+            all_axes_min_maxes_per_activity[activity_name]["spdByRegion"] = all_axes_min_maxes_across_all["spdByRegion"]
+            all_axes_min_maxes_per_activity[activity_name]["spdByRegion"][0] = max(all_axes_min_maxes_per_activity[activity_name]["spdByRegion"][0], 10e-9)
 
             # Make all of them numpy arrays for easy matlab conversion too 
-            for field in all_axes_min_maxes[activity_name]:
-                all_axes_min_maxes[activity_name][field] = np.array(all_axes_min_maxes[activity_name][field])
+            for field in all_axes_min_maxes_per_activity[activity_name]:
+                all_axes_min_maxes_per_activity[activity_name][field] = np.array(all_axes_min_maxes_per_activity[activity_name][field])
 
     # First, let's go over all of the activities 
     activities_iterator: Iterable = range(len(activities_list)) if verbose is False else tqdm(range(len(activities_list)), desc="Processing Activities", leave=False)
@@ -1064,7 +1075,7 @@ def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brain
         # across all subjects for this activity
         
         # Initialize min max per type of graph 
-        axes_min_maxes = default_axes_min_maxes if common_axes is False else all_axes_min_maxes[activity_name]
+        axes_min_maxes = default_axes_min_maxes if common_axes is False else all_axes_min_maxes_per_activity[activity_name]
         
         print(f"Activity: {activity_name}")
         for graph_type, bounds in axes_min_maxes.items():
