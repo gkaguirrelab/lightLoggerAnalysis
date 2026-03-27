@@ -133,6 +133,14 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(vi
     degPerPix = fovDegrees / size(virtuallyFoveatedExponentMap,1);
     idxStarts = 1:12:(480 - 24 + 1);
 
+
+    disp("THESE ARE THE BOUNDS IN THE SPD PLOTTING FUNCTION")
+    disp(options.exponent_clim)
+    disp(options.variance_clim)
+    disp(options.spd_ylim)
+    disp(options.spd_xlim)
+
+
     % ---------------------------------------------------------------------
     % Exponent map figure
     % ---------------------------------------------------------------------
@@ -403,6 +411,23 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(vi
         spdYLim(spdYLim <= 0) = 1e-12;
         ylim(targetAxes, sort(spdYLim));
     end
+
+    % Get current limits
+    xL = xlim(targetAxes);
+    yL = ylim(targetAxes);
+
+    % Create dense log-spaced ticks
+    numTicks = 10; % increase if you want more density
+    xticksVals = logspace(log10(xL(1)), log10(xL(2)), numTicks);
+    yticksVals = logspace(log10(yL(1)), log10(yL(2)), numTicks);
+
+    % Set ticks
+    set(targetAxes, 'XTick', xticksVals);
+    set(targetAxes, 'YTick', yticksVals);
+
+    % Format tick labels as plain numbers (NOT 10^x)
+    xticklabels(targetAxes, arrayfun(@(x) sprintf('%.3g', x), xticksVals, 'UniformOutput', false));
+    yticklabels(targetAxes, arrayfun(@(y) sprintf('%.3g', y), yticksVals, 'UniformOutput', false));
 
     % Only export/close the SPD figure if we created it locally
     if (islogical(spdTargetAxes) && ~islogical(options.output_dir))

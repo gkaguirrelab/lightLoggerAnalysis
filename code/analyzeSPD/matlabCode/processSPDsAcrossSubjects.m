@@ -166,11 +166,11 @@ function virtuallyFoveatedActivityDataAcrossSubjects = processSPDsAcrossSubjects
         end
 
         if(combine_figures && ~isfield(justProjectionActivityDataAcrossSubjects, activityName))
-            virtuallyFoveatedActivityDataAcrossSubjects.(activityName).exponentMaps = [];
-            virtuallyFoveatedActivityDataAcrossSubjects.(activityName).varianceMaps = [];
-            virtuallyFoveatedActivityDataAcrossSubjects.(activityName).spdByRegion = [];
-            virtuallyFoveatedActivityDataAcrossSubjects.(activityName).medianImage = [];
-            virtuallyFoveatedActivityDataAcrossSubjects.(activityName).frameDropVector = {};
+            justProjectionActivityDataAcrossSubjects.(activityName).exponentMaps = [];
+            justProjectionActivityDataAcrossSubjects.(activityName).varianceMaps = [];
+            justProjectionActivityDataAcrossSubjects.(activityName).spdByRegion = [];
+            justProjectionActivityDataAcrossSubjects.(activityName).medianImage = [];
+            justProjectionActivityDataAcrossSubjects.(activityName).frameDropVector = {};
         end
 
         % Check to see if we can skip because we do not want to overwrite existing activities
@@ -225,15 +225,19 @@ function virtuallyFoveatedActivityDataAcrossSubjects = processSPDsAcrossSubjects
             virtuallyFoveatedActivityDataAcrossSubjects.(activityName).frq = individual_virtually_foveated_spd_results.frq;
 
             if(combine_figures)
-                justProjectionActivityDataAcrossSubjects.(activityName).exponentMaps(:,:,ss) = individual_virtually_foveated_spd_results.exponentMap; 
-                justProjectionActivityDataAcrossSubjects.(activityName).varianceMaps(:,:,ss) = individual_virtually_foveated_spd_results.varianceMap; 
-                justProjectionActivityDataAcrossSubjects.(activityName).spdByRegions(:,:,:,ss) = individual_virtually_foveated_spd_results.spdByRegion; 
-                justProjectionActivityDataAcrossSubjects.(activityName).medianImages(:,:,ss) = individual_virtually_foveated_spd_results.medianImage; 
-                justProjectionActivityDataAcrossSubjects.(activityName).frameDropVector{ss} = individual_virtually_foveated_spd_results.frameDropVector; 
-                justProjectionActivityDataAcrossSubjects.(activityName).frq = individual_virtually_foveated_spd_results.frq;
+                % Load in the per subject + activity SPD struct for the non foveated 
+                just_projection_SPD_results = dir(fullfile(activityPath, sprintf('*%s_SPDResults.mat', "justProjection")));
+                thisVideo = fullfile(just_projection_SPD_results(1).folder, just_projection_SPD_results(1).name);
+                individual_just_projection_SPD_results = load(thisVideo).activityData.(activityName); 
+
+                justProjectionActivityDataAcrossSubjects.(activityName).exponentMaps(:,:,ss) = individual_just_projection_SPD_results.exponentMap; 
+                justProjectionActivityDataAcrossSubjects.(activityName).varianceMaps(:,:,ss) = individual_just_projection_SPD_results.varianceMap; 
+                justProjectionActivityDataAcrossSubjects.(activityName).spdByRegions(:,:,:,ss) = individual_just_projection_SPD_results.spdByRegion; 
+                justProjectionActivityDataAcrossSubjects.(activityName).medianImages(:,:,ss) = individual_just_projection_SPD_results.medianImage; 
+                justProjectionActivityDataAcrossSubjects.(activityName).frameDropVector{ss} = individual_just_projection_SPD_results.frameDropVector; 
+                justProjectionActivityDataAcrossSubjects.(activityName).frq = individual_just_projection_SPD_results.frq;
 
             end 
-
 
         end
 
@@ -270,7 +274,15 @@ function virtuallyFoveatedActivityDataAcrossSubjects = processSPDsAcrossSubjects
 
                 % Remove this field we no longer need to keep track of subjects
                 virtuallyFoveatedActivityDataAcrossSubjects = rmfield(virtuallyFoveatedActivityDataAcrossSubjects, 'subjectIDs'); 
+                
+                disp("HELLO FROM MATLAB. These are the bounds before they get send to be plotted");
+                disp(activityName)
+                disp(options.exponent_clim)
+                disp(options.variance_clim)
+                disp(options.spd_ylim)
+                disp(options.spd_xlim)
 
+                
                 [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(virtuallyFoveatedActivityDataAcrossSubjects, ...
                                                                                      "fovDegrees", options.fovDegrees,...
                                                                                      "exponent_clim", options.exponent_clim,... 
@@ -280,8 +292,9 @@ function virtuallyFoveatedActivityDataAcrossSubjects = processSPDsAcrossSubjects
                                                                                      "justProjectionActivityData", justProjectionActivityDataAcrossSubjects...
                                                                                      ); 
                 
+
+                %{ 
                 % Build filepaths
-                % TODO: Need to fix this for combined here
                 expPath = fullfile(output_dir, sprintf('%s_%s_exponentMapAcrossSubjects.pdf', activityName, options.projection_type));
                 varPath = fullfile(output_dir, sprintf('%s_%s_varianceMapAcrossSubjects.pdf', activityName, options.projection_type));
                 spdPath = fullfile(output_dir, sprintf('%s_%s_spdByRegionAcrossSubjects.pdf', activityName, options.projection_type));
@@ -303,6 +316,7 @@ function virtuallyFoveatedActivityDataAcrossSubjects = processSPDsAcrossSubjects
 
                 % Close all the figures after we saved them 
                 close([exponentMapHandle varianceMapHandle spdByRegionHandle]); 
+                %}
 
             end 
 

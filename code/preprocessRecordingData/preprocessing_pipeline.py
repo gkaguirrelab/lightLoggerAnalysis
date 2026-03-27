@@ -1066,6 +1066,10 @@ def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brain
         # Initialize min max per type of graph 
         axes_min_maxes = default_axes_min_maxes if common_axes is False else all_axes_min_maxes[activity_name]
         
+        print(f"Activity: {activity_name}")
+        for graph_type, bounds in axes_min_maxes.items():
+            print(f"\t{graph_type} | bounds: {bounds}")
+        
         # Generate the output dir
         output_dir: str = os.path.join(dst_dir, activity_name)
         os.makedirs(output_dir, exist_ok=True)
@@ -1088,7 +1092,6 @@ def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brain
                                           "combine_figures", combine_figures,
                                           nargout=0
                                         )
-
     # Close the matlab engine 
     eng.quit()
 
