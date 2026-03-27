@@ -1425,27 +1425,24 @@ def verify_world_neon_pairing(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorO
 
     return analyzed_data
 
-def generate_tag_task_start_ends(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026",
-                                 processing_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoorVideos2026",
+def generate_tag_task_start_ends(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026",
+                                 dst_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoorVideos2026",
+                                 task_length_seconds: float = 4 * 60,
+                                 subjects_to_skip: Iterable= set(),
+                                 activities_to_skip: Iterable= set(),
                                  overwrite_existing: bool=False, 
                                  verbose: bool=False, 
-                                 tag_end_offset: int= -120 * 2,
-                                 task_start_offset: int=120 * 5, 
-                                 task_length_seconds: int = 4 * 60, 
-                                 min_confidence: float=30.0,
-                                 frame_step: int=10
                                 ) -> dict[str, dict[str, bool]]:
 
-    raise NotImplementedError()
 
     # First, let's find all of the subjects in this experiment 
-    subject_paths: list[str] = natsorted([os.path.join(raw_dir, subject_name) 
-                                          for subject_name in os.listdir(raw_dir) 
+    subject_paths: list[str] = natsorted([os.path.join(src_dir, subject_name) 
+                                          for subject_name in os.listdir(src_dir) 
                                           if re.fullmatch(r"FLIC_\d+", subject_name) 
-                                          and os.path.isdir(os.path.join(raw_dir, subject_name))
+                                          and os.path.isdir(os.path.join(src_dir, subject_name))
                                          ]
                                         ) 
-    assert len(subject_paths) > 0, f"No subject directories found in: {raw_dir}" 
+    assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
 
     # Initialize a dict to store the unanalyzable videos 
     videos_for_manual_review: dict[str, dict[str, bool]] = {}
@@ -1458,6 +1455,10 @@ def generate_tag_task_start_ends(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndo
         subject_id: str = os.path.basename(subject_path)
         subject_id_number: int = int(re.search("\d+", subject_id).group())
 
+        # Skip subjects we are not interested in examining 
+        if(subject_id_number in subjects_to_skip):
+            continue
+
         # Iterate over the activites for this subject 
         activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in natsorted(os.listdir(subject_path))
                                       if os.path.isdir(os.path.join(subject_path, filename))
@@ -1468,13 +1469,17 @@ def generate_tag_task_start_ends(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndo
             activity_path: str = activites_paths[activity_num]
             activity_name: str = os.path.basename(activity_path)
 
+            # Skip desired activites 
+            if(activity_name in activities_to_skip):
+                continue 
+
             # Skip already created files if we want to skip them 
-            tag_task_output_path: str = os.path.join(processing_dir, subject_id, activity_name, "tag_task_start_end.mat")
+            tag_task_output_path: str = os.path.join(dst_dir, subject_id, activity_name, "tag_task_start_end.mat")
             if(os.path.exists(tag_task_output_path) and overwrite_existing is False):
                 continue 
             
             # Generate the path to the world video 
-            world_video_path: str = os.path.join(processing_dir, subject_id, activity_name, "GKA", "W.avi")
+            world_video_path: str = os.path.join(dst_dir, subject_id, activity_name, "GKA", "W.avi")
             assert os.path.exists(world_video_path), f"Problem with: {world_video_path}"
 
             # Otherwise, let's make the tag_task struct 
@@ -1484,41 +1489,40 @@ def generate_tag_task_start_ends(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndo
                 print(f"Input: {world_video_path}")
                 print(f"Output: {tag_task_output_path}")
 
-            # Let's now try to find the event marker in the video 
-            event_marker_last_frame: int | None = None
-            for keyword in ("place", "front", "camera"):
-                event_marker_last_frame = video_io.find_events(world_video_path, 
-                                                                           search_text=keyword,
-                                                                           min_conf=min_confidence,
-                                                                           frame_step=frame_step,
-                                                                           verbose=verbose
-                                                                      )
-                if(event_marker_last_frame is not None):
-                    break 
-
-            # If we couldn't find the text, mark it for manual review 
-            if(event_marker_last_frame is None):
-                warnings.warn(f"Could not find start/end for video: {world_video_path}")
-
-                if(subject_id_number not in videos_for_manual_review):
-                    videos_for_manual_review[subject_id_number] = {activity_name: True}
-                else:
-                    videos_for_manual_review[subject_id_number][activity_name] = True
-                
-                continue 
-
-            # Otherwise, we can make and save the struct 
-            tag_start, tag_end = 1, event_marker_last_frame + tag_end_offset
-            tag_task_start_end["tag"] = np.array([tag_start, tag_end])
-
+            # Retrieve some information about the video 
             world_camera_fps: float = video_io.inspect_video_FPS(world_video_path)
             video_frame_count: int = video_io.inspect_video_frame_count(world_video_path)
+            video_duration_seconds: float =  video_frame_count / world_camera_fps
 
-            task_start: int = event_marker_last_frame + task_start_offset
-            task_end: int = int(np.ceil(task_start + (world_camera_fps * task_length_seconds)))
-            assert task_end < video_frame_count, f"Task end: {task_end} > video frame count {video_frame_count} for video @: {world_video_path}"
-            
-            tag_task_start_end["task"] = np.array([task_start, task_end])
+            # Determine if the video is long enough to support segmentation 
+            # If not, just use the whole video for the task and output a warning
+            # Output 1,1 for the tag just so something is output 
+            tag_start = tag_end = task_start = task_end = float("-inf")
+            if(video_duration_seconds <= task_length_seconds):
+                warnings.warn(f"Video: {world_video_path} has duration: {video_duration_seconds} which is less than task length: {task_length_seconds}. The whole video will be used as task, and [1, 1] will be set for april tag")
+                
+                # Use 1 for MATLAB indexing 
+                tag_start: int = 1 
+                tag_end: int = 1 
+                task_start: int = 1
+                task_end: int = video_frame_count 
+
+            # Otherwise, we can segment the video based on the length of the task 
+            else:
+                task_end: int = video_frame_count
+                task_start: int = int(video_frame_count - (task_length_seconds * world_camera_fps)) + 1
+                tag_start: int = 1
+                tag_end: int = task_start - 1 
+
+            # Assert none of these are inf and all are above zero 
+            tag_start_end: list | np.ndarray = [tag_start, tag_end]
+            task_start_end: list | np.ndarray = [task_start, task_end]
+            assert all(x != float("inf") and x >= 1 for x in tag_start_end), f"Problem with video: {world_video_path} | tag start/end: {tag_start_end} | video duration: {video_duration_seconds}"
+            assert all(x != float("inf") and x >= 1 for x in task_start_end), f"Problem with video: {world_video_path} | task start/end: {task_start_end} | video duration {video_duration_seconds}"
+
+            # Save to a dictionary as np.ndarray 
+            tag_task_start_end["tag"] = np.array(tag_start_end)
+            tag_task_start_end["task"] = np.array(task_start_end)
 
             # Output the .mat file 
             scipy.io.savemat(tag_task_output_path, {"tag_task_start_end": tag_task_start_end})
