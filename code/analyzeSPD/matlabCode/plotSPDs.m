@@ -133,14 +133,6 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(vi
     degPerPix = fovDegrees / size(virtuallyFoveatedExponentMap,1);
     idxStarts = 1:12:(480 - 24 + 1);
 
-
-    disp("THESE ARE THE BOUNDS IN THE SPD PLOTTING FUNCTION")
-    disp(options.exponent_clim)
-    disp(options.variance_clim)
-    disp(options.spd_ylim)
-    disp(options.spd_xlim)
-
-
     % ---------------------------------------------------------------------
     % Exponent map figure
     % ---------------------------------------------------------------------
@@ -164,9 +156,16 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(vi
         title(sprintf('Exponent - %s - justProjection', activityName), 'Interpreter', 'none')
         axis square
         if (~islogical(options.exponent_clim))
-            clim(double(options.exponent_clim));
-        end
-        colorbar
+            climVals = double(options.exponent_clim);
+            disp("HERE ARE THE CLIM VALS")
+            disp(climVals)
+            clim(climVals);
+            cb = colorbar;
+            cb.Ticks = linspace(climVals(1), climVals(2), 6);
+            cb.TickLabels = arrayfun(@(x) sprintf('%.3g', x), cb.Ticks, 'UniformOutput', false);
+        else 
+            colorbar
+        end 
 
         % Right = virtually foveated
         nexttile;
@@ -183,9 +182,15 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(vi
         title(sprintf('Exponent - %s - virtuallyFoveated', activityName), 'Interpreter', 'none')
         axis square
         if (~islogical(options.exponent_clim))
-            clim(double(options.exponent_clim));
-        end
-        colorbar
+            climVals = double(options.exponent_clim);
+            clim(climVals);
+            cb = colorbar;
+            cb.Ticks = linspace(climVals(1), climVals(2), 6);
+            cb.TickLabels = arrayfun(@(x) sprintf('%.3g', x), cb.Ticks, 'UniformOutput', false);
+        else 
+            colorbar
+        end 
+
     else
         imagesc(-virtuallyFoveatedExponentMap);
         hold on
@@ -200,9 +205,14 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(vi
         title(sprintf('Exponent - %s', activityName))
         axis square
         if (~islogical(options.exponent_clim))
-            clim(double(options.exponent_clim));
-        end
-        colorbar
+            climVals = double(options.exponent_clim);
+            clim(climVals);
+            cb = colorbar;
+            cb.Ticks = linspace(climVals(1), climVals(2), 6);
+            cb.TickLabels = arrayfun(@(x) sprintf('%.3g', x), cb.Ticks, 'UniformOutput', false);
+        else 
+            colorbar
+        end 
     end
 
     if (~islogical(options.output_dir))
@@ -237,9 +247,14 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(vi
         title(sprintf('Contrast Variance - %s - justProjection', activityName), 'Interpreter', 'none')
         axis square
         if (~islogical(options.variance_clim))
-            clim(double(options.variance_clim));
-        end
-        colorbar
+             climVals = double(options.variance_clim);
+            clim(climVals);
+            cb = colorbar;
+            cb.Ticks = linspace(climVals(1), climVals(2), 6);
+            cb.TickLabels = arrayfun(@(x) sprintf('%.3g', x), cb.Ticks, 'UniformOutput', false);
+        else 
+            colorbar
+        end 
 
         % Right = virtually foveated
         nexttile;
@@ -256,9 +271,14 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(vi
         title(sprintf('Contrast Variance - %s - virtuallyFoveated', activityName), 'Interpreter', 'none')
         axis square
         if (~islogical(options.variance_clim))
-            clim(double(options.variance_clim));
-        end
-        colorbar
+            climVals = double(options.variance_clim);
+            clim(climVals);
+            cb = colorbar;
+            cb.Ticks = linspace(climVals(1), climVals(2), 6);
+            cb.TickLabels = arrayfun(@(x) sprintf('%.3g', x), cb.Ticks, 'UniformOutput', false);
+        else 
+            colorbar
+        end 
     else
         imagesc(virtuallyFoveatedVarianceMap);
         hold on
@@ -273,9 +293,14 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(vi
         title(sprintf('Contrast Variance - %s', activityName))
         axis square
         if (~islogical(options.variance_clim))
-            clim(double(options.variance_clim));
-        end
-        colorbar
+            climVals = double(options.variance_clim);
+            clim(climVals);
+            cb = colorbar;
+            cb.Ticks = linspace(climVals(1), climVals(2), 6);
+            cb.TickLabels = arrayfun(@(x) sprintf('%.3g', x), cb.Ticks, 'UniformOutput', false);
+        else 
+            colorbar
+        end 
     end
 
     if (~islogical(options.output_dir))

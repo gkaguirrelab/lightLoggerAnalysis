@@ -905,13 +905,13 @@ def _find_spd_axes_per_subject(subject_paths: list[str],
 def _find_spd_axes_per_activity(subject_paths: list[str],
                                 activities_list: list[str],
                                 activities_to_skip: list[str], 
-                                subjects_to_skip: list[str], 
+                                subjects_to_skip: list[int], 
                                 projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = set(["virtuallyFoveated", "justProjection"]),
                                 verbose: bool=False 
                               ) -> None:
 
     # Initialize min max per type of graph 
-    min_maxes: dict[int, list[float]] = {}
+    min_maxes: dict[str, list[float]] = {}
 
     # First, let's go over all of the activities 
     activities_iterator: Iterable = range(len(activities_list)) if verbose is False else tqdm(range(len(activities_list)), desc="Processing Activities", leave=False)
@@ -954,11 +954,13 @@ def _find_spd_axes_per_activity(subject_paths: list[str],
 
                 # Extract the per graph info 
                 for graph_type in min_maxes[activity_name]:
-                    graph_info: np.ndarray = spd_results[graph_type][0, 0].astype(np.float64)
+                    graph_info: np.ndarray = (spd_results[graph_type][0, 0].astype(np.float64) ) * (1 if graph_type != "exponentMap" else -1 )# Exponents are plotted in negative space
                     
                     # Find the min and max of this graph info 
                     graph_min: float = np.nanmin(graph_info)
                     graph_max: float = np.nanmax(graph_info)
+
+                    print(f"{subject_id} | {activity_name} | {projection_type} | {graph_type} | {[graph_min, graph_max]}")
 
                     # Compare to the global min/max and update if needed
                     global_min, global_max = min_maxes[activity_name][graph_type]
@@ -966,6 +968,8 @@ def _find_spd_axes_per_activity(subject_paths: list[str],
                         min_maxes[activity_name][graph_type][0] = graph_min
                     if(graph_max > global_max):
                         min_maxes[activity_name][graph_type][1] = graph_max
+                    
+                    assert min_maxes[activity_name][graph_type][0] <= min_maxes[activity_name][graph_type][1]
 
     return min_maxes
 
@@ -1047,7 +1051,13 @@ def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brain
 
             # Make all of them numpy arrays for easy matlab conversion too 
             for field in all_axes_min_maxes_per_activity[activity_name]:
+                assert all(all_axes_min_maxes_per_activity[activity_name][field][i] <= all_axes_min_maxes_per_activity[activity_name][field][i+1] for i in range(len(all_axes_min_maxes_per_activity[activity_name][field])-1)), f"Bounds: {field} not sorted: {all_axes_min_maxes_per_activity[activity_name][field]}" 
                 all_axes_min_maxes_per_activity[activity_name][field] = np.array(all_axes_min_maxes_per_activity[activity_name][field])
+
+        for activity, bounds in all_axes_min_maxes_per_activity.items():
+            for graph_type, bounds in bounds.items():
+                print(f"Activity: {activity} | Graph Type: {graph_type} | Bounds: {bounds}")
+
 
     # First, let's go over all of the activities 
     activities_iterator: Iterable = range(len(activities_list)) if verbose is False else tqdm(range(len(activities_list)), desc="Processing Activities", leave=False)
@@ -1076,10 +1086,6 @@ def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brain
         
         # Initialize min max per type of graph 
         axes_min_maxes = default_axes_min_maxes if common_axes is False else all_axes_min_maxes_per_activity[activity_name]
-        
-        print(f"Activity: {activity_name}")
-        for graph_type, bounds in axes_min_maxes.items():
-            print(f"\t{graph_type} | bounds: {bounds}")
         
         # Generate the output dir
         output_dir: str = os.path.join(dst_dir, activity_name)
