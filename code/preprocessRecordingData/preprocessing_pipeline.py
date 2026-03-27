@@ -808,7 +808,7 @@ def _find_spd_axes_across_all(subject_paths: list[str],
 
                 # Extract the per graph info 
                 for graph_type in min_maxes:
-                    graph_info: np.ndarray = spd_results[graph_type][0, 0].astype(np.float64)
+                    graph_info: np.ndarray = ( spd_results[graph_type][0, 0].astype(np.float64) ) * (1 if graph_type != "exponentMap" else -1) # Exponents are plotted in - space
                     
                     # Find the min and max of this graph info 
                     graph_min: float = np.nanmin(graph_info)
@@ -881,7 +881,7 @@ def _find_spd_axes_per_subject(subject_paths: list[str],
 
                 # Extract the per graph info 
                 for graph_type in min_maxes[subject_id_number]:
-                    graph_info: np.ndarray = spd_results[graph_type][0, 0].astype(np.float64)
+                    graph_info: np.ndarray = (spd_results[graph_type][0, 0].astype(np.float64)) * (1 if graph_type != "exponentMap" else -1) # Exponents are plotted in - space
                     
                     # Find the min and max of this graph info 
                     graph_min: float = np.nanmin(graph_info)

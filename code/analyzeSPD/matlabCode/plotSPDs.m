@@ -157,8 +157,6 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(vi
         axis square
         if (~islogical(options.exponent_clim))
             climVals = double(options.exponent_clim);
-            disp("HERE ARE THE CLIM VALS")
-            disp(climVals)
             clim(climVals);
             cb = colorbar;
             cb.Ticks = linspace(climVals(1), climVals(2), 6);

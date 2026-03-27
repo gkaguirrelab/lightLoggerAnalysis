@@ -274,15 +274,7 @@ function virtuallyFoveatedActivityDataAcrossSubjects = processSPDsAcrossSubjects
 
                 % Remove this field we no longer need to keep track of subjects
                 virtuallyFoveatedActivityDataAcrossSubjects = rmfield(virtuallyFoveatedActivityDataAcrossSubjects, 'subjectIDs'); 
-                
-                disp("HELLO FROM MATLAB. These are the bounds before they get send to be plotted");
-                disp(activityName)
-                disp(options.exponent_clim)
-                disp(options.variance_clim)
-                disp(options.spd_ylim)
-                disp(options.spd_xlim)
-
-                
+                         
                 [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(virtuallyFoveatedActivityDataAcrossSubjects, ...
                                                                                      "fovDegrees", options.fovDegrees,...
                                                                                      "exponent_clim", options.exponent_clim,... 
