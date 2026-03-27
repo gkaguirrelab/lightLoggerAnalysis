@@ -327,6 +327,25 @@ function frame_chunk = load_frame_chunk(video_reader, start_frame, num_frames_to
             error("FRAME SHAPE HAS BECOME INHOMOGENOUS\n"); 
         end 
 
+        % For SPD analysis, we want to ensure absolutely NO zeros can be in the image
+        if (ndims(read_frame) == 2 || size(read_frame,3) == 1)
+            % Grayscale: check any zero
+            if any(read_frame(:) == 0)
+                error("Zero value detected in grayscale frame at frame %d", ii);
+            end
+
+        elseif (ndims(read_frame) == 3)
+            % Multi-channel: check any pixel that is entirely zero across channels
+            zeroMask = true(size(read_frame,1), size(read_frame,2));
+            for c = 1:size(read_frame,3)
+                zeroMask = zeroMask & (read_frame(:,:,c) == 0);
+            end
+
+            if any(zeroMask(:))
+                error("Zero pixel (all channels == 0) detected in frame %d", ii);
+            end
+        end
+
         frame_chunk(insertion_index, :, :) = read_frame; 
         insertion_index = insertion_index + 1; 
     end 

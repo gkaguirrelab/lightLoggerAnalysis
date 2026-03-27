@@ -8,6 +8,7 @@ import pathlib
 import sys
 import zipfile
 import warnings
+import math
 import matplotlib.pyplot as plt
 import json
 import scipy.io
@@ -757,6 +758,48 @@ def adjust_spd_axes(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropb
 
     return 
 
+def _generate_ellipse_mask(height: int = 480,
+                            width: int = 480,
+                            center_x: float = 240.0,
+                            center_y: float = 240.0,
+                            ellipse_area: float = 120000.0,
+                            aspect_ratio: float = 0.75,
+                            rotation_radians: float = 0.0
+                          ) -> np.ndarray:
+    """
+    Create a boolean mask for the same ellipse used later in MATLAB plotting.
+
+    Assumptions:
+    - aspect_ratio = semi_minor / semi_major
+    - ellipse_area = pi * semi_major * semi_minor
+    - rotation_radians = ellipse rotation in radians
+
+    Returns
+    -------
+    mask : np.ndarray of shape (height, width), dtype=bool
+        True inside the ellipse, False outside.
+    """
+
+    # Solve for semi-major (a) and semi-minor (b)
+    semi_major: float = math.sqrt((ellipse_area / math.pi) / aspect_ratio)
+    semi_minor: float = aspect_ratio * semi_major
+
+    yy, xx = np.meshgrid(np.arange(1, height + 1), np.arange(1, width + 1), indexing="ij")
+
+    # Shift to ellipse center
+    x = xx - center_x
+    y = yy - center_y
+
+    # Rotate coordinates
+    cos_t = math.cos(rotation_radians)
+    sin_t = math.sin(rotation_radians)
+    x_rot = cos_t * x + sin_t * y
+    y_rot = -sin_t * x + cos_t * y
+
+    # Standard ellipse equation
+    mask: np.ndarray = ((x_rot ** 2) / (semi_major ** 2) + (y_rot ** 2) / (semi_minor ** 2)) <= 1.0
+    return mask
+
 
 def _find_spd_axes_across_all(subject_paths: list[str],
                                    subjects_to_skip: Iterable[str] = set(),
@@ -771,6 +814,17 @@ def _find_spd_axes_across_all(subject_paths: list[str],
         "spdByRegion": [float("inf"), float("-inf")],
         "frq": [float("inf"), float("-inf")],
     }
+
+    # Make an ellipse mask to only get the nanmin from certain 
+    # region we will later plot in MATLAB
+    ellipse_mask: np.ndarray = _generate_ellipse_mask( height=480,
+                                                       width=480,
+                                                       center_x=240.0,
+                                                       center_y=240.0,
+                                                       ellipse_area=120000.0,
+                                                       aspect_ratio=0.75,
+                                                       rotation_radians=0.0
+                                                    )
     
 
     # Now, let's iterate over all the subject paths 
@@ -800,7 +854,7 @@ def _find_spd_axes_across_all(subject_paths: list[str],
                 continue 
 
             # Iterate over the projection types 
-            for projection_type in projection_types:
+            for projection_type in ("virtuallyFoveated",):
                 # load the SPD results from this activity
                 spd_results_filepath: str = os.path.join(activity_path, f"{subject_id}_{activity_name}_{projection_type}_SPDResults.mat")
                 assert os.path.exists(spd_results_filepath), f"SPD Results path does not exist: {spd_results_filepath}"
@@ -809,7 +863,18 @@ def _find_spd_axes_across_all(subject_paths: list[str],
                 # Extract the per graph info 
                 for graph_type in min_maxes:
                     graph_info: np.ndarray = ( spd_results[graph_type][0, 0].astype(np.float64) ) * (1 if graph_type != "exponentMap" else -1) # Exponents are plotted in - space
-                    
+
+                    # NaN out completely BLACK pixels
+                    graph_info[graph_info == 0] = np.nan
+
+                    # In the maps specifically, just care about the eye ellipse 
+                    if("map" in graph_type.lower()):
+                        graph_info[~ellipse_mask] = np.nan
+
+                    if(np.all(np.isnan(graph_info))):
+                        warnings.warn(f"All nans in target region for: {subject_id_number} | {activity_name} | {projection_type} | {graph_type}")
+                        continue
+
                     # Find the min and max of this graph info 
                     graph_min: float = np.nanmin(graph_info)
                     graph_max: float = np.nanmax(graph_info)
@@ -837,6 +902,17 @@ def _find_spd_axes_per_subject(subject_paths: list[str],
     
     # Initialize min max per type of graph 
     min_maxes: dict[int, list[float]] = {}
+
+    # Make an ellipse mask to only get the nanmin from certain 
+    # region we will later plot in MATLAB
+    ellipse_mask: np.ndarray = _generate_ellipse_mask( height=480,
+                                                       width=480,
+                                                       center_x=240.0,
+                                                       center_y=240.0,
+                                                       ellipse_area=120000.0,
+                                                       aspect_ratio=0.75,
+                                                       rotation_radians=0.0
+                                                    )
 
 
     # Now, let's iterate over all the subject paths 
@@ -873,7 +949,7 @@ def _find_spd_axes_per_subject(subject_paths: list[str],
                 continue 
 
             # Iterate over the projection types 
-            for projection_type in projection_types:
+            for projection_type in ("virtuallyFoveated",):
                 # load the SPD results from this activity
                 spd_results_filepath: str = os.path.join(activity_path, f"{subject_id}_{activity_name}_{projection_type}_SPDResults.mat")
                 assert os.path.exists(spd_results_filepath), f"SPD Results path does not exist: {spd_results_filepath}"
@@ -883,6 +959,18 @@ def _find_spd_axes_per_subject(subject_paths: list[str],
                 for graph_type in min_maxes[subject_id_number]:
                     graph_info: np.ndarray = (spd_results[graph_type][0, 0].astype(np.float64)) * (1 if graph_type != "exponentMap" else -1) # Exponents are plotted in - space
                     
+                    # NaN out completely BLACK pixels
+                    graph_info[graph_info == 0] = np.nan
+
+                    # In the maps specifically, just care about the eye ellipse 
+                    if("map" in graph_type.lower()):
+                        graph_info[~ellipse_mask] = np.nan
+
+                    if(np.all(np.isnan(graph_info))):
+                        warnings.warn(f"All nans in target region for: {subject_id_number} | {activity_name} | {projection_type} | {graph_type}")
+                        continue
+
+
                     # Find the min and max of this graph info 
                     graph_min: float = np.nanmin(graph_info)
                     graph_max: float = np.nanmax(graph_info)
@@ -912,6 +1000,17 @@ def _find_spd_axes_per_activity(subject_paths: list[str],
 
     # Initialize min max per type of graph 
     min_maxes: dict[str, list[float]] = {}
+
+    # Make an ellipse mask to only get the nanmin from certain 
+    # region we will later plot in MATLAB
+    ellipse_mask: np.ndarray = _generate_ellipse_mask( height=480,
+                                                       width=480,
+                                                       center_x=240.0,
+                                                       center_y=240.0,
+                                                       ellipse_area=120000.0,
+                                                       aspect_ratio=0.75,
+                                                       rotation_radians=0.0
+                                                    )
 
     # First, let's go over all of the activities 
     activities_iterator: Iterable = range(len(activities_list)) if verbose is False else tqdm(range(len(activities_list)), desc="Processing Activities", leave=False)
@@ -946,7 +1045,7 @@ def _find_spd_axes_per_activity(subject_paths: list[str],
             assert os.path.exists(activity_path), f"Problem with: {activity_path}"
 
             # Iterate over the projection types 
-            for projection_type in projection_types:
+            for projection_type in ("virtuallyFoveated",):
                 # load the SPD results from this activity
                 spd_results_filepath: str = os.path.join(activity_path, f"{subject_id}_{activity_name}_{projection_type}_SPDResults.mat")
                 assert os.path.exists(spd_results_filepath), f"SPD Results path does not exist: {spd_results_filepath}"
@@ -955,12 +1054,21 @@ def _find_spd_axes_per_activity(subject_paths: list[str],
                 # Extract the per graph info 
                 for graph_type in min_maxes[activity_name]:
                     graph_info: np.ndarray = (spd_results[graph_type][0, 0].astype(np.float64) ) * (1 if graph_type != "exponentMap" else -1 )# Exponents are plotted in negative space
-                    
+
+                    # NaN out completely BLACK pixels
+                    graph_info[graph_info == 0] = np.nan
+
+                    # In the maps specifically, just care about the eye ellipse 
+                    if("map" in graph_type.lower()):
+                        graph_info[~ellipse_mask] = np.nan
+
+                    if(np.all(np.isnan(graph_info))):
+                        warnings.warn(f"All nans in target region for: {subject_id_number} | {activity_name} | {projection_type} | {graph_type}")
+                        continue
+
                     # Find the min and max of this graph info 
                     graph_min: float = np.nanmin(graph_info)
                     graph_max: float = np.nanmax(graph_info)
-
-                    print(f"{subject_id} | {activity_name} | {projection_type} | {graph_type} | {[graph_min, graph_max]}")
 
                     # Compare to the global min/max and update if needed
                     global_min, global_max = min_maxes[activity_name][graph_type]

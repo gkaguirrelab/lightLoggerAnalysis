@@ -143,11 +143,28 @@ function frame = readFrame(obj, options)
         error("Frame read of inhomogenous shape to metadata");
     end     
 
-    % If we are in grayscale and we want to convert zeros to nans, do it now 
-    if(options.zeros_as_nans)
-        frame(frame == 0) = nan; 
-    end 
+    % If we are converting zeros to NaNs
+    if (options.zeros_as_nans)
 
+        if (ndims(frame) == 2 || size(frame,3) == 1)
+            % Grayscale: replace all 0s with NaN
+            frame(frame == 0) = nan;
+
+        elseif (ndims(frame) == 3 && size(frame,3) == 3)
+            % 3 channel: find pixels where ALL channels are zero
+            zeroMask = (frame(:,:,1) == 0) & ...
+                    (frame(:,:,2) == 0) & ...
+                    (frame(:,:,3) == 0);
+
+            % Apply mask to all channels
+            for c = 1:3
+                tmp = frame(:,:,c);
+                tmp(zeroMask) = nan;
+                frame(:,:,c) = tmp;
+            end
+        end
+
+    end
     % Ensure we are not returning an empty variable 
     if(isempty(frame))
         error("readFrame is about to return an empty variable");
