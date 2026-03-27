@@ -293,11 +293,13 @@ function virtuallyFoveatedActivityDataAcrossSubjects = processSPDsAcrossSubjects
                                                                                      ); 
                 
 
-                %{ 
                 % Build filepaths
                 expPath = fullfile(output_dir, sprintf('%s_%s_exponentMapAcrossSubjects.pdf', activityName, options.projection_type));
                 varPath = fullfile(output_dir, sprintf('%s_%s_varianceMapAcrossSubjects.pdf', activityName, options.projection_type));
                 spdPath = fullfile(output_dir, sprintf('%s_%s_spdByRegionAcrossSubjects.pdf', activityName, options.projection_type));
+                
+                disp("SHOULD BE OUTPUTTING TO THIS PATH")
+                disp(expPath)
 
                 % Exponent map
                 if (~exist(expPath, 'file') || options.overwrite_existing)
@@ -316,7 +318,6 @@ function virtuallyFoveatedActivityDataAcrossSubjects = processSPDsAcrossSubjects
 
                 % Close all the figures after we saved them 
                 close([exponentMapHandle varianceMapHandle spdByRegionHandle]); 
-                %}
 
             end 
 
