@@ -1328,6 +1328,49 @@ def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brain
 
     return 
 
+
+def generate_spds_across_all(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026/", 
+                            dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026/acrossSubjects",
+                            overwrite_existing: bool=False,
+                            subjects_to_skip: Iterable=set(), 
+                            activities_to_skip: Iterable=set(["lunch", "phone"]), 
+                            projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = ["virtuallyFoveated", "justProjection"], 
+                            common_axes: bool=False, 
+                            combine_figures: bool=False, 
+                            verbose: bool=False
+                          ) -> None:
+    import matlab.engine
+    
+    # Initialize the MATLAB engine to utilize the MATLAB function we have developed for this purpose 
+    eng: object = matlab.engine.start_matlab()  
+    eng.pyenv('Version', '~/Documents/MATLAB/projects/lightLoggerAnalysis/analysis_env/bin/python', nargout=0)
+    eng.tbUseProject('lightLoggerAnalysis', nargout=0)
+
+    # Let's find the bounds across all subjects and activities
+    # First, let's find all of the subjects in this experiment 
+    subject_paths: list[str] = natsorted([os.path.join(src_dir, subject_name) 
+                                          for subject_name in os.listdir(src_dir) 
+                                          if re.fullmatch(r"FLIC_\d+", subject_name) 
+                                          and os.path.isdir(os.path.join(src_dir, subject_name))
+                                         ]
+                                        ) 
+    assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
+
+    min_max_across_all: dict = _find_spd_axes_across_all(subject_paths,
+                                                         subjects_to_skip=subjects_to_skip, 
+                                                         activities_to_skip=activities_to_skip, 
+                                                         projection_types=projection_types, 
+                                                         verbose=False
+                                                        )
+
+    
+
+    
+    
+
+
+    return 
+
 # -----------------------------------------------------------------------------
 # unpack_neon_recordings
 #
