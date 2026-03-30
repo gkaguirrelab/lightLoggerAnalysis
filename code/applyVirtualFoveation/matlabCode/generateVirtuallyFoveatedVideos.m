@@ -252,6 +252,12 @@ function generateVirtuallyFoveatedVideos(subjectIDs, options)
         % Virtually foveate and output the video 
         sensor_t_matrix = {world_t, pupil_t};
         
+        disp("IM MATLAB AND IM GONNA GENERATE A VIRTUALLY FOVEATED VIDEO WITH")
+        disp("input_path")
+        disp(path_to_world_video)
+        disp("output_path")
+        disp(output_path)
+
         virtuallyFoveateVideo(path_to_world_video, sensor_t_matrix, gaze_angles, offsets, blnk_events, output_path, path_to_intrinsics,... 
                               "frames_to_process", start_end,...
                               "verbose", options.verbose,...

@@ -558,9 +558,10 @@ def group_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Za
 
         # Construct the min maxes for this subject 
         axes_min_maxes: dict[str, np.ndarray] = per_subject_axes_min_maxes[subject_id_number]
-        axes_min_maxes["spdByRegion"] = across_all_axes_min_maxes["spdByRegion"]
-        axes_min_maxes["spdByRegion"][0] = max(axes_min_maxes["spdByRegion"][0], 10e-9)
-        axes_min_maxes["frq"] = across_all_axes_min_maxes["frq"]
+        axes_min_maxes["spdByRegion"]["bounds"] = across_all_axes_min_maxes["spdByRegion"]["bounds"]
+        axes_min_maxes["spdByRegion"]["bounds"][0] = max(axes_min_maxes["spdByRegion"]["bounds"][0], 10e-9)
+        axes_min_maxes["frq"]["bounds"] = across_all_axes_min_maxes["frq"]["bounds"]
+        axes_min_maxes["frq"]["bounds"][0] = max(axes_min_maxes["frq"]["bounds"][0], 10e-9)
 
         # Iterate over the activites for this subject 
         activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in natsorted(os.listdir(subject_path))
@@ -588,9 +589,6 @@ def group_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Za
                 for projection_type in projection_dict:
                     assert projection_dict[projection_type] != "", f"{group} | {activity} | {projection_type} is not assigned a path"
 
-    
-
-                
         # Now that we have the activities grouped together for this subject, pass it over to MATLAB 
         # to do the plotting 
         # First, output to a temp .mat file to make transfer easier between the two languages 
@@ -600,10 +598,10 @@ def group_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Za
         # Construct the output directory 
         output_dir: str = os.path.join(dst_dir, subject_id)
         eng.groupSPDs(temp_output_filepath, 
-                      "exponent_clim", axes_min_maxes["exponentMap"], 
-                      "variance_clim", axes_min_maxes["varianceMap"], 
-                      "spd_xlim", axes_min_maxes["frq"], 
-                      "spd_ylim", axes_min_maxes["spdByRegion"],
+                      "exponent_clim", axes_min_maxes["exponentMap"]["bounds"], 
+                      "variance_clim", axes_min_maxes["varianceMap"]["bounds"], 
+                      "spd_xlim", axes_min_maxes["frq"]["bounds"], 
+                      "spd_ylim", axes_min_maxes["spdByRegion"]["bounds"],
                       "title", str(subject_id_number),
                       "output_dir", output_dir, 
                       "overwrite_existing", overwrite_existing,
@@ -679,14 +677,15 @@ def adjust_spd_axes(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropb
         # Construct the min maxes for this subject 
         axes_min_maxes: dict[str, np.ndarray] = per_subject_axes_min_maxes[subject_id_number]
         axes_min_maxes["spdByRegion"] = across_all_axes_min_maxes["spdByRegion"]
-        axes_min_maxes["spdByRegion"][0] = max(axes_min_maxes["spdByRegion"][0], 10e-9)
+        axes_min_maxes["spdByRegion"]["bounds"][0] = max(axes_min_maxes["spdByRegion"]["bounds"][0], 10e-9)
         axes_min_maxes["frq"] = across_all_axes_min_maxes["frq"]
+        axes_min_maxes["frq"]["bounds"][0] = max(axes_min_maxes["frq"]["bounds"][0], 10e-9)
 
         # We need to ensure x and y of the loglog spd plot are finite and > 0 
-        if( not (all(axes_min_maxes["spdByRegion"] > 0) and all(axes_min_maxes["frq"] > 0))):
+        if( not (all(axes_min_maxes["spdByRegion"]["bounds"] > 0) and all(axes_min_maxes["frq"]["bounds"] > 0))):
             raise Exception(f"Zero or negative X or Y axis in Log SPD plot: {axes_min_maxes}")
 
-        if( not (all(np.isfinite(axes_min_maxes["spdByRegion"]))) and not all(np.isfinite(axes_min_maxes["frq"]))):
+        if( not (all(np.isfinite(axes_min_maxes["spdByRegion"]["bounds"]))) and not all(np.isfinite(axes_min_maxes["frq"]["bounds"]))):
             raise Exception(f"Infinite X or Y axis in Log SPD plot: {axes_min_maxes}")
 
         # Iterate over the activites for this subject 
@@ -720,10 +719,10 @@ def adjust_spd_axes(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropb
                 output_dir: str = os.path.join(dst_dir, subject_id, activity_name)
                 title: str = f"{subject_id}_{activity_name}_modesCombined"
                 eng.plotSPDs(temp_combined_dict[activity_name]["virtuallyFoveated"],
-                                "exponent_clim", axes_min_maxes["exponentMap"], 
-                                "variance_clim", axes_min_maxes["varianceMap"], 
-                                "spd_xlim", axes_min_maxes["frq"], 
-                                "spd_ylim", axes_min_maxes["spdByRegion"],
+                                "exponent_clim", axes_min_maxes["exponentMap"]["bounds"], 
+                                "variance_clim", axes_min_maxes["varianceMap"]["bounds"], 
+                                "spd_xlim", axes_min_maxes["frq"]["bounds"], 
+                                "spd_ylim", axes_min_maxes["spdByRegion"]["bounds"],
                                 "overwrite_existing", overwrite_existing, 
                                 "output_dir", output_dir,
                                 "title", title,
@@ -742,10 +741,10 @@ def adjust_spd_axes(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropb
                     output_dir: str = os.path.join(dst_dir, subject_id, activity_name)
                     title: str = f"{subject_id}_{activity_name}_{projection_type}"
                     eng.plotSPDs(spd_results_filepath,
-                                 "exponent_clim", axes_min_maxes["exponentMap"], 
-                                 "variance_clim", axes_min_maxes["varianceMap"], 
-                                 "spd_xlim", axes_min_maxes["frq"], 
-                                 "spd_ylim", axes_min_maxes["spdByRegion"],
+                                 "exponent_clim", axes_min_maxes["exponentMap"]["bounds"], 
+                                 "variance_clim", axes_min_maxes["varianceMap"]["bounds"], 
+                                 "spd_xlim", axes_min_maxes["frq"]["bounds"], 
+                                 "spd_ylim", axes_min_maxes["spdByRegion"]["bounds"],
                                  "overwrite_existing", overwrite_existing, 
                                  "output_dir", output_dir,
                                  "title", title,
@@ -808,12 +807,12 @@ def _find_spd_axes_across_all(subject_paths: list[str],
                                    verbose: bool=False
                                  ) -> None:
     # Initialize min max per type of graph 
-    min_maxes: dict[str, list[float]] = {
-        "exponentMap": [float("inf"), float("-inf")],
-        "varianceMap": [float("inf"), float("-inf")],
-        "spdByRegion": [float("inf"), float("-inf")],
-        "frq": [float("inf"), float("-inf")],
+    min_maxes: dict[str, list[float]] = {"exponentMap": {"bounds": [float("inf"), float("-inf")], "src": ["", ""]},
+        "varianceMap": {"bounds": [float("inf"), float("-inf")], "src": ["", ""]},
+        "spdByRegion": {"bounds": [float("inf"), float("-inf")], "src": ["", ""]},
+        "frq": {"bounds": [float("inf"), float("-inf")], "src": ["", ""]}
     }
+    
 
     # Make an ellipse mask to only get the nanmin from certain 
     # region we will later plot in MATLAB
@@ -854,14 +853,14 @@ def _find_spd_axes_across_all(subject_paths: list[str],
                 continue 
 
             # Iterate over the projection types 
-            for projection_type in ("virtuallyFoveated",):
+            for projection_type in projection_types:
                 # load the SPD results from this activity
                 spd_results_filepath: str = os.path.join(activity_path, f"{subject_id}_{activity_name}_{projection_type}_SPDResults.mat")
                 assert os.path.exists(spd_results_filepath), f"SPD Results path does not exist: {spd_results_filepath}"
                 spd_results: object = scipy.io.loadmat(spd_results_filepath)['activityData'][0, 0][activity_name]
 
                 # Extract the per graph info 
-                for graph_type in min_maxes:
+                for graph_type in min_maxes.keys():
                     graph_info: np.ndarray = ( spd_results[graph_type][0, 0].astype(np.float64) ) * (1 if graph_type != "exponentMap" else -1) # Exponents are plotted in - space
 
                     # NaN out completely BLACK pixels
@@ -876,19 +875,21 @@ def _find_spd_axes_across_all(subject_paths: list[str],
                         continue
 
                     # Find the min and max of this graph info 
-                    graph_min: float = np.nanmin(graph_info)
+                    graph_min: float = np.nanpercentile(graph_info, 15) if "map" in graph_type.lower() else np.nanmin(graph_info)
                     graph_max: float = np.nanmax(graph_info)
 
                     # Compare to the global min/max and update if needed
-                    global_min, global_max = min_maxes[graph_type]
+                    global_min, global_max = min_maxes[graph_type]["bounds"]
                     if(graph_min < global_min):
-                        min_maxes[graph_type][0] = graph_min
+                        min_maxes[graph_type]["bounds"][0] = graph_min
+                        min_maxes[graph_type]["src"][0] = spd_results_filepath
                     if(graph_max > global_max):
-                        min_maxes[graph_type][1] = graph_max
+                        min_maxes[graph_type]["bounds"][1] = graph_max
+                        min_maxes[graph_type]["src"][1] = spd_results_filepath
 
     # convert min maxes to np.ndarray 
     for graph_type in min_maxes:
-        min_maxes[graph_type] = np.array( min_maxes[graph_type], dtype=np.float64)
+        min_maxes[graph_type]["bounds"] = np.array( min_maxes[graph_type]["bounds"], dtype=np.float64)
 
     return min_maxes
 
@@ -928,10 +929,10 @@ def _find_spd_axes_per_subject(subject_paths: list[str],
             continue 
 
         # Insert this subject into the min-maxes dict 
-        min_maxes[subject_id_number] = {"exponentMap": [float("inf"), float("-inf")],
-                                        "varianceMap": [float("inf"), float("-inf")],
-                                        "spdByRegion": [float("inf"), float("-inf")],
-                                        "frq": [float("inf"), float("-inf")]
+        min_maxes[subject_id_number] = {"exponentMap": {"bounds": [float("inf"), float("-inf")], "src": ["", ""]},
+                                        "varianceMap": {"bounds": [float("inf"), float("-inf")], "src": ["", ""]},
+                                        "spdByRegion": {"bounds": [float("inf"), float("-inf")], "src": ["", ""]},
+                                        "frq": {"bounds": [float("inf"), float("-inf")], "src": ["", ""]}
                                        }
 
         # Iterate over the activites for this subject 
@@ -949,7 +950,7 @@ def _find_spd_axes_per_subject(subject_paths: list[str],
                 continue 
 
             # Iterate over the projection types 
-            for projection_type in ("virtuallyFoveated",):
+            for projection_type in projection_types:
                 # load the SPD results from this activity
                 spd_results_filepath: str = os.path.join(activity_path, f"{subject_id}_{activity_name}_{projection_type}_SPDResults.mat")
                 assert os.path.exists(spd_results_filepath), f"SPD Results path does not exist: {spd_results_filepath}"
@@ -972,20 +973,22 @@ def _find_spd_axes_per_subject(subject_paths: list[str],
 
 
                     # Find the min and max of this graph info 
-                    graph_min: float = np.nanmin(graph_info)
+                    graph_min: float = np.nanpercentile(graph_info, 15) if "map" in graph_type.lower() else np.nanmin(graph_info)
                     graph_max: float = np.nanmax(graph_info)
 
                     # Compare to the global min/max and update if needed
-                    global_min, global_max = min_maxes[subject_id_number][graph_type]
+                    global_min, global_max = min_maxes[subject_id_number][graph_type]["bounds"]
                     if(graph_min < global_min):
-                        min_maxes[subject_id_number][graph_type][0] = graph_min
+                        min_maxes[subject_id_number][graph_type]["bounds"][0] = graph_min
+                        min_maxes[subject_id_number][graph_type]["src"][0] = spd_results_filepath
                     if(graph_max > global_max):
-                        min_maxes[subject_id_number][graph_type][1] = graph_max
-
+                        min_maxes[subject_id_number][graph_type]["bounds"][1] = graph_max
+                        min_maxes[subject_id_number][graph_type]["src"][1] = spd_results_filepath
+                   
     # convert min maxes to np.ndarray 
     for subject_id_number in min_maxes:
         for graph_type in min_maxes[subject_id_number]:
-            min_maxes[subject_id_number][graph_type] = np.array( min_maxes[subject_id_number][graph_type], dtype=np.float64)
+            min_maxes[subject_id_number][graph_type]["bounds"] = np.array( min_maxes[subject_id_number][graph_type]["bounds"], dtype=np.float64)
 
     return min_maxes
 
@@ -1021,10 +1024,10 @@ def _find_spd_axes_per_activity(subject_paths: list[str],
             continue
         
         # Insert this subject into the min-maxes dict 
-        min_maxes[activity_name] = {"exponentMap": [float("inf"), float("-inf")],
-                                        "varianceMap": [float("inf"), float("-inf")],
-                                        "spdByRegion": [float("inf"), float("-inf")],
-                                        "frq": [float("inf"), float("-inf")]
+        min_maxes[activity_name] = {"exponentMap": {"bounds": [float("inf"), float("-inf")], "src": ["", ""]},
+                                        "varianceMap": {"bounds": [float("inf"), float("-inf")], "src": ["", ""]},
+                                        "spdByRegion": {"bounds": [float("inf"), float("-inf")], "src": ["", ""]},
+                                        "frq": {"bounds": [float("inf"), float("-inf")], "src": ["", ""]}
                                        }
 
 
@@ -1045,7 +1048,7 @@ def _find_spd_axes_per_activity(subject_paths: list[str],
             assert os.path.exists(activity_path), f"Problem with: {activity_path}"
 
             # Iterate over the projection types 
-            for projection_type in ("virtuallyFoveated",):
+            for projection_type in projection_types:
                 # load the SPD results from this activity
                 spd_results_filepath: str = os.path.join(activity_path, f"{subject_id}_{activity_name}_{projection_type}_SPDResults.mat")
                 assert os.path.exists(spd_results_filepath), f"SPD Results path does not exist: {spd_results_filepath}"
@@ -1067,17 +1070,23 @@ def _find_spd_axes_per_activity(subject_paths: list[str],
                         continue
 
                     # Find the min and max of this graph info 
-                    graph_min: float = np.nanmin(graph_info)
+                    graph_min: float = np.nanpercentile(graph_info, 15) if "map" in graph_type.lower() else np.nanmin(graph_info)
                     graph_max: float = np.nanmax(graph_info)
 
                     # Compare to the global min/max and update if needed
-                    global_min, global_max = min_maxes[activity_name][graph_type]
+                    global_min, global_max = min_maxes[activity_name][graph_type]["bounds"]
                     if(graph_min < global_min):
-                        min_maxes[activity_name][graph_type][0] = graph_min
+                        min_maxes[activity_name][graph_type]["bounds"][0] = graph_min
+                        min_maxes[activity_name][graph_type]["src"][0] = spd_results_filepath
                     if(graph_max > global_max):
-                        min_maxes[activity_name][graph_type][1] = graph_max
+                        min_maxes[activity_name][graph_type]["bounds"][1] = graph_max
+                        min_maxes[activity_name][graph_type]["src"][1] = spd_results_filepath
                     
-                    assert min_maxes[activity_name][graph_type][0] <= min_maxes[activity_name][graph_type][1]
+                    assert min_maxes[activity_name][graph_type]["bounds"][0] <= min_maxes[activity_name][graph_type]["bounds"][1]
+    
+        for graph_type in min_maxes[activity_name]:
+                min_maxes[activity_name][graph_type]["bounds"] = np.array( min_maxes[activity_name][graph_type]["bounds"], dtype=np.float64)
+
 
     return min_maxes
 
@@ -1094,7 +1103,7 @@ def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brain
                                 ) -> None:
     import matlab.engine
 
-     # Initialize the MATLAB engine to utilize the MATLAB function we have developed for this purpose 
+    # Initialize the MATLAB engine to utilize the MATLAB function we have developed for this purpose 
     eng: object = matlab.engine.start_matlab()  
     eng.pyenv('Version', '~/Documents/MATLAB/projects/lightLoggerAnalysis/analysis_env/bin/python', nargout=0)
     eng.tbUseProject('lightLoggerAnalysis', nargout=0)
@@ -1153,19 +1162,13 @@ def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brain
         # so fix that here 
         for activity_name in activities_list:
             all_axes_min_maxes_per_activity[activity_name]["frq"] = all_axes_min_maxes_across_all["frq"] 
-            all_axes_min_maxes_per_activity[activity_name]["frq"][0] = max(all_axes_min_maxes_per_activity[activity_name]["frq"][0], 10e-9)
+            all_axes_min_maxes_per_activity[activity_name]["frq"]["bounds"][0] = max(all_axes_min_maxes_per_activity[activity_name]["frq"]["bounds"][0], 10e-9)
             all_axes_min_maxes_per_activity[activity_name]["spdByRegion"] = all_axes_min_maxes_across_all["spdByRegion"]
-            all_axes_min_maxes_per_activity[activity_name]["spdByRegion"][0] = max(all_axes_min_maxes_per_activity[activity_name]["spdByRegion"][0], 10e-9)
+            all_axes_min_maxes_per_activity[activity_name]["spdByRegion"]["bounds"][0] = max(all_axes_min_maxes_per_activity[activity_name]["spdByRegion"]["bounds"][0], 10e-9)
 
             # Make all of them numpy arrays for easy matlab conversion too 
             for field in all_axes_min_maxes_per_activity[activity_name]:
-                assert all(all_axes_min_maxes_per_activity[activity_name][field][i] <= all_axes_min_maxes_per_activity[activity_name][field][i+1] for i in range(len(all_axes_min_maxes_per_activity[activity_name][field])-1)), f"Bounds: {field} not sorted: {all_axes_min_maxes_per_activity[activity_name][field]}" 
-                all_axes_min_maxes_per_activity[activity_name][field] = np.array(all_axes_min_maxes_per_activity[activity_name][field])
-
-        for activity, bounds in all_axes_min_maxes_per_activity.items():
-            for graph_type, bounds in bounds.items():
-                print(f"Activity: {activity} | Graph Type: {graph_type} | Bounds: {bounds}")
-
+                all_axes_min_maxes_per_activity[activity_name][field]["bounds"] = np.array(all_axes_min_maxes_per_activity[activity_name][field]["bounds"])
 
     # First, let's go over all of the activities 
     activities_iterator: Iterable = range(len(activities_list)) if verbose is False else tqdm(range(len(activities_list)), desc="Processing Activities", leave=False)
@@ -1210,10 +1213,10 @@ def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brain
                                           "save_figures", True, 
                                           "overwrite_existing", overwrite_existing, 
                                           "projection_type", projection_type,
-                                          "exponent_clim", axes_min_maxes["exponentMap"],
-                                          "variance_clim", axes_min_maxes["varianceMap"], 
-                                          "spd_xlim", axes_min_maxes["frq"],
-                                          "spd_ylim", axes_min_maxes["spdByRegion"], 
+                                          "exponent_clim", axes_min_maxes["exponentMap"]["bounds"],
+                                          "variance_clim", axes_min_maxes["varianceMap"]["bounds"], 
+                                          "spd_xlim", axes_min_maxes["frq"]["bounds"],
+                                          "spd_ylim", axes_min_maxes["spdByRegion"]["bounds"], 
                                           "combine_figures", combine_figures,
                                           nargout=0
                                         )
