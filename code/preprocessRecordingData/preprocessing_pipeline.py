@@ -453,7 +453,7 @@ def generate_spds(src_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoo
                                 "verbose", verbose,
                                 "overwrite_existing", overwrite_existing,
                                 "save_figures", True, 
-                                "projection_type", projection_type, 
+                                "video_type", projection_type, 
                                 nargout=0
                             )
             
