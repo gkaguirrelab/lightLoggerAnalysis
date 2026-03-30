@@ -84,7 +84,7 @@ function activityDataAcrossSubjects = processSPDsAcrossSubjects(input_dir, outpu
         options.activities = {};   % cell array of strings, e.g. {'walkIndoorFoveate'}
         options.verbose = false;
         options.overwrite_existing = false; 
-        options.video_type {mustbeMember(options.video_type, ["justProjection", "virtuallyFoveated"])} = "virtuallyFoveated"; 
+        options.video_type {mustBeVideoType} = "virtuallyFoveated"; 
         options.save_figures = false; 
         options.fovDegrees = 120; 
         options.exponent_clim = false
@@ -227,4 +227,15 @@ function activityDataAcrossSubjects = processSPDsAcrossSubjects(input_dir, outpu
 
     end
 
+end
+
+function mustBeVideoType(value)
+    % Accept both char and string
+    valueStr = string(value);
+
+    validOptions = ["justProjection", "virtuallyFoveated"];
+
+    if ~any(valueStr == validOptions)
+        error("Value must be 'justProjection' or 'virtuallyFoveated'. Got: %s", valueStr);
+    end
 end

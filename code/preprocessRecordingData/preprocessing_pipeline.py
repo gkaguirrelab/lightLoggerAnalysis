@@ -421,6 +421,11 @@ def generate_spds(src_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoo
             output_dir: str = os.path.join(dst_dir, subject_id, activity_name)
             os.makedirs(output_dir, exist_ok=True)
 
+            # We will first skip directories that entirely eixst 
+            # so we do not waste time copying them for further analysis 
+            if( all( os.path.exists(os.path.join(output_dir, f"{subject_id}_{activity_name}_{projection_type}_SPDResults.mat")) for projection_type in projection_types) and overwrite_existing is False):
+                continue 
+
             # Generate the temp dir wher we will
             # temporarily copy the src files to. This is to avoid network interrupts 
             # reading large files over e.g. the NAS
@@ -431,6 +436,8 @@ def generate_spds(src_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoo
 
             # Copy the activity to the temporary directory 
             temp_activity_path: str = os.path.join(temp_output_dir, subject_id, activity_name)
+
+            # Copy the original data locally for faster reading 
             shutil.copytree(activity_path, temp_activity_path)
 
             # Generate SPDs for desired projection types (e.g. justProjection and virtuallyFoveated)
@@ -477,18 +484,18 @@ def generate_spds(src_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoo
 
     return 
 
-def group_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026", 
-               dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026",
-               groups: dict[str, dict[str, str | None]] = {"indoor": {"work": None, "chat": None, "walkIndoor": None}, 
-                                                           "outdoor": {"walkOutdoor": None, "walkBiopond": None, "sitBiopond": None}
-                                                          }, 
-               overwrite_existing: bool=False,
-               subjects_to_skip: Iterable=set(), 
-               activities_to_skip: Iterable=set(["lunch", "phone"]), 
-               projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = set(["virtuallyFoveated", "justProjection"]), 
-               sort_by_experiment_ordering: bool=True, 
-               verbose: bool=False
-            ) -> None:
+def group_spds_per_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026", 
+                           dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026",
+                           groups: dict[str, dict[str, str | None]] = {"indoor": {"work": None, "chat": None, "walkIndoor": None}, 
+                                                                    "outdoor": {"walkOutdoor": None, "walkBiopond": None, "sitBiopond": None}
+                                                                    }, 
+                           overwrite_existing: bool=False,
+                           subjects_to_skip: Iterable=set(), 
+                           activities_to_skip: Iterable=set(["lunch", "phone"]), 
+                           projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = set(["virtuallyFoveated", "justProjection"]), 
+                           sort_by_experiment_ordering: bool=True, 
+                           verbose: bool=False
+                         ) -> None:
     
     import matlab.engine
 
@@ -523,14 +530,6 @@ def group_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Za
                                                                         verbose=False
                                                                         )
 
-    # Next we will find the colorbar min/maxs by subject 
-    per_subject_axes_min_maxes: dict[str, np.ndarray[float]] = _find_spd_axes_per_subject(subject_paths, 
-                                                                        subjects_to_skip,
-                                                                        activities_to_skip,
-                                                                        projection_types,
-                                                                        verbose=False
-                                                                    )
-
     # Now, let's iterate over all the subject paths 
     subject_iterator: Iterable = range(len(subject_paths)) if verbose is False else tqdm(range(len(subject_paths)), desc="Processing Subjects", leave=True)
     for subject_num in subject_iterator:
@@ -557,11 +556,11 @@ def group_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Za
         
 
         # Construct the min maxes for this subject 
-        axes_min_maxes: dict[str, np.ndarray] = per_subject_axes_min_maxes[subject_id_number]
+        axes_min_maxes: dict[str, np.ndarray] = across_all_axes_min_maxes[subject_id_number]
         axes_min_maxes["spdByRegion"]["bounds"] = across_all_axes_min_maxes["spdByRegion"]["bounds"]
-        axes_min_maxes["spdByRegion"]["bounds"][0] = max(axes_min_maxes["spdByRegion"]["bounds"][0], 10e-9)
+        axes_min_maxes["spdByRegion"]["bounds"][0] = max(across_all_axes_min_maxes["spdByRegion"]["bounds"][0], 10e-9)
         axes_min_maxes["frq"]["bounds"] = across_all_axes_min_maxes["frq"]["bounds"]
-        axes_min_maxes["frq"]["bounds"][0] = max(axes_min_maxes["frq"]["bounds"][0], 10e-9)
+        axes_min_maxes["frq"]["bounds"][0] = max(across_all_axes_min_maxes["frq"]["bounds"][0], 10e-9)
 
         # Iterate over the activites for this subject 
         activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in natsorted(os.listdir(subject_path))
@@ -615,6 +614,110 @@ def group_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Za
 
     # Close the matlab engine 
     eng.quit()
+
+    return 
+
+def group_spds_across_subjects(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026", 
+                                dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026",
+                                groups: dict[str, dict[str, str | None]] = {"indoor": {"work": None, "chat": None, "walkIndoor": None}, 
+                                                                            "outdoor": {"walkOutdoor": None, "walkBiopond": None, "sitBiopond": None}
+                                                                            }, 
+                                overwrite_existing: bool=False,
+                                subjects_to_skip: Iterable=set(), 
+                                activities_to_skip: Iterable=set(["lunch", "phone"]), 
+                                projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = set(["virtuallyFoveated", "justProjection"]), 
+                                sort_by_experiment_ordering: bool=True, 
+                                verbose: bool=False
+                            ) -> None:
+    
+    import matlab.engine
+    
+    # Initialize the MATLAB engine to utilize the MATLAB function we have developed for this purpose 
+    eng: object = matlab.engine.start_matlab()  
+    eng.pyenv('Version', '~/Documents/MATLAB/projects/lightLoggerAnalysis/analysis_env/bin/python', nargout=0)
+    eng.tbUseProject('lightLoggerAnalysis', nargout=0)
+
+    # Now we will make an inverse mapping of activities to groups rather than groups to activities 
+    activites_to_groups: dict = {activity_name: group_name 
+                                 for group_name, activity_dict in groups.items()
+                                 for activity_name, _ in activity_dict.items()  
+                                }
+
+    # Let's find the bounds across all subjects and activities
+    # First, let's find all of the subjects in this experiment 
+    subject_paths: list[str] = natsorted([os.path.join(src_dir, subject_name) 
+                                          for subject_name in os.listdir(src_dir) 
+                                          if re.fullmatch(r"FLIC_\d+", subject_name) 
+                                          and os.path.isdir(os.path.join(src_dir, subject_name))
+                                         ]
+                                        ) 
+    assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
+
+    min_max_across_all: dict = _find_spd_axes_across_all(subject_paths,
+                                                         subjects_to_skip=subjects_to_skip, 
+                                                         activities_to_skip=activities_to_skip, 
+                                                         projection_types=projection_types, 
+                                                         verbose=False
+                                                        )
+    
+
+    # Initialize dictionary to store average information across 
+    # subjects for a given activity
+    averaged_groups: dict = {group: 
+                                    {activity_name: 
+                                        {projection_type: ""
+                                            for projection_type in projection_types
+                                        }
+                                    for activity_name, _ in activity_dict.items()
+                                    if activity_name not in activities_to_skip
+                                    }
+                                for group, activity_dict in groups.items()
+                            }
+
+    # First, let's find all of the activities that exist 
+    activities_paths: list[str] = [os.path.join(src_dir, "acrossAll", activity) for activity in os.listdir(src_dir)
+                                   if activity not in activities_to_skip
+                                   and os.path.isdir(os.path.join(src_dir, activity))
+                                  ]
+
+    activities_iterator: Iterable = range(len(activities_paths)) if verbose is False else tqdm(range(len(activities_paths)), desc="Processing Activities", leave=False)
+    for activity_num in activities_iterator:
+        # Retrieve the activity path and activity name
+        activity_path: str = activities_paths[activity_num]
+        activity_name: str = os.path.basename(activity_path)
+
+        if(activity_name in activities_to_skip or activity_name not in groups):
+            continue
+
+        # Now, we will gather the path to the SPD 
+        for projection_type in projection_types:
+            spd_results_mat_path: str = os.path.join(activity_path, f"{activity_name}_{projection_type}_SPDResultsAcrossSubjects.mat")
+            assert os.path.exists(spd_results_mat_path), f"Problem with: {spd_results_mat_path}"    
+            group_name: str = activites_to_groups[activity_name]
+            averaged_groups[group_name][activity_name][projection_type] = spd_results_mat_path
+    
+    # Now that we have the activities grouped together for this subject, pass it over to MATLAB 
+    # to do the plotting 
+    # First, output to a temp .mat file to make transfer easier between the two languages 
+    temp_output_filepath: str = os.path.expanduser("~/Desktop/group_spds_across_subjects_temp.mat")
+    scipy.io.savemat(temp_output_filepath, {"groupedActivityData": averaged_groups})
+
+    # Construct the output directory 
+    output_dir: str = os.path.join(dst_dir)
+    eng.groupSPDs(temp_output_filepath, 
+                    "exponent_clim", min_max_across_all["exponentMap"]["bounds"], 
+                    "variance_clim", min_max_across_all["varianceMap"]["bounds"], 
+                    "spd_xlim", min_max_across_all["frq"]["bounds"], 
+                    "spd_ylim", min_max_across_all["spdByRegion"]["bounds"],
+                    "title", str("SubjectsAveraged"),
+                    "output_dir", output_dir, 
+                    "overwrite_existing", overwrite_existing,
+                    "sort_by_preferred_order", sort_by_experiment_ordering,
+                    nargout=0
+                )
+
+    # Remove the figure after it is finisehd 
+    os.remove(temp_output_filepath)
 
     return 
 
