@@ -1369,7 +1369,7 @@ def generate_spds_across_all(src_dir: str="/Users/zacharykelly/Aguirre-Brainard 
     # Now, we will gather the path to the SPD 
     for projection_type in projection_types:
         # Call the MATLAB plotting function
-        eng.processSPDAcrossActivities(src_dir, 
+        eng.processSPDAcrossActivities(os.path.join(src_dir, "acrossSubects"), 
                                           dst_dir, 
                                           "activities", activity_names,
                                           "verbose", False, 
