@@ -701,6 +701,7 @@ def group_spds_across_subjects(src_dir: str="/Users/zacharykelly/Aguirre-Brainar
             group_name: str = activities_to_groups[activity_name]
             averaged_groups[group_name][activity_name][projection_type] = spd_results_mat_path
 
+
     # Now that we have the activities grouped together for this subject, pass it over to MATLAB 
     # to do the plotting 
     # First, output to a temp .mat file to make transfer easier between the two languages 
@@ -708,7 +709,7 @@ def group_spds_across_subjects(src_dir: str="/Users/zacharykelly/Aguirre-Brainar
     scipy.io.savemat(temp_output_filepath, {"groupedActivityData": averaged_groups})
 
     # Construct the output directory 
-    output_dir: str = os.path.join(dst_dir, "acrossSubjects", activity_name)
+    output_dir: str = os.path.join(dst_dir, "acrossSubjects")
     eng.groupSPDs(temp_output_filepath, 
                     "exponent_clim", min_max_across_all["exponentMap"]["bounds"], 
                     "variance_clim", min_max_across_all["varianceMap"]["bounds"], 
