@@ -438,8 +438,15 @@ function iCopySingleAxesWithColorbar(sourceAxes, targetFigureHandle, targetPosit
 
     colormap(targetAxes, colormap(sourceAxes));
 
-    % Clear copied titles/labels inside the mini-map
-    title(targetAxes, '');
+    % Copy the source map title over
+    sourceTitle = get(sourceAxes, 'Title');
+    title(targetAxes, sourceTitle.String, ...
+        'Interpreter', sourceTitle.Interpreter, ...
+        'FontWeight', sourceTitle.FontWeight, ...
+        'FontSize', sourceTitle.FontSize, ...
+        'Color', sourceTitle.Color);
+
+    % Keep axis labels suppressed in the grouped mini-maps
     xlabel(targetAxes, '');
     ylabel(targetAxes, '');
 
