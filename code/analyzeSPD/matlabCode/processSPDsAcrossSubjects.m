@@ -265,15 +265,15 @@ function virtuallyFoveatedActivityDataAcrossSubjects = processSPDsAcrossSubjects
 
         % Output the results of this if desired
         if(output_dir ~= "")
-            activityData.virtuallyFoveatedActivityDataAcrossSubjects = virtuallyFoveatedActivityDataAcrossSubjects; 
-            activityData.justProjectionActivityDataAcrossSubjects = justProjectionActivityDataAcrossSubjects;
+            % Remove this field we no longer need to keep track of subjects
+            virtuallyFoveatedActivityDataAcrossSubjects = rmfield(virtuallyFoveatedActivityDataAcrossSubjects, 'subjectIDs'); 
+            
+            % Save the activity data
+            activityData = virtuallyFoveatedActivityDataAcrossSubjects; 
             save(output_filepath, 'activityData');
 
             if(options.save_figures)
                 assert(isstruct(virtuallyFoveatedActivityDataAcrossSubjects)); 
-
-                % Remove this field we no longer need to keep track of subjects
-                virtuallyFoveatedActivityDataAcrossSubjects = rmfield(virtuallyFoveatedActivityDataAcrossSubjects, 'subjectIDs'); 
                          
                 [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(virtuallyFoveatedActivityDataAcrossSubjects, ...
                                                                                      "fovDegrees", options.fovDegrees,...

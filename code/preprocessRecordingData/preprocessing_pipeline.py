@@ -556,7 +556,7 @@ def group_spds_per_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brainard La
         
 
         # Construct the min maxes for this subject 
-        axes_min_maxes: dict[str, np.ndarray] = across_all_axes_min_maxes[subject_id_number]
+        axes_min_maxes: dict[str, np.ndarray] = copy.deepcopy(across_all_axes_min_maxes)
         axes_min_maxes["spdByRegion"]["bounds"] = across_all_axes_min_maxes["spdByRegion"]["bounds"]
         axes_min_maxes["spdByRegion"]["bounds"][0] = max(across_all_axes_min_maxes["spdByRegion"]["bounds"][0], 10e-9)
         axes_min_maxes["frq"]["bounds"] = across_all_axes_min_maxes["frq"]["bounds"]
@@ -638,7 +638,7 @@ def group_spds_across_subjects(src_dir: str="/Users/zacharykelly/Aguirre-Brainar
     eng.tbUseProject('lightLoggerAnalysis', nargout=0)
 
     # Now we will make an inverse mapping of activities to groups rather than groups to activities 
-    activites_to_groups: dict = {activity_name: group_name 
+    activities_to_groups: dict = {activity_name: group_name 
                                  for group_name, activity_dict in groups.items()
                                  for activity_name, _ in activity_dict.items()  
                                 }
@@ -675,9 +675,9 @@ def group_spds_across_subjects(src_dir: str="/Users/zacharykelly/Aguirre-Brainar
                             }
 
     # First, let's find all of the activities that exist 
-    activities_paths: list[str] = [os.path.join(src_dir, "acrossAll", activity) for activity in os.listdir(src_dir)
+    activities_paths: list[str] = [os.path.join(src_dir, "acrossSubjects", activity) for activity in os.listdir(os.path.join(src_dir, "acrossSubjects"))
                                    if activity not in activities_to_skip
-                                   and os.path.isdir(os.path.join(src_dir, activity))
+                                   and os.path.isdir(os.path.join(src_dir, "acrossSubjects", activity))
                                   ]
 
     activities_iterator: Iterable = range(len(activities_paths)) if verbose is False else tqdm(range(len(activities_paths)), desc="Processing Activities", leave=False)
@@ -685,17 +685,17 @@ def group_spds_across_subjects(src_dir: str="/Users/zacharykelly/Aguirre-Brainar
         # Retrieve the activity path and activity name
         activity_path: str = activities_paths[activity_num]
         activity_name: str = os.path.basename(activity_path)
-
-        if(activity_name in activities_to_skip or activity_name not in groups):
+    
+        if(activity_name in activities_to_skip or activity_name not in activities_to_groups):
             continue
 
         # Now, we will gather the path to the SPD 
         for projection_type in projection_types:
             spd_results_mat_path: str = os.path.join(activity_path, f"{activity_name}_{projection_type}_SPDResultsAcrossSubjects.mat")
             assert os.path.exists(spd_results_mat_path), f"Problem with: {spd_results_mat_path}"    
-            group_name: str = activites_to_groups[activity_name]
+            group_name: str = activities_to_groups[activity_name]
             averaged_groups[group_name][activity_name][projection_type] = spd_results_mat_path
-    
+
     # Now that we have the activities grouped together for this subject, pass it over to MATLAB 
     # to do the plotting 
     # First, output to a temp .mat file to make transfer easier between the two languages 
@@ -1219,10 +1219,6 @@ def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brain
                                           and os.path.isdir(os.path.join(src_dir, subject_name))
                                          ]
                                         ) 
-    subject_id_numbers: list[int] = [ int(re.search(r"\d+", os.path.basename(path)).group()) 
-                                        for path in subject_paths 
-                                    ]
-    subject_id_numbers = [num for num in subject_id_numbers if num not in subjects_to_skip]
 
     assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
 
@@ -1278,22 +1274,22 @@ def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brain
     for activity_num in activities_iterator:
         # Retrieve the activity path and activity name
         activity_name: str = activities_list[activity_num]
+        if(activity_name in activities_to_skip):
+            continue
 
-        # Gather the path to this activity for all subjects (and ensure it exists)
-        activities_paths: list[str] = [ os.path.join(subject_path, activity_name) 
-                                        for subject_path, subject_id_num in zip(subject_paths, subject_id_numbers)
-                                        if subject_id_num not in subjects_to_skip
-                                      ]
-        for path in activities_paths:
-            if(not os.path.exists(path)):
-                raise Exception(f"Path: {path} does not exist")
-
-
-        # Gather the list of numerical subject IDS 
-        subject_id_numbers: list[int] = [ int(re.search(r"\d+", os.path.basename(path)).group()) 
-                                          for path in subject_paths 
-                                        ]
-        subject_id_numbers = [num for num in subject_id_numbers if num not in subjects_to_skip]
+        activities_paths: list[str] = []
+        subject_id_numbers: list[int] = []
+        for subject_path in subject_paths:
+            # Gather the subject ID number and skip this subject if we desired to do so 
+            subject_id_number: int = int(re.search(r"\d+", os.path.basename(subject_path)).group()) 
+            if(subject_id_number in subjects_to_skip):
+                continue     
+            subject_activity_path: str = os.path.join(subject_path, activity_name)
+            assert os.path.exists(subject_activity_path), f"Problem with: {subject_activity_path}"
+            
+            # Save the subject acitivty path and its ID number
+            activities_paths.append(subject_activity_path)
+            subject_id_numbers.append(subject_id_number)
 
         # If common axes is true, we will find the limits of the plots 
         # across all subjects for this activity
@@ -1306,7 +1302,7 @@ def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brain
         os.makedirs(output_dir, exist_ok=True)
 
         # iterate over desired projection types 
-        for projection_type in projection_types if combine_figures is False else (list(projection_types)[0],):
+        for projection_type in projection_types:
             # Call the MATLAB function to do the processing
             eng.processSPDsAcrossSubjects(src_dir, 
                                           output_dir, 
@@ -1330,7 +1326,7 @@ def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brain
 
 
 def generate_spds_across_all(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026/", 
-                            dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026/acrossSubjects",
+                            dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026/",
                             overwrite_existing: bool=False,
                             subjects_to_skip: Iterable=set(), 
                             activities_to_skip: Iterable=set(["lunch", "phone"]), 
@@ -1364,7 +1360,29 @@ def generate_spds_across_all(src_dir: str="/Users/zacharykelly/Aguirre-Brainard 
                                                         )
 
     
-
+    # Next, we will find all of the valid activities we will average over
+    activity_names: list[str] = [activity for activity in os.listdir(os.path.join(src_dir, "acrossSubjects"))
+                                 if activity not in activities_to_skip
+                                   and os.path.isdir(os.path.join(src_dir, "acrossSubjects", activity))
+                                  ]
+    
+    # Now, we will gather the path to the SPD 
+    for projection_type in projection_types:
+        # Call the MATLAB plotting function
+        eng.processSPDAcrossActivities(src_dir, 
+                                          dst_dir, 
+                                          "activities", activity_names,
+                                          "verbose", False, 
+                                          "save_figures", True, 
+                                          "overwrite_existing", overwrite_existing, 
+                                          "projection_type", projection_type,
+                                          "exponent_clim", min_max_across_all["exponentMap"]["bounds"],
+                                          "variance_clim", min_max_across_all["varianceMap"]["bounds"], 
+                                          "spd_xlim", min_max_across_all["frq"]["bounds"],
+                                          "spd_ylim", min_max_across_all["spdByRegion"]["bounds"], 
+                                          "combine_figures", combine_figures,
+                                          nargout=0
+                                        )
     
     
 

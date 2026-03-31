@@ -81,6 +81,8 @@ function groupedSpdHandle = groupSPDs(groupedActivityData, options)
         groupedActivityData = load(groupedActivityData).groupedActivityData; 
     end     
 
+    disp(groupedActivityData)
+
     % The top-level field names correspond to the row groups
     group_names = fieldnames(groupedActivityData); 
     n_graph_rows = numel(group_names);

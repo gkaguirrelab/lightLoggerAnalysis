@@ -158,10 +158,12 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(vi
         if (~islogical(options.exponent_clim))
             climVals = double(options.exponent_clim);
             clim(climVals);
+            colormap(pink);
             cb = colorbar;
             cb.Ticks = linspace(climVals(1), climVals(2), 6);
             cb.TickLabels = arrayfun(@(x) sprintf('%.3g', x), cb.Ticks, 'UniformOutput', false);
         else 
+            colormap(pink);
             colorbar
         end 
 
@@ -182,10 +184,12 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(vi
         if (~islogical(options.exponent_clim))
             climVals = double(options.exponent_clim);
             clim(climVals);
+            colormap(pink);
             cb = colorbar;
             cb.Ticks = linspace(climVals(1), climVals(2), 6);
             cb.TickLabels = arrayfun(@(x) sprintf('%.3g', x), cb.Ticks, 'UniformOutput', false);
         else 
+            colormap(pink);
             colorbar
         end 
 
@@ -205,10 +209,12 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(vi
         if (~islogical(options.exponent_clim))
             climVals = double(options.exponent_clim);
             clim(climVals);
+            colormap(pink);
             cb = colorbar;
             cb.Ticks = linspace(climVals(1), climVals(2), 6);
             cb.TickLabels = arrayfun(@(x) sprintf('%.3g', x), cb.Ticks, 'UniformOutput', false);
         else 
+            colormap(pink);
             colorbar
         end 
     end
@@ -245,12 +251,15 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(vi
         title(sprintf('Contrast Variance - %s - justProjection', activityName), 'Interpreter', 'none')
         axis square
         if (~islogical(options.variance_clim))
-             climVals = double(options.variance_clim);
+            climVals = double(options.variance_clim);
             clim(climVals);
+            colormap(pink);
             cb = colorbar;
+            
             cb.Ticks = linspace(climVals(1), climVals(2), 6);
             cb.TickLabels = arrayfun(@(x) sprintf('%.3g', x), cb.Ticks, 'UniformOutput', false);
         else 
+            colormap(pink);
             colorbar
         end 
 
@@ -271,6 +280,7 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(vi
         if (~islogical(options.variance_clim))
             climVals = double(options.variance_clim);
             clim(climVals);
+            colormap(pink);
             cb = colorbar;
             cb.Ticks = linspace(climVals(1), climVals(2), 6);
             cb.TickLabels = arrayfun(@(x) sprintf('%.3g', x), cb.Ticks, 'UniformOutput', false);
@@ -293,10 +303,12 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(vi
         if (~islogical(options.variance_clim))
             climVals = double(options.variance_clim);
             clim(climVals);
+            colormap(pink);
             cb = colorbar;
             cb.Ticks = linspace(climVals(1), climVals(2), 6);
             cb.TickLabels = arrayfun(@(x) sprintf('%.3g', x), cb.Ticks, 'UniformOutput', false);
         else 
+            colormap(pink);
             colorbar
         end 
     end
