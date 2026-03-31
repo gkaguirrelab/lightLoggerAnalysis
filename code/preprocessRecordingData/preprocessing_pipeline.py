@@ -372,6 +372,7 @@ def generate_spds(src_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoo
                   subjects_to_skip: Iterable=set(), 
                   activities_to_skip: Iterable=set(["lunch", "phone"]), 
                   projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = set(["virtuallyFoveated", "justProjection"]), 
+                  projection_types_for_bounds_calculations:  Iterable[Literal["virtuallyFoveated", "justProjection"]] = ["virtuallyFoveated", "justProjection"],
                   common_axes: bool=False, 
                   verbose: bool=False) -> None:
     
@@ -475,7 +476,9 @@ def generate_spds(src_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoo
                         verbose=verbose, 
                         subjects_to_skip=subjects_to_skip,
                         projection_types=projection_types, 
-                        activites_to_skip=activities_to_skip
+                        activites_to_skip=activities_to_skip,
+                        projection_types_for_bounds_calculations=projection_types_for_bounds_calculations
+                        
                         )
 
     
@@ -492,7 +495,8 @@ def group_spds_per_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brainard La
                            overwrite_existing: bool=False,
                            subjects_to_skip: Iterable=set(), 
                            activities_to_skip: Iterable=set(["lunch", "phone"]), 
-                           projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = set(["virtuallyFoveated", "justProjection"]), 
+                            projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = set(["virtuallyFoveated", "justProjection"]), 
+                           projection_types_for_bounds_calculations:  Iterable[Literal["virtuallyFoveated", "justProjection"]] = ["virtuallyFoveated", "justProjection"],
                            sort_by_experiment_ordering: bool=True, 
                            verbose: bool=False
                          ) -> None:
@@ -526,7 +530,7 @@ def group_spds_per_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brainard La
     across_all_axes_min_maxes: dict[str, np.ndarray[float]] = _find_spd_axes_across_all(subject_paths, 
                                                                         subjects_to_skip,
                                                                         activities_to_skip,
-                                                                        projection_types,
+                                                                        projection_types_for_bounds_calculations,
                                                                         verbose=False
                                                                         )
 
@@ -625,7 +629,8 @@ def group_spds_across_subjects(src_dir: str="/Users/zacharykelly/Aguirre-Brainar
                                 overwrite_existing: bool=False,
                                 subjects_to_skip: Iterable=set(), 
                                 activities_to_skip: Iterable=set(["lunch", "phone"]), 
-                                projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = set(["virtuallyFoveated", "justProjection"]), 
+                                 projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = set(["virtuallyFoveated", "justProjection"]), 
+                                projection_types_for_bounds_calculations:  Iterable[Literal["virtuallyFoveated", "justProjection"]] = ["virtuallyFoveated", "justProjection"], 
                                 sort_by_experiment_ordering: bool=True, 
                                 verbose: bool=False
                             ) -> None:
@@ -656,7 +661,7 @@ def group_spds_across_subjects(src_dir: str="/Users/zacharykelly/Aguirre-Brainar
     min_max_across_all: dict = _find_spd_axes_across_all(subject_paths,
                                                          subjects_to_skip=subjects_to_skip, 
                                                          activities_to_skip=activities_to_skip, 
-                                                         projection_types=projection_types, 
+                                                         projection_types=projection_types_for_bounds_calculations, 
                                                          verbose=False
                                                         )
     
@@ -696,6 +701,7 @@ def group_spds_across_subjects(src_dir: str="/Users/zacharykelly/Aguirre-Brainar
             group_name: str = activities_to_groups[activity_name]
             averaged_groups[group_name][activity_name][projection_type] = spd_results_mat_path
 
+
     # Now that we have the activities grouped together for this subject, pass it over to MATLAB 
     # to do the plotting 
     # First, output to a temp .mat file to make transfer easier between the two languages 
@@ -703,7 +709,7 @@ def group_spds_across_subjects(src_dir: str="/Users/zacharykelly/Aguirre-Brainar
     scipy.io.savemat(temp_output_filepath, {"groupedActivityData": averaged_groups})
 
     # Construct the output directory 
-    output_dir: str = os.path.join(dst_dir, "acrossSubjects", activity_name)
+    output_dir: str = os.path.join(dst_dir, "acrossSubjects")
     eng.groupSPDs(temp_output_filepath, 
                     "exponent_clim", min_max_across_all["exponentMap"]["bounds"], 
                     "variance_clim", min_max_across_all["varianceMap"]["bounds"], 
@@ -726,7 +732,8 @@ def adjust_spd_axes(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropb
                     dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026",
                     subjects_to_skip: Iterable= set(),
                     activities_to_skip: Iterable= set(),
-                    projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = set(["virtuallyFoveated", "justProjection"]), 
+                     projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = set(["virtuallyFoveated", "justProjection"]),
+                    projection_types_for_bounds_calculations:  Iterable[Literal["virtuallyFoveated", "justProjection"]] = ["virtuallyFoveated", "justProjection"],  
                     combine_figures: bool=True,
                     overwrite_existing: bool=False, 
                     verbose: bool=False
@@ -753,7 +760,7 @@ def adjust_spd_axes(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropb
     across_all_axes_min_maxes: dict[str, np.ndarray[float]] = _find_spd_axes_across_all(subject_paths, 
                                                                         subjects_to_skip,
                                                                         activities_to_skip,
-                                                                        projection_types,
+                                                                        projection_types_for_bounds_calculations,
                                                                         verbose=False
                                                                         )
 
@@ -761,7 +768,7 @@ def adjust_spd_axes(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropb
     per_subject_axes_min_maxes: dict[str, np.ndarray[float]] = _find_spd_axes_per_subject(subject_paths, 
                                                                         subjects_to_skip,
                                                                         activities_to_skip,
-                                                                        projection_types,
+                                                                        projection_types_for_bounds_calculations,
                                                                         verbose=False
                                                                     )
 
@@ -994,6 +1001,11 @@ def _find_spd_axes_across_all(subject_paths: list[str],
     for graph_type in min_maxes:
         min_maxes[graph_type]["bounds"] = np.array( min_maxes[graph_type]["bounds"], dtype=np.float64)
 
+        # The max of the frq should be 60 
+        if(graph_type == "frq"):
+            min_maxes[graph_type]["bounds"][-1] = max(min_maxes[graph_type]["bounds"][-1], 60)
+
+
     return min_maxes
 
 
@@ -1093,6 +1105,10 @@ def _find_spd_axes_per_subject(subject_paths: list[str],
         for graph_type in min_maxes[subject_id_number]:
             min_maxes[subject_id_number][graph_type]["bounds"] = np.array( min_maxes[subject_id_number][graph_type]["bounds"], dtype=np.float64)
 
+            # The max of the frq should be 60 
+            if(graph_type == "frq"):
+                min_maxes[subject_id_number][graph_type]["bounds"][-1] = max(min_maxes[subject_id_number][graph_type]["bounds"][-1], 60)
+
     return min_maxes
 
 
@@ -1190,6 +1206,10 @@ def _find_spd_axes_per_activity(subject_paths: list[str],
         for graph_type in min_maxes[activity_name]:
                 min_maxes[activity_name][graph_type]["bounds"] = np.array( min_maxes[activity_name][graph_type]["bounds"], dtype=np.float64)
 
+                # The max of the frq should be 60 
+                if(graph_type == "frq"):
+                    min_maxes[activity_name][graph_type]["bounds"][-1] = max(min_maxes[activity_name][graph_type]["bounds"][-1], 60)
+
 
     return min_maxes
 
@@ -1200,6 +1220,7 @@ def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brain
                                  subjects_to_skip: Iterable=set(), 
                                  activities_to_skip: Iterable=set(["lunch", "phone"]), 
                                  projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = ["virtuallyFoveated", "justProjection"], 
+                                 projection_types_for_bounds_calculations:  Iterable[Literal["virtuallyFoveated", "justProjection"]] = ["virtuallyFoveated", "justProjection"],
                                  common_axes: bool=False, 
                                  combine_figures: bool=False, 
                                  verbose: bool=False
@@ -1246,7 +1267,7 @@ def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brain
                                                                         activities_to_skip=activities_to_skip,
                                                                         subjects_to_skip=subjects_to_skip,
                                                                         verbose=False, 
-                                                                        projection_types=projection_types
+                                                                        projection_types=projection_types_for_bounds_calculations
                                                                       )
 
 
@@ -1254,7 +1275,7 @@ def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brain
                                                         activities_list=activities_list, 
                                                         activities_to_skip=activities_to_skip,
                                                         subjects_to_skip=subjects_to_skip,
-                                                        projection_types=projection_types,
+                                                        projection_types=projection_types_for_bounds_calculations,
                                                         verbose=False
                                                         )
         # Loglog  plots cannot have x or y <= 0     
@@ -1331,6 +1352,7 @@ def generate_spds_across_all(src_dir: str="/Users/zacharykelly/Aguirre-Brainard 
                             subjects_to_skip: Iterable=set(), 
                             activities_to_skip: Iterable=set(["lunch", "phone"]), 
                             projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = ["virtuallyFoveated", "justProjection"], 
+                            projection_types_for_bounds_calculations:  Iterable[Literal["virtuallyFoveated", "justProjection"]] = ["virtuallyFoveated", "justProjection"],
                             common_axes: bool=False, 
                             combine_figures: bool=False, 
                             verbose: bool=False
@@ -1355,7 +1377,7 @@ def generate_spds_across_all(src_dir: str="/Users/zacharykelly/Aguirre-Brainard 
     min_max_across_all: dict = _find_spd_axes_across_all(subject_paths,
                                                          subjects_to_skip=subjects_to_skip, 
                                                          activities_to_skip=activities_to_skip, 
-                                                         projection_types=projection_types, 
+                                                         projection_types=projection_types_for_bounds_calculations, 
                                                          verbose=False
                                                         )
 
@@ -1388,8 +1410,8 @@ def generate_spds_across_all(src_dir: str="/Users/zacharykelly/Aguirre-Brainard 
                                           nargout=0
                                         )
     
-    
-
+    # Close the MATLAB engine
+    eng.quit() 
 
     return 
 
