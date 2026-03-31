@@ -103,17 +103,20 @@ function [groupedExponentHandle, groupedVarianceHandle, groupedSpdHandle] = grou
         n_graph_cols = max([n_graph_cols, numel(group_activities)]);
     end 
 
-    % Create grouped exponent-map figure
+    % Create grouped exponent-map figure and KEEP the tiledlayout handle
     groupedExponentHandle = figure('Units', 'pixels', 'Position', [100 100 2200 1300]);
-    tiledlayout(groupedExponentHandle, n_graph_rows, n_graph_cols, "TileSpacing", "loose", "Padding", "loose");
+    groupedExponentLayout = tiledlayout(groupedExponentHandle, n_graph_rows, n_graph_cols, ...
+        "TileSpacing", "loose", "Padding", "loose");
 
-    % Create grouped variance-map figure
+    % Create grouped variance-map figure and KEEP the tiledlayout handle
     groupedVarianceHandle = figure('Units', 'pixels', 'Position', [120 120 2200 1300]);
-    tiledlayout(groupedVarianceHandle, n_graph_rows, n_graph_cols, "TileSpacing", "loose", "Padding", "loose");
+    groupedVarianceLayout = tiledlayout(groupedVarianceHandle, n_graph_rows, n_graph_cols, ...
+        "TileSpacing", "loose", "Padding", "loose");
 
-    % Create grouped SPD figure
+    % Create grouped SPD figure and KEEP the tiledlayout handle
     groupedSpdHandle = figure('Units', 'pixels', 'Position', [140 140 2200 1300]);
-    tiledlayout(groupedSpdHandle, n_graph_rows, n_graph_cols, "TileSpacing", "loose", "Padding", "loose");
+    groupedSpdLayout = tiledlayout(groupedSpdHandle, n_graph_rows, n_graph_cols, ...
+        "TileSpacing", "loose", "Padding", "loose");
 
     % Populate each tile directly by asking plotSPDs to draw the SPD plot
     % into the destination axes for that tile
@@ -140,7 +143,7 @@ function [groupedExponentHandle, groupedVarianceHandle, groupedSpdHandle] = grou
             assert(~strcmp(virtuallyFoveatedActivityData, ""));
 
             % justProjection data is optional, but if present, use it for
-            % direct comparison in the SPD plot
+            % direct comparison in the SPD plot and map plots
             justProjectionActivityData = false; 
             if (ismember("justProjection", projection_types))
                 justProjectionActivityData = activity_struct.justProjection; 
@@ -153,8 +156,7 @@ function [groupedExponentHandle, groupedVarianceHandle, groupedSpdHandle] = grou
             % -----------------------------------------------------------------
             % SPD tile
             % -----------------------------------------------------------------
-            figure(groupedSpdHandle);
-            spdTargetAxes = nexttile(tile_idx);
+            spdTargetAxes = nexttile(groupedSpdLayout, tile_idx);
             hold(spdTargetAxes, 'on');
 
             [exponentMapHandle, varianceMapHandle, ~] = plotSPDs( ...
@@ -169,51 +171,51 @@ function [groupedExponentHandle, groupedVarianceHandle, groupedSpdHandle] = grou
 
             title(spdTargetAxes, activity_name, 'Interpreter', 'none', 'FontWeight', 'bold');
             xlabel(spdTargetAxes, 'Frequency [Hz]');
-            ylabel(spdTargetAxes, 'Power [contrast^2/Hz]');
 
             if (aa == 1)
                 ylabel(spdTargetAxes, sprintf('\\bf%s\\rm\n%s', group_name, 'Power [contrast^2/Hz]'), 'Interpreter', 'tex');
+            else
+                ylabel(spdTargetAxes, 'Power [contrast^2/Hz]');
             end
 
-            % -----------------------------------------------------------------
+             % -----------------------------------------------------------------
             % Exponent tile
+            % Recreate the full plotSPDs map layout directly in the grouped
+            % figure using ordinary axes/colorbars so exportgraphics works.
             % -----------------------------------------------------------------
-            figure(groupedExponentHandle);
-            exponentTargetAxes = nexttile(tile_idx);
-            hold(exponentTargetAxes, 'on');
+            exponentTileAxes = nexttile(groupedExponentLayout, tile_idx);
+            axis(exponentTileAxes, 'off');
+            drawnow();
 
-            iCopyMapAxesFromPlotSPDs(exponentMapHandle, exponentTargetAxes);
+            exponentTilePosition = exponentTileAxes.Position;
+            delete(exponentTileAxes);
 
-            title(exponentTargetAxes, activity_name, 'Interpreter', 'none', 'FontWeight', 'bold');
-            axis(exponentTargetAxes, 'square');
-
-            if (aa == 1)
-                ylabel(exponentTargetAxes, sprintf('\\bf%s', group_name), 'Interpreter', 'tex');
-            end
+            iCopyEntireMapFigureFromPlotSPDs( ...
+                exponentMapHandle, ...
+                groupedExponentHandle, ...
+                exponentTilePosition, ...
+                activity_name, ...
+                group_name, ...
+                aa == 1);
 
             % -----------------------------------------------------------------
             % Variance tile
+            % Same idea as exponent tile.
             % -----------------------------------------------------------------
-            figure(groupedVarianceHandle);
-            varianceTargetAxes = nexttile(tile_idx);
-            hold(varianceTargetAxes, 'on');
+            varianceTileAxes = nexttile(groupedVarianceLayout, tile_idx);
+            axis(varianceTileAxes, 'off');
+            drawnow();
 
-            iCopyMapAxesFromPlotSPDs(varianceMapHandle, varianceTargetAxes);
+            varianceTilePosition = varianceTileAxes.Position;
+            delete(varianceTileAxes);
 
-            title(varianceTargetAxes, activity_name, 'Interpreter', 'none', 'FontWeight', 'bold');
-            axis(varianceTargetAxes, 'square');
-
-            if (aa == 1)
-                ylabel(varianceTargetAxes, sprintf('\\bf%s', group_name), 'Interpreter', 'tex');
-            end
-
-            % Close the temporary map figures created by plotSPDs
-            if (~isempty(exponentMapHandle) && isgraphics(exponentMapHandle))
-                close(exponentMapHandle);
-            end
-            if (~isempty(varianceMapHandle) && isgraphics(varianceMapHandle))
-                close(varianceMapHandle);
-            end
+            iCopyEntireMapFigureFromPlotSPDs( ...
+                varianceMapHandle, ...
+                groupedVarianceHandle, ...
+                varianceTilePosition, ...
+                activity_name, ...
+                group_name, ...
+                aa == 1);
         end 
 
         % If this row has fewer activities than the maximum number of
@@ -221,19 +223,16 @@ function [groupedExponentHandle, groupedVarianceHandle, groupedSpdHandle] = grou
         for aa = (numel(group_activities) + 1):n_graph_cols
             tile_idx = (gg - 1) * n_graph_cols + aa;
 
-            figure(groupedSpdHandle);
-            blankAxes = nexttile(tile_idx);
+            blankAxes = nexttile(groupedSpdLayout, tile_idx);
             axis(blankAxes, 'off');
 
-            figure(groupedExponentHandle);
-            blankAxes = nexttile(tile_idx);
+            blankAxes = nexttile(groupedExponentLayout, tile_idx);
             axis(blankAxes, 'off');
 
-            figure(groupedVarianceHandle);
-            blankAxes = nexttile(tile_idx);
+            blankAxes = nexttile(groupedVarianceLayout, tile_idx);
             axis(blankAxes, 'off');
         end
-    end 
+    end
 
     % Add bold super-titles to all grouped figures
     figure(groupedExponentHandle);
@@ -323,24 +322,17 @@ function sorted_activity_names = iSortActivitiesByPreferredOrder(activity_names,
     end
 end
 
-function iCopyMapAxesFromPlotSPDs(sourceFigureHandle, targetAxes)
-% Copy the virtually-foveated map axes from a plotSPDs map figure into a
-% destination tile axes.
+function iCopyEntireMapFigureFromPlotSPDs(sourceFigureHandle, targetFigureHandle, tilePosition, activity_name, group_name, is_first_column)
+% Copy the FULL map layout from a plotSPDs figure directly into a target
+% figure region corresponding to one outer tile.
 %
-% If plotSPDs was called with justProjectionActivityData, the source figure
-% contains 2 map axes:
-%   left  = justProjection
-%   right = virtuallyFoveated
-%
-% In that case, this helper copies the right-hand axes. Otherwise, it
-% copies the only map axes present.
-%
-% A separate colorbar is created for EACH target subplot.
+% Unlike the earlier uipanel-based approach, this recreates everything as
+% ordinary axes/colorbar graphics objects parented directly to the figure,
+% which is much more reliable for exportgraphics.
 
-    % Find all axes in the source figure.
+    % Find all real plotting axes in the source figure
     sourceAxes = findall(sourceFigureHandle, 'Type', 'axes');
 
-    % Remove non-plot axes such as colorbar / legend axes, if present.
     keepMask = true(size(sourceAxes));
     for ii = 1:numel(sourceAxes)
         thisTag = get(sourceAxes(ii), 'Tag');
@@ -350,63 +342,122 @@ function iCopyMapAxesFromPlotSPDs(sourceFigureHandle, targetAxes)
     end
     sourceAxes = sourceAxes(keepMask);
 
-    % Sort remaining axes by horizontal position so that:
-    %   sourceAxes(1)   = leftmost axes
-    %   sourceAxes(end) = rightmost axes
-    %
-    % When both justProjection and virtuallyFoveated are present, we want
-    % the rightmost one (virtuallyFoveated).
+    % Sort source axes left-to-right
     if (numel(sourceAxes) > 1)
-        positions = zeros(numel(sourceAxes), 1);
+        xPositions = zeros(numel(sourceAxes), 1);
         for ii = 1:numel(sourceAxes)
-            pos = get(sourceAxes(ii), 'Position');
-            positions(ii) = pos(1);
+            thisPos = get(sourceAxes(ii), 'Position');
+            xPositions(ii) = thisPos(1);
         end
-        [~, sortIdx] = sort(positions, 'ascend');
+        [~, sortIdx] = sort(xPositions, 'ascend');
         sourceAxes = sourceAxes(sortIdx);
     end
 
-    % Use the rightmost axes when there are 2 panels, otherwise use the
-    % only axes that exists.
-    sourceAxesToCopy = sourceAxes(end);
+    % ---------------------------------------------------------------------
+    % Layout inside the tile
+    % ---------------------------------------------------------------------
+    tileLeft   = tilePosition(1);
+    tileBottom = tilePosition(2);
+    tileWidth  = tilePosition(3);
+    tileHeight = tilePosition(4);
 
-    % Clear the destination axes before copying new content into it.
-    cla(targetAxes);
+    % Reserve a small strip at top for row/activity labels
+    titleFrac = 0.10;
+    gapFrac = 0.02;
 
-    % Copy all plotted children from the source axes into the destination.
-    childrenToCopy = allchild(sourceAxesToCopy);
-    copyobj(childrenToCopy, targetAxes);
+    contentBottom = tileBottom;
+    contentHeight = tileHeight * (1 - titleFrac);
+    titleBottom = tileBottom + contentHeight;
+    titleHeight = tileHeight * titleFrac;
 
-    % Copy over the important axes display properties so the destination
-    % tile matches the source map as closely as possible.
-    set(targetAxes, ...
-        'XLim', get(sourceAxesToCopy, 'XLim'), ...
-        'YLim', get(sourceAxesToCopy, 'YLim'), ...
-        'CLim', get(sourceAxesToCopy, 'CLim'), ...
-        'DataAspectRatio', get(sourceAxesToCopy, 'DataAspectRatio'), ...
-        'PlotBoxAspectRatio', get(sourceAxesToCopy, 'PlotBoxAspectRatio'), ...
-        'XDir', get(sourceAxesToCopy, 'XDir'), ...
-        'YDir', get(sourceAxesToCopy, 'YDir'));
+    % Add invisible annotation axes for labels
+    annotationAxes = axes( ...
+        'Parent', targetFigureHandle, ...
+        'Units', 'normalized', ...
+        'Position', [tileLeft, titleBottom, tileWidth, titleHeight], ...
+        'Visible', 'off', ...
+        'HitTest', 'off');
 
-    % Copy the colormap used by the source axes.
-    colormap(targetAxes, colormap(sourceAxesToCopy));
-
-    % Delete any existing colorbar already attached to this specific axes.
-    % This prevents duplicate colorbars if the helper is called more than
-    % once for the same tile axes.
-    sourceFigure = ancestor(targetAxes, 'figure');
-    allColorbars = findall(sourceFigure, 'Type', 'ColorBar');
-    for ii = 1:numel(allColorbars)
-        try
-            if isequal(allColorbars(ii).Axes, targetAxes)
-                delete(allColorbars(ii));
-            end
-        catch
-            % Do nothing if this colorbar does not expose an Axes property
-            % in the expected way on this MATLAB version.
-        end
+    if (is_first_column)
+        text(annotationAxes, 0.00, 0.5, sprintf('%s', group_name), ...
+            'Interpreter', 'none', ...
+            'FontWeight', 'bold', ...
+            'HorizontalAlignment', 'left', ...
+            'VerticalAlignment', 'middle');
     end
 
-    % Create a NEW colorbar for this specific subplot.
-    colorbar(targetAxes);
+    text(annotationAxes, 0.5, 0.5, activity_name, ...
+        'Interpreter', 'none', ...
+        'FontWeight', 'bold', ...
+        'HorizontalAlignment', 'center', ...
+        'VerticalAlignment', 'middle');
+
+    % ---------------------------------------------------------------------
+    % Build either a 1x2 inner layout or a single full-size map
+    % ---------------------------------------------------------------------
+    if (numel(sourceAxes) > 1)
+        innerGap = tileWidth * gapFrac;
+        innerWidth = (tileWidth - innerGap) / 2;
+
+        leftPos = [tileLeft, contentBottom, innerWidth, contentHeight];
+        rightPos = [tileLeft + innerWidth + innerGap, contentBottom, innerWidth, contentHeight];
+
+        iCopySingleAxesWithColorbar(sourceAxes(1), targetFigureHandle, leftPos);
+        iCopySingleAxesWithColorbar(sourceAxes(2), targetFigureHandle, rightPos);
+    else
+        fullPos = [tileLeft, contentBottom, tileWidth, contentHeight];
+        iCopySingleAxesWithColorbar(sourceAxes(1), targetFigureHandle, fullPos);
+    end
+end
+
+function iCopySingleAxesWithColorbar(sourceAxes, targetFigureHandle, targetPosition)
+% Recreate one map axes and its colorbar directly in the destination figure.
+
+    % Create destination axes
+    targetAxes = axes( ...
+        'Parent', targetFigureHandle, ...
+        'Units', 'normalized', ...
+        'Position', targetPosition);
+
+    % Copy children
+    childrenToCopy = allchild(sourceAxes);
+    copyobj(childrenToCopy, targetAxes);
+
+    % Copy important visual properties
+    set(targetAxes, ...
+        'XLim', get(sourceAxes, 'XLim'), ...
+        'YLim', get(sourceAxes, 'YLim'), ...
+        'CLim', get(sourceAxes, 'CLim'), ...
+        'DataAspectRatio', get(sourceAxes, 'DataAspectRatio'), ...
+        'PlotBoxAspectRatio', get(sourceAxes, 'PlotBoxAspectRatio'), ...
+        'XDir', get(sourceAxes, 'XDir'), ...
+        'YDir', get(sourceAxes, 'YDir'), ...
+        'FontSize', get(sourceAxes, 'FontSize'), ...
+        'Box', get(sourceAxes, 'Box'), ...
+        'Visible', get(sourceAxes, 'Visible'));
+
+    colormap(targetAxes, colormap(sourceAxes));
+
+    % Clear copied titles/labels inside the mini-map
+    title(targetAxes, '');
+    xlabel(targetAxes, '');
+    ylabel(targetAxes, '');
+
+    % Recreate colorbar as a normal figure graphics object
+    cb = colorbar(targetAxes);
+
+    % Keep the axes square-ish for map display
+    axis(targetAxes, 'square');
+
+    % Slightly shrink axes width so colorbar has room
+    axPos = targetAxes.Position;
+    axPos(3) = axPos(3) * 0.82;
+    targetAxes.Position = axPos;
+
+    % Reposition colorbar neatly inside this tile region
+    cb.Units = 'normalized';
+    cb.Position = [axPos(1) + axPos(3) + 0.01 * targetPosition(3), ...
+                   axPos(2), ...
+                   0.04 * targetPosition(3), ...
+                   axPos(4)];
 end

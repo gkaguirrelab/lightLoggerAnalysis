@@ -451,18 +451,36 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(vi
     xL = xlim(targetAxes);
     yL = ylim(targetAxes);
 
-    % Create dense log-spaced ticks
-    numTicks = 10; % increase if you want more density
-    xticksVals = logspace(log10(xL(1)), log10(xL(2)), numTicks);
-    yticksVals = logspace(log10(yL(1)), log10(yL(2)), numTicks);
+    %% =========================
+    % X AXIS (clean whole numbers)
+    %% =========================
 
-    % Set ticks
+    % Generate integer ticks within range
+    xticksVals = unique(round(logspace(log10(xL(1)), log10(xL(2)), 12)));
+
+    % Keep only valid ticks inside limits
+    xticksVals = xticksVals(xticksVals >= xL(1) & xticksVals <= xL(2));
+
+    % Ensure uniqueness and sorting
+    xticksVals = unique(xticksVals);
+
     set(targetAxes, 'XTick', xticksVals);
+
+    % Force integer labels (NO scientific notation)
+    xticklabels(targetAxes, arrayfun(@(x) sprintf('%d', x), xticksVals, 'UniformOutput', false));
+
+
+    %% =========================
+    % Y AXIS (clean decimals)
+    %% =========================
+
+    % Log-spaced ticks (keep density)
+    yticksVals = logspace(log10(yL(1)), log10(yL(2)), 10);
+
     set(targetAxes, 'YTick', yticksVals);
 
-    % Format tick labels as plain numbers (NOT 10^x)
-    xticklabels(targetAxes, arrayfun(@(x) sprintf('%.3g', x), xticksVals, 'UniformOutput', false));
-    yticklabels(targetAxes, arrayfun(@(y) sprintf('%.3g', y), yticksVals, 'UniformOutput', false));
+    % Format as fixed decimal (NO scientific notation)
+    yticklabels(targetAxes, arrayfun(@(y) sprintf('%.6f', y), yticksVals, 'UniformOutput', false));
 
     % Only export/close the SPD figure if we created it locally
     if (islogical(spdTargetAxes) && ~islogical(options.output_dir))
