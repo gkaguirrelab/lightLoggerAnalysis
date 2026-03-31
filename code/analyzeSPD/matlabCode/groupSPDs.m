@@ -1,4 +1,4 @@
-function groupedSpdHandle = groupSPDs(groupedActivityData, options)
+function [groupedExponentHandle, groupedVarianceHandle, groupedSpdHandle] = groupSPDs(groupedActivityData, options)
 % Plot grouped SPD-by-region summaries across multiple activities
 %
 % Syntax:
@@ -81,8 +81,6 @@ function groupedSpdHandle = groupSPDs(groupedActivityData, options)
         groupedActivityData = load(groupedActivityData).groupedActivityData; 
     end     
 
-    disp(groupedActivityData)
-
     % The top-level field names correspond to the row groups
     group_names = fieldnames(groupedActivityData); 
     n_graph_rows = numel(group_names);
@@ -105,13 +103,17 @@ function groupedSpdHandle = groupSPDs(groupedActivityData, options)
         n_graph_cols = max([n_graph_cols, numel(group_activities)]);
     end 
 
-    % Create a larger grouped figure so the tiles have more room and the
-    % resulting PDF is less visually cramped
-    groupedSpdHandle = figure('Units', 'pixels', 'Position', [100 100 2200 1300]);
+    % Create grouped exponent-map figure
+    groupedExponentHandle = figure('Units', 'pixels', 'Position', [100 100 2200 1300]);
+    tiledlayout(groupedExponentHandle, n_graph_rows, n_graph_cols, "TileSpacing", "loose", "Padding", "loose");
 
-    % Use looser spacing than before to give labels, legends, and titles
-    % more breathing room
-    tiledlayout(n_graph_rows, n_graph_cols, "TileSpacing", "loose", "Padding", "loose");
+    % Create grouped variance-map figure
+    groupedVarianceHandle = figure('Units', 'pixels', 'Position', [120 120 2200 1300]);
+    tiledlayout(groupedVarianceHandle, n_graph_rows, n_graph_cols, "TileSpacing", "loose", "Padding", "loose");
+
+    % Create grouped SPD figure
+    groupedSpdHandle = figure('Units', 'pixels', 'Position', [140 140 2200 1300]);
+    tiledlayout(groupedSpdHandle, n_graph_rows, n_graph_cols, "TileSpacing", "loose", "Padding", "loose");
 
     % Populate each tile directly by asking plotSPDs to draw the SPD plot
     % into the destination axes for that tile
@@ -147,13 +149,14 @@ function groupedSpdHandle = groupSPDs(groupedActivityData, options)
 
             % Compute the tile index for this row / column
             tile_idx = (gg - 1) * n_graph_cols + aa;
-            targetAxes = nexttile(tile_idx);
-            hold(targetAxes, 'on');
 
-            % Draw the SPD plot directly into the target axes. The exponent
-            % and variance figures are still created internally by plotSPDs,
-            % but we immediately close them since groupSPDs only needs the
-            % SPD panel.
+            % -----------------------------------------------------------------
+            % SPD tile
+            % -----------------------------------------------------------------
+            figure(groupedSpdHandle);
+            spdTargetAxes = nexttile(tile_idx);
+            hold(spdTargetAxes, 'on');
+
             [exponentMapHandle, varianceMapHandle, ~] = plotSPDs( ...
                 virtuallyFoveatedActivityData, ...
                 "exponent_clim", options.exponent_clim, ...
@@ -161,57 +164,113 @@ function groupedSpdHandle = groupSPDs(groupedActivityData, options)
                 "spd_xlim", options.spd_xlim, ...
                 "spd_ylim", options.spd_ylim, ...
                 "justProjectionActivityData", justProjectionActivityData, ...
-                "spd_target_axes", targetAxes ...
+                "spd_target_axes", spdTargetAxes ...
             );
 
-            % Replace the default plotSPDs title with a compact per-tile
-            % activity title better suited for grouped viewing
-            title(targetAxes, activity_name, 'Interpreter', 'none', 'FontWeight', 'bold');
+            title(spdTargetAxes, activity_name, 'Interpreter', 'none', 'FontWeight', 'bold');
+            xlabel(spdTargetAxes, 'Frequency [Hz]');
+            ylabel(spdTargetAxes, 'Power [contrast^2/Hz]');
 
-            % Keep axis labels consistent across grouped plots
-            xlabel(targetAxes, 'Frequency [Hz]');
-            ylabel(targetAxes, 'Power [contrast^2/Hz]');
-
-            % On the first column of each row, prepend the group name to the
-            % y-axis label so each row is clearly labeled by group
             if (aa == 1)
-                ylabel(targetAxes, sprintf('\\bf%s\\rm\n%s', group_name, 'Power [contrast^2/Hz]'), 'Interpreter', 'tex');
+                ylabel(spdTargetAxes, sprintf('\\bf%s\\rm\n%s', group_name, 'Power [contrast^2/Hz]'), 'Interpreter', 'tex');
             end
 
-            % Close the temporary exponent / variance map figures created by
-            % plotSPDs so they do not accumulate during grouped plotting
+            % -----------------------------------------------------------------
+            % Exponent tile
+            % -----------------------------------------------------------------
+            figure(groupedExponentHandle);
+            exponentTargetAxes = nexttile(tile_idx);
+            hold(exponentTargetAxes, 'on');
+
+            iCopyMapAxesFromPlotSPDs(exponentMapHandle, exponentTargetAxes);
+
+            title(exponentTargetAxes, activity_name, 'Interpreter', 'none', 'FontWeight', 'bold');
+            axis(exponentTargetAxes, 'square');
+
+            if (aa == 1)
+                ylabel(exponentTargetAxes, sprintf('\\bf%s', group_name), 'Interpreter', 'tex');
+            end
+
+            % -----------------------------------------------------------------
+            % Variance tile
+            % -----------------------------------------------------------------
+            figure(groupedVarianceHandle);
+            varianceTargetAxes = nexttile(tile_idx);
+            hold(varianceTargetAxes, 'on');
+
+            iCopyMapAxesFromPlotSPDs(varianceMapHandle, varianceTargetAxes);
+
+            title(varianceTargetAxes, activity_name, 'Interpreter', 'none', 'FontWeight', 'bold');
+            axis(varianceTargetAxes, 'square');
+
+            if (aa == 1)
+                ylabel(varianceTargetAxes, sprintf('\\bf%s', group_name), 'Interpreter', 'tex');
+            end
+
+            % Close the temporary map figures created by plotSPDs
             if (~isempty(exponentMapHandle) && isgraphics(exponentMapHandle))
                 close(exponentMapHandle);
             end
             if (~isempty(varianceMapHandle) && isgraphics(varianceMapHandle))
                 close(varianceMapHandle);
             end
-        end
+        end 
 
         % If this row has fewer activities than the maximum number of
-        % columns, fill the remaining tiles with blank axes
+        % columns, fill the remaining tiles with blank axes in all 3 figures
         for aa = (numel(group_activities) + 1):n_graph_cols
             tile_idx = (gg - 1) * n_graph_cols + aa;
+
+            figure(groupedSpdHandle);
+            blankAxes = nexttile(tile_idx);
+            axis(blankAxes, 'off');
+
+            figure(groupedExponentHandle);
+            blankAxes = nexttile(tile_idx);
+            axis(blankAxes, 'off');
+
+            figure(groupedVarianceHandle);
             blankAxes = nexttile(tile_idx);
             axis(blankAxes, 'off');
         end
     end 
 
-    % Add a bold super-title to the grouped figure
+    % Add bold super-titles to all grouped figures
+    figure(groupedExponentHandle);
+    sgtitle(sprintf('%s | Exponent Maps Grouped By Subject', options.title), ...
+        'Interpreter', 'none', ...
+        'FontWeight', 'bold');
+
+    figure(groupedVarianceHandle);
+    sgtitle(sprintf('%s | Variance Maps Grouped By Subject', options.title), ...
+        'Interpreter', 'none', ...
+        'FontWeight', 'bold');
+
+    figure(groupedSpdHandle);
     sgtitle(sprintf('%s | SPDs Grouped By Subject', options.title), ...
         'Interpreter', 'none', ...
         'FontWeight', 'bold');
 
-    % Export the grouped figure if requested
+    % Export grouped figures if requested
     if (~strcmp(options.output_dir, ""))
         assert(~strcmp(options.title, ""), ...
             'groupSPDs:MissingTitle', ...
             'options.title must be provided when saving output.');
 
-        output_filepath = fullfile(options.output_dir, sprintf('%s_groupedSPDs.pdf', options.title));
+        exponent_output_filepath = fullfile(options.output_dir, sprintf('%s_groupedExponentMaps.pdf', options.title));
+        variance_output_filepath = fullfile(options.output_dir, sprintf('%s_groupedVarianceMaps.pdf', options.title));
+        spd_output_filepath = fullfile(options.output_dir, sprintf('%s_groupedSPDs.pdf', options.title));
 
-        if (~exist(output_filepath, 'file') || options.overwrite_existing)
-            exportgraphics(groupedSpdHandle, output_filepath, 'ContentType', 'vector');
+        if (~exist(exponent_output_filepath, 'file') || options.overwrite_existing)
+            exportgraphics(groupedExponentHandle, exponent_output_filepath, 'ContentType', 'vector');
+        end
+
+        if (~exist(variance_output_filepath, 'file') || options.overwrite_existing)
+            exportgraphics(groupedVarianceHandle, variance_output_filepath, 'ContentType', 'vector');
+        end
+
+        if (~exist(spd_output_filepath, 'file') || options.overwrite_existing)
+            exportgraphics(groupedSpdHandle, spd_output_filepath, 'ContentType', 'vector');
         end
     end
 end
@@ -262,4 +321,92 @@ function sorted_activity_names = iSortActivitiesByPreferredOrder(activity_names,
             sorted_activity_names{end+1} = current_name; %#ok<AGROW>
         end
     end
+end
+
+function iCopyMapAxesFromPlotSPDs(sourceFigureHandle, targetAxes)
+% Copy the virtually-foveated map axes from a plotSPDs map figure into a
+% destination tile axes.
+%
+% If plotSPDs was called with justProjectionActivityData, the source figure
+% contains 2 map axes:
+%   left  = justProjection
+%   right = virtuallyFoveated
+%
+% In that case, this helper copies the right-hand axes. Otherwise, it
+% copies the only map axes present.
+%
+% A separate colorbar is created for EACH target subplot.
+
+    % Find all axes in the source figure.
+    sourceAxes = findall(sourceFigureHandle, 'Type', 'axes');
+
+    % Remove non-plot axes such as colorbar / legend axes, if present.
+    keepMask = true(size(sourceAxes));
+    for ii = 1:numel(sourceAxes)
+        thisTag = get(sourceAxes(ii), 'Tag');
+        if strcmpi(thisTag, 'Colorbar') || strcmpi(thisTag, 'legend')
+            keepMask(ii) = false;
+        end
+    end
+    sourceAxes = sourceAxes(keepMask);
+
+    % Sort remaining axes by horizontal position so that:
+    %   sourceAxes(1)   = leftmost axes
+    %   sourceAxes(end) = rightmost axes
+    %
+    % When both justProjection and virtuallyFoveated are present, we want
+    % the rightmost one (virtuallyFoveated).
+    if (numel(sourceAxes) > 1)
+        positions = zeros(numel(sourceAxes), 1);
+        for ii = 1:numel(sourceAxes)
+            pos = get(sourceAxes(ii), 'Position');
+            positions(ii) = pos(1);
+        end
+        [~, sortIdx] = sort(positions, 'ascend');
+        sourceAxes = sourceAxes(sortIdx);
+    end
+
+    % Use the rightmost axes when there are 2 panels, otherwise use the
+    % only axes that exists.
+    sourceAxesToCopy = sourceAxes(end);
+
+    % Clear the destination axes before copying new content into it.
+    cla(targetAxes);
+
+    % Copy all plotted children from the source axes into the destination.
+    childrenToCopy = allchild(sourceAxesToCopy);
+    copyobj(childrenToCopy, targetAxes);
+
+    % Copy over the important axes display properties so the destination
+    % tile matches the source map as closely as possible.
+    set(targetAxes, ...
+        'XLim', get(sourceAxesToCopy, 'XLim'), ...
+        'YLim', get(sourceAxesToCopy, 'YLim'), ...
+        'CLim', get(sourceAxesToCopy, 'CLim'), ...
+        'DataAspectRatio', get(sourceAxesToCopy, 'DataAspectRatio'), ...
+        'PlotBoxAspectRatio', get(sourceAxesToCopy, 'PlotBoxAspectRatio'), ...
+        'XDir', get(sourceAxesToCopy, 'XDir'), ...
+        'YDir', get(sourceAxesToCopy, 'YDir'));
+
+    % Copy the colormap used by the source axes.
+    colormap(targetAxes, colormap(sourceAxesToCopy));
+
+    % Delete any existing colorbar already attached to this specific axes.
+    % This prevents duplicate colorbars if the helper is called more than
+    % once for the same tile axes.
+    sourceFigure = ancestor(targetAxes, 'figure');
+    allColorbars = findall(sourceFigure, 'Type', 'ColorBar');
+    for ii = 1:numel(allColorbars)
+        try
+            if isequal(allColorbars(ii).Axes, targetAxes)
+                delete(allColorbars(ii));
+            end
+        catch
+            % Do nothing if this colorbar does not expose an Axes property
+            % in the expected way on this MATLAB version.
+        end
+    end
+
+    % Create a NEW colorbar for this specific subplot.
+    colorbar(targetAxes);
 end

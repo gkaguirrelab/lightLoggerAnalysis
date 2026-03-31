@@ -703,7 +703,7 @@ def group_spds_across_subjects(src_dir: str="/Users/zacharykelly/Aguirre-Brainar
     scipy.io.savemat(temp_output_filepath, {"groupedActivityData": averaged_groups})
 
     # Construct the output directory 
-    output_dir: str = os.path.join(dst_dir)
+    output_dir: str = os.path.join(dst_dir, "acrossSubjects", activity_name)
     eng.groupSPDs(temp_output_filepath, 
                     "exponent_clim", min_max_across_all["exponentMap"]["bounds"], 
                     "variance_clim", min_max_across_all["varianceMap"]["bounds"], 
@@ -1194,8 +1194,8 @@ def _find_spd_axes_per_activity(subject_paths: list[str],
     return min_maxes
 
 
-def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026/", 
-                                 dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026/acrossSubjects",
+def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026", 
+                                 dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026",
                                  overwrite_existing: bool=False,
                                  subjects_to_skip: Iterable=set(), 
                                  activities_to_skip: Iterable=set(["lunch", "phone"]), 
@@ -1298,7 +1298,7 @@ def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brain
         axes_min_maxes = default_axes_min_maxes if common_axes is False else all_axes_min_maxes_per_activity[activity_name]
         
         # Generate the output dir
-        output_dir: str = os.path.join(dst_dir, activity_name)
+        output_dir: str = os.path.join(dst_dir, "acrossSubjects", activity_name)
         os.makedirs(output_dir, exist_ok=True)
 
         # iterate over desired projection types 
@@ -1325,8 +1325,8 @@ def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brain
     return 
 
 
-def generate_spds_across_all(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026/", 
-                            dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026/",
+def generate_spds_across_all(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026", 
+                            dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026",
                             overwrite_existing: bool=False,
                             subjects_to_skip: Iterable=set(), 
                             activities_to_skip: Iterable=set(["lunch", "phone"]), 
@@ -1366,11 +1366,15 @@ def generate_spds_across_all(src_dir: str="/Users/zacharykelly/Aguirre-Brainard 
                                    and os.path.isdir(os.path.join(src_dir, "acrossSubjects", activity))
                                   ]
     
+    # Make the output dir if it does not exist already 
+    output_dir: str = os.path.join(dst_dir, "acrossAll")
+    os.makedirs(output_dir, exist_ok=True)
+
     # Now, we will gather the path to the SPD 
     for projection_type in projection_types:
         # Call the MATLAB plotting function
         eng.processSPDAcrossActivities(os.path.join(src_dir, "acrossSubjects"), 
-                                          dst_dir, 
+                                          output_dir, 
                                           "activities", activity_names,
                                           "verbose", False, 
                                           "save_figures", True, 
