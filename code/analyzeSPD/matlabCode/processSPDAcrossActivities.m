@@ -162,7 +162,7 @@ function virtuallyFoveatedActivityDataAcrossSubjects = processSPDAcrossActivitie
     % exists, skip the computation entirely.
     if (output_dir ~= "")
         output_filepath = fullfile(output_dir, ...
-            sprintf("allActivities_%s_SPDResultsAcrossAll.mat", options.projection_type));
+            sprintf("acrossActivities_%s_SPDResultsAcrossAll.mat", options.projection_type));
 
         if (~options.overwrite_existing && isfile(output_filepath))
             if (options.verbose)
@@ -348,11 +348,11 @@ function virtuallyFoveatedActivityDataAcrossSubjects = processSPDAcrossActivitie
             end
 
             exponentMapPath = fullfile(output_dir, ...
-                sprintf('allActivities_%s_exponentMapAcrossAll.pdf', options.projection_type));
+                sprintf('acrossActivities_%s_exponentMapAcrossAll.pdf', options.projection_type));
             varianceMapPath = fullfile(output_dir, ...
-                sprintf('allActivities_%s_varianceMapAcrossAll.pdf', options.projection_type));
+                sprintf('acrossActivities_%s_varianceMapAcrossAll.pdf', options.projection_type));
             spdByRegionPath = fullfile(output_dir, ...
-                sprintf('allActivities_%s_spdByRegionAcrossAll.pdf', options.projection_type));
+                sprintf('acrossActivities_%s_spdByRegionAcrossAll.pdf', options.projection_type));
 
             if (~exist(exponentMapPath, 'file') || options.overwrite_existing)
                 exportgraphics(exponentMapHandle, exponentMapPath, 'ContentType', 'vector');
