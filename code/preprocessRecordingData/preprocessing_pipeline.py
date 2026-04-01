@@ -1383,45 +1383,55 @@ def generate_spds_across_groups(src_dir: str="/Users/zacharykelly/Aguirre-Braina
                                                          projection_types=projection_types_for_bounds_calculations, 
                                                          verbose=False
                                                         )
-    
-    # Iterate over the groups we have defined 
-    group_names: list[str] = list(groups.keys())
-    group_iterator: Iterable = range(len(groups)) if verbose is False else tqdm(range(len(groups)), desc="Processing Groups")
-    for group_number in group_iterator:
-        # Retrieve the group name
-        group_name: str = group_names
+    projection_types = list(projection_types)
+    projection_iterator: Iterable = range(len(projection_types)) if verbose is False else tqdm(range(len(projection_types)), desc="Processing projection types")
+    for projection_num in projection_iterator:
+        # Retrieve the projection type 
+        projection_type: str = projection_types[projection_num]
 
-        # Find all the activities in the group 
-        group_activities: list[str] = list(groups[group_names].keys())
+        # Then iterate over groups
+        group_names: list[str] = list(groups.keys())
+        group_iterator: Iterable = range(len(groups)) if verbose is False else tqdm(range(len(groups)), desc=f"Processing groups")
 
-        # Make the output dir 
-        output_dir: str = os.path.join(dst_dir, group_name)
-        os.makedirs(output_dir, exist_ok=True)
+        for group_number in group_iterator:
+            # Retrieve the group name
+            group_name: str = group_names[group_number]
 
-        # Assemble all of the paths to these activities 
-        for activity in group_activities:
-            # Construct the path and ensure it exists 
-            if(activity in activities_to_skip):
-                continue 
-            activity_path: str = os.ath.join(src_dir, "acrossSubjects", activity)
-            assert os.path.exists(activity_path), f"Problem with: {activity_path}"
+            # Find all the activities in the group
+            group_activities: list[str] = groups[group_name] if (isinstance(groups[group_name], list) or isinstance(groups[group_name], tuple)) else list(groups[group_name].keys())
 
-            # Iterate over the projection types 
-            # and ensure they exists 
-            for projection_type in projection_types:
-                projection_path: str = os.path.join(activity_path, f"{activity}_{projection_type}_SPDResultsAcorssSubjects.mat")
+            # Make the output dir
+            output_dir: str = os.path.join(dst_dir, group_name)
+            os.makedirs(output_dir, exist_ok=True)
+
+            # Iterate over activities
+            for activity in group_activities:
+                if(activity in activities_to_skip):
+                    continue 
+
+                # Assert the activity and projection paths exist
+                activity_path: str = os.path.join(src_dir, "acrossSubjects", activity)
+                assert os.path.exists(activity_path), f"Problem with: {activity_path}"
+
+                # Construct projection path
+                projection_path: str = os.path.join(activity_path, f"{activity}_{projection_type}_SPDResultsAcrossSubjects.mat")
                 assert os.path.exists(projection_path), f"Problem with: {projection_path}"
-
-                # If there is no problem, save this information 
-                if(groups[group_name][activity] is None):
-                    groups[group_name][activity] = {projection_type: projection_path}
-                else:
-                    groups[group_name][activity][projection_type] = projection_path
-
-
-
-
-
+     
+            # Call the MATLAB plotting function
+            eng.processSPDAcrossActivities(os.path.join(src_dir, "acrossSubjects"), 
+                                            output_dir, 
+                                            "activities", group_activities,
+                                            "verbose", False, 
+                                            "save_figures", True, 
+                                            "overwrite_existing", overwrite_existing, 
+                                            "projection_type", projection_type,
+                                            "exponent_clim", min_max_across_all["exponentMap"]["bounds"],
+                                            "variance_clim", min_max_across_all["varianceMap"]["bounds"], 
+                                            "spd_xlim", min_max_across_all["frq"]["bounds"],
+                                            "spd_ylim", min_max_across_all["spdByRegion"]["bounds"], 
+                                            "combine_figures", combine_figures,
+                                            nargout=0
+                                            )
 
 
 
