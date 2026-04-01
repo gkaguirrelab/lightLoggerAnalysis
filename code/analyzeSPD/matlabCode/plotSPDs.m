@@ -133,6 +133,27 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(vi
     degPerPix = fovDegrees / size(virtuallyFoveatedExponentMap,1);
     idxStarts = 1:12:(480 - 24 + 1);
 
+   % Build center/periphery masks for SPD averaging
+    center_spd_eccentricity = 5; % Degrees
+    centerRadiusPix = center_spd_eccentricity / degPerPix;
+
+    spdHeight = size(virtuallyFoveatedSpdByRegion, 1);
+    spdWidth = size(virtuallyFoveatedSpdByRegion, 2);
+
+    % Region-center locations expressed in image-pixel coordinates
+    spdXCenters = ((1:spdWidth) - 0.5) * (size(virtuallyFoveatedExponentMap, 2) / spdWidth);
+    spdYCenters = ((1:spdHeight) - 0.5) * (size(virtuallyFoveatedExponentMap, 1) / spdHeight);
+
+    [spdXGrid, spdYGrid] = meshgrid(spdXCenters, spdYCenters);
+
+    imageCenterX = size(virtuallyFoveatedExponentMap, 2) / 2;
+    imageCenterY = size(virtuallyFoveatedExponentMap, 1) / 2;
+
+    spdDistanceFromCenter = sqrt((spdXGrid - imageCenterX).^2 + (spdYGrid - imageCenterY).^2);
+
+    centerMask = (spdDistanceFromCenter <= centerRadiusPix);
+    peripheryMask = (spdDistanceFromCenter > centerRadiusPix);
+
     % ---------------------------------------------------------------------
     % Exponent map figure
     % ---------------------------------------------------------------------
@@ -339,10 +360,24 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(vi
     end
 
     if (~islogical(justProjectionActivityData))
-        virtuallyFoveatedCenterSpd = squeeze(virtuallyFoveatedSpdByRegion(20,20,:));
-        virtuallyFoveatedPeripherySpd = squeeze(virtuallyFoveatedSpdByRegion(31,20,:));
-        justProjectionCenterSpd = squeeze(justProjectionSpdByRegion(20,20,:));
-        justProjectionPeripherySpd = squeeze(justProjectionSpdByRegion(31,20,:));
+        centerMask3D = repmat(centerMask, [1, 1, size(virtuallyFoveatedSpdByRegion, 3)]);
+        peripheryMask3D = repmat(peripheryMask, [1, 1, size(virtuallyFoveatedSpdByRegion, 3)]);
+
+        vfCenterTmp = virtuallyFoveatedSpdByRegion;
+        vfCenterTmp(~centerMask3D) = nan;
+        virtuallyFoveatedCenterSpd = squeeze(mean(mean(vfCenterTmp, 1, 'omitmissing'), 2, 'omitmissing'));
+
+        vfPeripheryTmp = virtuallyFoveatedSpdByRegion;
+        vfPeripheryTmp(~peripheryMask3D) = nan;
+        virtuallyFoveatedPeripherySpd = squeeze(mean(mean(vfPeripheryTmp, 1, 'omitmissing'), 2, 'omitmissing'));
+
+        jpCenterTmp = justProjectionSpdByRegion;
+        jpCenterTmp(~centerMask3D) = nan;
+        justProjectionCenterSpd = squeeze(mean(mean(jpCenterTmp, 1, 'omitmissing'), 2, 'omitmissing'));
+
+        jpPeripheryTmp = justProjectionSpdByRegion;
+        jpPeripheryTmp(~peripheryMask3D) = nan;
+        justProjectionPeripherySpd = squeeze(mean(mean(jpPeripheryTmp, 1, 'omitmissing'), 2, 'omitmissing'));
 
         virtuallyFoveatedFrqVector = virtuallyFoveatedFrq(:);
         justProjectionFrqVector = justProjectionFrq(:);
@@ -409,8 +444,16 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(vi
             'Location', 'best', 'Interpreter', 'none');
 
     else
-        centerSPD = squeeze(virtuallyFoveatedSpdByRegion(20,20,:));
-        peripherySPD = squeeze(virtuallyFoveatedSpdByRegion(31,20,:));
+        centerMask3D = repmat(centerMask, [1, 1, size(virtuallyFoveatedSpdByRegion, 3)]);
+        peripheryMask3D = repmat(peripheryMask, [1, 1, size(virtuallyFoveatedSpdByRegion, 3)]);
+
+        centerTmp = virtuallyFoveatedSpdByRegion;
+        centerTmp(~centerMask3D) = nan;
+        centerSPD = squeeze(mean(mean(centerTmp, 1, 'omitmissing'), 2, 'omitmissing'));
+
+        peripheryTmp = virtuallyFoveatedSpdByRegion;
+        peripheryTmp(~peripheryMask3D) = nan;
+        peripherySPD = squeeze(mean(mean(peripheryTmp, 1, 'omitmissing'), 2, 'omitmissing'));
 
         frqVector = virtuallyFoveatedFrq(:);
         centerSPD = centerSPD(:);

@@ -85,9 +85,13 @@ setpref(projectName, "camera_spectral_sensitivites_path", camera_spectral_sensit
 calfile_dir_path = fullfile(light_logger_analysis_path, "cal"); 
 setpref(projectName, "calfile_dir_path", calfile_dir_path); 
 
-% Add the path to 
+% Add the path to the world information and functions 
 world_util_path = fullfile(light_logger_analysis_path, "code", "library", "sensor_utility", "world_util.py"); 
 setpref(projectName, 'world_util_path', world_util_path); 
+
+% Save the path to the ms utility information and functions 
+ms_util_path = fullfile(light_logger_analysis_path, "code", "library", "sensor_utility", "ms_util.py"); 
+setpref(projectName, 'ms_util_path', ms_util_path); 
 
 % Save the path to the MATLAB I/O python library helper 
 video_io_util_path = fullfile(light_logger_analysis_path, "code", "library", "matlabIO", "python_libraries", "video_io.py");

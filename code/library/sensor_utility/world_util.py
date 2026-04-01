@@ -677,6 +677,8 @@ def world_timestamps_from_chunks(recording_path: str,
 
         # Load in the metadata and extract only the T column 
         world_metadata: np.ndarray = np.load(metadata_chunk_path)[:, 0].flatten()
+        if(convert_to_seconds is True):
+            world_metadata / ( 10 ** 9) # World timestamps are in nanoseconds by default
 
         # Sometimes the last chunk is empty. If this is true, skip it
         if(len(world_metadata) == 0):

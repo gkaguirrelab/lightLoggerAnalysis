@@ -18,6 +18,14 @@ function plotParticipantState(IMUdata, eyeStateData, blinkData, gazeData, winSiz
         ms_util = import_pyfile(getpref("lightLoggerAnalysis", "ms_util_path")); 
     end 
 
+    error("Did not yet fix path stuff ")
+
+    % Load in the world timesstamps and the MS data/ timestamps in seconds 
+    % from the RAW recording
+    world_timestamps = double(world_util.)
+
+
+
     %% Calculate Time Offsets (T0 based on IMU start)
     t0 = IMUdata.timestamp_ns_(1);
     
