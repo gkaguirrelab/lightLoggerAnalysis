@@ -359,6 +359,7 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(vi
         hold(targetAxes, 'on');
     end
 
+    % DOUBLE DATASET BRANCH
     if (~islogical(justProjectionActivityData))
         centerMask3D = repmat(centerMask, [1, 1, size(virtuallyFoveatedSpdByRegion, 3)]);
         peripheryMask3D = repmat(peripheryMask, [1, 1, size(virtuallyFoveatedSpdByRegion, 3)]);
@@ -435,7 +436,17 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(vi
                    '--r', 'LineWidth', 1.5);
         end
 
-        loglog(targetAxes, [10^0; 10^1.5], [10^-2; 10^-5], ':k');
+        if (~islogical(options.spd_xlim))
+            referenceXMax = max(double(options.spd_xlim));
+        else
+            referenceXMax = max([virtuallyFoveatedFrqVector(virtuallyFoveatedFrqVector > 0); ...
+                                justProjectionFrqVector(justProjectionFrqVector > 0)]);
+        end
+
+        referenceX = [1; referenceXMax];
+        referenceY = 1e-2 .* (referenceX .^ -2);
+
+        loglog(targetAxes, referenceX, referenceY, ':k');
 
         legend(targetAxes, ...
             {'justProjection center', 'justProjection periphery', ...
@@ -443,6 +454,8 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(vi
              'reference slope'}, ...
             'Location', 'best', 'Interpreter', 'none');
 
+
+    % SINGLE DATASET BRANCH
     else
         centerMask3D = repmat(centerMask, [1, 1, size(virtuallyFoveatedSpdByRegion, 3)]);
         peripheryMask3D = repmat(peripheryMask, [1, 1, size(virtuallyFoveatedSpdByRegion, 3)]);
@@ -469,7 +482,16 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(vi
             loglog(targetAxes, frqVector(validPeriphery), peripherySPD(validPeriphery), '-r', 'LineWidth', 1.5);
         end
 
-        loglog(targetAxes, [10^0; 10^1.5], [10^-2; 10^-5], ':k');
+        if (~islogical(options.spd_xlim))
+            referenceXMax = max(double(options.spd_xlim));
+        else
+            referenceXMax = max(frqVector(frqVector > 0));
+        end
+
+        referenceX = [1; referenceXMax];
+        referenceY = 1e-2 .* (referenceX .^ -2);
+
+        loglog(targetAxes, referenceX, referenceY, ':k');
 
         legend(targetAxes, {'center','periphery','reference slope'}, 'Location', 'best');
     end

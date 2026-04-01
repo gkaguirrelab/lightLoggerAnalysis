@@ -1001,9 +1001,13 @@ def _find_spd_axes_across_all(subject_paths: list[str],
     for graph_type in min_maxes:
         min_maxes[graph_type]["bounds"] = np.array( min_maxes[graph_type]["bounds"], dtype=np.float64)
 
-        # The max of the frq should be 60 
+        # The max of the frq should be 60. We hardcoded this value for the plots before VSS 2026 
         if(graph_type == "frq"):
             min_maxes[graph_type]["bounds"][-1] = max(min_maxes[graph_type]["bounds"][-1], 60)
+
+        # The min of the SPD by Region Y should be 0.000009. This is hardcoded for the plots before VSS 2026 
+        if(graph_type == "spdByRegion"):
+            min_maxes[graph_type]["bounds"][0] = max(min_maxes[graph_type]["bounds"][0], 0.000009)
 
 
     return min_maxes
