@@ -305,16 +305,25 @@ def ms_data_from_chunks(recording_path: str,
         metadata_chunk_path: str = ms_metadata_chunks[chunk_num]
 
         # Parse the buffer, selecting only the AS chip
-        data_chunk: np.ndarray = parse_readings(data_chunk_path)[0].to_numpy() 
+        data_buffer: np.ndarray = np.load(data_chunk_path)
+        data_chunk: np.ndarray = parse_readings(data_buffer)[0].to_numpy() 
         metadata_chunk: np.ndarray = np.load(metadata_chunk_path)
 
-        # Save this data in the running ararys 
+        # The last chunk may be empty, so just skip it if so
+        if(len(data_chunk) == 0):
+            continue 
+
+        # Save this data in the running ararys         
         data.append(data_chunk)
         metadata.append(metadata_chunk)
 
     # Convert to np.ndarray 
+    # and flatten to 1 long table of N channels for 
+    # data, 1 long vector for metadata
     data = np.array(data)
-    metadata = np.array(metadata)
+    n_chunks, n_readings, n_channels = data.shape
+    data = data.reshape((n_chunks * n_readings, n_channels))
+    metadata = np.array(metadata).flatten() 
 
     return data, metadata
 
