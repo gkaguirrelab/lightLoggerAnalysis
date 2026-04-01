@@ -6,7 +6,10 @@ import sys
 from typing import Literal
 import pandas as pd
 import mat73
+from natsort import natsorted 
+from tqdm.auto import tqdm
 import matlab
+from typing import Iterable
 
 # Store the scalar multipliers for all of the different colors of pixel's in an image 
 # We calculated this by making a measurement of the light integrating sphere in Zach's 
@@ -649,6 +652,40 @@ def calculate_color_weights_single_measurement(measurement: dict,
 """Given a recording path, return all of the timestamps 
    of the frames
 """
-def read_world_timestamps() -> None:
+def world_timestamps_from_chunks(recording_path: str, 
+                                 convert_to_seconds: bool=True,
+                                 verbose: bool=False
+                                ) -> None:
+    
+    # First, let's find the world metadata chunks
+    world_metadata_chunks: list[str] = natsorted([os.path.join(recording_path, filename)
+                                                  for filename in os.listdir(recording_path)
+                                                  if filename.startswith("world")
+                                                  and "metadata" in filename
+                                                 ]
+                                            )
+    assert len(world_metadata_chunks) > 0, f"0 world metadata chunks found @ {recording_path}"
+    
+    # Once we have them, let's iterate over the paths 
+    metadata: list[np.ndarray] | np.ndarray = []
 
-    return 
+    # Once we have the paths to the metadata chunks, we will simply read them in 
+    path_iterator: Iterable = range(len(world_metadata_chunks)) if verbose is False else tqdm(range(len(world_metadata_chunks)), desc="Loading world metadata chunks")
+    for chunk_num in path_iterator:
+        # Retrieve the path to this chunk 
+        metadata_chunk_path: str = world_metadata_chunks[chunk_num]
+
+        # Load in the metadata and extract only the T column 
+        world_metadata: np.ndarray = np.load(metadata_chunk_path)[:, 0].flatten()
+
+        # Sometimes the last chunk is empty. If this is true, skip it
+        if(len(world_metadata) == 0):
+            continue
+
+        # Save it to the running list 
+        metadata.extend(world_metadata)
+
+    # convert to standardized np array 
+    metadata = np.vstack(metadata).flatten()
+
+    return metadata
