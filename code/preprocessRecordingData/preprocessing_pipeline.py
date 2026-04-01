@@ -1345,9 +1345,96 @@ def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brain
 
     return 
 
+def generate_spds_across_groups(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026", 
+                            dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026",
+                            overwrite_existing: bool=False,
+                            subjects_to_skip: Iterable=set(), 
+                            activities_to_skip: Iterable=set(["lunch", "phone"]), 
+                            projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = ["virtuallyFoveated", "justProjection"], 
+                            projection_types_for_bounds_calculations:  Iterable[Literal["virtuallyFoveated", "justProjection"]] = ["virtuallyFoveated", "justProjection"],
+                            common_axes: bool=False, 
+                            combine_figures: bool=False, 
+                            verbose: bool=False,
+                            groups: dict[str, dict[str, str | None]] = {"indoor": {"work": None, "chat": None, "walkIndoor": None}, 
+                                                                    "outdoor": {"walkOutdoor": None, "walkBiopond": None, "sitBiopond": None}
+                                                                    }
+                        ) -> None:
+    
+    import matlab.engine
+    
+    # Initialize the MATLAB engine to utilize the MATLAB function we have developed for this purpose 
+    eng: object = matlab.engine.start_matlab()  
+    eng.pyenv('Version', '~/Documents/MATLAB/projects/lightLoggerAnalysis/analysis_env/bin/python', nargout=0)
+    eng.tbUseProject('lightLoggerAnalysis', nargout=0)
+
+    # Let's find the bounds across all subjects and activities
+    # First, let's find all of the subjects in this experiment 
+    subject_paths: list[str] = natsorted([os.path.join(src_dir, subject_name) 
+                                          for subject_name in os.listdir(src_dir) 
+                                          if re.fullmatch(r"FLIC_\d+", subject_name) 
+                                          and os.path.isdir(os.path.join(src_dir, subject_name))
+                                         ]
+                                        ) 
+    assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
+
+    min_max_across_all: dict = _find_spd_axes_across_all(subject_paths,
+                                                         subjects_to_skip=subjects_to_skip, 
+                                                         activities_to_skip=activities_to_skip, 
+                                                         projection_types=projection_types_for_bounds_calculations, 
+                                                         verbose=False
+                                                        )
+    
+    # Iterate over the groups we have defined 
+    group_names: list[str] = list(groups.keys())
+    group_iterator: Iterable = range(len(groups)) if verbose is False else tqdm(range(len(groups)), desc="Processing Groups")
+    for group_number in group_iterator:
+        # Retrieve the group name
+        group_name: str = group_names
+
+        # Find all the activities in the group 
+        group_activities: list[str] = list(groups[group_names].keys())
+
+        # Make the output dir 
+        output_dir: str = os.path.join(dst_dir, group_name)
+        os.makedirs(output_dir, exist_ok=True)
+
+        # Assemble all of the paths to these activities 
+        for activity in group_activities:
+            # Construct the path and ensure it exists 
+            if(activity in activities_to_skip):
+                continue 
+            activity_path: str = os.ath.join(src_dir, "acrossSubjects", activity)
+            assert os.path.exists(activity_path), f"Problem with: {activity_path}"
+
+            # Iterate over the projection types 
+            # and ensure they exists 
+            for projection_type in projection_types:
+                projection_path: str = os.path.join(activity_path, f"{activity}_{projection_type}_SPDResultsAcorssSubjects.mat")
+                assert os.path.exists(projection_path), f"Problem with: {projection_path}"
+
+                # If there is no problem, save this information 
+                if(groups[group_name][activity] is None):
+                    groups[group_name][activity] = {projection_type: projection_path}
+                else:
+                    groups[group_name][activity][projection_type] = projection_path
+
+
+
+
+
+
+
+
+    # Close the matlab engine 
+    eng.quit() 
+
+    return 
+
+
 
 def generate_spds_across_all(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026", 
                             dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026",
+                            
                             overwrite_existing: bool=False,
                             subjects_to_skip: Iterable=set(), 
                             activities_to_skip: Iterable=set(["lunch", "phone"]), 
