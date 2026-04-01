@@ -646,4 +646,9 @@ def calculate_color_weights_single_measurement(measurement: dict,
 
     return RGB_weights
 
+"""Given a recording path, return all of the timestamps 
+   of the frames
+"""
+def read_world_timestamps() -> None:
 
+    return 

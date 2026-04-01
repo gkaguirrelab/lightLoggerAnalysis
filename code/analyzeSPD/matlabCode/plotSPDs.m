@@ -451,22 +451,18 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(vi
     xL = xlim(targetAxes);
     yL = ylim(targetAxes);
 
+   %% =========================
+    % X AXIS (fixed powers of 2)
     %% =========================
-    % X AXIS (clean whole numbers)
-    %% =========================
 
-    % Generate integer ticks within range
-    xticksVals = unique(round(logspace(log10(xL(1)), log10(xL(2)), 12)));
+    desiredTicks = [1, 2, 4, 8, 16, 32, 64];
 
-    % Keep only valid ticks inside limits
-    xticksVals = xticksVals(xticksVals >= xL(1) & xticksVals <= xL(2));
-
-    % Ensure uniqueness and sorting
-    xticksVals = unique(xticksVals);
+    % Keep only ticks within current axis limits
+    xticksVals = desiredTicks(desiredTicks >= xL(1) & desiredTicks <= xL(2));
 
     set(targetAxes, 'XTick', xticksVals);
 
-    % Force integer labels (NO scientific notation)
+    % Force clean integer labels (no scientific notation)
     xticklabels(targetAxes, arrayfun(@(x) sprintf('%d', x), xticksVals, 'UniformOutput', false));
 
 
