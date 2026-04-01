@@ -16,6 +16,7 @@ function plotParticipantState(IMUdata, eyeStateData, blinkData, gazeData, winSiz
     % plotParticipantState: Stacked subplots with synchronized color coding
 
     % Load in the Python utility libraries if not loaded before 
+    %{
     persistent world_util, ms_util;
     if(any(isempty([world_util, ms_util])) || options.force_recalc)
         world_util = import_pyfile(getpref("lightLoggerAnalysis", "world_util_path"));
@@ -32,6 +33,7 @@ function plotParticipantState(IMUdata, eyeStateData, blinkData, gazeData, winSiz
     ms_data_and_timestamps = cell(ms_data_from_chunks(path_to_raw_recording));
     ms_data = double(ms_data_and_timestamps{1}); 
     ms_timestamps = double(ms_data_and_timestamps{2}); % seconds 
+    %}
 
     %% Calculate Time Offsets (T0 based on IMU start)
     t0 = IMUdata.timestamp_ns_(1);
