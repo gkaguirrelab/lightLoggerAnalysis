@@ -5,8 +5,12 @@ function plotParticipantState(IMUdata, eyeStateData, blinkData, gazeData, winSiz
         blinkData, 
         gazeData, 
         winSizeSec, 
-        activityName, 
-        options.force_recalc
+        activityName,
+        options.input_dir; 
+        options.output_dir; 
+        options.subjects = {};     % cell array of ints, e.g. {2001, 2003}
+        options.activities = {}; 
+        options.force_recalc = false; 
     end
 
     % plotParticipantState: Stacked subplots with synchronized color coding
@@ -22,9 +26,12 @@ function plotParticipantState(IMUdata, eyeStateData, blinkData, gazeData, winSiz
 
     % Load in the world timesstamps and the MS data/ timestamps in seconds 
     % from the RAW recording
-    world_timestamps = double(world_util.)
-
-
+    % Timestamps are w.r.t the start of the light logger device NOT the recording, 
+    % so you will need to find a common start point to match
+    world_timestamps = double(world_util.world_timestamps_from_chunks(path_to_raw_recording)); % seconds 
+    ms_data_and_timestamps = cell(ms_data_from_chunks(path_to_raw_recording));
+    ms_data = double(ms_data_and_timestamps{1}); 
+    ms_timestamps = double(ms_data_and_timestamps{2}); % seconds 
 
     %% Calculate Time Offsets (T0 based on IMU start)
     t0 = IMUdata.timestamp_ns_(1);
