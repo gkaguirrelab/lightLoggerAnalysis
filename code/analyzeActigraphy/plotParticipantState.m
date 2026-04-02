@@ -15,25 +15,19 @@ function plotParticipantState(IMUdata, eyeStateData, blinkData, gazeData, winSiz
 
     % plotParticipantState: Stacked subplots with synchronized color coding
 
-    % Load in the Python utility libraries if not loaded before 
-    %{
-    persistent world_util, ms_util;
-    if(any(isempty([world_util, ms_util])) || options.force_recalc)
+    % Load in the Python utility libraries if not loaded before     
+    persistent world_util ms_util;
+    if isempty(world_util) || isempty(ms_util) || options.force_recalc
         world_util = import_pyfile(getpref("lightLoggerAnalysis", "world_util_path"));
         ms_util = import_pyfile(getpref("lightLoggerAnalysis", "ms_util_path")); 
-    end 
+    end
 
-    error("Did not yet fix path stuff ")
+    % Load in the world and ms timestamps in neon timespace
+    path_to_raw_recording = "/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026/FLIC_2001/chat/GKA"
+    [world_t, ms_t] = load_ms_world_timestamps(path_to_raw_recording, world_util, ms_util); 
 
-    % Load in the world timesstamps and the MS data/ timestamps in seconds 
-    % from the RAW recording
-    % Timestamps are w.r.t the start of the light logger device NOT the recording, 
-    % so you will need to find a common start point to match
-    world_timestamps = double(world_util.world_timestamps_from_chunks(path_to_raw_recording)); % seconds 
-    ms_data_and_timestamps = cell(ms_data_from_chunks(path_to_raw_recording));
-    ms_data = double(ms_data_and_timestamps{1}); 
-    ms_timestamps = double(ms_data_and_timestamps{2}); % seconds 
-    %}
+
+    return 
 
     %% Calculate Time Offsets (T0 based on IMU start)
     t0 = IMUdata.timestamp_ns_(1);
@@ -191,3 +185,104 @@ function plotParticipantState(IMUdata, eyeStateData, blinkData, gazeData, winSiz
     title(tlo3, ['Activity vs Eye State: ' activityName], 'FontWeight', 'bold');
     drawnow;
 end
+
+
+% Load in the world timestamps 
+function world_t = load_world_gka_neon_timestamps(path)
+    opts = detectImportOptions(path, 'VariableNamingRule', 'preserve');
+
+    % Force timestamp column to int64 (preserves ns precision)
+    opts = setvartype(opts, 'timestamp [ns]', 'uint64');
+
+    world_timestamps_table = readtable(path, opts); 
+    world_t = uint64(world_timestamps_table.('timestamp [ns]')); 
+    
+    return 
+
+end 
+
+
+function [world_t, ms_t] = load_ms_world_timestamps(path_to_raw_recording, world_util, ms_util)
+    % Load in the world timesstamps and the MS data/ timestamps in nanoseconds from the RAW recording
+    %
+    % Timestamps are w.r.t the start of the light logger device NOT the recording, 
+    % so you will need to find a common start point to match
+    
+    % Load in the timestamps in GKA time 
+    gka_world_timestamps_gka_time = int64( world_util.world_timestamps_from_chunks(path_to_raw_recording, py.False) )'; % nanoseconds  
+    ms_data_and_timestamps = cell(ms_util.ms_data_from_chunks(path_to_raw_recording));
+    ms_data = double(ms_data_and_timestamps{1}); 
+    ms_timestamps_gka_time = int64(ms_data_and_timestamps{2} * (10 ^ 9))'; % nanoseconds 
+
+    path_to_gka_world_timestamps_neon_time = "/Volumes/FLIC_processing/NEWscriptedIndoorOutdoorVideos2026/FLIC_2001/chat/Neon/egocentric_mapper_results/alternative_camera_timestamps.csv"; 
+    gka_world_timestamps_neon_time = int64(load_world_gka_neon_timestamps(path_to_gka_world_timestamps_neon_time)); 
+
+    % Assert these two have the same length
+    num_gka_world_timestamps_gka_time = numel(gka_world_timestamps_gka_time);
+    num_gka_world_timestamps_neon_time = numel(gka_world_timestamps_neon_time);
+    if(num_gka_world_timestamps_gka_time ~= num_gka_world_timestamps_neon_time)
+        error("Num timestamps GKA time: %d ~+ num timestamps Neon time: %d\n", num_gka_world_timestamps_gka_time, num_gka_world_timestamps_neon_time);
+    end   
+    
+    % Now, let's do matching between the world timestamps and the MS 
+    
+    % First, let's find the nearest neighbor timestamp 
+    % because it is very unlikely that timestamps will be 
+    % exactly equal on the nanosecond level 
+    double_ms_timestamps_gka_time = double(ms_timestamps_gka_time);
+    double_world_timestamps_gka_time = double(gka_world_timestamps_gka_time); 
+    anchorpoint_diff_magnitude = inf; 
+    world_anchorpoint_idx = inf; 
+    ms_anchorpoint_idx = inf; 
+    for ii = 1:numel(gka_world_timestamps_gka_time)
+        gka_world_current_timestamp = double_world_timestamps_gka_time(ii);
+        [nearest_neighbor_diff, nearest_neighbor_idx] = min(abs(gka_world_current_timestamp - double_ms_timestamps_gka_time));
+        if(nearest_neighbor_diff < anchorpoint_diff_magnitude)
+            world_anchorpoint_idx = ii; 
+            ms_anchorpoint_idx = nearest_neighbor_idx; 
+            anchorpoint_diff_magnitude = nearest_neighbor_diff;
+        end 
+    end
+    
+
+    % Now we have the anchorpoint. We will set all other timestamps to be with respect to this 
+    ms_t = zeros(numel(ms_timestamps_gka_time), 1, 'int64'); 
+    anchorpoint_diff_with_directionality = ms_timestamps_gka_time(ms_anchorpoint_idx) - gka_world_timestamps_gka_time(world_anchorpoint_idx);
+    ms_t(ms_anchorpoint_idx) = gka_world_timestamps_neon_time(world_anchorpoint_idx) + anchorpoint_diff_with_directionality; 
+
+    % Now we do two loops. We do one from the anchorpoint to the 
+    % start and one from the anchorpoint until the end to fill in these timestamps 
+
+    % First, let's go backwards towards the start of the array
+    for ii = ms_anchorpoint_idx - 1 : -1 : 1
+        current_timestamp_gka_time = ms_timestamps_gka_time(ii);
+        next_timestamp_gka_time = ms_timestamps_gka_time(ii + 1);
+        next_timestamp_neon_time = ms_t(ii + 1);
+
+        % Find the time delta between these two poinst 
+        time_delta = next_timestamp_gka_time - current_timestamp_gka_time; 
+
+        % Save the updated timestamp 
+        ms_t(ii) = next_timestamp_neon_time - time_delta; 
+    end 
+
+
+    % Next, we will do a loop from the anchorpoint until the end of the array 
+    for ii = ms_anchorpoint_idx + 1 : numel(ms_t)
+        current_timestamp_gka_time = ms_timestamps_gka_time(ii);
+        previous_timestamp_gka_time = ms_timestamps_gka_time(ii - 1); 
+        previous_timestamp_neon_time = ms_t(ii - 1); 
+
+        % Find the time delta between these points 
+        time_delta = current_timestamp_gka_time - previous_timestamp_gka_time; 
+
+        % Save the updated timestamp 
+        ms_t(ii) = previous_timestamp_neon_time + time_delta; 
+    end 
+
+    % Return the converted values 
+    world_t = gka_world_timestamps_neon_time;
+
+    return ; 
+
+end 

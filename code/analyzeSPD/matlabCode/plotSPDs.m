@@ -71,6 +71,7 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(vi
         options.title = ""
         options.justProjectionActivityData = false
         options.spd_target_axes = false
+        options.num_participants (1,1) double {mustBePositive} = 1
     end
 
     % Pull optional datasets / handles out of options
@@ -136,6 +137,9 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(vi
    % Build center/periphery masks for SPD averaging
     center_spd_eccentricity = 5; % Degrees
     centerRadiusPix = center_spd_eccentricity / degPerPix;
+
+    % Do this for each subject, take the std across these averages, 
+    % then use this as the standard deviation in the SEM 
 
     spdHeight = size(virtuallyFoveatedSpdByRegion, 1);
     spdWidth = size(virtuallyFoveatedSpdByRegion, 2);
@@ -359,128 +363,93 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(vi
         hold(targetAxes, 'on');
     end
 
+    numParticipants = options.num_participants;
+
+    % Color families:
+    %   justProjection     = blue family
+    %   virtuallyFoveated  = red family
+    %
+    % Within each family:
+    %   center     = dark, saturated
+    %   periphery  = much lighter / desaturated
+
+    % justProjection (blue family)
+    jpCenterColor     = [0.00, 0.20, 0.70];   % deep blue
+    jpPeripheryColor  = [0.55, 0.75, 0.95];   % very light blue
+
+    % virtuallyFoveated (red family)
+    vfCenterColor     = [0.75, 0.05, 0.05];   % deep red
+    vfPeripheryColor  = [0.95, 0.65, 0.65];   % very light red
+
+    % Reference slope
+    referenceColor = [0.25, 0.25, 0.25];
+
     % DOUBLE DATASET BRANCH
     if (~islogical(justProjectionActivityData))
-        centerMask3D = repmat(centerMask, [1, 1, size(virtuallyFoveatedSpdByRegion, 3)]);
-        peripheryMask3D = repmat(peripheryMask, [1, 1, size(virtuallyFoveatedSpdByRegion, 3)]);
 
-        vfCenterTmp = virtuallyFoveatedSpdByRegion;
-        vfCenterTmp(~centerMask3D) = nan;
-        virtuallyFoveatedCenterSpd = squeeze(mean(mean(vfCenterTmp, 1, 'omitmissing'), 2, 'omitmissing'));
+        [justProjectionCenterSpd, justProjectionCenterSem] = ...
+            iComputeRegionMeanAndSem(justProjectionSpdByRegion, centerMask, numParticipants);
 
-        vfPeripheryTmp = virtuallyFoveatedSpdByRegion;
-        vfPeripheryTmp(~peripheryMask3D) = nan;
-        virtuallyFoveatedPeripherySpd = squeeze(mean(mean(vfPeripheryTmp, 1, 'omitmissing'), 2, 'omitmissing'));
+        [justProjectionPeripherySpd, justProjectionPeripherySem] = ...
+            iComputeRegionMeanAndSem(justProjectionSpdByRegion, peripheryMask, numParticipants);
 
-        jpCenterTmp = justProjectionSpdByRegion;
-        jpCenterTmp(~centerMask3D) = nan;
-        justProjectionCenterSpd = squeeze(mean(mean(jpCenterTmp, 1, 'omitmissing'), 2, 'omitmissing'));
+        [virtuallyFoveatedCenterSpd, virtuallyFoveatedCenterSem] = ...
+            iComputeRegionMeanAndSem(virtuallyFoveatedSpdByRegion, centerMask, numParticipants);
 
-        jpPeripheryTmp = justProjectionSpdByRegion;
-        jpPeripheryTmp(~peripheryMask3D) = nan;
-        justProjectionPeripherySpd = squeeze(mean(mean(jpPeripheryTmp, 1, 'omitmissing'), 2, 'omitmissing'));
+        [virtuallyFoveatedPeripherySpd, virtuallyFoveatedPeripherySem] = ...
+            iComputeRegionMeanAndSem(virtuallyFoveatedSpdByRegion, peripheryMask, numParticipants);
 
-        virtuallyFoveatedFrqVector = virtuallyFoveatedFrq(:);
         justProjectionFrqVector = justProjectionFrq(:);
+        virtuallyFoveatedFrqVector = virtuallyFoveatedFrq(:);
 
-        virtuallyFoveatedCenterSpd = virtuallyFoveatedCenterSpd(:);
-        virtuallyFoveatedPeripherySpd = virtuallyFoveatedPeripherySpd(:);
-        justProjectionCenterSpd = justProjectionCenterSpd(:);
-        justProjectionPeripherySpd = justProjectionPeripherySpd(:);
+        % Plot shaded SEM first so lines sit on top
+        iPlotSpdWithSemPatch(targetAxes, justProjectionFrqVector, justProjectionCenterSpd, ...
+            justProjectionCenterSem, jpCenterColor, '-', 1.8);
 
-        virtuallyFoveatedCenterValidIdx = isfinite(virtuallyFoveatedFrqVector) & ...
-                                          isfinite(virtuallyFoveatedCenterSpd) & ...
-                                          (virtuallyFoveatedFrqVector > 0) & ...
-                                          (virtuallyFoveatedCenterSpd > 0);
+        iPlotSpdWithSemPatch(targetAxes, justProjectionFrqVector, justProjectionPeripherySpd, ...
+            justProjectionPeripherySem, jpPeripheryColor, '-', 1.8);
 
-        virtuallyFoveatedPeripheryValidIdx = isfinite(virtuallyFoveatedFrqVector) & ...
-                                             isfinite(virtuallyFoveatedPeripherySpd) & ...
-                                             (virtuallyFoveatedFrqVector > 0) & ...
-                                             (virtuallyFoveatedPeripherySpd > 0);
+        iPlotSpdWithSemPatch(targetAxes, virtuallyFoveatedFrqVector, virtuallyFoveatedCenterSpd, ...
+            virtuallyFoveatedCenterSem, vfCenterColor, '--', 1.8);
 
-        justProjectionCenterValidIdx = isfinite(justProjectionFrqVector) & ...
-                                       isfinite(justProjectionCenterSpd) & ...
-                                       (justProjectionFrqVector > 0) & ...
-                                       (justProjectionCenterSpd > 0);
-
-        justProjectionPeripheryValidIdx = isfinite(justProjectionFrqVector) & ...
-                                          isfinite(justProjectionPeripherySpd) & ...
-                                          (justProjectionFrqVector > 0) & ...
-                                          (justProjectionPeripherySpd > 0);
-
-        if (any(justProjectionCenterValidIdx))
-            loglog(targetAxes, ...
-                   justProjectionFrqVector(justProjectionCenterValidIdx), ...
-                   justProjectionCenterSpd(justProjectionCenterValidIdx), ...
-                   '-k', 'LineWidth', 1.5);
-        end
-
-        if (any(justProjectionPeripheryValidIdx))
-            loglog(targetAxes, ...
-                   justProjectionFrqVector(justProjectionPeripheryValidIdx), ...
-                   justProjectionPeripherySpd(justProjectionPeripheryValidIdx), ...
-                   '-r', 'LineWidth', 1.5);
-        end
-
-        if (any(virtuallyFoveatedCenterValidIdx))
-            loglog(targetAxes, ...
-                   virtuallyFoveatedFrqVector(virtuallyFoveatedCenterValidIdx), ...
-                   virtuallyFoveatedCenterSpd(virtuallyFoveatedCenterValidIdx), ...
-                   '--k', 'LineWidth', 1.5);
-        end
-
-        if (any(virtuallyFoveatedPeripheryValidIdx))
-            loglog(targetAxes, ...
-                   virtuallyFoveatedFrqVector(virtuallyFoveatedPeripheryValidIdx), ...
-                   virtuallyFoveatedPeripherySpd(virtuallyFoveatedPeripheryValidIdx), ...
-                   '--r', 'LineWidth', 1.5);
-        end
+        iPlotSpdWithSemPatch(targetAxes, virtuallyFoveatedFrqVector, virtuallyFoveatedPeripherySpd, ...
+            virtuallyFoveatedPeripherySem, vfPeripheryColor, '--', 1.8);
 
         if (~islogical(options.spd_xlim))
             referenceXMax = max(double(options.spd_xlim));
         else
             referenceXMax = max([virtuallyFoveatedFrqVector(virtuallyFoveatedFrqVector > 0); ...
-                                justProjectionFrqVector(justProjectionFrqVector > 0)]);
+                                 justProjectionFrqVector(justProjectionFrqVector > 0)]);
         end
 
         referenceX = [1; referenceXMax];
         referenceY = 1e-2 .* (referenceX .^ -2);
 
-        loglog(targetAxes, referenceX, referenceY, ':k');
+        loglog(targetAxes, referenceX, referenceY, ':', 'Color', referenceColor, 'LineWidth', 1.2);
 
         legend(targetAxes, ...
-            {'justProjection center', 'justProjection periphery', ...
-             'virtuallyFoveated center', 'virtuallyFoveated periphery', ...
+            {'justProjection center SEM', 'justProjection center', ...
+             'justProjection periphery SEM', 'justProjection periphery', ...
+             'virtuallyFoveated center SEM', 'virtuallyFoveated center', ...
+             'virtuallyFoveated periphery SEM', 'virtuallyFoveated periphery', ...
              'reference slope'}, ...
             'Location', 'best', 'Interpreter', 'none');
 
-
     % SINGLE DATASET BRANCH
     else
-        centerMask3D = repmat(centerMask, [1, 1, size(virtuallyFoveatedSpdByRegion, 3)]);
-        peripheryMask3D = repmat(peripheryMask, [1, 1, size(virtuallyFoveatedSpdByRegion, 3)]);
+        [centerSPD, centerSem] = ...
+            iComputeRegionMeanAndSem(virtuallyFoveatedSpdByRegion, centerMask, numParticipants);
 
-        centerTmp = virtuallyFoveatedSpdByRegion;
-        centerTmp(~centerMask3D) = nan;
-        centerSPD = squeeze(mean(mean(centerTmp, 1, 'omitmissing'), 2, 'omitmissing'));
-
-        peripheryTmp = virtuallyFoveatedSpdByRegion;
-        peripheryTmp(~peripheryMask3D) = nan;
-        peripherySPD = squeeze(mean(mean(peripheryTmp, 1, 'omitmissing'), 2, 'omitmissing'));
+        [peripherySPD, peripherySem] = ...
+            iComputeRegionMeanAndSem(virtuallyFoveatedSpdByRegion, peripheryMask, numParticipants);
 
         frqVector = virtuallyFoveatedFrq(:);
-        centerSPD = centerSPD(:);
-        peripherySPD = peripherySPD(:);
 
-        validCenter = isfinite(frqVector) & isfinite(centerSPD) & (frqVector > 0) & (centerSPD > 0);
-        validPeriphery = isfinite(frqVector) & isfinite(peripherySPD) & (frqVector > 0) & (peripherySPD > 0);
+        iPlotSpdWithSemPatch(targetAxes, frqVector, centerSPD, centerSem, ...
+            vfCenterColor, '-', 1.8);
 
-        if (any(validCenter))
-            loglog(targetAxes, frqVector(validCenter), centerSPD(validCenter), '-k', 'LineWidth', 1.5);
-        end
-        if (any(validPeriphery))
-            loglog(targetAxes, frqVector(validPeriphery), peripherySPD(validPeriphery), '-r', 'LineWidth', 1.5);
-        end
+        iPlotSpdWithSemPatch(targetAxes, frqVector, peripherySPD, peripherySem, ...
+            vfPeripheryColor, '-', 1.8);
 
         if (~islogical(options.spd_xlim))
             referenceXMax = max(double(options.spd_xlim));
@@ -491,9 +460,11 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(vi
         referenceX = [1; referenceXMax];
         referenceY = 1e-2 .* (referenceX .^ -2);
 
-        loglog(targetAxes, referenceX, referenceY, ':k');
+        loglog(targetAxes, referenceX, referenceY, ':', 'Color', referenceColor, 'LineWidth', 1.2);
 
-        legend(targetAxes, {'center','periphery','reference slope'}, 'Location', 'best');
+        legend(targetAxes, ...
+            {'center SEM', 'center', 'periphery SEM', 'periphery', 'reference slope'}, ...
+            'Location', 'best', 'Interpreter', 'none');
     end
 
     set(targetAxes, 'XScale', 'log', 'YScale', 'log');
@@ -516,31 +487,19 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(vi
     xL = xlim(targetAxes);
     yL = ylim(targetAxes);
 
-   %% =========================
+    %% =========================
     % X AXIS (fixed powers of 2)
     %% =========================
-
     desiredTicks = [1, 2, 4, 8, 16, 32, 64];
-
-    % Keep only ticks within current axis limits
     xticksVals = desiredTicks(desiredTicks >= xL(1) & desiredTicks <= xL(2));
-
     set(targetAxes, 'XTick', xticksVals);
-
-    % Force clean integer labels (no scientific notation)
     xticklabels(targetAxes, arrayfun(@(x) sprintf('%d', x), xticksVals, 'UniformOutput', false));
-
 
     %% =========================
     % Y AXIS (clean decimals)
     %% =========================
-
-    % Log-spaced ticks (keep density)
     yticksVals = logspace(log10(yL(1)), log10(yL(2)), 10);
-
     set(targetAxes, 'YTick', yticksVals);
-
-    % Format as fixed decimal (NO scientific notation)
     yticklabels(targetAxes, arrayfun(@(y) sprintf('%.6f', y), yticksVals, 'UniformOutput', false));
 
     % Only export/close the SPD figure if we created it locally
@@ -557,5 +516,83 @@ end
 function mustBeStructOrText(x)
     if ~(isstruct(x) || ischar(x) || isstring(x))
         error('Input must be a struct, char, or string.');
+    end
+end
+
+function [regionMeanSpd, regionSemSpd] = iComputeRegionMeanAndSem(spdByRegion, regionMask, numParticipants)
+% Compute mean SPD and SEM at each frequency for a spatial region.
+%
+% SEM procedure:
+%   - At each frequency, take the SD across all valid patches in the region
+%   - Divide by sqrt(number of participants)
+%   - Also normalize by the size of the region (number of valid patches)
+
+    numFrequencies = size(spdByRegion, 3);
+
+    regionMeanSpd = nan(numFrequencies, 1);
+    regionSemSpd = nan(numFrequencies, 1);
+
+    for ff = 1:numFrequencies
+        currentSlice = spdByRegion(:,:,ff);
+        regionValues = currentSlice(regionMask);
+        regionValues = regionValues(isfinite(regionValues));
+
+        if (~isempty(regionValues))
+            regionMeanSpd(ff) = mean(regionValues, 'omitmissing');
+
+           numValidRegionPatches = numel(regionValues);
+
+            if (numValidRegionPatches > 1)
+                regionSemSpd(ff) = std(regionValues, 0, 'omitmissing') ./ ...
+                    sqrt(numParticipants * numValidRegionPatches);
+            else
+                regionSemSpd(ff) = 0; % Degenerate case: only one patch
+            end
+        end
+    end
+end
+
+function iPlotSpdWithSemPatch(targetAxes, frqVector, meanSpd, semSpd, lineColor, lineStyle, lineWidth)
+% Plot mean SPD with a shaded SEM background band.
+
+    frqVector = frqVector(:);
+    meanSpd = meanSpd(:);
+    semSpd = semSpd(:);
+
+    validIdx = isfinite(frqVector) & isfinite(meanSpd) & isfinite(semSpd) & ...
+               (frqVector > 0) & (meanSpd > 0);
+
+    if (~any(validIdx))
+        return;
+    end
+
+    x = frqVector(validIdx);
+    y = meanSpd(validIdx);
+    sem = semSpd(validIdx);
+
+    lowerBand = y - sem;
+    upperBand = y + sem;
+
+    % Keep patch valid on log axes
+    lowerBand(lowerBand <= 0) = eps;
+    upperBand(upperBand <= 0) = eps;
+
+    patch(targetAxes, ...
+        [x; flipud(x)], ...
+        [lowerBand; flipud(upperBand)], ...
+        lineColor, ...
+        'FaceAlpha', 0.18, ...
+        'EdgeColor', 'none', ...
+        'HandleVisibility', 'on');
+
+    loglog(targetAxes, x, y, ...
+        'LineStyle', lineStyle, ...
+        'Color', lineColor, ...
+        'LineWidth', lineWidth);
+end
+
+function mustBePositive(x)
+    if (any(x <= 0))
+        error('Value must be positive.');
     end
 end

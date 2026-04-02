@@ -10,6 +10,7 @@ from natsort import natsorted
 from tqdm.auto import tqdm
 import matlab
 from typing import Iterable
+import dill
 
 # Store the scalar multipliers for all of the different colors of pixel's in an image 
 # We calculated this by making a measurement of the light integrating sphere in Zach's 
@@ -655,8 +656,18 @@ def calculate_color_weights_single_measurement(measurement: dict,
 def world_timestamps_from_chunks(recording_path: str, 
                                  convert_to_seconds: bool=True,
                                  verbose: bool=False
-                                ) -> None:
-    
+                                ) -> np.ndarray:
+    # Find the config file 
+    # of the recording. This will tell us about the FPS 
+    # and how to interpolate between chunks 
+    config_filepath: str = os.path.join(recording_path, "config.pkl")
+    assert os.path.exists(config_filepath), f"Config filepath does not exist: {config_filepath}"
+    config_data: dict | None = None
+    with open(config_filepath, 'rb') as f:
+        config_data = dill.load(f)
+    recording_fps: float = config_data['sensors']['W']['sensor_mode']['fps']
+    frame_period_ns: float = (10 ** 9) / recording_fps
+
     # First, let's find the world metadata chunks
     world_metadata_chunks: list[str] = natsorted([os.path.join(recording_path, filename)
                                                   for filename in os.listdir(recording_path)
@@ -671,23 +682,57 @@ def world_timestamps_from_chunks(recording_path: str,
 
     # Once we have the paths to the metadata chunks, we will simply read them in 
     path_iterator: Iterable = range(len(world_metadata_chunks)) if verbose is False else tqdm(range(len(world_metadata_chunks)), desc="Loading world metadata chunks")
+
+    previous_chunk_end: float | None = None
+    current_chunk_start: float | None = None
     for chunk_num in path_iterator:
         # Retrieve the path to this chunk 
         metadata_chunk_path: str = world_metadata_chunks[chunk_num]
 
         # Load in the metadata and extract only the T column 
         world_metadata: np.ndarray = np.load(metadata_chunk_path)[:, 0].flatten()
-        if(convert_to_seconds is True):
-            world_metadata / ( 10 ** 9) # World timestamps are in nanoseconds by default
-
         # Sometimes the last chunk is empty. If this is true, skip it
         if(len(world_metadata) == 0):
-            continue
+            break
+
+
+        current_chunk_start = world_metadata[0]
+
+        # If this is the first chunk, we can save both the previous end
+        # and current start from it 
+        if(chunk_num == 0):
+            previous_chunk_end = world_metadata[-1]    
+
+        # Otherwise, we need to interpolate 
+        # the timestamps in between the chunks 
+        # that comes BEFORE world_metadata 
+        else:
+            # Find the missing time in nano seconds
+            gap_ns: float = current_chunk_start - previous_chunk_end
+
+            # Estimate how many missing frames are between chunks
+            # We subtract 1 because the boundary timestamps already exist
+            num_missing_frames: int = max(0, gap_ns // frame_period_ns) - 1
+
+            if(num_missing_frames > 0):
+                # Calculate the timestamps for this downtime
+                downtime_timestamps: np.ndarray = (previous_chunk_end + frame_period_ns * np.arange(1, num_missing_frames + 1))
+
+                # Combine them into the world timestamps 
+                world_metadata = np.concatenate([downtime_timestamps, world_metadata])
+
+            # Now, the previous chunk end is the last timestamp in this buffer
+            previous_chunk_end = world_metadata[-1]
 
         # Save it to the running list 
         metadata.extend(world_metadata)
 
     # convert to standardized np array 
-    metadata = np.vstack(metadata).flatten()
+    metadata = np.array(metadata).flatten()
+
+    # World timestamps are in nanoseconds by default,
+    # so convert to seconds if desired
+    if(convert_to_seconds is True):
+        metadata /= ( 10 ** 9) 
 
     return metadata

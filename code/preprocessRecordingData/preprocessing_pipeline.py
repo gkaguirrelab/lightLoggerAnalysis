@@ -1342,6 +1342,7 @@ def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brain
                                           "spd_xlim", axes_min_maxes["frq"]["bounds"],
                                           "spd_ylim", axes_min_maxes["spdByRegion"]["bounds"], 
                                           "combine_figures", combine_figures,
+                                          "n_participants", len(subject_paths) - 1, # TODO: This is hard coded for now until I fix the exclusion of subjects
                                           nargout=0
                                         )
     # Close the matlab engine 
@@ -1434,6 +1435,7 @@ def generate_spds_across_groups(src_dir: str="/Users/zacharykelly/Aguirre-Braina
                                             "spd_xlim", min_max_across_all["frq"]["bounds"],
                                             "spd_ylim", min_max_across_all["spdByRegion"]["bounds"], 
                                             "combine_figures", combine_figures,
+                                            "n_participants", len(subject_paths), 
                                             nargout=0
                                             )
 
