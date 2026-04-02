@@ -1,4 +1,4 @@
-function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(virtuallyFoveatedActivityData, options)
+function [exponentMapHandle, varianceMapHandle, spdByRegionHandle, regionAverages] = plotSPDs(virtuallyFoveatedActivityData, options)
 % Plot temporal SPD exponent, variance, and regional spectrum summaries
 %
 % Syntax:
@@ -77,6 +77,8 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(vi
     % Pull optional datasets / handles out of options
     justProjectionActivityData = options.justProjectionActivityData;
     spdTargetAxes = options.spd_target_axes;
+
+    regionAverages = struct();
 
     % If the virtually foveated input was passed in as a file path, load it
     if (isstring(virtuallyFoveatedActivityData) || ischar(virtuallyFoveatedActivityData))
@@ -399,6 +401,12 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(vi
         [virtuallyFoveatedPeripherySpd, virtuallyFoveatedPeripherySem] = ...
             iComputeRegionMeanAndSem(virtuallyFoveatedSpdByRegion, peripheryMask, numParticipants);
 
+        regionAverages.justProjection.center = justProjectionCenterSpd;
+        regionAverages.justProjection.periphery = justProjectionPeripherySpd;
+
+        regionAverages.virtuallyFoveated.center = virtuallyFoveatedCenterSpd;
+        regionAverages.virtuallyFoveated.periphery = virtuallyFoveatedPeripherySpd;
+
         justProjectionFrqVector = justProjectionFrq(:);
         virtuallyFoveatedFrqVector = virtuallyFoveatedFrq(:);
 
@@ -442,6 +450,9 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs(vi
 
         [peripherySPD, peripherySem] = ...
             iComputeRegionMeanAndSem(virtuallyFoveatedSpdByRegion, peripheryMask, numParticipants);
+
+        regionAverages.virtuallyFoveated.center = centerSPD;
+        regionAverages.virtuallyFoveated.periphery = peripherySPD;
 
         frqVector = virtuallyFoveatedFrq(:);
 

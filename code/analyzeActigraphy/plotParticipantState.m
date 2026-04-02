@@ -27,8 +27,6 @@ function plotParticipantState(IMUdata, eyeStateData, blinkData, gazeData, winSiz
     [world_t, ms_t] = load_ms_world_timestamps(path_to_raw_recording, world_util, ms_util); 
 
 
-    return 
-
     %% Calculate Time Offsets (T0 based on IMU start)
     t0 = IMUdata.timestamp_ns_(1);
     
