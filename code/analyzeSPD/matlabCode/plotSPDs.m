@@ -72,6 +72,7 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle, regionAverage
         options.justProjectionActivityData = false
         options.spd_target_axes = false
         options.num_participants (1,1) double {mustBePositive} = 1
+        options.return_region_averages_only (1,1) logical = false
     end
 
     % Pull optional datasets / handles out of options
@@ -159,6 +160,54 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle, regionAverage
 
     centerMask = (spdDistanceFromCenter <= centerRadiusPix);
     peripheryMask = (spdDistanceFromCenter > centerRadiusPix);
+
+    % ---------------------------------------------------------------------
+    % OPTIONAL: return region averages only (skip all plotting)
+    % ---------------------------------------------------------------------
+    if (options.return_region_averages_only)
+
+        numParticipants = options.num_participants;
+
+        if (~islogical(justProjectionActivityData))
+
+            [justProjectionCenterSpd, ~] = ...
+                iComputeRegionMeanAndSem(justProjectionSpdByRegion, centerMask, numParticipants);
+
+            [justProjectionPeripherySpd, ~] = ...
+                iComputeRegionMeanAndSem(justProjectionSpdByRegion, peripheryMask, numParticipants);
+
+            [virtuallyFoveatedCenterSpd, ~] = ...
+                iComputeRegionMeanAndSem(virtuallyFoveatedSpdByRegion, centerMask, numParticipants);
+
+            [virtuallyFoveatedPeripherySpd, ~] = ...
+                iComputeRegionMeanAndSem(virtuallyFoveatedSpdByRegion, peripheryMask, numParticipants);
+
+            regionAverages.justProjection.center = justProjectionCenterSpd;
+            regionAverages.justProjection.periphery = justProjectionPeripherySpd;
+
+            regionAverages.virtuallyFoveated.center = virtuallyFoveatedCenterSpd;
+            regionAverages.virtuallyFoveated.periphery = virtuallyFoveatedPeripherySpd;
+
+        else
+
+            [centerSPD, ~] = ...
+                iComputeRegionMeanAndSem(virtuallyFoveatedSpdByRegion, centerMask, numParticipants);
+
+            [peripherySPD, ~] = ...
+                iComputeRegionMeanAndSem(virtuallyFoveatedSpdByRegion, peripheryMask, numParticipants);
+
+            regionAverages.virtuallyFoveated.center = centerSPD;
+            regionAverages.virtuallyFoveated.periphery = peripherySPD;
+        end
+
+        % Return empty handles since we skipped plotting
+        exponentMapHandle = [];
+        varianceMapHandle = [];
+        spdByRegionHandle = [];
+
+        return;
+    end
+
 
     % ---------------------------------------------------------------------
     % Exponent map figure
@@ -554,8 +603,7 @@ function [regionMeanSpd, regionSemSpd] = iComputeRegionMeanAndSem(spdByRegion, r
            numValidRegionPatches = numel(regionValues);
 
             if (numValidRegionPatches > 1)
-                regionSemSpd(ff) = std(regionValues, 0, 'omitmissing') ./ ...
-                    sqrt(numParticipants * numValidRegionPatches);
+                regionSemSpd(ff) = __________ ./ sqrt(numParticipants);
             else
                 regionSemSpd(ff) = 0; % Degenerate case: only one patch
             end

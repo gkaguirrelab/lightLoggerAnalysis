@@ -52,6 +52,8 @@ import virtual_foveation
 # -----------------------------------------------------------------------------
 def generate_world_videos(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026", 
                           dst_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoorVideos2026", 
+                          subjects_to_skip: Iterable=set(), 
+                          activities_to_skip: Iterable=set(), 
                           overwrite_existing: bool=False,
                           apply_color_weights: bool=True, 
                           debayer_images: bool=True, 
@@ -65,6 +67,7 @@ def generate_world_videos(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
                                           for subject_name in os.listdir(src_dir) 
                                           if re.fullmatch(r"FLIC_\d+", subject_name) 
                                           and os.path.isdir(os.path.join(src_dir, subject_name))
+                                          if _extract_num_from_id(subject_name) not in subjects_to_skip
                                          ]
                                         ) 
     assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
@@ -86,6 +89,9 @@ def generate_world_videos(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
             # Retrieve the activity path and activity name
             activity_path: str = activites_paths[activity_num]
             activity_name: str = os.path.basename(activity_path)
+
+            if(activity_name in activities_to_skip):
+                continue 
 
             # Construct the path to the chunks that form the world video 
             world_video_in: str = os.path.join(activity_path, "GKA")
@@ -149,6 +155,8 @@ def generate_egocentric_mapper_results(src_dir: str="/Volumes/FLIC_raw/NEWscript
                                        image_matcher: Literal["Efficient_LOFTR", "LOFTR_indoor"] = "Efficient_LOFTR",
                                        show_video_preview: bool=False, 
                                        overwrite_existing: bool=False,
+                                       subjects_to_skip: Iterable=set(), 
+                                       activities_to_skip: Iterable=set(), 
                                        verbose: bool=False
                                       ) -> None:
     # First, let's find all of the subjects in this experiment 
@@ -156,6 +164,7 @@ def generate_egocentric_mapper_results(src_dir: str="/Volumes/FLIC_raw/NEWscript
                                           for subject_name in os.listdir(src_dir) 
                                           if re.fullmatch(r"FLIC_\d+", subject_name) 
                                           and os.path.isdir(os.path.join(src_dir, subject_name))
+                                          if _extract_num_from_id(subject_name) not in subjects_to_skip
                                          ]
                                         ) 
     assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
@@ -177,6 +186,9 @@ def generate_egocentric_mapper_results(src_dir: str="/Volumes/FLIC_raw/NEWscript
             # Retrieve the activity path and activity name
             activity_path: str = activites_paths[activity_num]
             activity_name: str = os.path.basename(activity_path)
+
+            if(activity_name in activities_to_skip):
+                continue
 
             # Next, let's find the paths to both the Neon and the world videos 
             neon_dir: str = os.path.join(activity_path, "Neon")
@@ -252,6 +264,7 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/NEWscript
                                           for subject_name in os.listdir(src_dir) 
                                           if re.fullmatch(r"FLIC_\d+", subject_name) 
                                           and os.path.isdir(os.path.join(src_dir, subject_name))
+                                          if _extract_num_from_id(subject_name) not in subjects_to_skip
                                          ]
                                         ) 
     assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
@@ -389,6 +402,7 @@ def generate_spds(src_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoo
                                           for subject_name in os.listdir(src_dir) 
                                           if re.fullmatch(r"FLIC_\d+", subject_name) 
                                           and os.path.isdir(os.path.join(src_dir, subject_name))
+                                          if _extract_num_from_id(subject_name) not in subjects_to_skip
                                          ]
                                         ) 
     assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
@@ -521,6 +535,7 @@ def group_spds_per_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brainard La
                                           for subject_name in os.listdir(src_dir) 
                                           if re.fullmatch(r"FLIC_\d+", subject_name) 
                                           and os.path.isdir(os.path.join(src_dir, subject_name))
+                                          if _extract_num_from_id(subject_name) not in subjects_to_skip
                                          ]
                                         ) 
     assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
@@ -654,6 +669,7 @@ def group_spds_across_subjects(src_dir: str="/Users/zacharykelly/Aguirre-Brainar
                                           for subject_name in os.listdir(src_dir) 
                                           if re.fullmatch(r"FLIC_\d+", subject_name) 
                                           and os.path.isdir(os.path.join(src_dir, subject_name))
+                                          if _extract_num_from_id(subject_name) not in subjects_to_skip
                                          ]
                                         ) 
     assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
@@ -751,6 +767,7 @@ def adjust_spd_axes(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropb
                                           for subject_name in os.listdir(src_dir) 
                                           if re.fullmatch(r"FLIC_\d+", subject_name) 
                                           and os.path.isdir(os.path.join(src_dir, subject_name))
+                                          if _extract_num_from_id(subject_name) not in subjects_to_skip
                                          ]
                                         ) 
     assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
@@ -1240,8 +1257,10 @@ def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brain
     # First, let's find all of the subjects in this experiment 
     subject_paths: list[str] = natsorted([os.path.join(src_dir, subject_name) 
                                           for subject_name in os.listdir(src_dir) 
-                                          if re.fullmatch(r"FLIC_\d+", subject_name) 
-                                          and os.path.isdir(os.path.join(src_dir, subject_name))
+                                          if (re.fullmatch(r"FLIC_\d+", subject_name) 
+                                              and os.path.isdir(os.path.join(src_dir, subject_name))
+                                              and _extract_num_from_id(subject_name) not in subjects_to_skip
+                                          )
                                          ]
                                         ) 
 
@@ -1342,7 +1361,7 @@ def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brain
                                           "spd_xlim", axes_min_maxes["frq"]["bounds"],
                                           "spd_ylim", axes_min_maxes["spdByRegion"]["bounds"], 
                                           "combine_figures", combine_figures,
-                                          "n_participants", len(subject_paths) - 1, # TODO: This is hard coded for now until I fix the exclusion of subjects
+                                          "n_participants", len(subject_paths),
                                           nargout=0
                                         )
     # Close the matlab engine 
@@ -1378,6 +1397,7 @@ def generate_spds_across_groups(src_dir: str="/Users/zacharykelly/Aguirre-Braina
                                           for subject_name in os.listdir(src_dir) 
                                           if re.fullmatch(r"FLIC_\d+", subject_name) 
                                           and os.path.isdir(os.path.join(src_dir, subject_name))
+                                          if(_extract_num_from_id not in subjects_to_skip)
                                          ]
                                         ) 
     assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
@@ -1473,6 +1493,7 @@ def generate_spds_across_all(src_dir: str="/Users/zacharykelly/Aguirre-Brainard 
                                           for subject_name in os.listdir(src_dir) 
                                           if re.fullmatch(r"FLIC_\d+", subject_name) 
                                           and os.path.isdir(os.path.join(src_dir, subject_name))
+                                          if _extract_num_from_id(subject_name) not in subjects_to_skip
                                          ]
                                         ) 
     assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
@@ -1757,6 +1778,7 @@ def verify_world_neon_pairing(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorO
                                           for subject_name in os.listdir(raw_dir) 
                                           if re.fullmatch(r"FLIC_\d+", subject_name) 
                                           and os.path.isdir(os.path.join(raw_dir, subject_name))
+                                          if _extract_num_from_id(subject_name) not in subjects_to_skip
                                          ]
                                         ) 
     assert len(subject_paths) > 0, f"No subject directories found in: {raw_dir}" 
@@ -1864,6 +1886,7 @@ def generate_tag_task_start_ends(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndo
                                           for subject_name in os.listdir(src_dir) 
                                           if re.fullmatch(r"FLIC_\d+", subject_name) 
                                           and os.path.isdir(os.path.join(src_dir, subject_name))
+                                          if _extract_num_from_id(subject_name) not in subjects_to_skip
                                          ]
                                         ) 
     assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
@@ -1968,6 +1991,7 @@ def verify_virtually_foveated_video_integrity(src_dir: str="/Volumes/FLIC_proces
                                           for subject_name in os.listdir(src_dir) 
                                           if re.fullmatch(r"FLIC_\d+", subject_name) 
                                           and os.path.isdir(os.path.join(src_dir, subject_name))
+                                          if _extract_num_from_id(subject_name) not in subjects_to_skip
                                          ]
                                         ) 
     assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
@@ -2246,6 +2270,10 @@ def download_pupil_cloud_recordings(api_key: str,
 
 
     return 
+
+def _extract_num_from_id(subject_id: str) -> int:
+    assert re.fullmatch("FLIC_\d+"), f"{subject_id} does not fit the format FLIC_[NUM]"
+    return re.search(r"\d+", subject_id).group()
 
 
 def main():

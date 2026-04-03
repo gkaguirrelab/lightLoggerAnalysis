@@ -216,17 +216,13 @@ function virtuallyFoveatedActivityDataAcrossSubjects = processSPDAcrossActivitie
             continue;
         end
 
-        dataField = fieldNames{1};
-        spd = loadedStruct.activityData.(dataField);
-
-        if (~isfield(spd, 'exponentMap') || ~isfield(spd, 'varianceMap') || ...
-                ~isfield(spd, 'spdByRegion') || ~isfield(spd, 'medianImage') || ...
-                ~isfield(spd, 'frameDropVector') || ~isfield(spd, 'frq'))
-            fprintf('Skipping %s because required SPD fields were missing\n', thisFile);
-            continue;
-        end
+        activityName = fieldNames{1};
+        spd = loadedStruct.activityData.(activityName);
 
         validActivityIdx = validActivityIdx + 1;
+
+
+
 
         virtuallyFoveatedActivityDataAcrossSubjects.acrossAll .activityNames{validActivityIdx} = activityName;
         virtuallyFoveatedActivityDataAcrossSubjects.acrossAll .exponentMaps(:,:,validActivityIdx) = spd.exponentMap;
@@ -235,6 +231,25 @@ function virtuallyFoveatedActivityDataAcrossSubjects = processSPDAcrossActivitie
         virtuallyFoveatedActivityDataAcrossSubjects.acrossAll .medianImages(:,:,validActivityIdx) = spd.medianImage;
         virtuallyFoveatedActivityDataAcrossSubjects.acrossAll .frameDropVector{validActivityIdx} = spd.frameDropVector;
         virtuallyFoveatedActivityDataAcrossSubjects.acrossAll .frq = spd.frq;
+
+        % Now, we need to accumulate the regionAverages across subjects for this set of activities 
+        nSubjects = numel(spd.subjects); 
+        for ii = 1:nSubjects
+            % Gather the subject id 
+            subject_id = spd.subjects{ii}; 
+
+            % Gather the Subject's  region averages 
+            subject_region_averages = spd.regionAveragesAcrossSubjects{ii};
+
+            % Accumulate the list of subjects 
+            virtuallyFoveatedActivityDataAcrossSubjects.acrossAll.subjects{end+1} = subject_id;
+
+            % Also, accumulate the list of region averages 
+            virtuallyFoveatedActivityDataAcrossSubjects.acrossAll.regionAveragesAcrossAll{end+1} = subject_region_averages;
+
+        end 
+
+
 
         if (combine_figures)
             jp_files = dir(fullfile(activityPath, ...
@@ -262,6 +277,26 @@ function virtuallyFoveatedActivityDataAcrossSubjects = processSPDAcrossActivitie
                             justProjectionDataAcrossAll.medianImages(:,:,validActivityIdx) = jp.medianImage;
                             justProjectionDataAcrossAll.frameDropVector{validActivityIdx} = jp.frameDropVector;
                             justProjectionDataAcrossAll.frq = jp.frq;
+
+
+                            % Save the region averages for the justprojection videos 
+                            for ii = 1:nSubjects
+                                % Gather the subject id 
+                                subject_id = jp.subjects{ii}; 
+
+                                % Gather the Subject's  region averages 
+                                subject_region_averages = jp.regionAveragesAcrossSubjects{ii};
+
+                                % Accumulate the list of subjects 
+                                justProjectionDataAcrossAll.acrossAll.subjects{end+1} = subject_id;
+
+                                % Also, accumulate the list of region averages 
+                                justProjectionDataAcrossAll.acrossAll.regionAveragesAcrossAll{end+1} = subject_region_averages;
+
+                            end 
+
+
+
                         end
                     end
                 end
@@ -269,30 +304,26 @@ function virtuallyFoveatedActivityDataAcrossSubjects = processSPDAcrossActivitie
         end
     end
 
-    % ---------------------------------------------------------------------
-    % STEP 3.5: Handle case where nothing valid was loaded
-    % ---------------------------------------------------------------------
-    if (validActivityIdx == 0)
-        warning('No valid SPDResultsAcrossSubjects files were loaded from input_dir: %s', input_dir);
-        virtuallyFoveatedActivityDataAcrossSubjects.acrossAll = virtuallyFoveatedActivityDataAcrossSubjects.acrossAll ;
-        return;
-    end
+
 
     % ---------------------------------------------------------------------
-    % STEP 4: Compute averages across all successfully loaded activities
+    % STEP 4: Compute averages and STD across all successfully loaded activities
     % ---------------------------------------------------------------------
     virtuallyFoveatedActivityDataAcrossSubjects.acrossAll .exponentMap = squeeze(mean(virtuallyFoveatedActivityDataAcrossSubjects.acrossAll .exponentMaps(:,:,1:validActivityIdx), 3, 'omitmissing'));
     virtuallyFoveatedActivityDataAcrossSubjects.acrossAll .varianceMap = squeeze(mean(virtuallyFoveatedActivityDataAcrossSubjects.acrossAll .varianceMaps(:,:,1:validActivityIdx), 3, 'omitmissing'));
     virtuallyFoveatedActivityDataAcrossSubjects.acrossAll .spdByRegion = squeeze(mean(virtuallyFoveatedActivityDataAcrossSubjects.acrossAll .spdByRegions(:,:,:,1:validActivityIdx), 4, 'omitmissing'));
     virtuallyFoveatedActivityDataAcrossSubjects.acrossAll .medianImage = squeeze(mean(virtuallyFoveatedActivityDataAcrossSubjects.acrossAll .medianImages(:,:,1:validActivityIdx), 3, 'omitmissing'));
 
-    if (combine_figures && isstruct(justProjectionDataAcrossAll) && ...
-            isfield(justProjectionDataAcrossAll, 'exponentMaps'))
+    if (combine_figures)
         justProjectionDataAcrossAll.exponentMap = squeeze(mean(justProjectionDataAcrossAll.exponentMaps, 3, 'omitmissing'));
         justProjectionDataAcrossAll.varianceMap = squeeze(mean(justProjectionDataAcrossAll.varianceMaps, 3, 'omitmissing'));
         justProjectionDataAcrossAll.spdByRegion = squeeze(mean(justProjectionDataAcrossAll.spdByRegions, 4, 'omitmissing'));
         justProjectionDataAcrossAll.medianImage = squeeze(mean(justProjectionDataAcrossAll.medianImages, 3, 'omitmissing'));
     end
+
+    n_region_averages = numel(virtuallyFoveatedActivityDataAcrossSubjects.)
+
+
 
     % ---------------------------------------------------------------------
     % STEP 5: Save results and optionally export figures

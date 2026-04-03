@@ -24,8 +24,11 @@ function plotParticipantState(IMUdata, eyeStateData, blinkData, gazeData, winSiz
 
     % Load in the world and ms timestamps in neon timespace
     path_to_raw_recording = "/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026/FLIC_2001/chat/GKA"
-    [world_t, ms_t] = load_ms_world_timestamps(path_to_raw_recording, world_util, ms_util); 
+    [world_t, ms_t, ms_v] = load_ms_world_timestamps_and_data(path_to_raw_recording, world_util, ms_util); 
 
+    disp(size(world_t))
+
+    return 
 
     %% Calculate Time Offsets (T0 based on IMU start)
     t0 = IMUdata.timestamp_ns_(1);
@@ -200,7 +203,7 @@ function world_t = load_world_gka_neon_timestamps(path)
 end 
 
 
-function [world_t, ms_t] = load_ms_world_timestamps(path_to_raw_recording, world_util, ms_util)
+function [world_t, ms_t, ms_v] = load_ms_world_timestamps_and_data(path_to_raw_recording, world_util, ms_util)
     % Load in the world timesstamps and the MS data/ timestamps in nanoseconds from the RAW recording
     %
     % Timestamps are w.r.t the start of the light logger device NOT the recording, 
@@ -280,6 +283,7 @@ function [world_t, ms_t] = load_ms_world_timestamps(path_to_raw_recording, world
 
     % Return the converted values 
     world_t = gka_world_timestamps_neon_time;
+    ms_v = ms_data; 
 
     return ; 
 

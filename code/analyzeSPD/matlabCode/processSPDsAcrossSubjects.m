@@ -94,6 +94,7 @@ function virtuallyFoveatedActivityDataAcrossSubjects = processSPDsAcrossSubjects
         options.spd_ylim = false
         options.combine_figures = false; 
         options.n_participants = 1; 
+        options.across_subject_deviation = 0; 
     end
     
     fovDegrees = options.fovDegrees; 
@@ -261,6 +262,32 @@ function virtuallyFoveatedActivityDataAcrossSubjects = processSPDsAcrossSubjects
             justProjectionActivityDataAcrossSubjects.(activityName).exponentMap = justProjectionAvgExponentMap; 
             justProjectionActivityDataAcrossSubjects.(activityName).varianceMap = justProjectionAvgVarianceMap;
             justProjectionActivityDataAcrossSubjects.(activityName).spdByRegion = justProjectionAvgSpdByRegion;  
+        end 
+
+        % Also, importantly, we need to compute the standard deviation of the regionAverages means
+        % ACROSS subjects 
+        for ii = 1:nSubjects
+            
+            [~. ~. ~, subject_region_averages] = plotSPDs("return_region_averages_only", true)
+            virtuallyFoveatedActivityDataAcrossSubjects.(activityName).regionAveragesAcrossSubjects{ii} = regionAverages.virtuallyFoveated; 
+
+            if(combine_figures)
+                justProjectionActivityDataAcrossSubjects.(activityName).regionAveragesAcrossSubjects{ii} = regionAverages.justProjection; 
+            end 
+        end 
+
+        % Importantly, save the subjects used to calculate this 
+        virtuallyFoveatedActivityDataAcrossSubjects.(activityName).subjects = options.subjects; 
+        
+        % Then calculate standard deviation
+        virtuallyFoveatedActivityDataAcrossSubjects.(activityName).acrossSubjectSTD.center = std(regionAverages.virtuallyFoveated.center);
+        virtuallyFoveatedActivityDataAcrossSubjects.(activityName).acrossSubjectSTD.periphery = std(regionAverages.virtuallyFoveated.periphery); 
+        if(combine_figures)
+            justProjectionActivityDataAcrossSubjects.(activityName).subjects = options.subjects; 
+
+            justProjectionActivityDataAcrossSubjects.(activityName).acrossSubjectSTD.center = std(regionAverages.justProjection.center);
+            justProjectionActivityDataAcrossSubjects.(activityName).acrossSubjectSTD.periphery = std(regionAverages.justProjection.center); 
+
         end 
 
 
