@@ -2272,7 +2272,7 @@ def download_pupil_cloud_recordings(api_key: str,
     return 
 
 def _extract_num_from_id(subject_id: str) -> int:
-    assert re.fullmatch("FLIC_\d+"), f"{subject_id} does not fit the format FLIC_[NUM]"
+    assert re.fullmatch("FLIC_\d+", subject_id), f"{subject_id} does not fit the format FLIC_[NUM]"
     return re.search(r"\d+", subject_id).group()
 
 

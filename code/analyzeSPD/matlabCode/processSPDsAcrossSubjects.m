@@ -126,11 +126,6 @@ function virtuallyFoveatedActivityDataAcrossSubjects = processSPDsAcrossSubjects
 
     nSubjects = length(subjectFiles);
 
-    % Save subjectIDs
-    for ss = 1:nSubjects
-        virtuallyFoveatedActivityDataAcrossSubjects.subjectIDs{ss} = subjectFiles(ss).name;
-    end
-
     % Determine activity list
     if ~isempty(options.activities)
         activityNames = options.activities;
@@ -267,35 +262,82 @@ function virtuallyFoveatedActivityDataAcrossSubjects = processSPDsAcrossSubjects
         % Also, importantly, we need to compute the standard deviation of the regionAverages means
         % ACROSS subjects 
         for ii = 1:nSubjects
-            
-            [~. ~. ~, subject_region_averages] = plotSPDs("return_region_averages_only", true)
-            virtuallyFoveatedActivityDataAcrossSubjects.(activityName).regionAveragesAcrossSubjects{ii} = regionAverages.virtuallyFoveated; 
+            subjectVirtuallyFoveatedData = struct();
+            subjectVirtuallyFoveatedData.(activityName).exponentMap = ...
+                virtuallyFoveatedActivityDataAcrossSubjects.(activityName).exponentMaps(:, :, ss);
+            subjectVirtuallyFoveatedData.(activityName).varianceMap = ...
+                virtuallyFoveatedActivityDataAcrossSubjects.(activityName).varianceMaps(:, :, ss);
+            subjectVirtuallyFoveatedData.(activityName).spdByRegion = ...
+                virtuallyFoveatedActivityDataAcrossSubjects.(activityName).spdByRegions(:, :, :, ss);
+            subjectVirtuallyFoveatedData.(activityName).frq = ...
+                virtuallyFoveatedActivityDataAcrossSubjects.(activityName).frq;
+            subjectVirtuallyFoveatedData.(activityName).medianImage = ...
+                virtuallyFoveatedActivityDataAcrossSubjects.(activityName).medianImages(:, :, ss);
+            subjectVirtuallyFoveatedData.(activityName).frameDropVector = ...
+                virtuallyFoveatedActivityDataAcrossSubjects.(activityName).frameDropVector{ss};
 
-            if(combine_figures)
-                justProjectionActivityDataAcrossSubjects.(activityName).regionAveragesAcrossSubjects{ii} = regionAverages.justProjection; 
-            end 
+            if (~islogical(justProjectionActivityDataAcrossSubjects))
+                subjectJustProjectionData = struct();
+                subjectJustProjectionData.(activityName).exponentMap = ...
+                    justProjectionActivityDataAcrossSubjects.(activityName).exponentMaps(:, :, ss);
+                subjectJustProjectionData.(activityName).varianceMap = ...
+                    justProjectionActivityDataAcrossSubjects.(activityName).varianceMaps(:, :, ss);
+                subjectJustProjectionData.(activityName).spdByRegion = ...
+                    justProjectionActivityDataAcrossSubjects.(activityName).spdByRegions(:, :, :, ss);
+                subjectJustProjectionData.(activityName).frq = ...
+                    justProjectionActivityDataAcrossSubjects.(activityName).frq;
+                subjectJustProjectionData.(activityName).medianImage = ...
+                    justProjectionActivityDataAcrossSubjects.(activityName).medianImages(:, :, ss);
+                subjectJustProjectionData.(activityName).frameDropVector = ...
+                    justProjectionActivityDataAcrossSubjects.(activityName).frameDropVector{ss};
+            else
+                subjectJustProjectionData = false;
+            end
+
+            [~, ~, ~, subject_region_averages] = plotSPDs( ...
+                subjectVirtuallyFoveatedData, ...
+                "fovDegrees", options.fovDegrees, ...
+                "return_region_averages_only", true, ...
+                "justProjectionActivityData", subjectJustProjectionData, ...
+                "num_participants", 1 ...
+            );
+
+            virtuallyFoveatedActivityDataAcrossSubjects.(activityName).regionAveragesAcrossSubjects{ss} = ...
+                subject_region_averages.virtuallyFoveated;
+
+            virtuallyFoveatedCenterAverages(ss, :) = ...
+                subject_region_averages.virtuallyFoveated.center(:)';
+            virtuallyFoveatedPeripheryAverages(ss, :) = ...
+                subject_region_averages.virtuallyFoveated.periphery(:)';
+
+            if (~islogical(subjectJustProjectionData))
+                justProjectionActivityDataAcrossSubjects.(activityName).regionAveragesAcrossSubjects{ss} = ...
+                    subject_region_averages.justProjection;
+
+                justProjectionCenterAverages(ss, :) = ...
+                    subject_region_averages.justProjection.center(:)';
+                justProjectionPeripheryAverages(ss, :) = ...
+                    subject_region_averages.justProjection.periphery(:)';
+            end
         end 
 
         % Importantly, save the subjects used to calculate this 
         virtuallyFoveatedActivityDataAcrossSubjects.(activityName).subjects = options.subjects; 
         
         % Then calculate standard deviation
-        virtuallyFoveatedActivityDataAcrossSubjects.(activityName).acrossSubjectSTD.center = std(regionAverages.virtuallyFoveated.center);
-        virtuallyFoveatedActivityDataAcrossSubjects.(activityName).acrossSubjectSTD.periphery = std(regionAverages.virtuallyFoveated.periphery); 
+       virtuallyFoveatedActivityDataAcrossSubjects.(activityName).acrossSubjectSTD.center = std(virtuallyFoveatedCenterAverages, 0, 1, 'omitnan');
+       virtuallyFoveatedActivityDataAcrossSubjects.(activityName).acrossSubjectSTD.periphery = std(virtuallyFoveatedPeripheryAverages, 0, 1, 'omitnan');
         if(combine_figures)
             justProjectionActivityDataAcrossSubjects.(activityName).subjects = options.subjects; 
 
-            justProjectionActivityDataAcrossSubjects.(activityName).acrossSubjectSTD.center = std(regionAverages.justProjection.center);
-            justProjectionActivityDataAcrossSubjects.(activityName).acrossSubjectSTD.periphery = std(regionAverages.justProjection.center); 
+            justProjectionActivityDataAcrossSubjects.(activityName).acrossSubjectSTD.center = std(justProjectionCenterAverages, 0, 1, 'omitnan');
+            justProjectionActivityDataAcrossSubjects.(activityName).acrossSubjectSTD.periphery = std(justProjectionPeripheryAverages, 0, 1, 'omitnan');
 
         end 
 
 
         % Output the results of this if desired
-        if(output_dir ~= "")
-            % Remove this field we no longer need to keep track of subjects
-            virtuallyFoveatedActivityDataAcrossSubjects = rmfield(virtuallyFoveatedActivityDataAcrossSubjects, 'subjectIDs'); 
-            
+        if(output_dir ~= "")            
             % Save the activity data
             activityData = virtuallyFoveatedActivityDataAcrossSubjects; 
             save(output_filepath, 'activityData');
@@ -310,7 +352,11 @@ function virtuallyFoveatedActivityDataAcrossSubjects = processSPDsAcrossSubjects
                                                                                      "spd_xlim", options.spd_xlim, ...
                                                                                      "spd_ylim", options.spd_ylim, ...
                                                                                      "justProjectionActivityData", justProjectionActivityDataAcrossSubjects,...
-                                                                                     "num_participants", options.n_participants...
+                                                                                     "num_participants", options.n_participants,...
+                                                                                     "acrossParticipantRegionSTD", struct( ...
+                                                                                                                    "virtuallyFoveated", virtuallyFoveatedActivityDataAcrossSubjects.(activityName).acrossSubjectSTD, ...
+                                                                                                                    "justProjection", justProjectionActivityDataAcrossSubjects.(activityName).acrossSubjectSTD ...
+                                                                                                                )... 
                                                                                      ); 
                 
 
