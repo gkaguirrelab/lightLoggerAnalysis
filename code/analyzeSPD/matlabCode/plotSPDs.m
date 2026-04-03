@@ -452,7 +452,7 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle, regionAverage
                 targetAxes, justProjectionFrqVector, justProjectionCenterSpd, ...
                 iComputeRegionSemFromAcrossParticipantStd( ...
                     options.acrossParticipantRegionSTD.justProjection.center, numParticipants), ...
-                jpCenterColor, '--', 1.8);
+                jpCenterColor, '-', 1.8);
 
             [jpPeripheryPatchHandle, jpPeripheryLineHandle] = iPlotSpdWithSemPatch( ...
                 targetAxes, justProjectionFrqVector, justProjectionPeripherySpd, ...
@@ -470,7 +470,7 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle, regionAverage
                 targetAxes, virtuallyFoveatedFrqVector, virtuallyFoveatedPeripherySpd, ...
                 iComputeRegionSemFromAcrossParticipantStd( ...
                     options.acrossParticipantRegionSTD.virtuallyFoveated.periphery, numParticipants), ...
-                vfPeripheryColor, '-', 1.8);
+                vfPeripheryColor, '--', 1.8);
 
             referenceHandle = loglog(targetAxes, [10^0; 10^1.5], [10^-2; 10^-5], ':', 'Color', referenceColor, 'LineWidth', 1.5);
 
@@ -487,7 +487,7 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle, regionAverage
             };
         else
             jpCenterLineHandle = loglog(targetAxes, justProjectionFrqVector, justProjectionCenterSpd, ...
-                '--', 'Color', jpCenterColor, 'LineWidth', 1.8);
+                '-', 'Color', jpCenterColor, 'LineWidth', 1.8);
 
             jpPeripheryLineHandle = loglog(targetAxes, justProjectionFrqVector, justProjectionPeripherySpd, ...
                 '--', 'Color', jpPeripheryColor, 'LineWidth', 1.8);
@@ -496,7 +496,7 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle, regionAverage
                 '-', 'Color', vfCenterColor, 'LineWidth', 1.8);
 
             vfPeripheryLineHandle = loglog(targetAxes, virtuallyFoveatedFrqVector, virtuallyFoveatedPeripherySpd, ...
-                '-', 'Color', vfPeripheryColor, 'LineWidth', 1.8);
+                '--', 'Color', vfPeripheryColor, 'LineWidth', 1.8);
 
             referenceHandle = loglog(targetAxes, [10^0; 10^1.5], [10^-2; 10^-5], ':', 'Color', referenceColor, 'LineWidth', 1.5);
 
@@ -537,7 +537,7 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle, regionAverage
                 targetAxes, frqVector, peripherySPD, ...
                 iComputeRegionSemFromAcrossParticipantStd( ...
                     options.acrossParticipantRegionSTD.virtuallyFoveated.periphery, numParticipants), ...
-                vfPeripheryColor, '-', 1.8);
+                vfPeripheryColor, '--', 1.8);
 
            referenceHandle = loglog(targetAxes, [10^0; 10^1.5], [10^-2; 10^-5], ':', 'Color', referenceColor, 'LineWidth', 1.5);
 
@@ -557,7 +557,7 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle, regionAverage
                 '-', 'Color', vfCenterColor, 'LineWidth', 1.8);
 
             peripheryLineHandle = loglog(targetAxes, frqVector, peripherySPD, ...
-                '-', 'Color', vfPeripheryColor, 'LineWidth', 1.8);
+                '--', 'Color', vfPeripheryColor, 'LineWidth', 1.8);
 
             referenceHandle = loglog(targetAxes, [10^0; 10^1.5], [10^-2; 10^-5], ':', 'Color', referenceColor, 'LineWidth', 1.5);
 
