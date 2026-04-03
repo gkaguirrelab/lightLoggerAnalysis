@@ -167,6 +167,8 @@ function plotParticipantState(IMUdata, eyeStateData, blinkData, gazeData, winSiz
     plot(axB, interpYaw(validY), polyval(p2, interpYaw(validY)), 'k', 'LineWidth', 1.5);
     title(sprintf('Horizontal (R=%.2f)', corr(interpYaw(validY), gazeAzim(validY))));
     grid on; axis square; xlabel('Yaw'); ylabel('Azim');
+    title(tlo2, ['Gaze Pos vs Head Pos: ' activityName], 'FontWeight', 'bold');
+
     drawnow;
 
     %----------------------------------------------
