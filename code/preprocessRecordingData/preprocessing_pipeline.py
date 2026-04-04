@@ -2271,6 +2271,95 @@ def download_pupil_cloud_recordings(api_key: str,
 
     return 
 
+
+def generate_actigraphy_graphs(src_dir: str="",
+                               dst_dir: str="", 
+                               overwrite_exsiting=False, 
+                                                  verbose=False, 
+                                                  subjects_to_skip: Iterable=set(), 
+                                                  activities_to_skip: Iterable=set()
+                                                ) -> None:
+    
+    # Construct the paths to the raw and processing dirs 
+    raw_dir: str = os.path.join(src_dir, "FLIC_raw")
+    processing_dir: str = os.path.join(src_dir, "FLIC_processing")
+
+    # First, let's find all of the subjects in this experiment 
+    subject_paths: list[str] = natsorted([os.path.join(raw_dir, subject_name) 
+                                          for subject_name in os.listdir(raw_dir) 
+                                          if re.fullmatch(r"FLIC_\d+", subject_name) 
+                                          and os.path.isdir(os.path.join(raw_dir, subject_name))
+                                          if _extract_num_from_id(subject_name) not in subjects_to_skip
+                                         ]
+                                        ) 
+    assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
+
+    # Now, let's iterate over all the subject paths 
+    subject_iterator: Iterable = range(len(subject_paths)) if verbose is False else tqdm(range(len(subject_paths)), desc="Processing Subjects", leave=True)
+    for subject_num in subject_iterator:
+        # Retrieve the subject path and subject name
+        subject_raw_path: str = subject_paths[subject_num]
+        subject_id: str = os.path.basename(subject_raw_path)
+        subject_id_number: int = int(re.search("\d+", subject_id).group())
+
+        # Skip subjects we are not interested in examining 
+        if(subject_id_number in subjects_to_skip):
+            continue
+
+        # Construct the path to this subject in the processing directory 
+        subject_processing_path: str = os.path.join(processing_dir, subject_id)
+        assert os.path.exists(subject_processing_path), f"Problem with: {subject_processing_path}"
+
+        # Iterate over the activites for this subject 
+        activites_paths: list[str] = [os.path.join(subject_raw_path, filename) for filename in natsorted(os.listdir(subject_raw_path))
+                                      if os.path.isdir(os.path.join(subject_raw_path, filename))
+                                     ]
+        activities_iterator: Iterable = range(len(activites_paths)) if verbose is False else tqdm(range(len(activites_paths)), desc="Processing Activities", leave=False)
+        for activity_num in activities_iterator:
+            # Retrieve the activity path and activity name
+            activity_raw_path: str = activites_paths[activity_num]
+            activity_name: str = os.path.basename(activity_raw_path)
+
+            # Skip desired activites 
+            if(activity_name in activities_to_skip):
+                continue 
+
+            activitiy_processing_path: str = os.path.join(subject_processing_path, activity_name)
+            assert os.path.exists(activitiy_processing_path), f"Problem with: {activitiy_processing_path}"
+
+            # Assert both the required GKA and Neon paths exist for this 
+            gka_raw_dir: str = os.path.join(activity_raw_path, "GKA")
+            neon_processing_dir: str = os.path.join(activitiy_processing_path, "Neon")
+            neon_raw_dir: str = os.path.join(activity_raw_path, "Neon")
+            assert all(os.path.exists(filepath) for filepath in (gka_raw_dir, neon_processing_dir, neon_raw_dir)), f"Problem with {subject_id} | {activity_name}"
+            neon_raw_recording_dir_name: str = [ filename for filename in os.listdir(neon_raw_dir) 
+                                                 if os.path.isdir(os.path.join(neon_raw_dir, filename)) 
+                                                ][0]
+
+            # Now, we are going to gather all of the import paths
+            neon_actigraphy_filepaths: dict[str, str] = {data_type: os.path.join(neon_raw_dir, neon_raw_recording_dir_name, data_type+".csv")
+                                                         for data_type in ("imu", "3d_eye_states", "blinks", "gaze")
+                                                        }
+
+            world_timestamps_neon_time: str = os.path.join(neon_processing_dir, "egocentric_video_mapper", "alternative_camera_timestamps.csv")
+            assert os.path.exists(world_timestamps_neon_time), f"Problem with: {world_timestamps_neon_time}"
+
+            # This is what I need to get 
+            """
+            IMUdata, 
+            eyeStateData,
+            blinkData, 
+            gazeData
+            path_to_raw_recording (gka_raw_dir)
+            gka_world_neon_time
+            """
+
+
+
+    return 
+
+
+
 def _extract_num_from_id(subject_id: str) -> int:
     assert re.fullmatch("FLIC_\d+", subject_id), f"{subject_id} does not fit the format FLIC_[NUM]"
     return re.search(r"\d+", subject_id).group()
