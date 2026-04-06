@@ -221,9 +221,6 @@ function virtuallyFoveatedActivityDataAcrossSubjects = processSPDAcrossActivitie
 
         validActivityIdx = validActivityIdx + 1;
 
-
-
-
         virtuallyFoveatedActivityDataAcrossSubjects.acrossAll .activityNames{validActivityIdx} = activityName;
         virtuallyFoveatedActivityDataAcrossSubjects.acrossAll .exponentMaps(:,:,validActivityIdx) = spd.exponentMap;
         virtuallyFoveatedActivityDataAcrossSubjects.acrossAll .varianceMaps(:,:,validActivityIdx) = spd.varianceMap;
@@ -240,11 +237,14 @@ function virtuallyFoveatedActivityDataAcrossSubjects = processSPDAcrossActivitie
 
             % Gather the Subject's  region averages 
             subject_region_averages = spd.regionAveragesAcrossSubjects{ii};
+            % Accumulate the list of subjects and region averages 
+            if(~isfield(virtuallyFoveatedActivityDataAcrossSubjects.acrossAll, "subjects"))
+                virtuallyFoveatedActivityDataAcrossSubjects.acrossAll.subjects = {subject_id}; 
+                virtuallyFoveatedActivityDataAcrossSubjects.acrossAll.regionAveragesAcrossAll = {subject_region_averages}; 
+                continue; 
+            end 
 
-            % Accumulate the list of subjects 
             virtuallyFoveatedActivityDataAcrossSubjects.acrossAll.subjects{end+1} = subject_id;
-
-            % Also, accumulate the list of region averages 
             virtuallyFoveatedActivityDataAcrossSubjects.acrossAll.regionAveragesAcrossAll{end+1} = subject_region_averages;
 
         end 
@@ -287,11 +287,15 @@ function virtuallyFoveatedActivityDataAcrossSubjects = processSPDAcrossActivitie
                                 % Gather the Subject's  region averages 
                                 subject_region_averages = jp.regionAveragesAcrossSubjects{ii};
 
-                                % Accumulate the list of subjects 
-                                justProjectionDataAcrossAll.acrossAll.subjects{end+1} = subject_id;
+                                % Accumulate the subject region averages across these activities
+                                if(~isfield(justProjectionDataAcrossAll, 'subjects'))
+                                    justProjectionDataAcrossAll.subjects = {subject_id}; 
+                                    justProjectionDataAcrossAll.regionAveragesAcrossAll = {subject_region_averages}; 
+                                    continue; 
+                                end 
 
-                                % Also, accumulate the list of region averages 
-                                justProjectionDataAcrossAll.acrossAll.regionAveragesAcrossAll{end+1} = subject_region_averages;
+                                justProjectionDataAcrossAll.subjects{end+1} = subject_id;
+                                justProjectionDataAcrossAll.regionAveragesAcrossAll{end+1} = subject_region_averages;
 
                             end 
 
@@ -305,7 +309,15 @@ function virtuallyFoveatedActivityDataAcrossSubjects = processSPDAcrossActivitie
     end
 
 
-
+    % Now, let's formulate more easily filled arrays to take STD over 
+    across_participant_std = struct(); 
+    for ii = 1:numel(virtuallyFoveatedActivityDataAcrossSubjects.acrossAll.regionAveragesAcrossAll)
+        across_participant_std.virtuallyFoveated.center(ii, :) = virtuallyFoveatedActivityDataAcrossSubjects.acrossAll.regionAveragesAcrossAll{ii}.center; 
+        across_participant_std.virtuallyFoveated.periphery(ii, :) = virtuallyFoveatedActivityDataAcrossSubjects.acrossAll.regionAveragesAcrossAll{ii}.periphery; 
+    end 
+    across_participant_std.virtuallyFoveated.center = std(across_participant_std.virtuallyFoveated.center, 0, 1, 'omitnan');
+    across_participant_std.virtuallyFoveated.periphery = std(across_participant_std.virtuallyFoveated.periphery, 0, 1, 'omitnan');
+       
     % ---------------------------------------------------------------------
     % STEP 4: Compute averages and STD across all successfully loaded activities
     % ---------------------------------------------------------------------
@@ -319,10 +331,16 @@ function virtuallyFoveatedActivityDataAcrossSubjects = processSPDAcrossActivitie
         justProjectionDataAcrossAll.varianceMap = squeeze(mean(justProjectionDataAcrossAll.varianceMaps, 3, 'omitmissing'));
         justProjectionDataAcrossAll.spdByRegion = squeeze(mean(justProjectionDataAcrossAll.spdByRegions, 4, 'omitmissing'));
         justProjectionDataAcrossAll.medianImage = squeeze(mean(justProjectionDataAcrossAll.medianImages, 3, 'omitmissing'));
+
+         for ii = 1:numel(virtuallyFoveatedActivityDataAcrossSubjects.acrossAll.regionAveragesAcrossAll)
+            across_participant_std.justProjection.center(ii, :) = justProjectionDataAcrossAll.regionAveragesAcrossAll{ii}.center; 
+            across_participant_std.justProjection.periphery(ii, :) = justProjectionDataAcrossAll.regionAveragesAcrossAll{ii}.periphery; 
+        end 
+        across_participant_std.justProjection.center = std(across_participant_std.justProjection.center, 0, 1, 'omitnan');
+        across_participant_std.justProjection.periphery = std(across_participant_std.justProjection.periphery, 0, 1, 'omitnan');
+
+
     end
-
-    n_region_averages = numel(virtuallyFoveatedActivityDataAcrossSubjects.)
-
 
 
     % ---------------------------------------------------------------------
@@ -367,7 +385,8 @@ function virtuallyFoveatedActivityDataAcrossSubjects = processSPDAcrossActivitie
                     "spd_xlim", options.spd_xlim, ...
                     "spd_ylim", options.spd_ylim, ...
                     "justProjectionActivityData", justProjectionPlotData, ...
-                    "num_participants", options.n_participants...
+                    "num_participants", options.n_participants,...
+                    "acrossParticipantRegionSTD", across_participant_std...
                 );
             else
                 [exponentMapHandle, varianceMapHandle, spdByRegionHandle] = plotSPDs( ...
@@ -377,7 +396,8 @@ function virtuallyFoveatedActivityDataAcrossSubjects = processSPDAcrossActivitie
                     "variance_clim", options.variance_clim, ...
                     "spd_xlim", options.spd_xlim, ...
                     "spd_ylim", options.spd_ylim, ...
-                    "num_participants", options.n_participants...
+                    "num_participants", options.n_participants,...
+                    "acrossParticipantRegionSTD", across_participant_std...
                 );
             end
 

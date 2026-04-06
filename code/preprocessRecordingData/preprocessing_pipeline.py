@@ -1531,6 +1531,7 @@ def generate_spds_across_all(src_dir: str="/Users/zacharykelly/Aguirre-Brainard 
                                           "spd_xlim", min_max_across_all["frq"]["bounds"],
                                           "spd_ylim", min_max_across_all["spdByRegion"]["bounds"], 
                                           "combine_figures", combine_figures,
+                                          "n_participants", len(subject_paths), 
                                           nargout=0
                                         )
     

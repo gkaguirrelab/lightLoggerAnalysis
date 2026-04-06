@@ -261,7 +261,7 @@ function virtuallyFoveatedActivityDataAcrossSubjects = processSPDsAcrossSubjects
 
         % Also, importantly, we need to compute the standard deviation of the regionAverages means
         % ACROSS subjects 
-        for ii = 1:nSubjects
+        for ss = 1:nSubjects
             subjectVirtuallyFoveatedData = struct();
             subjectVirtuallyFoveatedData.(activityName).exponentMap = ...
                 virtuallyFoveatedActivityDataAcrossSubjects.(activityName).exponentMaps(:, :, ss);
