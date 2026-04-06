@@ -2363,6 +2363,9 @@ def generate_actigraphy_graphs(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoor
             if(os.path.exists(output_filepath) and overwrite_exsiting is False):
                 continue 
 
+            # Create the output directory if it does not exist 
+            os.makedirs(output_dir, exist_ok=True)
+
             # Generate the actigraphy graph for this subject
             eng.plotParticipantState(raw_dir,
                                      processing_dir, 
