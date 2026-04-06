@@ -2374,7 +2374,7 @@ def generate_actigraphy_graphs(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoor
                                           neon_actigraphy_filepaths["3d_eye_states"],
                                           neon_actigraphy_filepaths["blinks"],
                                           neon_actigraphy_filepaths["gaze"],
-                                          "save_figures", True,
+                                          "save_figures", True, 
                                           nargout=0 
                                         )
 

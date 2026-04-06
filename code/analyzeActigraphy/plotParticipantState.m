@@ -176,8 +176,8 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     targetTime = double(gazeData.timestamp_ns_);
     imuTime = double(IMUdata.timestamp_ns_);
 
-    interpPitch = interp1(imuTime, IMUdata.pitch_deg_, targetTime, 'linear', 'extrap');
-    interpYaw   = interp1(imuTime, unwrappedYaw, targetTime, 'linear', 'extrap');
+    interpPitch = interp1(imuTime, IMUdata.pitch_deg_, targetTime, 'nearest', NaN);
+    interpYaw   = interp1(imuTime, unwrappedYaw, targetTime, 'nearest', NaN);
     validP = find(~isnan(interpPitch) & ~isnan(gazeElev));
     validY = find(~isnan(interpYaw) & ~isnan(gazeAzim));
 
@@ -220,8 +220,8 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     %----------------------------------------------
     %% Figure 3: Activity vs. Eye State Correlation
     eyeTime = double(eyeStateData.timestamp_ns_);
-    interpAperture = interp1(eyeTime, smoothAperture, imuTime, 'linear', 'extrap');
-    interpPupil    = interp1(eyeTime, smoothPupil, imuTime, 'linear', 'extrap');
+    interpAperture = interp1(eyeTime, smoothAperture, imuTime, 'nearest', NaN);
+    interpPupil    = interp1(eyeTime, smoothPupil, imuTime, 'nearest', NaN);
     
     validA = find(~isnan(activityIndex) & ~isnan(interpAperture));
     validPup = find(~isnan(activityIndex) & ~isnan(interpPupil));
@@ -269,7 +269,7 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     %% Figure 4: Illuminance vs. Eye State Correlation
     % Use log10 because the pupillary light reflex is logarithmic
     logLux = log10(MS2illum_lux + eps); 
-    interpLogLux_Eye = interp1(double(ms_t), logLux, eyeTime, 'linear', 'extrap');
+    interpLogLux_Eye = interp1(double(ms_t), logLux, eyeTime, 'nearest', NaN);
 
     figure('Color', 'w', 'Units', 'normalized', 'Position', [0.1 0.1 0.6 0.4], 'Name', 'Illuminance Correlations');
     tlo4 = tiledlayout(1, 2, 'TileSpacing', 'loose', 'Padding', 'compact');
@@ -287,7 +287,6 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
         title(axE, sprintf('Lux vs Eye Openness (R=%.2f)', corr(interpLogLux_Eye(validLuxA), smoothAperture(validLuxA))));
     end
     xlabel(axE, 'Log10(Lux)'); ylabel(axE, 'Eye Openness (mm)'); grid on; axis square;
-    xlim([1, 10e4]); 
     ylim([0, 15]); 
 
     % Panel 2: Log(Lux) vs. Pupil Diameter
@@ -303,7 +302,6 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
         title(axF, sprintf('Lux vs Pupil (R=%.2f)', corr(interpLogLux_Eye(validLuxP), smoothPupil(validLuxP))));
     end
     xlabel(axF, 'Log10(Lux)'); ylabel(axF, 'Pupil (mm)'); grid on; axis square;
-    xlim([1, 10e4]); 
     ylim([2, 6]);
     
     title(tlo4, ['Environmental Light vs Eye State: ' figureTitle], 'FontWeight', 'bold');
