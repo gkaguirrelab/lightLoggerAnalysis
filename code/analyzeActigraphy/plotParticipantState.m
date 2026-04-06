@@ -1,17 +1,22 @@
-function plotParticipantState(IMUdata, eyeStateData, blinkData, gazeData, winSizeSec, activityName, options)
+function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, activity, figureTitle, IMUdata, eyeStateData, blinkData, gazeData, options)
     arguments 
+        raw_dir;
+        processing_dir;    
+        output_dir; 
+        subject_id; 
+        activity; 
+        figureTitle; 
+
         IMUdata, 
         eyeStateData,
         blinkData, 
         gazeData, 
-        winSizeSec, 
-        activityName,
-        options.input_dir; 
-        options.output_dir; 
-        options.subjects = {};     
-        options.activities = {}; 
+        
+        options.save_figures = false; 
+        options.winSizeSec = 5;  
         options.force_recalc = false; 
     end
+    winSizeSec = options.winSizeSec; 
 
     %% Load Utility Libraries & Data
     persistent world_util ms_util;
@@ -20,8 +25,21 @@ function plotParticipantState(IMUdata, eyeStateData, blinkData, gazeData, winSiz
         ms_util = import_pyfile(getpref("lightLoggerAnalysis", "ms_util_path")); 
     end
     
-    path_to_raw_recording = "/Users/samanthamontoya/Aguirre-Brainard Lab Dropbox/Sam Montoya/FLIC_analysis/2001_raw/walkIndoor/GKA";
-    [world_t, ms_t, ms_v] = load_ms_world_timestamps_and_data(path_to_raw_recording, world_util, ms_util); 
+    % Load in the actigraphy data if needed 
+    [IMUdata, eyeStateData, blinkData, gazeData] = load_actigraphy_data(IMUdata, eyeStateData, blinkData, gazeData);
+    
+    % First, we need to find and load in the timestamp data so we can do temporal alignment
+    path_to_raw_recording = fullfile(raw_dir, subject_id, activity, "GKA"); 
+    path_to_gka_world_timestamps_neon_time = fullfile(processing_dir, subject_id, activity, "Neon", "egocentric_mapper_results", "alternative_camera_timestamps.csv"); 
+
+    assert(exist(path_to_raw_recording, 'dir') ~= 0, ...
+    sprintf('Path %s does not exist', path_to_raw_recording));
+
+    assert(exist(path_to_gka_world_timestamps_neon_time, 'file') ~= 0, ...
+    sprintf('Path %s does not exist', path_to_gka_world_timestamps_neon_time));
+
+
+    [world_t, ms_t, ms_v] = load_ms_world_timestamps_and_data(path_to_raw_recording, path_to_gka_world_timestamps_neon_time, world_util, ms_util); 
     
     % Convert MS counts to absolute illuminance
     MS2illum_lux = msCounts2Illuminance(ms_v);
@@ -93,21 +111,25 @@ function plotParticipantState(IMUdata, eyeStateData, blinkData, gazeData, winSiz
     % Subplot 1: ENMO
     ax1 = nexttile(tlo1);
     plot(ax1, timeMinIMU, activityIndex, 'k', 'LineWidth', 1.2, 'DisplayName', 'ENMO');
-    ylabel(ax1, 'Activity (g)'); title(ax1, [activityName ' - ' num2str(winSizeSec) 's Window']);
+    ylabel(ax1, 'Activity (g)'); title(ax1, [figureTitle ' - ' num2str(winSizeSec) 's Window']);
+    ylim([0, 0.2]);
     grid on;
 
     % Subplot 2: Rotational Vel
     ax2 = nexttile(tlo1); hold(ax2, 'on');
-    plot(ax2, timeMinIMU, vRoll, 'Color', cRoll, 'DisplayName', 'Roll');
-    plot(ax2, timeMinIMU, vPitch, 'Color', cPitch, 'DisplayName', 'Pitch');
-    plot(ax2, timeMinIMU, vYaw, 'Color', cYaw, 'DisplayName', 'Yaw');
+    plot(ax2, timeMinIMU, vRoll,  'Color', [cRoll  0.3], 'DisplayName', 'Roll');
+    plot(ax2, timeMinIMU, vPitch, 'Color', [cPitch 0.3], 'DisplayName', 'Pitch');
+    plot(ax2, timeMinIMU, vYaw,   'Color', [cYaw   0.3], 'DisplayName', 'Yaw');
     ylabel(ax2, 'Rot. Vel (deg/s)'); legend('FontSize', 7); grid on;
+    ylim([-360, 360]);
     
+
     % Subplot 3: Gaze
     ax3 = nexttile(tlo1); hold(ax3, 'on');
     plot(ax3, timeMinGaze, gazeElev, 'Color', cPitch, 'DisplayName', 'Elev');
     plot(ax3, timeMinGaze, gazeAzim, 'Color', cYaw, 'DisplayName', 'Azim');
     ylabel(ax3, 'Gaze (deg)'); legend('FontSize', 7); grid on;
+    ylim([-60, 60]);
     
     % Subplot 4: Eye State
     ax4 = nexttile(tlo1); hold(ax4, 'on');
@@ -115,10 +137,11 @@ function plotParticipantState(IMUdata, eyeStateData, blinkData, gazeData, winSiz
     timeMinBlinks = (double(blinkData.startTimestamp_ns_) - double(t0)) / 1e9 / 60;
     stem(ax4, timeMinBlinks, zeros(size(timeMinBlinks)) + 2.0, 'Color', [0.6 0.6 0.6], 'Marker', 'none', 'HandleVisibility', 'off');
     pAperture = plot(ax4, timeMinEye, smoothAperture, '-', 'Color', cApert, 'LineWidth', 1.2, 'DisplayName', 'Aperture'); 
-    ylabel('Aperture (mm)'); ax4.YAxis(1).Color = cApert; 
+    ylabel('Eyelid Aperture (mm)'); ax4.YAxis(1).Color = cApert; 
+    ylim(ax4, [0, 15]);
     yyaxis right
     pPupil = plot(ax4, timeMinEye, smoothPupil, '-', 'Color', cPupil, 'LineWidth', 1.2, 'DisplayName', 'Pupil');
-    ylim(ax4, [2, inf]);
+    ylim(ax4, [2, 6]);
     ylabel('Pupil (mm)'); ax4.YAxis(2).Color = cPupil; 
     grid on;
 
@@ -129,6 +152,7 @@ function plotParticipantState(IMUdata, eyeStateData, blinkData, gazeData, winSiz
     ax5.YMinorGrid = 'off'; 
     ax5.YGrid = 'on';      
     ylabel(ax5, 'Illum (Lux)'); xlabel(ax5, 'Time (min)');
+    ylim([1, 10e4]); 
     grid on; 
     
     linkaxes([ax1, ax2, ax3, ax4, ax5], 'x');
@@ -137,15 +161,26 @@ function plotParticipantState(IMUdata, eyeStateData, blinkData, gazeData, winSiz
     xlim(ax1, [0, maxTime]);
     drawnow;
 
+    % Save the figure if desired 
+    if(options.save_figures)
+        output_path = fullfile(output_dir, "actigraphy_summary.pdf");
+        exportgraphics(gcf, output_path, ...
+        'ContentType', 'vector', ...   
+        'BackgroundColor', 'white', ...
+        'Resolution', 300);
+        close(gcf); 
+    end 
+
     %----------------------------------------------
     %% Figure 2: Gaze-Head Correlation
     targetTime = double(gazeData.timestamp_ns_);
     imuTime = double(IMUdata.timestamp_ns_);
+
     interpPitch = interp1(imuTime, IMUdata.pitch_deg_, targetTime, 'linear', 'extrap');
     interpYaw   = interp1(imuTime, unwrappedYaw, targetTime, 'linear', 'extrap');
     validP = find(~isnan(interpPitch) & ~isnan(gazeElev));
     validY = find(~isnan(interpYaw) & ~isnan(gazeAzim));
-    
+
     figure('Color', 'w', 'Units', 'normalized', 'Position', [0.36 0.5 0.3 0.4], 'Name', 'Gaze-Head Corr');
     tlo2 = tiledlayout(1, 2, 'TileSpacing', 'loose', 'Padding', 'compact');
     axA = nexttile(tlo2); hold(axA, 'on');
@@ -156,6 +191,7 @@ function plotParticipantState(IMUdata, eyeStateData, blinkData, gazeData, winSiz
     p1 = polyfit(interpPitch(validP), gazeElev(validP), 1);
     plot(axA, interpPitch(validP), polyval(p1, interpPitch(validP)), 'k', 'LineWidth', 1.5);
     title(sprintf('Vertical (R=%.2f)', corr(interpPitch(validP), gazeElev(validP))));
+    ylim([-60, 60]);
     grid on; axis square; xlabel('Pitch'); ylabel('Elev');
 
     axB = nexttile(tlo2); hold(axB, 'on');
@@ -167,9 +203,19 @@ function plotParticipantState(IMUdata, eyeStateData, blinkData, gazeData, winSiz
     plot(axB, interpYaw(validY), polyval(p2, interpYaw(validY)), 'k', 'LineWidth', 1.5);
     title(sprintf('Horizontal (R=%.2f)', corr(interpYaw(validY), gazeAzim(validY))));
     grid on; axis square; xlabel('Yaw'); ylabel('Azim');
-    title(tlo2, ['Gaze Pos vs Head Pos: ' activityName], 'FontWeight', 'bold');
-
+    title(tlo2, ['Gaze Pos vs Head Pos: ' figureTitle], 'FontWeight', 'bold');
+    ylim([-60, 60]);
     drawnow;
+    % Save the figure if desired 
+    if(options.save_figures)
+        output_path = fullfile(output_dir, "gaze_head_correlation.pdf");
+        exportgraphics(gcf, output_path, ...
+        'ContentType', 'vector', ...   
+        'BackgroundColor', 'white', ...
+        'Resolution', 300);
+        close(gcf); 
+    end 
+
 
     %----------------------------------------------
     %% Figure 3: Activity vs. Eye State Correlation
@@ -207,8 +253,17 @@ function plotParticipantState(IMUdata, eyeStateData, blinkData, gazeData, winSiz
     end
     xlabel('Activity (ENMO)'); ylabel('Pupil (mm)'); grid on; axis square;
     
-    title(tlo3, ['Activity vs Eye State: ' activityName], 'FontWeight', 'bold');
+    title(tlo3, ['Activity vs Eye State: ' figureTitle], 'FontWeight', 'bold');
     drawnow;
+    % Save the figure if desired 
+    if(options.save_figures)
+        output_path = fullfile(output_dir, "activity_vs_eyestate.pdf");
+        exportgraphics(gcf, output_path, ...
+        'ContentType', 'vector', ...   
+        'BackgroundColor', 'white', ...
+        'Resolution', 300);
+        close(gcf); 
+    end 
 
     %----------------------------------------------
     %% Figure 4: Illuminance vs. Eye State Correlation
@@ -232,6 +287,8 @@ function plotParticipantState(IMUdata, eyeStateData, blinkData, gazeData, winSiz
         title(axE, sprintf('Lux vs Eye Openness (R=%.2f)', corr(interpLogLux_Eye(validLuxA), smoothAperture(validLuxA))));
     end
     xlabel(axE, 'Log10(Lux)'); ylabel(axE, 'Eye Openness (mm)'); grid on; axis square;
+    xlim([1, 10e4]); 
+    ylim([0, 15]); 
 
     % Panel 2: Log(Lux) vs. Pupil Diameter
     axF = nexttile(tlo4); hold(axF, 'on');
@@ -246,11 +303,22 @@ function plotParticipantState(IMUdata, eyeStateData, blinkData, gazeData, winSiz
         title(axF, sprintf('Lux vs Pupil (R=%.2f)', corr(interpLogLux_Eye(validLuxP), smoothPupil(validLuxP))));
     end
     xlabel(axF, 'Log10(Lux)'); ylabel(axF, 'Pupil (mm)'); grid on; axis square;
+    xlim([1, 10e4]); 
+    ylim([2, 6]);
     
-    title(tlo4, ['Environmental Light vs Eye State: ' activityName], 'FontWeight', 'bold');
+    title(tlo4, ['Environmental Light vs Eye State: ' figureTitle], 'FontWeight', 'bold');
     drawnow;
-end
+        % Save the figure if desired 
+    if(options.save_figures)
+        output_path = fullfile(output_dir, "illuminance_vs_eyestate.pdf");
+        exportgraphics(gcf, output_path, ...
+        'ContentType', 'vector', ...   
+        'BackgroundColor', 'white', ...
+        'Resolution', 300);
+        close(gcf); 
+    end 
 
+end
 
 % Load in the world timestamps 
 function world_t = load_world_gka_neon_timestamps(path)
@@ -267,7 +335,7 @@ function world_t = load_world_gka_neon_timestamps(path)
 end 
 
 
-function [world_t, ms_t, ms_v] = load_ms_world_timestamps_and_data(path_to_raw_recording, world_util, ms_util)
+function [world_t, ms_t, ms_v] = load_ms_world_timestamps_and_data(path_to_raw_recording,  path_to_gka_world_timestamps_neon_time, world_util, ms_util)
     % Load in the world timesstamps and the MS data/ timestamps in nanoseconds from the RAW recording
     %
     % Timestamps are w.r.t the start of the light logger device NOT the recording, 
@@ -281,14 +349,30 @@ function [world_t, ms_t, ms_v] = load_ms_world_timestamps_and_data(path_to_raw_r
 
     %load egocentric video mapper timestamps for converting between gka and
     %neon
-    path_to_gka_world_timestamps_neon_time = "/Users/samanthamontoya/Aguirre-Brainard Lab Dropbox/Sam Montoya/FLIC_analysis/2001_processing/Neon/egocentric_mapper_results/alternative_camera_timestamps.csv"; 
     gka_world_timestamps_neon_time = int64(load_world_gka_neon_timestamps(path_to_gka_world_timestamps_neon_time)); 
 
     % Assert these two have the same length
     num_gka_world_timestamps_gka_time = numel(gka_world_timestamps_gka_time);
     num_gka_world_timestamps_neon_time = numel(gka_world_timestamps_neon_time);
+    num_frames_diff = abs(num_gka_world_timestamps_gka_time - num_gka_world_timestamps_neon_time); 
     if(num_gka_world_timestamps_gka_time ~= num_gka_world_timestamps_neon_time)
-        error("Num timestamps GKA time: %d ~+ num timestamps Neon time: %d\n", num_gka_world_timestamps_gka_time, num_gka_world_timestamps_neon_time);
+        warning("Num timestamps GKA time: %d ~= num timestamps Neon time: %d\n", num_gka_world_timestamps_gka_time, num_gka_world_timestamps_neon_time);
+
+        % If the difference is a rounding error, just take the minimum number existing
+        if(num_frames_diff > 10)
+            error("Difference is %d frames. Likely programmatic error somewhere", num_frames_diff); 
+        end
+        
+        warning("Difference is =< 10 frames. Cropping to minimum size");
+
+        if(num_gka_world_timestamps_gka_time < num_gka_world_timestamps_neon_time)
+            gka_world_timestamps_neon_time = gka_world_timestamps_neon_time(1:num_gka_world_timestamps_gka_time);
+        else    
+            num_gka_world_timestamps_gka_time = gka_world_timestamps_gka_time(1:num_gka_world_timestamps_neon_time);
+        end 
+
+
+
     end   
     
     % Now, let's do matching between the world timestamps and the MS 
@@ -353,4 +437,27 @@ function [world_t, ms_t, ms_v] = load_ms_world_timestamps_and_data(path_to_raw_r
 
     return ; 
 
+end 
+
+
+% Local function to do loading in of the needed .csv files 
+function [IMUdata, eyeStateData, blinkData, gazeData] = load_actigraphy_data(IMUdata, eyeStateData, blinkData, gazeData)
+    % If these are paths, read them in, otherwise just return them 
+    if(isstring(IMUdata) || ischar(IMUdata))
+        IMUdata = readtable(IMUdata);
+    end 
+
+    if(isstring(eyeStateData) || ischar(eyeStateData))
+        eyeStateData = readtable(eyeStateData);
+    end 
+
+    if(isstring(blinkData) || ischar(blinkData))
+        blinkData = readtable(blinkData);
+    end 
+
+    if(isstring(gazeData) || ischar(gazeData))
+        gazeData = readtable(gazeData);
+    end 
+
+    return ; 
 end 

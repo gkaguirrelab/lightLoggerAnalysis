@@ -307,7 +307,7 @@ def ms_data_from_chunks(recording_path: str,
         # Parse the buffer, selecting only the AS chip
         data_buffer: np.ndarray = np.load(data_chunk_path)
         data_chunk: np.ndarray = parse_readings(data_buffer)[0].to_numpy() 
-        metadata_chunk: np.ndarray = np.load(metadata_chunk_path)
+        metadata_chunk: np.ndarray = np.load(metadata_chunk_path).flatten()
 
         # The last chunk may be empty, so just skip it if so
         if(len(data_chunk) == 0):
@@ -320,10 +320,20 @@ def ms_data_from_chunks(recording_path: str,
     # Convert to np.ndarray 
     # and flatten to 1 long table of N channels for 
     # data, 1 long vector for metadata
-    data = np.array(data)
-    n_chunks, n_readings, n_channels = data.shape
-    data = data.reshape((n_chunks * n_readings, n_channels))
-    metadata = np.array(metadata).flatten() 
+    try:
+        data = np.vstack(data)
+    except:
+        for idx, chunk in enumerate(data):
+            print(f"Chunk: {idx} | Shape: {chunk.shape}")
+        raise Exception("Shape error when converting data to numpy array")
+    
+    try:
+        metadata = np.concatenate(metadata).flatten() 
+    except:
+        for idx, chunk in enumerate(metadata):
+            print(f"Chunk: {idx} | Shape: {chunk.shape}")
+        raise Exception("Error when converting metadata to numpy array")
+    
 
     return data, metadata
 

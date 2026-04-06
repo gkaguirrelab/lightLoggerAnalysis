@@ -2272,17 +2272,25 @@ def download_pupil_cloud_recordings(api_key: str,
     return 
 
 
-def generate_actigraphy_graphs(src_dir: str="",
-                               dst_dir: str="", 
+def generate_actigraphy_graphs(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026",
+                               processing_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoorVideos2026",
+                               dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026", 
                                overwrite_exsiting=False, 
-                                                  verbose=False, 
-                                                  subjects_to_skip: Iterable=set(), 
-                                                  activities_to_skip: Iterable=set()
-                                                ) -> None:
+                                verbose=False, 
+                                subjects_to_skip: Iterable=set(), 
+                                activities_to_skip: Iterable=set()
+                              ) -> None:
+    import matlab.engine
     
+    # Initialize the MATLAB engine to utilize the MATLAB function we have developed for this purpose 
+    eng: object = matlab.engine.start_matlab()  
+    eng.pyenv('Version', '~/Documents/MATLAB/projects/lightLoggerAnalysis/analysis_env/bin/python', nargout=0)
+    eng.tbUseProject('combiExperiments', nargout=0)
+    eng.tbUseProject('lightLoggerAnalysis', nargout=0)
+
+
     # Construct the paths to the raw and processing dirs 
-    raw_dir: str = os.path.join(src_dir, "FLIC_raw")
-    processing_dir: str = os.path.join(src_dir, "FLIC_processing")
+    assert all(os.path.exists(x) for x in (raw_dir, processing_dir))
 
     # First, let's find all of the subjects in this experiment 
     subject_paths: list[str] = natsorted([os.path.join(raw_dir, subject_name) 
@@ -2292,7 +2300,7 @@ def generate_actigraphy_graphs(src_dir: str="",
                                           if _extract_num_from_id(subject_name) not in subjects_to_skip
                                          ]
                                         ) 
-    assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
+    assert len(subject_paths) > 0, f"No subject directories found in: {raw_dir}" 
 
     # Now, let's iterate over all the subject paths 
     subject_iterator: Iterable = range(len(subject_paths)) if verbose is False else tqdm(range(len(subject_paths)), desc="Processing Subjects", leave=True)
@@ -2341,24 +2349,36 @@ def generate_actigraphy_graphs(src_dir: str="",
                                                          for data_type in ("imu", "3d_eye_states", "blinks", "gaze")
                                                         }
 
-            world_timestamps_neon_time: str = os.path.join(neon_processing_dir, "egocentric_video_mapper", "alternative_camera_timestamps.csv")
+            world_timestamps_neon_time: str = os.path.join(neon_processing_dir, "egocentric_mapper_results", "alternative_camera_timestamps.csv")
             assert os.path.exists(world_timestamps_neon_time), f"Problem with: {world_timestamps_neon_time}"
 
-            # This is what I need to get 
-            """
-            IMUdata, 
-            eyeStateData,
-            blinkData, 
-            gazeData
-            path_to_raw_recording (gka_raw_dir)
-            gka_world_neon_time
-            """
+            # Construct the output dir 
+            output_dir: str = os.path.join(dst_dir, subject_id, activity_name)
 
+            # Several files are output, but we just check the summary file here for simplicity
+            output_filepath: str = os.path.join(output_dir, "actigraphy_summary.pdf")
 
+            # First, we check if the output files exist. If they do and we do not want to 
+            # overwrite, skip 
+            if(os.path.exists(output_filepath) and overwrite_exsiting is False):
+                continue 
+
+            # Generate the actigraphy graph for this subject
+            eng.plotParticipantState(raw_dir,
+                                     processing_dir, 
+                                          output_dir, 
+                                          subject_id,
+                                          activity_name, 
+                                          f"{activity_name}", 
+                                          neon_actigraphy_filepaths["imu"], 
+                                          neon_actigraphy_filepaths["3d_eye_states"],
+                                          neon_actigraphy_filepaths["blinks"],
+                                          neon_actigraphy_filepaths["gaze"],
+                                          "save_figures", True,
+                                          nargout=0 
+                                        )
 
     return 
-
-
 
 def _extract_num_from_id(subject_id: str) -> int:
     assert re.fullmatch("FLIC_\d+", subject_id), f"{subject_id} does not fit the format FLIC_[NUM]"
