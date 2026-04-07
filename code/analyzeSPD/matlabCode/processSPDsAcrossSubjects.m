@@ -94,7 +94,6 @@ function virtuallyFoveatedActivityDataAcrossSubjects = processSPDsAcrossSubjects
         options.spd_ylim = false
         options.combine_figures = false; 
         options.n_participants = 1; 
-        options.across_subject_deviation = 0; 
     end
     
     fovDegrees = options.fovDegrees; 

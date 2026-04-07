@@ -74,6 +74,8 @@ function [groupedExponentHandle, groupedVarianceHandle, groupedSpdHandle] = grou
         options.output_dir = ""
         options.overwrite_existing = false
         options.sort_by_preferred_order = false
+        options.n_participants = 1; 
+        options.groups_across_participant_std = false; 
     end 
 
     % If groupedActivityData was passed in as a filepath, load it now
@@ -102,6 +104,9 @@ function [groupedExponentHandle, groupedVarianceHandle, groupedSpdHandle] = grou
 
         n_graph_cols = max([n_graph_cols, numel(group_activities)]);
     end 
+
+    % Find the STD by group 
+    groups_across_participant_std = find_across_participant_std(groupedActivityData);
 
     % Create grouped exponent-map figure and KEEP the tiledlayout handle
     groupedExponentHandle = figure('Units', 'pixels', 'Position', [100 100 2200 1300]);
@@ -159,6 +164,9 @@ function [groupedExponentHandle, groupedVarianceHandle, groupedSpdHandle] = grou
             spdTargetAxes = nexttile(groupedSpdLayout, tile_idx);
             hold(spdTargetAxes, 'on');
 
+            % Retrieve the STD for this group 
+            group_std = groups_across_participant_std(char(group_name)); 
+
             [exponentMapHandle, varianceMapHandle, ~] = plotSPDs( ...
                 virtuallyFoveatedActivityData, ...
                 "exponent_clim", options.exponent_clim, ...
@@ -166,7 +174,9 @@ function [groupedExponentHandle, groupedVarianceHandle, groupedSpdHandle] = grou
                 "spd_xlim", options.spd_xlim, ...
                 "spd_ylim", options.spd_ylim, ...
                 "justProjectionActivityData", justProjectionActivityData, ...
-                "spd_target_axes", spdTargetAxes ...
+                "spd_target_axes", spdTargetAxes, ...
+                "acrossParticipantRegionSTD", group_std,... 
+                "num_participants", options.n_participants... 
             );
 
             title(spdTargetAxes, activity_name, 'Interpreter', 'none', 'FontWeight', 'bold');
@@ -468,3 +478,95 @@ function iCopySingleAxesWithColorbar(sourceAxes, targetFigureHandle, targetPosit
                    0.04 * targetPosition(3), ...
                    axPos(4)];
 end
+
+function groups_across_participant_std = find_across_participant_std(groupedActivityData)
+    % First, find the group names 
+    group_names = fieldnames(groupedActivityData); 
+
+    % Initialize map to save averages by group struct 
+    groups_across_participant_std = containers.Map(); 
+
+    % Go over the group names 
+    for nn = 1:numel(group_names)
+        group_name = group_names{nn};
+
+        % Initialize containers for the data we will append over for this group 
+        virtuallyFoveated_groupAvgs_center = {}; 
+        virtuallyFoveated_groupAvgs_periphery = {}; 
+
+        justProjection_groupAvgs_center = {}; 
+        justProjection_groupAvgs_periphery = {};
+
+        % Go over each of the activity in this group 
+        group_activities = fieldnames(groupedActivityData.(group_name)); 
+        for aa = 1:numel(group_activities)
+            activity_name = group_activities{aa};
+            
+            % For each activity, there may be 1 or more projection types 
+            projection_types = fieldnames(groupedActivityData.(group_name).(activity_name)); 
+            
+            % Start accumulating 
+            if(ismember("virtuallyFoveated", projection_types))
+                % Load in the virtually foveated data 
+                virtually_foveated_data = load(groupedActivityData.(group_name).(activity_name).virtuallyFoveated).activityData.(activity_name); 
+
+                % Iterate over the subjects we have for this activity 
+                num_subjects = numel(virtually_foveated_data.subjects); 
+                for ss = 1:num_subjects
+                    center_region_avg = virtually_foveated_data.regionAveragesAcrossSubjects{ss}.center; 
+                    periphery_region_avg = virtually_foveated_data.regionAveragesAcrossSubjects{ss}.periphery;
+                
+                    % Save these 
+                    virtuallyFoveated_groupAvgs_center{end+1} = center_region_avg;
+                    virtuallyFoveated_groupAvgs_periphery{end+1} = periphery_region_avg; 
+
+                end 
+
+       
+            end 
+
+            if(ismember("justProjection", projection_types))
+                just_projection_data = load(groupedActivityData.(group_name).(activity_name).justProjection).activityData.(activity_name); 
+
+                % Iterate over the subjects we have for this activity 
+                num_subjects = numel(virtually_foveated_data.subjects); 
+                for ss = 1:num_subjects
+                    center_region_avg = just_projection_data.regionAveragesAcrossSubjects{ss}.center; 
+                    periphery_region_avg = just_projection_data.regionAveragesAcrossSubjects{ss}.periphery;
+
+                    justProjection_groupAvgs_center{end+1} = center_region_avg;
+                    justProjection_groupAvgs_periphery{end+1} = periphery_region_avg; 
+                end 
+            end 
+        end 
+
+        % Now let's compute and save the STDs 
+        group_std_struct = struct(); 
+        if(numel(virtuallyFoveated_groupAvgs_center) > 0)
+            center_mat = horzcat(virtuallyFoveated_groupAvgs_center{:}).';
+            periphery_mat = horzcat(virtuallyFoveated_groupAvgs_periphery{:}).';
+
+            center_std = std(center_mat, 0, 1, 'omitnan');
+            periphery_std = std(periphery_mat, 0, 1, 'omitnan');
+
+            group_std_struct.virtuallyFoveated.center = center_std;
+            group_std_struct.virtuallyFoveated.periphery = periphery_std;
+        end
+
+        if(numel(justProjection_groupAvgs_center) > 0) 
+            center_mat = horzcat(justProjection_groupAvgs_center{:}).';
+            periphery_mat = horzcat(justProjection_groupAvgs_periphery{:}).';
+
+            center_std = std(center_mat, 0, 1, 'omitnan');
+            periphery_std = std(periphery_mat, 0, 1, 'omitnan');
+
+            group_std_struct.justProjection.center = center_std; 
+            group_std_struct.justProjection.periphery = periphery_std; 
+        end 
+
+        groups_across_participant_std(char(group_name)) = group_std_struct; 
+
+    end 
+
+    return ; 
+end 

@@ -694,7 +694,7 @@ def group_spds_across_subjects(src_dir: str="/Users/zacharykelly/Aguirre-Brainar
                                     }
                                 for group, activity_dict in groups.items()
                             }
-
+    
     # First, let's find all of the activities that exist 
     activities_paths: list[str] = [os.path.join(src_dir, "acrossSubjects", activity) for activity in os.listdir(os.path.join(src_dir, "acrossSubjects"))
                                    if activity not in activities_to_skip
@@ -717,7 +717,6 @@ def group_spds_across_subjects(src_dir: str="/Users/zacharykelly/Aguirre-Brainar
             group_name: str = activities_to_groups[activity_name]
             averaged_groups[group_name][activity_name][projection_type] = spd_results_mat_path
 
-
     # Now that we have the activities grouped together for this subject, pass it over to MATLAB 
     # to do the plotting 
     # First, output to a temp .mat file to make transfer easier between the two languages 
@@ -735,6 +734,7 @@ def group_spds_across_subjects(src_dir: str="/Users/zacharykelly/Aguirre-Brainar
                     "output_dir", output_dir, 
                     "overwrite_existing", overwrite_existing,
                     "sort_by_preferred_order", sort_by_experiment_ordering,
+                    "n_participants", len(subject_paths), 
                     nargout=0
                 )
 
