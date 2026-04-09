@@ -2,10 +2,17 @@ function frame = readFrame(obj, options)
     arguments 
         obj 
         options.frameNum {mustBeNumeric} = []; 
-        options.color {mustBeMember(options.color, ["RGB","BGR","GRAY", "LMS", "L+M+S"])} = "RGB";
+        options.color {mustBeMember(options.color, ["RGB","BGR","GRAY", "LMS", "L+M+S", "L-M"])} = "RGB";
         options.zeros_as_nans = false; 
         options.verbose = false; 
         options.force_rebuffer = false; 
+    end 
+
+    % Save a list of the LMS colorspace types  use later 
+    persistent LMS_colorspace_types two_dimensional_colorspace_types 
+    if(isempty(LMS_colorspace_types))
+        LMS_colorspace_types = ["LMS", "L+M+S", "L-M"];
+        two_dimensional_colorspace_types = ["GRAY", "L+M+S", "L-M"];
     end 
 
     if(options.verbose)
@@ -54,7 +61,7 @@ function frame = readFrame(obj, options)
         % Because we will do MATLAB conversion of RGB -> LMS, 
         % if the desired color mode is LMS, we need to send RGB to Python and then convert the buffer in MATLAB 
         python_color = options.color; 
-        if(options.color == "LMS" || options.color == "L+M+S")
+        if(ismember(options.color, LMS_colorspace_types))
             python_color = "RGB";
         end     
 
@@ -93,7 +100,7 @@ function frame = readFrame(obj, options)
 
         % The buffer is now in memory. If we want to convert to LMS, we should do that now
         % so the whole buffer is in LMS space
-        if(options.color == "LMS" || options.color == "L+M+S")
+        if(ismember(options.color, LMS_colorspace_types))
             % Retrieve the transformation matrices used to convert to LMS 
             % and the camera choice
             T_camera = obj.T_camera; 
@@ -107,11 +114,21 @@ function frame = readFrame(obj, options)
                                                         );
             end     
             
+            % We are now in LMS 3 channel space 
+
             % If L+M+S, sum the channels together 
+            % Leaving us a 2D image 
             if(options.color == "L+M+S")
                 read_ahead_buffer = sum(read_ahead_buffer, 4); 
             end 
 
+            % If L-M, we need to subtract 2 channels and remove the third 
+            % This leaves us a 2D image
+            if(options.color == "L-M")
+                L = read_ahead_buffer(:,:,:,1);
+                M = read_ahead_buffer(:,:,:,2);
+                read_ahead_buffer = squeeze(L - M);
+            end 
         end 
         
         % Save the read ahead buffer to the obj 
@@ -125,7 +142,7 @@ function frame = readFrame(obj, options)
     % Retrieve the frame from the buffer of frames we have read 
     buffer_position = (frameNum - obj.buffer_start_frame) + 1; 
     frame = squeeze(obj.read_ahead_buffer(buffer_position, :, :, :)); 
-    if(obj.current_reading_color_mode == "GRAY" || obj.current_reading_color_mode == "L+M+S")
+    if(ismember(obj.current_reading_color_mode, two_dimensional_colorspace_types))
         frame = reshape(frame, obj.Height, obj.Width); 
     else
         frame = reshape(frame, obj.Height, obj.Width, 3); 
@@ -147,7 +164,7 @@ function frame = readFrame(obj, options)
     if (options.zeros_as_nans)
 
         if (ndims(frame) == 2 || size(frame,3) == 1)
-            % Grayscale: replace all 0s with NaN
+            % 2 Channel: replace all 0s with NaN
             frame(frame == 0) = nan;
 
         elseif (ndims(frame) == 3 && size(frame,3) == 3)

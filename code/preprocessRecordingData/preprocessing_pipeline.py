@@ -386,6 +386,7 @@ def generate_spds(src_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoo
                   activities_to_skip: Iterable=set(["lunch", "phone"]), 
                   projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = set(["virtuallyFoveated", "justProjection"]), 
                   projection_types_for_bounds_calculations:  Iterable[Literal["virtuallyFoveated", "justProjection"]] = ["virtuallyFoveated", "justProjection"],
+                  color_mode: Literal["L+M+S", "L-M", "GRAY"] = "L+M+S",
                   common_axes: bool=False, 
                   verbose: bool=False) -> None:
     
@@ -433,7 +434,7 @@ def generate_spds(src_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoo
                 continue
 
             # Generate the output path
-            output_dir: str = os.path.join(dst_dir, subject_id, activity_name)
+            output_dir: str = os.path.join(dst_dir, color_mode, subject_id, activity_name)
             os.makedirs(output_dir, exist_ok=True)
 
             # We will first skip directories that entirely eixst 
@@ -476,6 +477,7 @@ def generate_spds(src_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoo
                                 "overwrite_existing", overwrite_existing,
                                 "save_figures", True, 
                                 "video_type", projection_type, 
+                                "color_mode", color_mode, 
                                 nargout=0
                             )
             

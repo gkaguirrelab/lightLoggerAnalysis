@@ -87,6 +87,7 @@ function [exponentMap, varianceMap, spdByRegion, frq, medianImage, frameDropVect
         options.doPlot  (1,1) logical           = true
         options.nWorkers (1,1) {mustBeNumeric}   = 6
         options.frameDropVector {mustBeNumeric}  = [];
+        options.color_mode {mustBeMember(options.color_mode, ["L+M+S", "L-M", "GRAY"])} = "L+M+S";
     end
 
     % Load in some info about the video to get us started
@@ -181,7 +182,7 @@ function [exponentMap, varianceMap, spdByRegion, frq, medianImage, frameDropVect
 
         % Load in a desired amount of frames for this chunk 
         chunk_start_frame = chunkStarts(ff); 
-        frameChunk = load_frame_chunk(video_reader, chunk_start_frame, framesPerChunk); 
+        frameChunk = load_frame_chunk(video_reader, chunk_start_frame, framesPerChunk, options.color_mode); 
         readTime = datetime('now');
 
         % Nan any frames that we have already specified are dropped
@@ -303,7 +304,7 @@ end
 
 % Define location function to read in a number of frames
 % from the video 
-function frame_chunk = load_frame_chunk(video_reader, start_frame, num_frames_to_read)
+function frame_chunk = load_frame_chunk(video_reader, start_frame, num_frames_to_read, color_mode)
     if(start_frame > video_reader.NumFrames)
         error(sprintf("Start frame %d is out of bounds for video with NumFrames %d", start_frame, video_reader.NumFrames));
     end 
@@ -320,7 +321,7 @@ function frame_chunk = load_frame_chunk(video_reader, start_frame, num_frames_to
     % Read the target amount of frames 
     insertion_index = 1; 
     for ii = start_frame : start_frame + num_frames_to_read - 1
-        read_frame = video_reader.readFrame('frameNum', ii, "zeros_as_nans", true, 'color', 'L+M+S');
+        read_frame = video_reader.readFrame('frameNum', ii, "zeros_as_nans", true, 'color', color_mode);
         [read_height, read_width] = size(read_frame);
         if(read_height ~= video_reader.Height || read_width ~= video_reader.Width)
             fprintf("Frame shape (%d, %d) does not match video shape (%d, %d)\n", read_height, read_width, video_reader.Height, video_reader.Width); 

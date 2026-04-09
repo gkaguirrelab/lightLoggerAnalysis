@@ -91,6 +91,7 @@ function activityDataAcrossSubjects = processSPDsAcrossSubjects(input_dir, outpu
         options.variance_clim = false
         options.spd_xlim = false
         options.spd_ylim = false
+        options.color_mode {mustBeMember(options.color_mode, ["L+M+S", "L-M", "GRAY"])} = "L+M+S";
     end
 
     % Find all subject folders matching ^FLIC_\d+$
@@ -176,7 +177,11 @@ function activityDataAcrossSubjects = processSPDsAcrossSubjects(input_dir, outpu
             thisVideo = fullfile(task_video(1).folder, task_video(1).name);
 
             % Call mapSPDs
-            [exponentMap, varianceMap, spdByRegion, frq, medianImage, frameDropVector] = mapSPDs(thisVideo, 'frameDropVector', frameDropVector, 'doPlot', false);
+            [exponentMap, varianceMap, spdByRegion, frq, medianImage, frameDropVector] = mapSPDs(thisVideo, 'frameDropVector', ...
+                                                                                                 frameDropVector,...
+                                                                                                 'doPlot', false,...
+                                                                                                 'color_mode', options.color_mode...
+                                                                                                );
             activityData.(activityName).exponentMap = exponentMap; 
             activityData.(activityName).varianceMap = varianceMap; 
             activityData.(activityName).spdByRegion = spdByRegion; 
