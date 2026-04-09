@@ -240,12 +240,6 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements, opts)
                 integratedIrradXCIE(ss) = sum(irradXCIE(ss,:));
                 illum(ss) = integratedIrradXCIE(ss) * 683;
 
-                disp(size(sphereSPDs(ss, :)))
-                disp(size(detectorP_rel))
-                disp(size(sphereSPDs(ss,:) * detectorP_rel))
-
-                return; 
-
                 predictedCounts(ss,:) = sphereSPDs(ss,:) * detectorP_rel;
             end
 
@@ -357,7 +351,6 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements, opts)
             x = x(:);
             y = y(:);
             valid_idx = isfinite(x) & isfinite(y);
-            disp(valid_idx)
 
             x = x(valid_idx);
             y = y(valid_idx);
@@ -393,45 +386,45 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements, opts)
     % Local function to reformat the minispect SPDs to be in the space of
     % the source SPDs
     function minipspectP_rels_map = reformat_SPDs(spectral_sensitivity_map, sourceS)
-    % Next, let's iterate over the chips at this NDF level
-    % and reformat the minispect SPDs to be in the space of
-    % the source SPDs
-    minipspectP_rels_map = containers.Map();
-    chips = keys(spectral_sensitivity_map);
-    for cc = 1:numel(chips)
-        % Retrieve the current chip
-        chip = chips{cc};
+        % Next, let's iterate over the chips at this NDF level
+        % and reformat the minispect SPDs to be in the space of
+        % the source SPDs
+        minipspectP_rels_map = containers.Map();
+        chips = keys(spectral_sensitivity_map);
+        for cc = 1:numel(chips)
+            % Retrieve the current chip
+            chip = chips{cc};
 
-        miniSpectSPDPath = spectral_sensitivity_map(chip);
-        load(miniSpectSPDPath,'T');
-        minispectS = WlsToS(T.wl);
-        minispectP_rel = T{:,2:end};
+            miniSpectSPDPath = spectral_sensitivity_map(chip);
+            load(miniSpectSPDPath,'T');
+            minispectS = WlsToS(T.wl);
+            minispectP_rel = T{:,2:end};
 
-        detectorP_rel = [];
-        for jj = 1:size(minispectP_rel,2)
-            detectorP_rel(:,jj) = interp1(SToWls(minispectS),minispectP_rel(:,jj),SToWls(sourceS));
+            detectorP_rel = [];
+            for jj = 1:size(minispectP_rel,2)
+                detectorP_rel(:,jj) = interp1(SToWls(minispectS),minispectP_rel(:,jj),SToWls(sourceS));
+            end
+
+            % Save the new SPDs
+            minipspectP_rels_map(chip) = detectorP_rel;
         end
 
-        % Save the new SPDs
-        minipspectP_rels_map(chip) = detectorP_rel;
-    end
-
-    return ;
+        return ;
     end
 
     % Local function to find the min square figsize required to plot data
     function [rows, cols] = find_min_figsize(num_plots)
-    % Iterate over the ints between 1 and num_plots
-    for ii = 1:num_plots
-        rows = ii;
-        cols = ii;
+        % Iterate over the ints between 1 and num_plots
+        for ii = 1:num_plots
+            rows = ii;
+            cols = ii;
 
-        % Determine if we have reached the target
-        if(rows * cols >= num_plots)
-            return ;
+            % Determine if we have reached the target
+            if(rows * cols >= num_plots)
+                return ;
+            end
+
         end
-
-    end
 
 end
 
