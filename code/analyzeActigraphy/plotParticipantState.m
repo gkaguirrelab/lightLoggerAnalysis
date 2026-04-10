@@ -15,6 +15,8 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
         options.save_figures = false; 
         options.winSizeSec = 5;  
         options.force_recalc = false; 
+        options.w_as_offset = -139.354; % milliseconds
+
     end
     winSizeSec = options.winSizeSec; 
 
@@ -38,9 +40,16 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     assert(exist(path_to_gka_world_timestamps_neon_time, 'file') ~= 0, ...
     sprintf('Path %s does not exist', path_to_gka_world_timestamps_neon_time));
 
-
     [world_t, ms_t, ms_v] = load_ms_world_timestamps_and_data(path_to_raw_recording, path_to_gka_world_timestamps_neon_time, world_util, ms_util); 
     
+    % We know the temporal offset (W-AS) is options.w_as_offset milliseconds. 
+    % Therefore, we apply this correction now to the Nanosecond time 
+    % Given that it is negative, it implies that the world is BEHIND 
+    % the MS, so subtract this offset from the MS to bring them onto the same 
+    % time
+    offset_in_nanoseconds = options.w_as_offset * 1e6; 
+    ms_t = ms_t + offset_in_nanoseconds; 
+
     % Convert MS counts to absolute illuminance
     MS2illum_lux = msCounts2Illuminance(ms_v);
 

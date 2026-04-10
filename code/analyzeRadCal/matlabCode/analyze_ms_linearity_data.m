@@ -157,6 +157,7 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements, opts)
             % level for this chip across NDF levels
             [rows, cols] = find_min_figsize(numel(calibration_metadata.NDFs));
             figure;
+            set(gcf, 'Color', 'w');
             counts_by_NDF_tiled = tiledlayout(rows, cols);
             title(counts_by_NDF_tiled, sprintf("Counts by NDF Level | C: %s", chip), 'FontWeight', 'Bold');
 
@@ -177,7 +178,7 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements, opts)
 
             if opts.plotSettingLevel
                 % Create a new tab for this NDF for measured/predicted plot
-                tab = uitab(tab_group, 'Title', sprintf("NDF %.2f", NDF));
+                tab = uitab(tab_group, 'Title', sprintf("NDF %.0f", NDF));
 
                 % Define a tiled layout that will go in this tab
                 [rows, cols] = find_min_figsize(n_channels_map(chip));
@@ -213,7 +214,7 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements, opts)
             if opts.plotSettingLevel
                 % Plot detector counts across settings levels
                 counts_ax = nexttile(counts_by_NDF_tiled);
-                title(counts_ax, sprintf("Averaged Counts by Settings Level | NDF %.3f", NDF));
+                title(counts_ax, sprintf("Averaged Counts by Settings Level | NDF %.0f", NDF));
                 hold(counts_ax, 'on');
 
                 for ch = 1:n_detector_channels
@@ -223,6 +224,7 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements, opts)
                 xlabel(counts_ax, "Settings Level");
                 ylabel(counts_ax, "Averged Count");
                 legend(counts_ax, 'Location', 'best');
+                set(counts_ax, 'Color', 'none', 'Box', 'off');
                 hold(counts_ax, 'off');
             end
 
@@ -341,6 +343,7 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements, opts)
                 set(across_NDF_channel_ax, 'XLimMode', 'auto');
                 xlabel(across_NDF_channel_ax, 'log Illuminance [lux]');
                 ylabel(across_NDF_channel_ax, 'log measured sensor count');
+                title(across_NDF_channel_ax, sprintf('%s Channel %d Sensor Count vs Illuminance', chip, ch));
             end
 
             hold(across_NDF_channel_ax, 'off');

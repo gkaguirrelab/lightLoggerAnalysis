@@ -217,7 +217,7 @@ if opts.plotEachMeasure
                 '-o',...
                 'LineWidth',2,...
                 'Color', colorList(nn,:),...
-                'DisplayName', sprintf("NDF %.2f | M: %d", NDFs(nn), mm)...
+                'DisplayName', sprintf("NDF %.0f | M: %d", NDFs(nn), mm)...
                 );
             h.MarkerFaceAlpha = 0.4;
             h.MarkerEdgeAlpha = 0.4;
@@ -233,7 +233,7 @@ if opts.plotEachMeasure
     plot(log10(xfine), ideal_device, "--", "Color",[0.5 0.5 0.5], "DisplayName", "Ideal Device");
 
     % Add a title
-    title(sprintf("World TTF All Measures | C: %.2f", contrast_level));
+    title(sprintf("World TTF All Measures | Contrast: %.2f", contrast_level));
 
     % Label and clean up the plot
     xlabel("Frequency [hz]");
@@ -281,7 +281,7 @@ for nn = 1:numel(NDFs)
     meanAmpData = mean_response_amplitude_per_frequency .* (1./contrast_attenuation_with_frequency(1:numel(frequencies))) ./ contrast_level;
     h = scatter(log10(frequencies), meanAmpData,...
         'o', 'filled',...
-        'DisplayName', sprintf("NDF %.2f", NDFs(nn))...
+        'DisplayName', sprintf("NDF %.0f", NDFs(nn))...
         );
     h.MarkerFaceAlpha = 0.4;
     h.MarkerEdgeAlpha = 0.4;
@@ -305,7 +305,7 @@ for nn = 1:numel(NDFs)
     plot(log10(xfine), fitVals(nn,:), "-", "Color",colorList(nn,:), 'HandleVisibility', 'off');
 end
 % Add a title
-title(sprintf("World TTF Avg Amplitude | C: %.2f | Approx freq %2.2f Hz", contrast_level, filterFreqHz));
+title(sprintf("World TTF Avg Amplitude | Contrast: %.2f | Approx freq %2.2f Hz", contrast_level, filterFreqHz));
 
 % Label and clean up the plot
 xlabel("Frequency [hz]");

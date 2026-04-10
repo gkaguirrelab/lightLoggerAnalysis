@@ -202,7 +202,7 @@ function analyze_phase_fit_data(calibration_metadata, measurements)
 
         % First tile we will plot the slow video world camera and its fit
         nexttile;
-        title(sprintf("World and MS-AS | F: %.3f", frequencies(1)));
+        title(sprintf("World and MS-AS | F: %.3f hz", frequencies(1)));
         hold on;
         yyaxis left
         plot(slow_measurement.W.t, convert_to_contrast(slow_measurement.W.v), '.k','MarkerSize',10, 'DisplayName', 'World Measured');
@@ -236,7 +236,7 @@ function analyze_phase_fit_data(calibration_metadata, measurements)
 
         % First, plot the sensors before the alignment
         nexttile;
-        title(sprintf("%.3f | Before Alignment", frequencies(1)));
+        title(sprintf("%.3f hz | Before Alignment", frequencies(1)));
         hold on ;
         yyaxis left
         plot(slow_measurement.W.t, convert_to_contrast(slow_measurement.W.v), '.', 'DisplayName', 'World');
@@ -250,7 +250,7 @@ function analyze_phase_fit_data(calibration_metadata, measurements)
 
         % First, plot the sensors after the alignment
         nexttile;
-        title(sprintf("%.3f | After Alignment", frequencies(1)));
+        title(sprintf("%.3f hz | After Alignment", frequencies(1)));
         hold on ;
         yyaxis left
         plot(slow_measurement.W.t, convert_to_contrast(slow_measurement.W.v), '.', 'DisplayName', 'World');
