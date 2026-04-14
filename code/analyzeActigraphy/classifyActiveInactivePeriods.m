@@ -19,7 +19,6 @@ function classifications = classifyActiveInactivePeriods()
     enmo = max(0, magAccel - 1); 
     activityIndex = movmean(enmo, winSizeSamples, 'omitnan');  
 
-
     % Preallocate the return variable that classifies each timepoint 
     % as active or inactive 
     classifications = zeros(num_readings, 1);

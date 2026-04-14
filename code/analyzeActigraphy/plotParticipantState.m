@@ -52,6 +52,10 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
 
     % Convert MS counts to absolute illuminance
     MS2illum_lux = msCounts2Illuminance(ms_v);
+    
+    % Classify outdoor/indoor based on this 
+    outdoor_indoor_classifications = classifyIndoorOutdoorPeriods()
+
 
     %% Calculate Time Offsets (T0 based on IMU start)
     t0 = IMUdata.timestamp_ns_(1);
@@ -73,8 +77,9 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     %% Signal Processing
     % ENMO
     magAccel = sqrt(sum(IMUdata{:, {'accelerationX_g_', 'accelerationY_g_', 'accelerationZ_g_'}}.^2, 2));
-    enmo = max(0, magAccel - 1); % USE THIS FOR THE ACTIVE VS INACTIVE CLASSIFICATION
+    enmo = max(0, magAccel - 1); 
     activityIndex = movmean(enmo, winSizeSamples, 'omitnan'); 
+    active_inactive_classifications = classifyActiveInactivePeriods(IMUdata);  % Classify active/inactive based on this 
     
     % Rotational Velocities
     unwrappedYaw = unwrap(deg2rad(IMUdata.yaw_deg_)) * (180/pi);
