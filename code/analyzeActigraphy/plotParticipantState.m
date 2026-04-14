@@ -73,8 +73,8 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     %% Signal Processing
     % ENMO
     magAccel = sqrt(sum(IMUdata{:, {'accelerationX_g_', 'accelerationY_g_', 'accelerationZ_g_'}}.^2, 2));
-    enmo = max(0, magAccel - 1);
-    activityIndex = movmean(enmo, winSizeSamples); 
+    enmo = max(0, magAccel - 1); % USE THIS FOR THE ACTIVE VS INACTIVE CLASSIFICATION
+    activityIndex = movmean(enmo, winSizeSamples, 'omitnan'); 
     
     % Rotational Velocities
     unwrappedYaw = unwrap(deg2rad(IMUdata.yaw_deg_)) * (180/pi);

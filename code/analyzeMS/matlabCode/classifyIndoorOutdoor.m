@@ -3,7 +3,7 @@ function classifications = classifyIndoorOutdoorPeriods()
         raw_recording_dir;
         options.force_recalc = false; 
         options.window_size_seconds = 5; 
-        options.outdoor_threshold = 5; 
+        options.outdoor_threshold = 10 ^ 2.5; % This lux value and above is outdoor  
     end 
 
     %% Load Utility Libraries & Data
@@ -35,7 +35,6 @@ function classifications = classifyIndoorOutdoorPeriods()
     % Now, let's find the portions that are below the outdoor threshold 
     indoor_frames = counts_movemean < options.outdoor_threshold; 
     classifications(indoor_frames) = 1; 
-
 
     return ; 
 end 
