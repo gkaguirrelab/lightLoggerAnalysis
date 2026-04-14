@@ -2131,6 +2131,10 @@ def transfer_light_logger_recordings(src_dir: str="/Volumes/T7 Shield",
             output_dir: str = os.path.join(dst_dir, f"FLIC_{subject_id_num}", activity_name)
             output_path: str = os.path.join(output_dir, "GKA")
 
+            if(verbose is True):
+                print(f"Input path: {input_path}")
+                print(f"Output path: {output_path}")
+
             # Skip recordings that are already downloaded unless we want to overwrite 
             if(os.path.exists(output_path) and overwrite_existing is False):
                 continue
@@ -2140,7 +2144,6 @@ def transfer_light_logger_recordings(src_dir: str="/Volumes/T7 Shield",
 
             # Copy this directory to output_dir with the name described in output_path
             shutil.copytree(input_path, output_path, dirs_exist_ok=True)
-
 
     return 
 

@@ -24,6 +24,34 @@ function classifications = classifyIndoorOutdoorPeriods()
     % convert the window size seconds to nanoseconds too 
     winows_size_nanoseconds = options.window_size_nanseconds * (10 ^ 9); 
 
+    % Because the FPS is non-constant, we CANNOT use movemean. 
+    % We will implement our own sliding window technique 
+    windows_bounds = {};
+    
+    % The window starts at the first index 
+    l = 1; 
+    r = 1; 
+    
+    % We want to go through the entire array
+    while(l <= num_timestamps && r <= num_timestamps) % TODO, check this condition 
+        % Let's get the current bounds of our window 
+        left_bound_nanoseconds = ms_t(l);
+        right_bound_nanoseconds = ms_t(r); 
+        current_window_size = right_bound_nanoseconds - left_bound_nanoseconds; 
+        
+        % While the right index has not yet reached the end of a 
+        % target window, we will expand the right pointer 
+        if(current_window_size < window_size_nanseconds)
+            r = r + 1; 
+            continue; 
+        end 
+
+        % If we are greater than or equal to the window size, 
+        % then let's save this window bounds and move onto the next 
+        windows_bounds{end+1} = [l, r - 1]; 
+        l = r; 
+    end 
+
 
 
 end 

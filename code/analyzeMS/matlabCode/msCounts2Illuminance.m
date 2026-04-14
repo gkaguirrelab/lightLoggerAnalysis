@@ -1,4 +1,4 @@
-function MS2illum_lux = msCounts2Illuminance(ms_counts)
+function MS2illum_lux = msCounts2Illuminance(ms_counts, options)
 % msCountsToIlluminance - Converts MiniSpectrometer readings to illuminance
 % (lux) using fits saved from linear fit of illuminance to MS readings
 % during calibration. Averages across all channels.
@@ -12,47 +12,56 @@ function MS2illum_lux = msCounts2Illuminance(ms_counts)
 % Output:
 %   illum_lux    - [nSamples] estimated illuminance in lux
 %
+    arguments 
+        ms_counts 
+        options.force_recalc = false; 
+    end 
 
-% load coefficients for converting MS chip values to illuminance
-dropBoxBaseDir = getpref('combiExperiments','dropboxBaseDir');
-calDir = '/FLIC_data/LightLoggerRadCal/W1P1M1/MSLinearityMeasurements';
-MS_illumfile = [dropBoxBaseDir,calDir, '/PR670_illum_to_MS_fits.mat'];
-load(MS_illumfile, 'illum_to_MS');
+    % Define these variables as persistent so that we can save time 
+    % and not have to load them in if we call them repeatedly 
+    persistent dropboxBaseDir calDir MS_illumfile
+    if(isempty(dropBoxBaseDir) || isempty(calDir) || isempty(MS_illumfile) || options.force_recalc)
+        % load coefficients for converting MS chip values to illuminance
+        dropBoxBaseDir = getpref('combiExperiments','dropboxBaseDir');
+        calDir = '/FLIC_data/LightLoggerRadCal/W1P1M1/MSLinearityMeasurements';
+        MS_illumfile = [dropBoxBaseDir,calDir, '/PR670_illum_to_MS_fits.mat'];
+        load(MS_illumfile, 'illum_to_MS');
+    end 
 
-% Ensure data is in log10 space
-if any(ms_counts(:) <= 0)
-    error('ms_counts must be strictly positive to apply log10.');
-end
-ms_log = log10(ms_counts);
+    % Ensure data is in log10 space
+    if any(ms_counts(:) <= 0)
+        error('ms_counts must be strictly positive to apply log10.');
+    end
+    ms_log = log10(ms_counts);
 
-% Prepare output
-[nSamples, nChannels] = size(ms_log);
+    % Prepare output
+    [nSamples, nChannels] = size(ms_log);
 
-if size(illum_to_MS, 1) > nChannels
-    minChannels = min(size(illum_to_MS,1), nChannels);
-    warning('Size mismatch: ms_counts has %d channels, but illum_to_MS has %d. Using channels 1- %d.',...
-        nChannels, size(illum_to_MS,1), minChannels);
-elseif size(illum_to_MS, 1) < nChannels
-    minChannels = min(size(illum_to_MS,1), nChannels);
-    warning('Size mismatch: ms_counts has %d channels, but illum_to_MS has %d. Using channels 1- %d.',...
-        nChannels, size(illum_to_MS,1), minChannels);
-else
-    minChannels = (size(illum_to_MS,1));
-end
+    if size(illum_to_MS, 1) > nChannels
+        minChannels = min(size(illum_to_MS,1), nChannels);
+        warning('Size mismatch: ms_counts has %d channels, but illum_to_MS has %d. Using channels 1- %d.',...
+            nChannels, size(illum_to_MS,1), minChannels);
+    elseif size(illum_to_MS, 1) < nChannels
+        minChannels = min(size(illum_to_MS,1), nChannels);
+        warning('Size mismatch: ms_counts has %d channels, but illum_to_MS has %d. Using channels 1- %d.',...
+            nChannels, size(illum_to_MS,1), minChannels);
+    else
+        minChannels = (size(illum_to_MS,1));
+    end
 
-MS2illum_lux_by_channel = nan(nSamples, nChannels);
+    MS2illum_lux_by_channel = nan(nSamples, nChannels);
 
-% Invert the regression per channel
-for ch = 1:minChannels
-    m = illum_to_MS(ch, 1);
-    b = illum_to_MS(ch, 2);
+    % Invert the regression per channel
+    for ch = 1:minChannels
+        m = illum_to_MS(ch, 1);
+        b = illum_to_MS(ch, 2);
 
-    % Invert the linear relationship
-    log10_illum = (ms_log(:, ch) - b) ./ m;
+        % Invert the linear relationship
+        log10_illum = (ms_log(:, ch) - b) ./ m;
 
-    % Convert back to lux
-    MS2illum_lux_by_channel(:, ch) = 10.^log10_illum;
-end
-% average across all the channels
-MS2illum_lux = mean(MS2illum_lux_by_channel,2, 'omitnan');
+        % Convert back to lux
+        MS2illum_lux_by_channel(:, ch) = 10.^log10_illum;
+    end
+    % average across all the channels
+    MS2illum_lux = mean(MS2illum_lux_by_channel,2, 'omitnan');
 end
