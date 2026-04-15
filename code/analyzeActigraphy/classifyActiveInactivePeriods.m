@@ -1,4 +1,4 @@
-function classifications = classifyActiveInactivePeriods()
+function classifications = classifyActiveInactivePeriods(IMUdata, options)
     arguments 
         IMUdata 
         options.window_size_seconds = 5; 
@@ -13,6 +13,12 @@ function classifications = classifyActiveInactivePeriods()
 
     % Get the table size to kow how many readings we have 
     num_readings = size(IMUdata, 1); 
+
+    % Calculate the window size
+    t0 = IMUdata.timestamp_ns_(1);
+    timeMinIMU = (double(IMUdata.timestamp_ns_) - double(t0)) / 1e9 / 60;
+    dt = mean(diff(timeMinIMU * 60)); 
+    winSizeSamples = round(options.window_size_seconds / dt);
 
     % Take the magnitude of acceleration in all dimensions (vector norm)
     magAccel = sqrt(sum(IMUdata{:, {'accelerationX_g_', 'accelerationY_g_', 'accelerationZ_g_'}}.^2, 2));

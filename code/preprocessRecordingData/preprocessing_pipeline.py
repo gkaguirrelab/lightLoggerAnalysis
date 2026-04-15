@@ -2283,6 +2283,7 @@ def generate_actigraphy_graphs(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoor
                                dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026", 
                                overwrite_exsiting=False, 
                                 verbose=False, 
+                                color_mode: Literal["L+M+S", "L-M", "GRAY"] = "L+M+S", 
                                 subjects_to_skip: Iterable=set(), 
                                 activities_to_skip: Iterable=set()
                               ) -> None:
@@ -2359,7 +2360,7 @@ def generate_actigraphy_graphs(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoor
             assert os.path.exists(world_timestamps_neon_time), f"Problem with: {world_timestamps_neon_time}"
 
             # Construct the output dir 
-            output_dir: str = os.path.join(dst_dir, subject_id, activity_name)
+            output_dir: str = os.path.join(dst_dir, color_mode, subject_id, activity_name)
 
             # Several files are output, but we just check the summary file here for simplicity
             output_filepath: str = os.path.join(output_dir, "actigraphy_summary.pdf")

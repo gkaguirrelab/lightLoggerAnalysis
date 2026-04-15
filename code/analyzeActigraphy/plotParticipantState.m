@@ -54,8 +54,7 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     MS2illum_lux = msCounts2Illuminance(ms_v);
     
     % Classify outdoor/indoor based on this 
-    outdoor_indoor_classifications = classifyIndoorOutdoorPeriods()
-
+    outdoor_indoor_classifications = ~classifyIndoorOutdoorPeriods(path_to_raw_recording, "window_size_seconds", options.winSizeSec); 
 
     %% Calculate Time Offsets (T0 based on IMU start)
     t0 = IMUdata.timestamp_ns_(1);
@@ -79,8 +78,8 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     magAccel = sqrt(sum(IMUdata{:, {'accelerationX_g_', 'accelerationY_g_', 'accelerationZ_g_'}}.^2, 2));
     enmo = max(0, magAccel - 1); 
     activityIndex = movmean(enmo, winSizeSamples, 'omitnan'); 
-    active_inactive_classifications = classifyActiveInactivePeriods(IMUdata);  % Classify active/inactive based on this 
-    
+    active_inactive_classifications = classifyActiveInactivePeriods(IMUdata, "window_size_seconds", options.winSizeSec);  % Classify active/inactive based on this 
+
     % Rotational Velocities
     unwrappedYaw = unwrap(deg2rad(IMUdata.yaw_deg_)) * (180/pi);
     vRoll  = gradient(IMUdata.roll_deg_, dt);
@@ -116,6 +115,8 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     %% Colors
     cRoll  = [0 0.4470 0.7410]; cPitch = [0.8500 0.3250 0.0980]; cYaw = [0.9290 0.6940 0.1250];
     cPupil = [0 0.5 0.5]; cApert = [0.6350 0.0780 0.1840]; cLux = [0.4660 0.6740 0.1880]; % Green
+    cOutdoor = [1 1 0];   % yellow
+    cActive  = [0 1 0];   % green
     
     %----------------------------------------------
     %% Figure 1: Session Summary (Updated to 5 rows)
@@ -123,11 +124,27 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     tlo1 = tiledlayout(5, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
     
     % Subplot 1: ENMO
-    ax1 = nexttile(tlo1);
-    plot(ax1, timeMinIMU, activityIndex, 'k', 'LineWidth', 1.2, 'DisplayName', 'ENMO');
-    ylabel(ax1, 'Activity (g)'); title(ax1, [figureTitle ' - ' num2str(winSizeSec) 's Window']);
-    ylim([0, 0.2]);
-    grid on;
+    ax1 = nexttile(tlo1); 
+    hold(ax1, 'on');
+
+    pENMO = plot(ax1, timeMinIMU, activityIndex, 'k', 'LineWidth', 1.2, 'DisplayName', 'ENMO');
+    ylabel(ax1, 'Activity (g)'); 
+    title(ax1, [figureTitle ' - ' num2str(winSizeSec) 's Window']);
+    ylim(ax1, [0, 0.2]);
+    grid(ax1, 'on');
+
+    yl1 = ylim(ax1);
+    activeMask = double(active_inactive_classifications(:));
+    activeMask(activeMask == 0) = NaN;
+
+    hActive = area(ax1, timeMinIMU, yl1(2) * activeMask, ...
+        'FaceColor', cActive, ...
+        'FaceAlpha', 0.18, ...
+        'EdgeColor', 'none', ...
+        'DisplayName', 'Active');
+    uistack(hActive, 'bottom');
+
+    legend(ax1, [pENMO, hActive], {'ENMO', 'Active'}, 'FontSize', 7);
 
     % Subplot 2: Rotational Vel
     ax2 = nexttile(tlo1); hold(ax2, 'on');
@@ -161,13 +178,29 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
 
     % Subplot 5: Absolute Illuminance (Lux)
     ax5 = nexttile(tlo1);
-    plot(ax5, timeMinMS, MS2illum_lux, '.', 'Color', cLux, 'LineWidth', 1.1);
-    ax5.YScale ='log';
+    hold(ax5, 'on');
+
+    pLux = plot(ax5, timeMinMS, MS2illum_lux, '.', 'Color', cLux, 'LineWidth', 1.1, 'DisplayName', 'Illum');
+
+    ax5.YScale = 'log';
     ax5.YMinorGrid = 'off'; 
     ax5.YGrid = 'on';      
-    ylabel(ax5, 'Illum (Lux)'); xlabel(ax5, 'Time (min)');
-    ylim([1, 10e4]); 
-    grid on; 
+    ylabel(ax5, 'Illum (Lux)'); 
+    xlabel(ax5, 'Time (min)');
+    ylim(ax5, [1, 10e4]); 
+    grid(ax5, 'on');
+
+    yl5 = ylim(ax5);
+    outdoorMask = double(outdoor_indoor_classifications(:));
+    outdoorMask(outdoorMask == 0) = NaN;
+
+    hOutdoor = area(ax5, timeMinMS, yl5(2) * outdoorMask, ...
+        'FaceColor', cOutdoor, ...
+        'FaceAlpha', 0.18, ...
+        'EdgeColor', 'none', ...
+        'DisplayName', 'Outdoor');
+    uistack(hOutdoor, 'bottom');
+    legend(ax5, [pLux, hOutdoor], {'Illum', 'Outdoor'}, 'FontSize', 7);
     
     linkaxes([ax1, ax2, ax3, ax4, ax5], 'x');
     % Find the maximum time across your data to set a tight limit
@@ -473,3 +506,4 @@ function [IMUdata, eyeStateData, blinkData, gazeData] = load_actigraphy_data(IMU
 
     return ; 
 end 
+

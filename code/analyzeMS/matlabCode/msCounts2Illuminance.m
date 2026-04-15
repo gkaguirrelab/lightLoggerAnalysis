@@ -19,13 +19,13 @@ function MS2illum_lux = msCounts2Illuminance(ms_counts, options)
 
     % Define these variables as persistent so that we can save time 
     % and not have to load them in if we call them repeatedly 
-    persistent dropboxBaseDir calDir MS_illumfile
-    if(isempty(dropBoxBaseDir) || isempty(calDir) || isempty(MS_illumfile) || options.force_recalc)
+    persistent illum_to_MS
+    if(isempty(illum_to_MS) || options.force_recalc)
         % load coefficients for converting MS chip values to illuminance
         dropBoxBaseDir = getpref('combiExperiments','dropboxBaseDir');
         calDir = '/FLIC_data/LightLoggerRadCal/W1P1M1/MSLinearityMeasurements';
         MS_illumfile = [dropBoxBaseDir,calDir, '/PR670_illum_to_MS_fits.mat'];
-        load(MS_illumfile, 'illum_to_MS');
+        illum_to_MS = load(MS_illumfile, 'illum_to_MS').illum_to_MS;
     end 
 
     % Ensure data is in log10 space

@@ -1,4 +1,4 @@
-function classifications = classifyIndoorOutdoorPeriods()
+function classifications = classifyIndoorOutdoorPeriods(raw_recording_dir, options)
     arguments
         raw_recording_dir;
         options.force_recalc = false; 
