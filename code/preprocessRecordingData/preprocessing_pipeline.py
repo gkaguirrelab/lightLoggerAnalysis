@@ -483,20 +483,6 @@ def generate_spds(src_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoo
             
             # Remove the temporary directory for this activity      
             shutil.rmtree(temp_output_dir)
-
-    # If we want the output plots to share a common axis, 
-    if(common_axes is True):
-        adjust_spd_axes(src_dir=dst_dir,
-                        dst_dir=dst_dir,
-                        overwrite_existing=True, 
-                        verbose=verbose, 
-                        subjects_to_skip=subjects_to_skip,
-                        projection_types=projection_types, 
-                        activites_to_skip=activities_to_skip,
-                        projection_types_for_bounds_calculations=projection_types_for_bounds_calculations
-                        
-                        )
-
     
     # Close the MATLAB engine
     eng.quit() 
@@ -514,6 +500,7 @@ def group_spds_per_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brainard La
                             projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = set(["virtuallyFoveated", "justProjection"]), 
                            projection_types_for_bounds_calculations:  Iterable[Literal["virtuallyFoveated", "justProjection"]] = ["virtuallyFoveated", "justProjection"],
                            sort_by_experiment_ordering: bool=True, 
+                           color_mode: Literal["L+M+S", "L-M", "GRAY"] = "L+M+S", 
                            verbose: bool=False
                          ) -> None:
     
@@ -533,10 +520,10 @@ def group_spds_per_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brainard La
     eng.tbUseProject('lightLoggerAnalysis', nargout=0)
 
     # First, let's find all of the subjects in this experiment 
-    subject_paths: list[str] = natsorted([os.path.join(src_dir, subject_name) 
-                                          for subject_name in os.listdir(src_dir) 
+    subject_paths: list[str] = natsorted([os.path.join(src_dir, color_mode, subject_name) 
+                                          for subject_name in os.listdir(os.path.join(src_dir, color_mode) )
                                           if re.fullmatch(r"FLIC_\d+", subject_name) 
-                                          and os.path.isdir(os.path.join(src_dir, subject_name))
+                                          and os.path.isdir(os.path.join(src_dir, color_mode, subject_name))
                                           if _extract_num_from_id(subject_name) not in subjects_to_skip
                                          ]
                                         ) 
@@ -616,7 +603,7 @@ def group_spds_per_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brainard La
         scipy.io.savemat(temp_output_filepath, {"groupedActivityData": per_subject_activity_grouping})
 
         # Construct the output directory 
-        output_dir: str = os.path.join(dst_dir, subject_id)
+        output_dir: str = os.path.join(dst_dir, color_mode, subject_id)
         eng.groupSPDs(temp_output_filepath, 
                       "exponent_clim", axes_min_maxes["exponentMap"]["bounds"], 
                       "variance_clim", axes_min_maxes["varianceMap"]["bounds"], 
@@ -626,6 +613,7 @@ def group_spds_per_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brainard La
                       "output_dir", output_dir, 
                       "overwrite_existing", overwrite_existing,
                       "sort_by_preferred_order", sort_by_experiment_ordering,
+                      "n_participants", 1, 
                       nargout=0
                     )
 
@@ -649,6 +637,7 @@ def group_spds_across_subjects(src_dir: str="/Users/zacharykelly/Aguirre-Brainar
                                  projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = set(["virtuallyFoveated", "justProjection"]), 
                                 projection_types_for_bounds_calculations:  Iterable[Literal["virtuallyFoveated", "justProjection"]] = ["virtuallyFoveated", "justProjection"], 
                                 sort_by_experiment_ordering: bool=True, 
+                                color_mode: Literal["L+M+S", "L-M", "GRAY"] = "L+M+S", 
                                 verbose: bool=False
                             ) -> None:
     
@@ -667,10 +656,10 @@ def group_spds_across_subjects(src_dir: str="/Users/zacharykelly/Aguirre-Brainar
 
     # Let's find the bounds across all subjects and activities
     # First, let's find all of the subjects in this experiment 
-    subject_paths: list[str] = natsorted([os.path.join(src_dir, subject_name) 
-                                          for subject_name in os.listdir(src_dir) 
+    subject_paths: list[str] = natsorted([os.path.join(src_dir, color_mode, subject_name) 
+                                          for subject_name in os.listdir(os.path.join(src_dir, color_mode) )
                                           if re.fullmatch(r"FLIC_\d+", subject_name) 
-                                          and os.path.isdir(os.path.join(src_dir, subject_name))
+                                          and os.path.isdir(os.path.join(src_dir, color_mode, subject_name))
                                           if _extract_num_from_id(subject_name) not in subjects_to_skip
                                          ]
                                         ) 
@@ -698,9 +687,9 @@ def group_spds_across_subjects(src_dir: str="/Users/zacharykelly/Aguirre-Brainar
                             }
     
     # First, let's find all of the activities that exist 
-    activities_paths: list[str] = [os.path.join(src_dir, "acrossSubjects", activity) for activity in os.listdir(os.path.join(src_dir, "acrossSubjects"))
+    activities_paths: list[str] = [os.path.join(src_dir, color_mode, "acrossSubjects", activity) for activity in os.listdir(os.path.join(src_dir, color_mode, "acrossSubjects"))
                                    if activity not in activities_to_skip
-                                   and os.path.isdir(os.path.join(src_dir, "acrossSubjects", activity))
+                                   and os.path.isdir(os.path.join(src_dir, color_mode, "acrossSubjects", activity))
                                   ]
 
     activities_iterator: Iterable = range(len(activities_paths)) if verbose is False else tqdm(range(len(activities_paths)), desc="Processing Activities", leave=False)
@@ -726,7 +715,7 @@ def group_spds_across_subjects(src_dir: str="/Users/zacharykelly/Aguirre-Brainar
     scipy.io.savemat(temp_output_filepath, {"groupedActivityData": averaged_groups})
 
     # Construct the output directory 
-    output_dir: str = os.path.join(dst_dir, "acrossSubjects")
+    output_dir: str = os.path.join(dst_dir, color_mode, "acrossSubjects")
     eng.groupSPDs(temp_output_filepath, 
                     "exponent_clim", min_max_across_all["exponentMap"]["bounds"], 
                     "variance_clim", min_max_across_all["varianceMap"]["bounds"], 
@@ -754,6 +743,7 @@ def adjust_spd_axes(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropb
                     projection_types_for_bounds_calculations:  Iterable[Literal["virtuallyFoveated", "justProjection"]] = ["virtuallyFoveated", "justProjection"],  
                     combine_figures: bool=True,
                     overwrite_existing: bool=False, 
+                    color_mode: Literal["L+M+S", "L-M", "GRAY"] = "L+M+S", 
                     verbose: bool=False
                    ) -> None:
     import matlab.engine
@@ -765,10 +755,10 @@ def adjust_spd_axes(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropb
     
 
      # First, let's find all of the subjects in this experiment 
-    subject_paths: list[str] = natsorted([os.path.join(src_dir, subject_name) 
-                                          for subject_name in os.listdir(src_dir) 
+    subject_paths: list[str] = natsorted([os.path.join(src_dir, color_mode, subject_name) 
+                                          for subject_name in os.listdir(os.path.join(src_dir, color_mode)) 
                                           if re.fullmatch(r"FLIC_\d+", subject_name) 
-                                          and os.path.isdir(os.path.join(src_dir, subject_name))
+                                          and os.path.isdir(os.path.join(src_dir, color_mode, subject_name))
                                           if _extract_num_from_id(subject_name) not in subjects_to_skip
                                          ]
                                         ) 
@@ -845,7 +835,7 @@ def adjust_spd_axes(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropb
                 
             
 
-                output_dir: str = os.path.join(dst_dir, subject_id, activity_name)
+                output_dir: str = os.path.join(dst_dir, color_mode, subject_id, activity_name)
                 title: str = f"{subject_id}_{activity_name}_modesCombined"
                 eng.plotSPDs(temp_combined_dict[activity_name]["virtuallyFoveated"],
                                 "exponent_clim", axes_min_maxes["exponentMap"]["bounds"], 
@@ -867,7 +857,7 @@ def adjust_spd_axes(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropb
                     spd_results_filepath: str = os.path.join(activity_path, f"{subject_id}_{activity_name}_{projection_type}_SPDResults.mat")
                     assert os.path.exists(spd_results_filepath), f"SPD Results path does not exist: {spd_results_filepath}"
                     
-                    output_dir: str = os.path.join(dst_dir, subject_id, activity_name)
+                    output_dir: str = os.path.join(dst_dir, color_mode, subject_id, activity_name)
                     title: str = f"{subject_id}_{activity_name}_{projection_type}"
                     eng.plotSPDs(spd_results_filepath,
                                  "exponent_clim", axes_min_maxes["exponentMap"]["bounds"], 
@@ -1246,6 +1236,7 @@ def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brain
                                  projection_types_for_bounds_calculations:  Iterable[Literal["virtuallyFoveated", "justProjection"]] = ["virtuallyFoveated", "justProjection"],
                                  common_axes: bool=False, 
                                  combine_figures: bool=False, 
+                                 color_mode: Literal["L+M+S", "L-M", "GRAY"] = "L+M+S",
                                  verbose: bool=False
                                 ) -> None:
     import matlab.engine
@@ -1257,10 +1248,10 @@ def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brain
     
 
     # First, let's find all of the subjects in this experiment 
-    subject_paths: list[str] = natsorted([os.path.join(src_dir, subject_name) 
-                                          for subject_name in os.listdir(src_dir) 
+    subject_paths: list[str] = natsorted([os.path.join(src_dir, color_mode, subject_name) 
+                                          for subject_name in os.listdir(os.path.join(src_dir, color_mode)) 
                                           if (re.fullmatch(r"FLIC_\d+", subject_name) 
-                                              and os.path.isdir(os.path.join(src_dir, subject_name))
+                                              and os.path.isdir(os.path.join(src_dir, color_mode, subject_name))
                                               and _extract_num_from_id(subject_name) not in subjects_to_skip
                                           )
                                          ]
@@ -1344,13 +1335,13 @@ def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brain
         axes_min_maxes = default_axes_min_maxes if common_axes is False else all_axes_min_maxes_per_activity[activity_name]
         
         # Generate the output dir
-        output_dir: str = os.path.join(dst_dir, "acrossSubjects", activity_name)
+        output_dir: str = os.path.join(dst_dir, color_mode, "acrossSubjects", activity_name)
         os.makedirs(output_dir, exist_ok=True)
 
         # iterate over desired projection types 
         for projection_type in projection_types:
             # Call the MATLAB function to do the processing
-            eng.processSPDsAcrossSubjects(src_dir, 
+            eng.processSPDsAcrossSubjects(os.path.join(src_dir, color_mode), 
                                           output_dir, 
                                           "subjects", subject_id_numbers,
                                           "activities", [activity_name],
@@ -1381,6 +1372,7 @@ def generate_spds_across_groups(src_dir: str="/Users/zacharykelly/Aguirre-Braina
                             common_axes: bool=False, 
                             combine_figures: bool=False, 
                             verbose: bool=False,
+                            color_mode: Literal["L+M+S", "L-M", "GRAY"] = "L+M+S", 
                             groups: dict[str, dict[str, str | None]] = {"indoor": {"work": None, "chat": None, "walkIndoor": None}, 
                                                                     "outdoor": {"walkOutdoor": None, "walkBiopond": None, "sitBiopond": None}
                                                                     }
@@ -1395,10 +1387,10 @@ def generate_spds_across_groups(src_dir: str="/Users/zacharykelly/Aguirre-Braina
 
     # Let's find the bounds across all subjects and activities
     # First, let's find all of the subjects in this experiment 
-    subject_paths: list[str] = natsorted([os.path.join(src_dir, subject_name) 
-                                          for subject_name in os.listdir(src_dir) 
+    subject_paths: list[str] = natsorted([os.path.join(src_dir, color_mode, subject_name) 
+                                          for subject_name in os.listdir(os.path.join(src_dir, color_mode) )
                                           if re.fullmatch(r"FLIC_\d+", subject_name) 
-                                          and os.path.isdir(os.path.join(src_dir, subject_name))
+                                          and os.path.isdir(os.path.join(src_dir, color_mode, subject_name))
                                           if(_extract_num_from_id not in subjects_to_skip)
                                          ]
                                         ) 
@@ -1428,7 +1420,7 @@ def generate_spds_across_groups(src_dir: str="/Users/zacharykelly/Aguirre-Braina
             group_activities: list[str] = groups[group_name] if (isinstance(groups[group_name], list) or isinstance(groups[group_name], tuple)) else list(groups[group_name].keys())
 
             # Make the output dir
-            output_dir: str = os.path.join(dst_dir, group_name)
+            output_dir: str = os.path.join(dst_dir, color_mode, group_name)
             os.makedirs(output_dir, exist_ok=True)
 
             # Iterate over activities
@@ -1437,7 +1429,7 @@ def generate_spds_across_groups(src_dir: str="/Users/zacharykelly/Aguirre-Braina
                     continue 
 
                 # Assert the activity and projection paths exist
-                activity_path: str = os.path.join(src_dir, "acrossSubjects", activity)
+                activity_path: str = os.path.join(src_dir, color_mode, "acrossSubjects", activity)
                 assert os.path.exists(activity_path), f"Problem with: {activity_path}"
 
                 # Construct projection path
@@ -1445,7 +1437,7 @@ def generate_spds_across_groups(src_dir: str="/Users/zacharykelly/Aguirre-Braina
                 assert os.path.exists(projection_path), f"Problem with: {projection_path}"
      
             # Call the MATLAB plotting function
-            eng.processSPDAcrossActivities(os.path.join(src_dir, "acrossSubjects"), 
+            eng.processSPDAcrossActivities(os.path.join(src_dir, color_mode, "acrossSubjects"), 
                                             output_dir, 
                                             "activities", group_activities,
                                             "verbose", False, 
@@ -1480,6 +1472,7 @@ def generate_spds_across_all(src_dir: str="/Users/zacharykelly/Aguirre-Brainard 
                             projection_types_for_bounds_calculations:  Iterable[Literal["virtuallyFoveated", "justProjection"]] = ["virtuallyFoveated", "justProjection"],
                             common_axes: bool=False, 
                             combine_figures: bool=False, 
+                            color_mode: Literal["L+M+S", "L-M", "GRAY"] = "L+M+S", 
                             verbose: bool=False
                           ) -> None:
     import matlab.engine
@@ -1491,10 +1484,10 @@ def generate_spds_across_all(src_dir: str="/Users/zacharykelly/Aguirre-Brainard 
 
     # Let's find the bounds across all subjects and activities
     # First, let's find all of the subjects in this experiment 
-    subject_paths: list[str] = natsorted([os.path.join(src_dir, subject_name) 
-                                          for subject_name in os.listdir(src_dir) 
+    subject_paths: list[str] = natsorted([os.path.join(src_dir, color_mode, subject_name) 
+                                          for subject_name in os.listdir(os.path.join(src_dir, color_mode)) 
                                           if re.fullmatch(r"FLIC_\d+", subject_name) 
-                                          and os.path.isdir(os.path.join(src_dir, subject_name))
+                                          and os.path.isdir(os.path.join(src_dir, color_mode, subject_name))
                                           if _extract_num_from_id(subject_name) not in subjects_to_skip
                                          ]
                                         ) 
@@ -1509,19 +1502,19 @@ def generate_spds_across_all(src_dir: str="/Users/zacharykelly/Aguirre-Brainard 
 
     
     # Next, we will find all of the valid activities we will average over
-    activity_names: list[str] = [activity for activity in os.listdir(os.path.join(src_dir, "acrossSubjects"))
+    activity_names: list[str] = [activity for activity in os.listdir(os.path.join(src_dir, color_mode, "acrossSubjects"))
                                  if activity not in activities_to_skip
-                                   and os.path.isdir(os.path.join(src_dir, "acrossSubjects", activity))
+                                   and os.path.isdir(os.path.join(src_dir, color_mode, "acrossSubjects", activity))
                                   ]
     
     # Make the output dir if it does not exist already 
-    output_dir: str = os.path.join(dst_dir, "acrossAll")
+    output_dir: str = os.path.join(dst_dir, color_mode, "acrossAll")
     os.makedirs(output_dir, exist_ok=True)
 
     # Now, we will gather the path to the SPD 
     for projection_type in projection_types:
         # Call the MATLAB plotting function
-        eng.processSPDAcrossActivities(os.path.join(src_dir, "acrossSubjects"), 
+        eng.processSPDAcrossActivities(os.path.join(src_dir, color_mode, "acrossSubjects"), 
                                           output_dir, 
                                           "activities", activity_names,
                                           "verbose", False, 

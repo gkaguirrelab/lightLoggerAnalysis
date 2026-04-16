@@ -225,7 +225,6 @@ function virtuallyFoveatedActivityDataAcrossSubjects = processSPDAcrossActivitie
         virtuallyFoveatedActivityDataAcrossSubjects.acrossAll .exponentMaps(:,:,validActivityIdx) = spd.exponentMap;
         virtuallyFoveatedActivityDataAcrossSubjects.acrossAll .varianceMaps(:,:,validActivityIdx) = spd.varianceMap;
         virtuallyFoveatedActivityDataAcrossSubjects.acrossAll .spdByRegions(:,:,:,validActivityIdx) = spd.spdByRegion;
-        virtuallyFoveatedActivityDataAcrossSubjects.acrossAll .medianImages(:,:,validActivityIdx) = spd.medianImage;
         virtuallyFoveatedActivityDataAcrossSubjects.acrossAll .frameDropVector{validActivityIdx} = spd.frameDropVector;
         virtuallyFoveatedActivityDataAcrossSubjects.acrossAll .frq = spd.frq;
 
@@ -267,41 +266,36 @@ function virtuallyFoveatedActivityDataAcrossSubjects = processSPDAcrossActivitie
                         jpField = jpFieldNames{1};
                         jp = jpStruct.activityData.(jpField);
 
-                        if (isfield(jp, 'exponentMap') && isfield(jp, 'varianceMap') && ...
-                                isfield(jp, 'spdByRegion') && isfield(jp, 'medianImage') && ...
-                                isfield(jp, 'frameDropVector') && isfield(jp, 'frq'))
-
-                            justProjectionDataAcrossAll.exponentMaps(:,:,validActivityIdx) = jp.exponentMap;
-                            justProjectionDataAcrossAll.varianceMaps(:,:,validActivityIdx) = jp.varianceMap;
-                            justProjectionDataAcrossAll.spdByRegions(:,:,:,validActivityIdx) = jp.spdByRegion;
-                            justProjectionDataAcrossAll.medianImages(:,:,validActivityIdx) = jp.medianImage;
-                            justProjectionDataAcrossAll.frameDropVector{validActivityIdx} = jp.frameDropVector;
-                            justProjectionDataAcrossAll.frq = jp.frq;
+                        justProjectionDataAcrossAll.exponentMaps(:,:,validActivityIdx) = jp.exponentMap;
+                        justProjectionDataAcrossAll.varianceMaps(:,:,validActivityIdx) = jp.varianceMap;
+                        justProjectionDataAcrossAll.spdByRegions(:,:,:,validActivityIdx) = jp.spdByRegion;
+                        justProjectionDataAcrossAll.frameDropVector{validActivityIdx} = jp.frameDropVector;
+                        justProjectionDataAcrossAll.frq = jp.frq;
 
 
-                            % Save the region averages for the justprojection videos 
-                            for ii = 1:nSubjects
-                                % Gather the subject id 
-                                subject_id = jp.subjects{ii}; 
+                        % Save the region averages for the justprojection videos 
+                        for ii = 1:nSubjects
+                            % Gather the subject id 
+                            subject_id = jp.subjects{ii}; 
 
-                                % Gather the Subject's  region averages 
-                                subject_region_averages = jp.regionAveragesAcrossSubjects{ii};
+                            % Gather the Subject's  region averages 
+                            subject_region_averages = jp.regionAveragesAcrossSubjects{ii};
 
-                                % Accumulate the subject region averages across these activities
-                                if(~isfield(justProjectionDataAcrossAll, 'subjects'))
-                                    justProjectionDataAcrossAll.subjects = {subject_id}; 
-                                    justProjectionDataAcrossAll.regionAveragesAcrossAll = {subject_region_averages}; 
-                                    continue; 
-                                end 
-
-                                justProjectionDataAcrossAll.subjects{end+1} = subject_id;
-                                justProjectionDataAcrossAll.regionAveragesAcrossAll{end+1} = subject_region_averages;
-
+                            % Accumulate the subject region averages across these activities
+                            if(~isfield(justProjectionDataAcrossAll, 'subjects'))
+                                justProjectionDataAcrossAll.subjects = {subject_id}; 
+                                justProjectionDataAcrossAll.regionAveragesAcrossAll = {subject_region_averages}; 
+                                continue; 
                             end 
 
+                            justProjectionDataAcrossAll.subjects{end+1} = subject_id;
+                            justProjectionDataAcrossAll.regionAveragesAcrossAll{end+1} = subject_region_averages;
+
+                        end 
 
 
-                        end
+
+                        
                     end
                 end
             end
@@ -324,13 +318,11 @@ function virtuallyFoveatedActivityDataAcrossSubjects = processSPDAcrossActivitie
     virtuallyFoveatedActivityDataAcrossSubjects.acrossAll .exponentMap = squeeze(mean(virtuallyFoveatedActivityDataAcrossSubjects.acrossAll .exponentMaps(:,:,1:validActivityIdx), 3, 'omitmissing'));
     virtuallyFoveatedActivityDataAcrossSubjects.acrossAll .varianceMap = squeeze(mean(virtuallyFoveatedActivityDataAcrossSubjects.acrossAll .varianceMaps(:,:,1:validActivityIdx), 3, 'omitmissing'));
     virtuallyFoveatedActivityDataAcrossSubjects.acrossAll .spdByRegion = squeeze(mean(virtuallyFoveatedActivityDataAcrossSubjects.acrossAll .spdByRegions(:,:,:,1:validActivityIdx), 4, 'omitmissing'));
-    virtuallyFoveatedActivityDataAcrossSubjects.acrossAll .medianImage = squeeze(mean(virtuallyFoveatedActivityDataAcrossSubjects.acrossAll .medianImages(:,:,1:validActivityIdx), 3, 'omitmissing'));
 
     if (combine_figures)
         justProjectionDataAcrossAll.exponentMap = squeeze(mean(justProjectionDataAcrossAll.exponentMaps, 3, 'omitmissing'));
         justProjectionDataAcrossAll.varianceMap = squeeze(mean(justProjectionDataAcrossAll.varianceMaps, 3, 'omitmissing'));
         justProjectionDataAcrossAll.spdByRegion = squeeze(mean(justProjectionDataAcrossAll.spdByRegions, 4, 'omitmissing'));
-        justProjectionDataAcrossAll.medianImage = squeeze(mean(justProjectionDataAcrossAll.medianImages, 3, 'omitmissing'));
 
          for ii = 1:numel(virtuallyFoveatedActivityDataAcrossSubjects.acrossAll.regionAveragesAcrossAll)
             across_participant_std.justProjection.center(ii, :) = justProjectionDataAcrossAll.regionAveragesAcrossAll{ii}.center; 

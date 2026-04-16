@@ -111,7 +111,6 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle, regionAverage
     virtuallyFoveatedVarianceMap = virtuallyFoveatedActivityData.(activityName).varianceMap;
     virtuallyFoveatedSpdByRegion = virtuallyFoveatedActivityData.(activityName).spdByRegion;
     virtuallyFoveatedFrq = virtuallyFoveatedActivityData.(activityName).frq;
-    medianImage = virtuallyFoveatedActivityData.(activityName).medianImage; %#ok<NASGU>
     frameDropVector = virtuallyFoveatedActivityData.(activityName).frameDropVector; %#ok<NASGU>
 
     % Build elliptical FOV mask

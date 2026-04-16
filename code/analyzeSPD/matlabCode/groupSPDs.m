@@ -106,7 +106,9 @@ function [groupedExponentHandle, groupedVarianceHandle, groupedSpdHandle] = grou
     end 
 
     % Find the STD by group 
-    groups_across_participant_std = find_across_participant_std(groupedActivityData);
+    if(options.n_participants > 1)
+        groups_across_participant_std = find_across_participant_std(groupedActivityData, options.n_participants);
+    end 
 
     % Create grouped exponent-map figure and KEEP the tiledlayout handle
     groupedExponentHandle = figure('Units', 'pixels', 'Position', [100 100 2200 1300]);
@@ -165,7 +167,11 @@ function [groupedExponentHandle, groupedVarianceHandle, groupedSpdHandle] = grou
             hold(spdTargetAxes, 'on');
 
             % Retrieve the STD for this group 
-            group_std = groups_across_participant_std(char(group_name)); 
+            if(options.n_participants > 1)
+                group_std = groups_across_participant_std(char(group_name)); 
+            else
+                group_std = false; 
+            end 
 
             [exponentMapHandle, varianceMapHandle, ~] = plotSPDs( ...
                 virtuallyFoveatedActivityData, ...
@@ -479,7 +485,7 @@ function iCopySingleAxesWithColorbar(sourceAxes, targetFigureHandle, targetPosit
                    axPos(4)];
 end
 
-function groups_across_participant_std = find_across_participant_std(groupedActivityData)
+function groups_across_participant_std = find_across_participant_std(groupedActivityData, n_participants)
     % First, find the group names 
     group_names = fieldnames(groupedActivityData); 
 
@@ -511,7 +517,8 @@ function groups_across_participant_std = find_across_participant_std(groupedActi
                 virtually_foveated_data = load(groupedActivityData.(group_name).(activity_name).virtuallyFoveated).activityData.(activity_name); 
 
                 % Iterate over the subjects we have for this activity 
-                num_subjects = numel(virtually_foveated_data.subjects); 
+
+                num_subjects = n_participants; 
                 for ss = 1:num_subjects
                     center_region_avg = virtually_foveated_data.regionAveragesAcrossSubjects{ss}.center; 
                     periphery_region_avg = virtually_foveated_data.regionAveragesAcrossSubjects{ss}.periphery;
@@ -529,7 +536,7 @@ function groups_across_participant_std = find_across_participant_std(groupedActi
                 just_projection_data = load(groupedActivityData.(group_name).(activity_name).justProjection).activityData.(activity_name); 
 
                 % Iterate over the subjects we have for this activity 
-                num_subjects = numel(virtually_foveated_data.subjects); 
+                num_subjects = n_participants; 
                 for ss = 1:num_subjects
                     center_region_avg = just_projection_data.regionAveragesAcrossSubjects{ss}.center; 
                     periphery_region_avg = just_projection_data.regionAveragesAcrossSubjects{ss}.periphery;

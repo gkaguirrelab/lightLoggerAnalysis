@@ -156,16 +156,16 @@ function virtuallyFoveatedActivityDataAcrossSubjects = processSPDsAcrossSubjects
         if ~isfield(virtuallyFoveatedActivityDataAcrossSubjects, activityName)
             virtuallyFoveatedActivityDataAcrossSubjects.(activityName).exponentMaps = [];
             virtuallyFoveatedActivityDataAcrossSubjects.(activityName).varianceMaps = [];
-            virtuallyFoveatedActivityDataAcrossSubjects.(activityName).spdByRegion = [];
-            virtuallyFoveatedActivityDataAcrossSubjects.(activityName).medianImage = [];
+            virtuallyFoveatedActivityDataAcrossSubjects.(activityName).spdByRegions = [];
+            virtuallyFoveatedActivityDataAcrossSubjects.(activityName).medianImages = [];
             virtuallyFoveatedActivityDataAcrossSubjects.(activityName).frameDropVector = {};
         end
 
         if(combine_figures && ~isfield(justProjectionActivityDataAcrossSubjects, activityName))
             justProjectionActivityDataAcrossSubjects.(activityName).exponentMaps = [];
             justProjectionActivityDataAcrossSubjects.(activityName).varianceMaps = [];
-            justProjectionActivityDataAcrossSubjects.(activityName).spdByRegion = [];
-            justProjectionActivityDataAcrossSubjects.(activityName).medianImage = [];
+            justProjectionActivityDataAcrossSubjects.(activityName).spdByRegions = [];
+            justProjectionActivityDataAcrossSubjects.(activityName).medianImages = [];
             justProjectionActivityDataAcrossSubjects.(activityName).frameDropVector = {};
         end
 

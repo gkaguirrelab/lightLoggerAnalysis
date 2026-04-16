@@ -54,7 +54,11 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     MS2illum_lux = msCounts2Illuminance(ms_v);
     
     % Classify outdoor/indoor based on this 
-    outdoor_indoor_classifications = ~classifyIndoorOutdoorPeriods(path_to_raw_recording, "window_size_seconds", options.winSizeSec); 
+    outdoor_threshold = 10 ^ 2.5; 
+    outdoor_indoor_classifications = ~classifyIndoorOutdoorPeriods(path_to_raw_recording, ...
+                                                                  "window_size_seconds", options.winSizeSec,...
+                                                                  "outdoor_threshold", outdoor_threshold...
+                                                                  ); 
 
     %% Calculate Time Offsets (T0 based on IMU start)
     t0 = IMUdata.timestamp_ns_(1);
@@ -78,7 +82,11 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     magAccel = sqrt(sum(IMUdata{:, {'accelerationX_g_', 'accelerationY_g_', 'accelerationZ_g_'}}.^2, 2));
     enmo = max(0, magAccel - 1); 
     activityIndex = movmean(enmo, winSizeSamples, 'omitnan'); 
-    active_inactive_classifications = classifyActiveInactivePeriods(IMUdata, "window_size_seconds", options.winSizeSec);  % Classify active/inactive based on this 
+    active_threshold = 0.05; 
+    active_inactive_classifications = classifyActiveInactivePeriods(IMUdata, ...
+                                                                    "window_size_seconds", options.winSizeSec,...
+                                                                    "active_threshold", active_threshold...
+                                                                   );  % Classify active/inactive based on this 
 
     % Rotational Velocities
     unwrappedYaw = unwrap(deg2rad(IMUdata.yaw_deg_)) * (180/pi);
@@ -133,18 +141,6 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     ylim(ax1, [0, 0.2]);
     grid(ax1, 'on');
 
-    yl1 = ylim(ax1);
-    activeMask = double(active_inactive_classifications(:));
-    activeMask(activeMask == 0) = NaN;
-
-    hActive = area(ax1, timeMinIMU, yl1(2) * activeMask, ...
-        'FaceColor', cActive, ...
-        'FaceAlpha', 0.18, ...
-        'EdgeColor', 'none', ...
-        'DisplayName', 'Active');
-    uistack(hActive, 'bottom');
-
-    legend(ax1, [pENMO, hActive], {'ENMO', 'Active'}, 'FontSize', 7);
 
     % Subplot 2: Rotational Vel
     ax2 = nexttile(tlo1); hold(ax2, 'on');
@@ -190,23 +186,52 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     ylim(ax5, [1, 10e4]); 
     grid(ax5, 'on');
 
-    yl5 = ylim(ax5);
-    outdoorMask = double(outdoor_indoor_classifications(:));
-    outdoorMask(outdoorMask == 0) = NaN;
-
-    hOutdoor = area(ax5, timeMinMS, yl5(2) * outdoorMask, ...
-        'FaceColor', cOutdoor, ...
-        'FaceAlpha', 0.18, ...
-        'EdgeColor', 'none', ...
-        'DisplayName', 'Outdoor');
-    uistack(hOutdoor, 'bottom');
-    legend(ax5, [pLux, hOutdoor], {'Illum', 'Outdoor'}, 'FontSize', 7);
-    
     linkaxes([ax1, ax2, ax3, ax4, ax5], 'x');
     % Find the maximum time across your data to set a tight limit
     maxTime = max([timeMinIMU; timeMinGaze; timeMinEye; timeMinMS]);
     xlim(ax1, [0, maxTime]);
     drawnow;
+
+    xl1 = xlim(ax1);
+    yl1 = ylim(ax1);
+
+    hActive = patch(ax1, ...
+        [xl1(1) xl1(2) xl1(2) xl1(1)], ...
+        [active_threshold active_threshold yl1(2) yl1(2)], ...
+        cActive, ...
+        'FaceAlpha', 0.18, ...
+        'EdgeColor', 'none', ...
+        'DisplayName', 'Active');
+
+    uistack(hActive, 'bottom');
+
+    plot(ax1, xl1, [active_threshold active_threshold], ...
+        'Color', cActive, ...
+        'LineWidth', 1.5, ...
+        'HandleVisibility', 'off');
+
+    legend(ax1, [pENMO, hActive], {'ENMO', 'Active threshold'}, 'FontSize', 7);
+
+
+    xl5 = xlim(ax5);
+    yl5 = ylim(ax5);
+
+    hOutdoor = patch(ax5, ...
+        [xl5(1) xl5(2) xl5(2) xl5(1)], ...
+        [outdoor_threshold outdoor_threshold yl5(2) yl5(2)], ...
+        cOutdoor, ...
+        'FaceAlpha', 0.18, ...
+        'EdgeColor', 'none', ...
+        'DisplayName', 'Outdoor');
+
+    uistack(hOutdoor, 'bottom');
+
+    plot(ax5, xl5, [outdoor_threshold outdoor_threshold], ...
+        'Color', cOutdoor, ...
+        'LineWidth', 1.5, ...
+        'HandleVisibility', 'off');
+
+    legend(ax5, [pLux, hOutdoor], {'Illum', 'Outdoor threshold'}, 'FontSize', 7);
 
     % Save the figure if desired 
     if(options.save_figures)
@@ -506,4 +531,3 @@ function [IMUdata, eyeStateData, blinkData, gazeData] = load_actigraphy_data(IMU
 
     return ; 
 end 
-
