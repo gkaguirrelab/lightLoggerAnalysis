@@ -120,11 +120,11 @@ function frame = readFrame(obj, options)
             % Leaving us a 2D image 
             if(options.color == "L+M+S")
                 read_ahead_buffer = sum(read_ahead_buffer, 4); 
-            end 
+            end
 
             % If L-M, we need to subtract 2 channels and remove the third 
             % This leaves us a 2D image
-            if(options.color == "L-M")
+            if (options.color == "L-M")
                 L = read_ahead_buffer(:,:,:,1);
                 M = read_ahead_buffer(:,:,:,2);
                 read_ahead_buffer = squeeze(L - M);
