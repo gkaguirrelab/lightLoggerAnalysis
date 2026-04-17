@@ -87,7 +87,7 @@ function [exponentMap, varianceMap, spdByRegion, frq, medianImage, frameDropVect
         options.doPlot  (1,1) logical           = true
         options.nWorkers (1,1) {mustBeNumeric}   = 6
         options.frameDropVector {mustBeNumeric}  = [];
-        options.color_mode {mustBeMember(options.color_mode, ["L+M+S", "L-M", "GRAY"])} = "L+M+S";
+        options.color_mode {mustBeMember(options.color_mode, ["L+M+S", "L-M", "GRAY", "a"])} = "L+M+S";
     end
 
     % Load in some info about the video to get us started
