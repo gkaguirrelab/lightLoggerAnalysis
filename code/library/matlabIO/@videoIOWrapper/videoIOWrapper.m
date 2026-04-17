@@ -34,7 +34,6 @@ classdef videoIOWrapper < handle
         camera_used; 
         T_receptors
         T_camera; 
-        utility_library; 
     end
 
     % These may be modified after object creation
@@ -97,7 +96,13 @@ classdef videoIOWrapper < handle
                     % generate it quickly with Python, then access it quickly 
                     % with MATLAB, removing it when the object closes 
                     % We will do this conversion when the first frame is read 
-                    obj.temporary_reading_hdf5_filepath = fullfile(getenv('HOME'), 'Desktop', name+"_temp.hdf5");
+
+                    % We use a 
+                    time_of_generation = posixtime(datetime('now'));     % seconds since epoch
+                    random_identifier = randi(1e6);                     % random component
+                    unique_id = sprintf('%d%06d', floor(time_of_generation*1000), random_identifier);
+                    temporary_filename = sprintf("%s_%s.hdf5", name, unique_id); 
+                    obj.temporary_reading_hdf5_filepath = fullfile(getenv('HOME'), 'Desktop', temporary_filename);
 
                     % Store the number of frames in the video 
                     obj.NumFrames = double(obj.utility_library.inspect_video_frame_count(videoFileName));

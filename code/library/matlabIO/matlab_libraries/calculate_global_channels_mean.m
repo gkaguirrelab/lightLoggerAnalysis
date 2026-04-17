@@ -4,6 +4,7 @@ function global_means = calculate_global_channels_mean(video_path, options)
         options.color {mustBeMember(options.color, ["RGB","BGR","GRAY", "LMS", "L+M+S", "L-M", "a", "c_lm", "c_s"])}; 
         options.sum_of {mustBeMember(options.sum_of, ["value", "loge"])}; 
         options.channels = [1, 2, 3]; 
+        options.verbose = false 
     end 
 
     % First, let's open a video reader to stream frames from the video 
@@ -28,7 +29,7 @@ function global_means = calculate_global_channels_mean(video_path, options)
         case "loge"
             transformation = @(x) log(x);
 
-        otherwise:
+        otherwise
             error("Unsupported transformation %s", options.sum_of);
 
     end 
@@ -36,11 +37,15 @@ function global_means = calculate_global_channels_mean(video_path, options)
 
 
     % Next, let's iterate over the frames of the video 
+    if options.verbose
+        h_wait = waitbar(0, 'Calculating Channel Means | Processing video frames...');
+    end
+
     n_frames = video_reader.NumFrames; 
     for ii = 1:n_frames
         % Read the target frame from the video 
-        frame = videor_reader.readFrame('frameNum', ii, ...
-                                        'color', options.color, 
+        frame = video_reader.readFrame('frameNum', ii, ...
+                                        'color', options.color,... 
                                         'zeros_as_nans', true...
                                        ); 
         
@@ -48,10 +53,21 @@ function global_means = calculate_global_channels_mean(video_path, options)
         % applying the desired transformation
         for ch = 1:numel(options.channels)
             target_channel = options.channels(ch);
-            global_sums(ch) = global_sums(ch) + transformation(frame(:, :, target_channel)(:)) ;                   
+            channel_data = frame(:, :, target_channel);
+            global_sums(ch) = global_sums(ch) + sum(transformation(channel_data(:)));                
         end 
 
+        % ---- UPDATE PROGRESS BAR ----
+        if options.verbose
+            waitbar(ii / n_frames, h_wait, ...
+                sprintf('Calculating Channel Means | Processing frame %d / %d', ii, n_frames));
+        end
     
+    end
+
+    % ---- CLOSE PROGRESS BAR ----
+    if options.verbose
+        close(h_wait);
     end
 
     % The number of total values is num_frames * (IMAGE_SIZE)

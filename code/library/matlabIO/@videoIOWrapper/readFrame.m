@@ -7,6 +7,7 @@ function frame = readFrame(obj, options)
         options.verbose = false; 
         options.force_rebuffer = false; 
     end 
+    verbose = options.verbose; 
 
     % Save a list of the LMS colorspace types  use later 
     persistent LMS_colorspace_types two_dimensional_colorspace_types normalized_color_types
@@ -60,6 +61,10 @@ function frame = readFrame(obj, options)
 
     should_rebuffer = any([no_buffer_exists, color_changed, overran_buffer, underran_buffer, options.force_rebuffer]);
     if(should_rebuffer)
+        if(verbose)
+            disp("REBUFFERING");
+        end 
+
         % let's define the start and end indices of the read buffer 
         block_size = double(min(remaining, obj.read_ahead_buffer_size));
 
@@ -71,6 +76,9 @@ function frame = readFrame(obj, options)
         end     
 
         % Convert a buffer of the video to HDF5 to be able to be read in 
+        if(verbose)
+            disp("CONVERTING TO HDF5"); 
+        end     
         obj.utility_library.video_to_hdf5(obj.full_video_path, obj.temporary_reading_hdf5_filepath,...
                                           python_color,...
                                           py.int(frameNum - 1), py.int((frameNum - 1) + block_size),...
@@ -84,6 +92,9 @@ function frame = readFrame(obj, options)
         % do not need to access the file for each individual frame 
         obj.buffer_start_frame = frameNum; 
 
+        if(verbose)
+            disp("READING FROM HDF5")
+        end 
         info = h5info(obj.temporary_reading_hdf5_filepath, "/video");
         % Read gray frames from the temp file 
         read_ahead_buffer = []; 
@@ -106,6 +117,10 @@ function frame = readFrame(obj, options)
         % The buffer is now in memory. If we want to convert to LMS, we should do that now
         % so the whole buffer is in LMS space
         if(ismember(options.color, LMS_colorspace_types))
+            if(verbose)
+                disp("converting to LMS"); 
+            end 
+
             % Retrieve the transformation matrices used to convert to LMS 
             % and the camera choice
             T_camera = obj.T_camera; 
@@ -128,7 +143,7 @@ function frame = readFrame(obj, options)
                 % Leaving us a 2D image 
                 if(options.color == "L+M+S")
                     read_ahead_buffer = sum(read_ahead_buffer, 4); 
-                end
+                
 
                 % If L-M, we need to subtract 2 channels and remove the third 
                 % This leaves us a 2D image
@@ -175,18 +190,23 @@ function frame = readFrame(obj, options)
                 % to calculate the normalization factors 
                 % for each of l, m, s
                 if(isempty(normalization_factors))
+                    if(verbose)
+                        disp("Calculating normalization factors")
+                    end 
+
                     % Calculate the normalization factors 
                     % using the Python helper function 
                     normalization_factors = calculate_global_channels_mean(obj.full_video_path, ...
-                                                                            "color", options.color,...
+                                                                            "color", "LMS",...
                                                                             "sum_of", "loge",...
-                                                                            "channels", [1, 2, 3]...
+                                                                            "channels", [1, 2, 3],...
+                                                                            "verbose", verbose...
                                                                             ); 
 
                 end     
 
 
-                % First, let's calculate these things if not done already
+                % Let's calculate the normalized buffer
                 l_hat = log(read_ahead_buffer(:, :, :, 1)) - normalization_factors(1); 
                 m_hat = log(read_ahead_buffer(:, :, :, 2)) - normalization_factors(2);
                 s_hat = log(read_ahead_buffer(:, :, :, 3)) - normalization_factors(3);
@@ -206,7 +226,7 @@ function frame = readFrame(obj, options)
                 %   "How bright is the scene relative to its average?"
                 %% ------------------------------------------------------------------------
                 if(options.color == "a")
-                    read_ahead_buffer = (l_hat + m_hat) / sqrt(t); 
+                    read_ahead_buffer = (l_hat + m_hat) / sqrt(2); 
 
                 %% ------------------------------------------------------------------------
                 % Chromatic signal 1 (red–green opponent channel)
