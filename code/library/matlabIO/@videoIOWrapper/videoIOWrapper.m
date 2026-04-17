@@ -34,6 +34,7 @@ classdef videoIOWrapper < handle
         camera_used; 
         T_receptors
         T_camera; 
+        utility_library; 
     end
 
     % These may be modified after object creation

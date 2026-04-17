@@ -2,17 +2,18 @@ function frame = readFrame(obj, options)
     arguments 
         obj 
         options.frameNum {mustBeNumeric} = []; 
-        options.color {mustBeMember(options.color, ["RGB","BGR","GRAY", "LMS", "L+M+S", "L-M"])} = "RGB";
+        options.color {mustBeMember(options.color, ["RGB","BGR","GRAY", "LMS", "L+M+S", "L-M", "a", "c_lm", "c_s"])} = "RGB";
         options.zeros_as_nans = false; 
         options.verbose = false; 
         options.force_rebuffer = false; 
     end 
 
     % Save a list of the LMS colorspace types  use later 
-    persistent LMS_colorspace_types two_dimensional_colorspace_types 
+    persistent LMS_colorspace_types two_dimensional_colorspace_types normalized_color_types
     if(isempty(LMS_colorspace_types))
-        LMS_colorspace_types = ["LMS", "L+M+S", "L-M"];
-        two_dimensional_colorspace_types = ["GRAY", "L+M+S", "L-M"];
+        LMS_colorspace_types = ["LMS", "L+M+S", "L-M", "a", "c_lm", "c_s"];
+        two_dimensional_colorspace_types = ["GRAY", "L+M+S", "L-M", "a", "c_lm", "c_s"];
+        normalized_color_types = ["a", "c_lm", "c_s"]; 
     end 
 
     if(options.verbose)
@@ -52,6 +53,10 @@ function frame = readFrame(obj, options)
     color_changed = string(obj.current_reading_color_mode) ~= string(options.color); 
     overran_buffer = frameNum > ( (obj.buffer_start_frame + obj.read_ahead_buffer_size) - 1); 
     underran_buffer = frameNum < obj.buffer_start_frame; 
+
+    % Persistent normalization factors used with normalized color types. 
+    % This should be recalculated when they are used 
+    persistent normalization_factors
 
     should_rebuffer = any([no_buffer_exists, color_changed, overran_buffer, underran_buffer, options.force_rebuffer]);
     if(should_rebuffer)
@@ -114,21 +119,133 @@ function frame = readFrame(obj, options)
                                                         );
             end     
             
-            % We are now in LMS 3 channel space 
+            
+            % We first check if we are not in the normalized space 
+            % This is a more simple calculation 
+            % that does not require knowing certain normalization values
+            if(~ismember(options.color, normalized_color_types))
+                % If L+M+S, sum the channels together 
+                % Leaving us a 2D image 
+                if(options.color == "L+M+S")
+                    read_ahead_buffer = sum(read_ahead_buffer, 4); 
+                end
 
-            % If L+M+S, sum the channels together 
-            % Leaving us a 2D image 
-            if(options.color == "L+M+S")
-                read_ahead_buffer = sum(read_ahead_buffer, 4); 
+                % If L-M, we need to subtract 2 channels and remove the third 
+                % This leaves us a 2D image
+                elseif (options.color == "L-M")
+                    L = read_ahead_buffer(:,:,:,1);
+                    M = read_ahead_buffer(:,:,:,2);
+                    read_ahead_buffer = squeeze(L - M);
+                
+                end 
+            
+            else
+
+                % The below are sourced from paper: Processing of Natural Temporal Stimuli by Macaque Retinal Ganglion Cells (J. H. van Hateren,1 L. Ru¨ ttiger,2,3 H. Sun,4 and B. B. Lee2,)
+
+                % they first perform the following transformation 
+
+                %% ------------------------------------------------------------------------
+                % Cone signal preprocessing (contrast normalization)
+                %
+                % Step 1: Log transform + mean subtraction
+                %
+                % For each cone channel (L, M, S):
+                %
+                %   i_hat = log(i) - mean(log(i))
+                %          
+                %
+                %
+                % Interpretation:
+                % - Log transform converts multiplicative changes → additive (intensity → contrast)
+                % - Subtracting mean centers the signal over time
+                %
+                % Result:
+                % - i_hat > 0  → brighter than average
+                % - i_hat < 0  → darker than average
+                %
+                % Same applied to:
+                %   l_hat, m_hat, s_hat
+                %
+                % i_hat represents deviation from average in contrast units
+                %% ------------------------------------------------------------------------
+                
+                % If we are calculating any of the normalized 
+                % color types for the first time, we need 
+                % to calculate the normalization factors 
+                % for each of l, m, s
+                if(isempty(normalization_factors))
+                    % Calculate the normalization factors 
+                    % using the Python helper function 
+                    normalization_factors = calculate_global_channels_mean(obj.full_video_path, ...
+                                                                            "color", options.color,...
+                                                                            "sum_of", "loge",...
+                                                                            "channels", [1, 2, 3]...
+                                                                            ); 
+
+                end     
+
+
+                % First, let's calculate these things if not done already
+                l_hat = log(read_ahead_buffer(:, :, :, 1)) - normalization_factors(1); 
+                m_hat = log(read_ahead_buffer(:, :, :, 2)) - normalization_factors(2);
+                s_hat = log(read_ahead_buffer(:, :, :, 3)) - normalization_factors(3);
+
+                % %% ------------------------------------------------------------------------
+                % Achromatic signal (overall brightness)
+                %
+                % Combine L and M cone contrast signals:
+                %
+                %   a = (l_hat + m_hat) / sqrt(2)
+                %
+                % Interpretation:
+                % - Represents overall brightness (luminance-like signal)
+                % - S cone is ignored (minor contribution to luminance in primates)
+                %
+                % Rough meaning:
+                %   "How bright is the scene relative to its average?"
+                %% ------------------------------------------------------------------------
+                if(options.color == "a")
+                    read_ahead_buffer = (l_hat + m_hat) / sqrt(t); 
+
+                %% ------------------------------------------------------------------------
+                % Chromatic signal 1 (red–green opponent channel)
+                %
+                % Difference between L and M cones:
+                %
+                %   c_lm = (l_hat - m_hat) / sqrt(2)
+                %
+                % Interpretation:
+                % - Measures red vs green balance
+                %
+                % Sign:
+                %   c_lm > 0  → more L → reddish
+                %   c_lm < 0  → more M → greenish
+                %% ------------------------------------------------------------------------
+                elseif(options.color == "c_lm")
+                    read_ahead_buffer = (l_hat - m_hat) / sqrt(2); 
+                
+                %% ------------------------------------------------------------------------
+                % Chromatic signal 2 (blue–yellow opponent channel)
+                %
+                % Compare S cone vs combined L+M:
+                %
+                %   c_s = (2*s_hat - (l_hat + m_hat)) / sqrt(6)
+                %
+                % Interpretation:
+                % - Compares blue (S) vs yellow (L+M)
+                %
+                % Sign:
+                %   c_s > 0  → blue-ish
+                %   c_s < 0  → yellow-ish
+                %% ------------------------------------------------------------------------
+                elseif(options.color == "c_s")
+                    read_ahead_buffer = (2 * s_hat - (l_hat + m_hat)) / sqrt(6); 
+
+                end
+            
             end
 
-            % If L-M, we need to subtract 2 channels and remove the third 
-            % This leaves us a 2D image
-            if (options.color == "L-M")
-                L = read_ahead_buffer(:,:,:,1);
-                M = read_ahead_buffer(:,:,:,2);
-                read_ahead_buffer = squeeze(L - M);
-            end 
         end 
         
         % Save the read ahead buffer to the obj 
