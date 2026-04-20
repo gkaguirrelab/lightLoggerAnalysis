@@ -91,7 +91,7 @@ function activityDataAcrossSubjects = processSPDsAcrossSubjects(input_dir, outpu
         options.variance_clim = false
         options.spd_xlim = false
         options.spd_ylim = false
-        options.color_mode {mustBeMember(options.color_mode, ["L+M+S", "L-M", "GRAY", "a"])} = "L+M+S";
+        options.color_mode {mustBeMember(options.color_mode, ["L+M+S", "L-M", "GRAY", "a", "c_lm", "c_s"])} = "L+M+S";
     end
 
     % Find all subject folders matching ^FLIC_\d+$

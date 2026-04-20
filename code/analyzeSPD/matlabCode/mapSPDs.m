@@ -87,7 +87,7 @@ function [exponentMap, varianceMap, spdByRegion, frq, medianImage, frameDropVect
         options.doPlot  (1,1) logical           = true
         options.nWorkers (1,1) {mustBeNumeric}   = 6
         options.frameDropVector {mustBeNumeric}  = [];
-        options.color_mode {mustBeMember(options.color_mode, ["L+M+S", "L-M", "GRAY", "a"])} = "L+M+S";
+        options.color_mode {mustBeMember(options.color_mode, ["L+M+S", "L-M", "GRAY", "a", "c_lm", "c_s"])} = "L+M+S";
         options.verbose = false; 
     end
 
@@ -123,7 +123,7 @@ function [exponentMap, varianceMap, spdByRegion, frq, medianImage, frameDropVect
     chunkStarts = startFrameIdx:framesPerStep:(endFrameIdx-framesPerChunk);
 
     % Find the number of chunks in the video
-    nChunks = 2; %length(chunkStarts);
+    nChunks = length(chunkStarts);
     chunkStarts = chunkStarts(1:nChunks);
 
     % Find the row and column starts

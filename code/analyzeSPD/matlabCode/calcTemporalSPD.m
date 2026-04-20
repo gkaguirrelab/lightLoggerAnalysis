@@ -80,9 +80,6 @@ function [spd, frq] = calcTemporalSPD(v, fps, options)
         % Mean the pixels per image per frame to achieve the signal
         signal = mean(regionPixels, 2, 'omitmissing');
 
-        % Convert to contrast units
-        signal = (signal - mean(signal, 'omitmissing')) / mean(signal, 'omitmissing');
-
     end
 
     if(numel(signal(:)) == 0)

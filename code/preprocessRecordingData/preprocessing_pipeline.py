@@ -386,7 +386,7 @@ def generate_spds(src_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoo
                   activities_to_skip: Iterable=set(["lunch", "phone"]), 
                   projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = set(["virtuallyFoveated", "justProjection"]), 
                   projection_types_for_bounds_calculations:  Iterable[Literal["virtuallyFoveated", "justProjection"]] = ["virtuallyFoveated", "justProjection"],
-                  color_mode: Literal["L+M+S", "L-M", "GRAY", "a"] = "L+M+S",
+                  color_mode: Literal["L+M+S", "L-M", "GRAY", "a", "c_cm", "c_s"] = "L+M+S",
                   common_axes: bool=False, 
                   verbose: bool=False) -> None:
     
@@ -477,7 +477,7 @@ def generate_spds(src_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoo
                                 "overwrite_existing", overwrite_existing,
                                 "save_figures", True, 
                                 "video_type", projection_type, 
-                                "color_mode", color_mode, 
+                                "color_mode", color_mode,   
                                 nargout=0
                             )
             
