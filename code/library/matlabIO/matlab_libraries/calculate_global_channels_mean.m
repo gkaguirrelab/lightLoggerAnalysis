@@ -5,6 +5,7 @@ function global_means = calculate_global_channels_mean(video_path, options)
         options.sum_of {mustBeMember(options.sum_of, ["value", "loge"])}; 
         options.channels = [1, 2, 3]; 
         options.verbose = false 
+        options.start_end = false; 
     end 
 
     % First, let's open a video reader to stream frames from the video 
@@ -27,7 +28,7 @@ function global_means = calculate_global_channels_mean(video_path, options)
         % If we want the natural log 
         % it is as follows 
         case "loge"
-            transformation = @(x) log(x);
+            transformation = @(x) log(x + 10e-9);
 
         otherwise
             error("Unsupported transformation %s", options.sum_of);
@@ -42,11 +43,21 @@ function global_means = calculate_global_channels_mean(video_path, options)
     end
 
     n_frames = video_reader.NumFrames; 
-    for ii = 1:n_frames
+    if(~islogical(options.start_end))
+        start = options.start_end(1); 
+        end_ = options.start_end(2);
+        assert(end_ <= n_frames); 
+
+    else 
+        start = 1; 
+        end_ = n_frames; 
+    end 
+
+    for ii = start:end_
         % Read the target frame from the video 
         frame = video_reader.readFrame('frameNum', ii, ...
                                         'color', options.color,... 
-                                        'zeros_as_nans', true...
+                                        'zeros_as_nans', false...
                                        ); 
         
         % Sum the target channels 
@@ -54,8 +65,9 @@ function global_means = calculate_global_channels_mean(video_path, options)
         for ch = 1:numel(options.channels)
             target_channel = options.channels(ch);
             channel_data = frame(:, :, target_channel);
-            global_sums(ch) = global_sums(ch) + sum(transformation(channel_data(:)));                
+            global_sums(ch) = global_sums(ch) + sum(transformation(channel_data(:)), 'omitnan');                
         end 
+        assert(~any(isnan(global_sums(:) ))); 
 
         % ---- UPDATE PROGRESS BAR ----
         if options.verbose
@@ -76,6 +88,7 @@ function global_means = calculate_global_channels_mean(video_path, options)
     for ch = 1:numel(options.channels)
         global_means(ch) = global_sums(ch) / total_num_values;
     end     
+    assert(~any(isnan(global_means(:) ))); 
 
     return 
 

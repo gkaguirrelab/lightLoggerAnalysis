@@ -200,16 +200,23 @@ function frame = readFrame(obj, options)
                                                                             "color", "LMS",...
                                                                             "sum_of", "loge",...
                                                                             "channels", [1, 2, 3],...
-                                                                            "verbose", verbose...
+                                                                            "verbose", verbose,...
+                                                                            "start_end", [ obj.buffer_start_frame, obj.buffer_start_frame + ( 2 * obj.read_ahead_buffer_size) - 1 ]...
                                                                             ); 
 
                 end     
 
 
                 % Let's calculate the normalized buffer
-                l_hat = log(read_ahead_buffer(:, :, :, 1)) - normalization_factors(1); 
-                m_hat = log(read_ahead_buffer(:, :, :, 2)) - normalization_factors(2);
-                s_hat = log(read_ahead_buffer(:, :, :, 3)) - normalization_factors(3);
+                
+                % we add a small epsilon to fight zeros and thus causing nans here 
+                anti_zero_epsilon = 10e-9; 
+                l_hat = log(read_ahead_buffer(:, :, :, 1) + anti_zero_epsilon) - normalization_factors(1); 
+                m_hat = log(read_ahead_buffer(:, :, :, 2) + anti_zero_epsilon) - normalization_factors(2);
+                s_hat = log(read_ahead_buffer(:, :, :, 3) + anti_zero_epsilon) - normalization_factors(3);
+                assert(~any(isnan(l_hat(:) )));
+                assert(~any(isnan(m_hat(:) )));
+                assert(~any(isnan(s_hat(:) )));
 
                 % %% ------------------------------------------------------------------------
                 % Achromatic signal (overall brightness)

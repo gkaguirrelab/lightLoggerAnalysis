@@ -123,7 +123,8 @@ function [exponentMap, varianceMap, spdByRegion, frq, medianImage, frameDropVect
     chunkStarts = startFrameIdx:framesPerStep:(endFrameIdx-framesPerChunk);
 
     % Find the number of chunks in the video
-    nChunks = length(chunkStarts);
+    nChunks = 2; %length(chunkStarts);
+    chunkStarts = chunkStarts(1:nChunks);
 
     % Find the row and column starts
     rowStarts = 1:stepSpacePixels:(nRows - windowSpacePixels(1) + 1);
