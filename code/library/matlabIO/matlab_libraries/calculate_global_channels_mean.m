@@ -65,7 +65,7 @@ function global_means = calculate_global_channels_mean(video_path, options)
         for ch = 1:numel(options.channels)
             target_channel = options.channels(ch);
             channel_data = frame(:, :, target_channel);
-            global_sums(ch) = global_sums(ch) + sum(transformation(channel_data(:)), 'omitnan');                
+            global_sums(ch) = global_sums(ch) + sum( transformation(channel_data(:)), 'omitnan');                
         end 
         assert(~any(isnan(global_sums(:) ))); 
 
