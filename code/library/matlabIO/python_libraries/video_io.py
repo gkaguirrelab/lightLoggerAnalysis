@@ -330,10 +330,6 @@ def destruct_video(video_path: str, start_frame: int=0, end_frame: int=float("in
     # Set the cursor at the start of the range we want to explore 
     video_stream.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
     for frame_num in iterator:
-        global_frame_num: int = start_frame + frame_num
-        if(global_frame_num >= end_frame):
-            break 
-
         # Attempt to read in a video 
         # from the stream 
         ret, frame = video_stream.read() 
