@@ -302,6 +302,19 @@ def destruct_video(video_path: str, start_frame: int=0, end_frame: int=float("in
                   ) -> None | np.ndarray:
     # Let's get some information about the video 
     frame_height, frame_width = inspect_video_framesize(video_path)
+    num_frames: int = inspect_video_frame_count(video_path)
+
+    # Support inf indexing
+    end_frame = end_frame if end_frame != float("inf") else num_frames  
+
+    # Support negative indexing
+    if(start_frame < 0):
+        start_frame = int(num_frames - abs(start_frame))
+
+    if(end_frame < 0):
+        end_frame = int(num_frames - abs(end_frame))
+
+
     output_shape: tuple = (end_frame - start_frame, frame_height, frame_width) if is_grayscale is True else (end_frame - start_frame, frame_height, frame_width, 3)
 
     # Open the video via cv2 
@@ -310,19 +323,16 @@ def destruct_video(video_path: str, start_frame: int=0, end_frame: int=float("in
     # Initialize a container to hold the frames 
     frames: np.ndarray | None = None if q is not None else np.empty(shape=output_shape, dtype=np.uint8)
 
-    # Support negative indexing
-    if(start_frame < 0):
-        start_frame = inspect_video_frame_count(video_path) - abs(start_frame)
-
-    if(end_frame < 0):
-        end_frame = inspect_video_frame_count(video_path) - abs(end_frame)
-
     # Stream the frames in from the video 
     iterator: Iterable = tqdm(range(start_frame, end_frame)) if verbose is True else range(start_frame, end_frame)
     insertion_idx: int = 0 
+
+    # Set the cursor at the start of the range we want to explore 
+    video_stream.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
     for frame_num in iterator:
-        # Jump the the target frame in the stream
-        video_stream.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
+        global_frame_num: int = start_frame + frame_num
+        if(global_frame_num >= end_frame):
+            break 
 
         # Attempt to read in a video 
         # from the stream 
