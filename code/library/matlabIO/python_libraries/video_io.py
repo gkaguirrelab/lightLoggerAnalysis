@@ -310,7 +310,14 @@ def destruct_video(video_path: str, start_frame: int=0, end_frame: int=float("in
     # Initialize a container to hold the frames 
     frames: np.ndarray | None = None if q is not None else np.empty(shape=output_shape, dtype=np.uint8)
 
-    # Stream the frames in from the vidoe 
+    # Support negative indexing
+    if(start_frame < 0):
+        start_frame = inspect_video_frame_count(video_path) - abs(start_frame)
+
+    if(end_frame < 0):
+        end_frame = inspect_video_frame_count(video_path) - abs(end_frame)
+
+    # Stream the frames in from the video 
     iterator: Iterable = tqdm(range(start_frame, end_frame)) if verbose is True else range(start_frame, end_frame)
     insertion_idx: int = 0 
     for frame_num in iterator:
