@@ -13,10 +13,14 @@ from typing import Iterable
 import dill
 
 # Store the scalar multipliers for all of the different colors of pixel's in an image 
-# We calculated this by making a measurement of the light integrating sphere in Zach's 
-# room with the combiLED at 0.5 contrast with ONLY channels 2-8 (no channel 1). 
-# The original numbers we got were [1, 1.077, 1.27]
-# Then, we altered these numbers by finding 
+# We calculated this by making a measurement with the light logger device 
+# on the roof of Goddard on a cloudy day. We took the asymptotic RGB values of 
+# the center region of this recording, scaled them relative to the blue channel, 
+# and found individual multiplers a, b, c such that the original RGB values 
+# times these numbers equaled the relative weights according to the PR670, 
+# which Geoff also used to take a measurement of this cloudy day. We then 
+# Solved the following formula to make sure the mean of these new weights 
+# was equal to 1 
 """
 Ra Ga Ba
 Example:
@@ -29,7 +33,7 @@ where:
 Mean[Rb Gb Bb] = 1
 Gb/Rb = Ga/Ra Gb/Bb = Ga/Ba Rb/Bb = Ra/Ba
 """
-WORLD_RGB_SCALARS: np.ndarray = np.array([0.896,0.965,1.138], dtype=np.float64) 
+WORLD_RGB_SCALARS: np.ndarray = np.array([1.032, 0.803, 1.164], dtype=np.float64) 
 
 # Define a mapping between frame sizes and fielding functions of the camera
 WORLD_FIELDING_FUNCTIONS: dict[tuple[int], np.ndarray] = {(480, 640): np.ones((480, 640), dtype=np.float64)}
