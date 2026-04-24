@@ -591,7 +591,28 @@ def world_chunks_to_video(recording_path: str,
 
         # If we want to apply color weights, do so now 
         if(apply_color_weights is True):
+            # Because of our weights, if a pixel is [255, 255, 255]
+            # before correction, our weights would induce a weird 
+            # hueing effect once applied 
+            
+            # Therefore, we first turn any pixel that has any channel maxed out 
+            # into a maxed out (white pixel)
+            frame_buffer[(frame_buffer >= 255).any(axis=-1, keepdims=True)] = 255
+            
+            # We also do this for the dark noise we have calculated 
+            frame_buffer[(frame_buffer <= world_util.WORLD_DARK_NOISE).any(axis=-1, keepdims=True)] = world_util.WORLD_DARK_NOISE
+
+            # Apply the radiometric correction
             frame_buffer = np.array([ world_util.apply_color_correction(frame) for frame in frame_buffer], dtype=np.uint8)
+            
+            # We also apply the correction we did at the start at the end too, just so 
+            # to be sure 
+            frame_buffer[(frame_buffer >= 255).any(axis=-1, keepdims=True)] = 255
+
+            # We also do this for the dark noise we have calculated 
+            frame_buffer[(frame_buffer <= world_util.WORLD_DARK_NOISE).any(axis=-1, keepdims=True)] = world_util.WORLD_DARK_NOISE
+
+
 
         # If we want to debayer the image
         if(debayer_images is True):

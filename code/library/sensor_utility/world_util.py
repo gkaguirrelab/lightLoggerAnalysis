@@ -38,6 +38,11 @@ WORLD_RGB_SCALARS: np.ndarray = np.array([1.032, 0.803, 1.164], dtype=np.float64
 # Define a mapping between frame sizes and fielding functions of the camera
 WORLD_FIELDING_FUNCTIONS: dict[tuple[int], np.ndarray] = {(480, 640): np.ones((480, 640), dtype=np.float64)}
 
+# This the dark noise of the camera. That is, we measured a recording 
+# from the camera when it is entirely wrapped in black cloth 
+# and this was the result. This is 
+WORLD_DARK_NOISE: float = 16
+
 """Debayer a world camera image into an RGB image"""
 def debayer_image(image: np.ndarray, visualize_results: bool=False) -> np.ndarray | tuple[np.ndarray, object]:
     # Initialize a variable for the figure handle that 
