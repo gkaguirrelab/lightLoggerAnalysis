@@ -478,6 +478,7 @@ def video_to_hdf5(video_path: str, output_path: str,
 def world_chunks_to_video(recording_path: str,
                           output_path: str,
                           apply_color_weights: bool=False, 
+                          apply_floor_ceiling: bool=False,
                           debayer_images: bool=False, 
                           apply_digital_gain: bool=False,
                           fill_missing_frames: bool=False,
@@ -550,6 +551,9 @@ def world_chunks_to_video(recording_path: str,
         # World timestamps are in nanoseconds and thus must be converted to seconds 
         t_vector: np.ndarray = np.ascontiguousarray(metadata[:, 0], dtype=np.float64) / ( (10 ** 9) if convert_to_seconds is True else 1)
         frame_buffer: np.ndarray = np.load(frame_buffer_path)
+        
+        # Let's keep track of the current colorspace the video is in 
+        current_color_space: Literal['BAYER', 'RGB', 'BGR'] = 'BAYER'
 
         # Assert the t vector and frame vector are the same size 
         try:
@@ -582,59 +586,67 @@ def world_chunks_to_video(recording_path: str,
 
         # Now, we will apply the requested transformations to the frames 
         frame_buffer = frame_buffer.astype(np.float64) # First, convert to float for float multiplications 
-
+                
         # Apply Dgain if requested
         if(apply_digital_gain is True):
+            frame_buffer = frame_buffer.astype(np.float64)
+
             buffer_dgains: np.ndarray = metadata[:, 2]
-            buffer_dgains = buffer_dgains[:, np.newaxis, np.newaxis]
+
+            if(frame_buffer.ndim == 3):
+                buffer_dgains = buffer_dgains[:, np.newaxis, np.newaxis]
+            else:
+                  buffer_dgains = buffer_dgains[:, np.newaxis, np.newaxis, np.newaxis]
+
             frame_buffer *= buffer_dgains
 
-        # If we want to apply color weights, do so now 
+            frame_buffer = np.clip(np.round(frame_buffer), 0, 255).astype(np.uint8)
+
         if(apply_color_weights is True):
+            assert frame_buffer.ndim == 3
+
+            # Apply the radiometric correction
+            frame_buffer = np.array([ world_util.apply_color_correction(frame) 
+                                     for frame in frame_buffer], dtype=np.uint8
+                                    )
+            
+        # If we want to debayer the image
+        if(debayer_images is True):
+            # Note: When writing color images to cv2.VideoWriter, it expects a BGR instead of RGB 
+            # frame, so also convert now 
+            frame_buffer = np.array([world_util.debayer_image( 
+                                                                ( frame if frame.dtype == np.uint8 else np.clip(np.round(frame), 0, 255).astype(np.uint8) ) 
+                                                            ) 
+                                     for frame in frame_buffer 
+                                    ],
+                                    dtype=np.uint8
+                                   )
+            current_color_space = 'RGB'
+            
+        # If we want to apply floor ceiling (16, 255) in any channel implies 
+        # that entire pixel is whit 
+        if(apply_floor_ceiling is True):
+            assert frame_buffer.ndim == 4, f"Frames must be debayered before applying floor/ceiling"
+            
             # Because of our weights, if a pixel is [255, 255, 255]
             # before correction, our weights would induce a weird 
             # hueing effect once applied 
             
             # Therefore, we first turn any pixel that has any channel maxed out 
             # into a maxed out (white pixel)
-            frame_buffer = np.where((frame_buffer >= 255).any(axis=-1, keepdims=True),
+            frame_buffer = np.where((frame_buffer >= 255).any(axis=3, keepdims=True),
                                      255,
                                      frame_buffer
                                     )
             
             # We also do this for the dark noise we have calculated 
-            frame_buffer = frame_buffer = np.where((frame_buffer <= world_util.WORLD_DARK_NOISE).any(axis=-1, keepdims=True),
+            frame_buffer = frame_buffer = np.where((frame_buffer <= world_util.WORLD_DARK_NOISE).any(axis=3, keepdims=True),
                                                    world_util.WORLD_DARK_NOISE,
                                                    frame_buffer
                                                 )
-
-            # Apply the radiometric correction
-            frame_buffer = np.array([ world_util.apply_color_correction(frame) for frame in frame_buffer], dtype=np.uint8)
-            
-            # We also apply the correction we did at the start at the end too, just so 
-            # to be sure 
-            frame_buffer = np.where((frame_buffer >= 255).any(axis=-1, keepdims=True),
-                                     255,
-                                     frame_buffer
-                                    )
-
-            # We also do this for the dark noise we have calculated 
-            frame_buffer = frame_buffer = np.where((frame_buffer <= world_util.WORLD_DARK_NOISE).any(axis=-1, keepdims=True),
-                                                   world_util.WORLD_DARK_NOISE,
-                                                   frame_buffer
-                                                  )
-
-
-
-        # If we want to debayer the image
-        if(debayer_images is True):
-            # Note: When writing color images to cv2.VideoWriter, it expects a BGR instead of RGB 
-            # frame, so also convert now 
-            frame_buffer = np.array([cv2.cvtColor(world_util.debayer_image( np.clip(np.round(frame), 0, 255).astype(np.uint8)  ), cv2.COLOR_RGB2BGR) 
-                                     for frame in frame_buffer 
-                                    ],
-                                    dtype=np.uint8
-                                   )
+        
+        # I just did digital gain, therefore this will immediately 
+        # trigger and 
 
         # Convert the frame buffer back into uint8 format
         if(frame_buffer.dtype != np.uint8): 
@@ -647,6 +659,14 @@ def world_chunks_to_video(recording_path: str,
                            ],
                            dtype=np.uint8
                            )
+
+        # ALL TRANSFORMATIONS ARE DONE AT THIS POINT. 
+        # WE NEED TO CONVERT TO BGR TO WRITE FRAMES WITH CV2
+        if(frame_buffer.ndim > 3 and current_color_space != 'BGR'):
+            if(current_color_space == 'RGB'):
+                frame_buffer = np.array([cv2.cvtColor(frame, cv2.COLOR_RGB2BGR) for frame in frame_buffer])
+            else:
+                raise RuntimeError(f"Unsupported colorspace conversion: {current_color_space} -> RBG")
 
         # Retrieve the current chunk start time 
         current_chunk_start_time = t_vector[0]

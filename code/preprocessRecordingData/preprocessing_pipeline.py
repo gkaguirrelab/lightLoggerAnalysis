@@ -53,9 +53,12 @@ import virtual_foveation
 def generate_world_videos(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026", 
                           dst_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoorVideos2026", 
                           subjects_to_skip: Iterable=set(), 
+                          subjects_to_process: Iterable=set(), 
                           activities_to_skip: Iterable=set(), 
+                          activities_to_process: Iterable=set(), 
                           overwrite_existing: bool=False,
                           apply_color_weights: bool=True, 
+                          apply_floor_ceiling: bool=True,
                           debayer_images: bool=True, 
                           apply_digital_gain: bool=True, 
                           fill_missing_frames: bool=True, 
@@ -63,15 +66,25 @@ def generate_world_videos(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
                          ) -> None:
     
     # First, let's find all of the subjects in this experiment 
-    subject_paths: list[str] = natsorted([os.path.join(src_dir, subject_name) 
-                                          for subject_name in os.listdir(src_dir) 
-                                          if re.fullmatch(r"FLIC_\d+", subject_name) 
-                                          and os.path.isdir(os.path.join(src_dir, subject_name))
-                                          if _extract_num_from_id(subject_name) not in subjects_to_skip
-                                         ]
+    subject_paths: list[str] = natsorted(list(
+                                              set(
+                                                    [os.path.join(src_dir, subject_name) 
+                                                        for subject_name in os.listdir(src_dir) 
+                                                        if re.fullmatch(r"FLIC_\d+", subject_name) 
+                                                        and os.path.isdir(os.path.join(src_dir, subject_name))
+                                                        
+                                                        # If subjects to skip were specified and the subject was not in them OR subjects to process were specified and the subject is in them 
+                                                        # OR neither of these were specified just take everything by default
+                                                        if ( ( _extract_num_from_id(subject_name) not in subjects_to_skip and len(subjects_to_skip) > 0 ) 
+                                                             or (_extract_num_from_id(subject_name) in subjects_to_process ) 
+                                                             or ( len(subjects_to_skip) == 0 and len(subjects_to_process) == 0 )
+                                                           )
+
+                                                    ]
+                                                )
+                                            )
                                         ) 
     assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
-
 
     # Now, let's iterate over all the subject paths 
     subject_iterator: Iterable = range(len(subject_paths)) if verbose is False else tqdm(range(len(subject_paths)), desc="Processing Subjects", leave=True)
@@ -81,7 +94,7 @@ def generate_world_videos(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
         subject_id: str = os.path.basename(subject_path)
         subject_id_number: int = int(re.search("\d+", subject_id).group())
 
-        if(subject_id_number in subjects_to_skip):
+        if(subject_id_number in subjects_to_skip or (len(subjects_to_process) > 0 and subject_id_number not in subjects_to_process)):
             continue
 
         # Iterate over the activites for this subject 
@@ -94,7 +107,7 @@ def generate_world_videos(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
             activity_path: str = activites_paths[activity_num]
             activity_name: str = os.path.basename(activity_path)
 
-            if(activity_name in activities_to_skip):
+            if(activity_name in activities_to_skip or (len(activities_to_process) > 0 and activity_name not in activities_to_process)):
                 continue 
 
             # Construct the path to the chunks that form the world video 
@@ -120,6 +133,7 @@ def generate_world_videos(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
             video_io.world_chunks_to_video(world_video_in, 
                                            world_video_out,
                                            apply_color_weights=apply_color_weights, 
+                                           apply_floor_ceiling=apply_floor_ceiling,
                                            debayer_images=debayer_images,
                                            apply_digital_gain=apply_digital_gain, 
                                            fill_missing_frames=fill_missing_frames,
@@ -2389,7 +2403,7 @@ def generate_actigraphy_graphs(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoor
 
 def _extract_num_from_id(subject_id: str) -> int:
     assert re.fullmatch("FLIC_\d+", subject_id), f"{subject_id} does not fit the format FLIC_[NUM]"
-    return re.search(r"\d+", subject_id).group()
+    return int(re.search(r"\d+", subject_id).group())
 
 
 def main():

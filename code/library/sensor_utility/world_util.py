@@ -50,7 +50,7 @@ def debayer_image(image: np.ndarray, visualize_results: bool=False) -> np.ndarra
     fig: object | None = None
 
     # Ensure the image is correctly rounded 
-    guarded_image: np.ndarray = np.clip(np.round(image), 0, 255).astype(np.uint8)
+    guarded_image: np.ndarray = image if image.dtype == np.uint8 else np.clip(np.round(image), 0, 255).astype(np.uint8)
 
     # Debayer the image according to the sensor's bayer pattern
     debayered_image: np.ndarray = cv2.cvtColor(guarded_image, cv2.COLOR_BayerRG2RGB)
@@ -238,7 +238,7 @@ def apply_color_correction(original_frame: np.ndarray,
         
         # Left axis will be the "before"
         # image 
-        axes[0].imshow(original_frame, cmap="gray")
+        axes[0].imshow(original_frame)
         axes[0].set_title('Before')
 
         # Middle axis will be the after but without 
