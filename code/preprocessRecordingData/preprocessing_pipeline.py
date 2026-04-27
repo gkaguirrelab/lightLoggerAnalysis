@@ -100,6 +100,11 @@ def generate_world_videos(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
         # Iterate over the activites for this subject 
         activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in natsorted(os.listdir(subject_path))
                                       if os.path.isdir(os.path.join(subject_path, filename))
+                                      if ( ( filename not in activities_to_skip and len(activities_to_skip) > 0)
+                                           or ( filename in activities_to_process )
+                                           or ( len(activities_to_skip) == 0 and len(activities_to_process) == 0)
+                                        ) 
+                                         
                                      ]
         activities_iterator: Iterable = range(len(activites_paths)) if verbose is False else tqdm(range(len(activites_paths)), desc="Processing Activities", leave=False)
         for activity_num in activities_iterator:
