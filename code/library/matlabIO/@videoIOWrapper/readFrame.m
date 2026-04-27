@@ -12,8 +12,8 @@ function frame = readFrame(obj, options)
     % Save a list of the LMS colorspace types  use later 
     persistent LMS_colorspace_types two_dimensional_colorspace_types normalized_color_types
     if(isempty(LMS_colorspace_types))
-        LMS_colorspace_types = ["LMS", "L+M+S", "L-M", "a", "c_lm", "c_s"];
-        two_dimensional_colorspace_types = ["GRAY", "L+M+S", "L-M", "a", "c_lm", "c_s"];
+        LMS_colorspace_types = ["LMS", "L+M", "L+M+S", "L-M", "S", "a", "c_lm", "c_s"];
+        two_dimensional_colorspace_types = ["GRAY", "L+M+S", "L-M", "L+M", "S", "a", "c_lm", "c_s"];
         normalized_color_types = ["a", "c_lm", "c_s"]; 
     end 
 
@@ -144,6 +144,12 @@ function frame = readFrame(obj, options)
                 if(options.color == "L+M+S")
                     read_ahead_buffer = sum(read_ahead_buffer, 4); 
                 
+                % If L-M, we need to add 2 channels and remove the third 
+                % This leaves us a 2D image
+                elseif(options.color == "L+M")
+                    L = read_ahead_buffer(:,:,:,1);
+                    M = read_ahead_buffer(:,:,:,2);
+                    read_ahead_buffer = squeeze(L + M);
 
                 % If L-M, we need to subtract 2 channels and remove the third 
                 % This leaves us a 2D image
@@ -152,6 +158,10 @@ function frame = readFrame(obj, options)
                     M = read_ahead_buffer(:,:,:,2);
                     read_ahead_buffer = squeeze(L - M);
                 
+                % If S, then we need to simply extract the last channel of the image 
+                elseif (options.color == "S")
+                    S = read_ahead_buffer(:, :, :, 3);
+                    read_ahead_buffer = squeeze(S);
                 end 
             
             else
