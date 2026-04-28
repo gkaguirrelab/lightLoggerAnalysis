@@ -198,7 +198,7 @@ function figHandle = plot_TTF(NDFs, contrast_level, frequencies, response_amplit
 figHandle = [];
 if opts.plotEachMeasure
     figHandle = figure('Name', sprintf("Temporal_Sensitivity_TTF_All_Measures_C_%0.2f", contrast_level));
-    set(figHandle, 'Position', [100 100 500 400]);
+    set(figHandle, 'Position', [100 100 750 600]);
 
     % Make a list of colors for each ND level for the conjoined plot
     colorList = [
@@ -265,7 +265,7 @@ end
 function figHandle = plot_mean_TTF(NDFs, contrast_level, frequencies, response_amplitude_data, world_fps, contrast_attenuation_with_frequency, opts)
 % Construct the Mean TTF for this contrast level
 figHandle = figure('Name', sprintf("Temporal_Sensitivity_TTF_Mean_C_%0.2f", contrast_level));
-set(figHandle, 'Position', [100 100 500 400]);   % less wide, more compact
+set(figHandle, 'Position', [100 100 750 600]);   % same aspect ratio, larger figure
 
 % Make a list of colors for each ND level for the conjoined plot
     colorList = [

@@ -274,7 +274,7 @@ function figureHandles = analyze_phase_fit_data(calibration_metadata, measuremen
         yyaxis left
         plot(slow_measurement.W.t, convert_to_contrast(slow_measurement.W.v), '.', 'DisplayName', 'World');
         yyaxis right
-        plot(slow_measurement.M.t.AS, convert_to_contrast(slow_measurement.M.v.AS(:, 5)), '.', 'DisplayName', 'MS-AS');
+        plot(slow_measurement.M.t.AS, convert_to_contrast(slow_measurement.M.v.AS(:, 5)), '.', 'MarkerSize', 16, 'DisplayName', 'MS-AS');
         xlabel("Time [s]");
         ylabel("Contrast");
 
@@ -302,7 +302,7 @@ function figureHandles = analyze_phase_fit_data(calibration_metadata, measuremen
 
         yyaxis right
         plot(slow_measurement.M.t.AS + mean_world_ms_AS_temporal_offset_secs, ...
-            convert_to_contrast(slow_measurement.M.v.AS(:, 5)), '.', ...
+            convert_to_contrast(slow_measurement.M.v.AS(:, 5)), '.', 'MarkerSize', 16, ...
             'DisplayName', 'MS-AS');
 
         xlabel("Time [s]");

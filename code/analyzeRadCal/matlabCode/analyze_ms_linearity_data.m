@@ -352,7 +352,7 @@ function figureHandles = analyze_ms_linearity_data(calibration_metadata, measure
                 end
 
                 set(across_NDF_channel_ax, 'YLim', limits);
-                set(across_NDF_channel_ax, 'XLimMode', 'auto');
+                set(across_NDF_channel_ax, 'XLim', limits);
                 xlabel(across_NDF_channel_ax, 'log Illuminance [lux]');
                 ylabel(across_NDF_channel_ax, 'log measured sensor count');
                 title(across_NDF_channel_ax, sprintf('%s Channel %d Sensor Count vs Illuminance', chip, ch));

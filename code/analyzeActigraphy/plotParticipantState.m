@@ -32,6 +32,7 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     
     % First, we need to find and load in the timestamp data so we can do temporal alignment
     path_to_raw_recording = fullfile(raw_dir, subject_id, activity, "GKA"); 
+    path_to_activity_start_end = fullfile(processing_dir, subject_id, activity, "tag_task_start_end.mat"); 
     path_to_gka_world_timestamps_neon_time = fullfile(processing_dir, subject_id, activity, "Neon", "egocentric_mapper_results", "alternative_camera_timestamps.csv"); 
 
     assert(exist(path_to_raw_recording, 'dir') ~= 0, ...
@@ -40,8 +41,17 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     assert(exist(path_to_gka_world_timestamps_neon_time, 'file') ~= 0, ...
     sprintf('Path %s does not exist', path_to_gka_world_timestamps_neon_time));
 
+    % At this point, everything is in Neon time
     [world_t, ms_t, ms_v] = load_ms_world_timestamps_and_data(path_to_raw_recording, path_to_gka_world_timestamps_neon_time, world_util, ms_util); 
-    
+
+    % With this information, we can also get the start/ending time of the activity in neon time 
+    tag_task_start_end_frames = load(path_to_activity_start_end).tag_task_start_end; 
+    tag_start_end_frames = tag_task_start_end_frames.tag; 
+    task_start_end_frames = tag_task_start_end_frames.task; 
+    tag_start_end_neon_time = world_t(tag_start_end_frames); 
+    task_start_end_neon_time = world_t(task_start_end_frames);
+
+
     % We know the temporal offset (W-AS) is options.w_as_offset milliseconds. 
     % Therefore, we apply this correction now to the Nanosecond time 
     % Given that it is negative, it implies that the world is BEHIND 
@@ -65,6 +75,7 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     
     % Align MS Timing to T0 (Minutes)
     timeMinMS = (double(ms_t) - double(t0)) / 1e9 / 60;
+    timeMinTask = (double(task_start_end_neon_time) - double(t0)) / 1e9 / 60;
     
     % IMU Timing
     timeMinIMU = (double(IMUdata.timestamp_ns_) - double(t0)) / 1e9 / 60;
@@ -125,6 +136,7 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     cPupil = [0 0.5 0.5]; cApert = [0.6350 0.0780 0.1840]; cLux = [0.4660 0.6740 0.1880]; % Green
     cOutdoor = [1 1 0];   % yellow
     cActive  = [0 1 0];   % green
+    cTaskBounds = [0 0.65 1];
     
     %----------------------------------------------
     %% Figure 1: Session Summary (Updated to 5 rows)
@@ -162,7 +174,7 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     ax4 = nexttile(tlo1); hold(ax4, 'on');
     yyaxis left
     timeMinBlinks = (double(blinkData.startTimestamp_ns_) - double(t0)) / 1e9 / 60;
-    stem(ax4, timeMinBlinks, zeros(size(timeMinBlinks)) + 2.0, 'Color', [0.6 0.6 0.6], 'Marker', 'none', 'HandleVisibility', 'off');
+    pBlink = stem(ax4, timeMinBlinks, zeros(size(timeMinBlinks)) + 2.0, 'Color', [0.6 0.6 0.6], 'Marker', 'none', 'DisplayName', 'Blinks');
     pAperture = plot(ax4, timeMinEye, smoothAperture, '-', 'Color', cApert, 'LineWidth', 1.2, 'DisplayName', 'Aperture'); 
     ylabel('Eyelid Aperture (mm)'); ax4.YAxis(1).Color = cApert; 
     ylim(ax4, [0, 15]);
@@ -171,6 +183,7 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     ylim(ax4, [2, 6]);
     ylabel('Pupil (mm)'); ax4.YAxis(2).Color = cPupil; 
     grid on;
+    legend(ax4, [pAperture, pPupil, pBlink], {'Eyelid openness', 'Pupil size', 'Blinks'}, 'FontSize', 7, 'Location', 'best');
 
     % Subplot 5: Absolute Illuminance (Lux)
     ax5 = nexttile(tlo1);
@@ -190,6 +203,7 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     % Find the maximum time across your data to set a tight limit
     maxTime = max([timeMinIMU; timeMinGaze; timeMinEye; timeMinMS]);
     xlim(ax1, [0, maxTime]);
+    add_task_boundary_lines([ax1, ax2, ax3, ax4, ax5], timeMinTask, cTaskBounds);
     drawnow;
 
     xl1 = xlim(ax1);
@@ -531,3 +545,15 @@ function [IMUdata, eyeStateData, blinkData, gazeData] = load_actigraphy_data(IMU
 
     return ; 
 end 
+
+function add_task_boundary_lines(axesHandles, timeMinTask, lineColor)
+    if(isempty(timeMinTask) || numel(timeMinTask) ~= 2 || any(~isfinite(timeMinTask)))
+        return;
+    end
+
+    for ax = axesHandles
+        hold(ax, 'on');
+        xline(ax, timeMinTask(1), '-', 'Color', lineColor, 'LineWidth', 1.8, 'HandleVisibility', 'off');
+        xline(ax, timeMinTask(2), '-', 'Color', lineColor, 'LineWidth', 1.8, 'HandleVisibility', 'off');
+    end
+end
