@@ -6,6 +6,7 @@ function frame = readFrame(obj, options)
         options.zeros_as_nans = false; 
         options.verbose = false; 
         options.force_rebuffer = false; 
+        options.parallel_buffer = true; 
     end 
     verbose = options.verbose; 
 
@@ -128,12 +129,51 @@ function frame = readFrame(obj, options)
             camera_used = obj.camera_used; 
 
             % Iterate over the buffer 
-            parfor pp = 1:size(read_ahead_buffer, 1)
-                read_ahead_buffer(pp, :, :, :) = rgb2lms(squeeze(read_ahead_buffer(pp, :, :, :)), T_receptors, T_camera,...
+            if(options.parallel_buffer)
+                if(options.verbose)
+                    % Create a waitbar for the parallel loop
+                    hWait = waitbar(0, 'Converting RGB frames to LMS...');
+
+                    % Progress counter
+                    nFrames = size(read_ahead_buffer, 1);
+                    progressCount = 0;
+
+                    % DataQueue lets parfor workers notify the client process
+                    dq = parallel.pool.DataQueue;
+
+                    % Update waitbar each time a worker finishes one frame
+                    afterEach(dq, @updateWaitbar);
+                    
+                end 
+
+                parfor pp = 1:size(read_ahead_buffer, 1)
+                    read_ahead_buffer(pp, :, :, :) = rgb2lms(squeeze(read_ahead_buffer(pp, :, :, :)), T_receptors, T_camera,...
                                                          "camera", camera_used...
                                                         );
-            end     
-            
+                    
+                    if(options.verbose)
+                        % Send progress update back to client
+                        send(dq, pp);
+                    end 
+
+                end     
+
+                % Close waitbar when complete
+                if(options.verbose)
+                    close(hWait);
+                end 
+
+            else 
+                for pp = 1:size(read_ahead_buffer, 1)
+                    if(options.verbose)
+                        fprintf("Converting frame %d / %d \n", pp, size(read_ahead_buffer, 1));
+                    end 
+
+                    read_ahead_buffer(pp, :, :, :) = rgb2lms(squeeze(read_ahead_buffer(pp, :, :, :)), T_receptors, T_camera,...
+                                                         "camera", camera_used...
+                                                        );
+                end 
+            end
             
             % We first check if we are not in the normalized space 
             % This is a more simple calculation 
@@ -348,5 +388,18 @@ function frame = readFrame(obj, options)
     end 
 
     return ; 
+
+
+
+    % Local function used to update progress waitbars
+    function updateWaitbar(~)
+        progressCount = progressCount + 1;
+
+        if isvalid(hWait)
+            waitbar(progressCount / nFrames, hWait, ...
+                sprintf('Converting RGB frames to LMS... %d / %d', ...
+                progressCount, nFrames));
+        end
+    end
 
 end

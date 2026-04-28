@@ -1,4 +1,4 @@
-function analyze_temporal_sensitivity_data(calibration_metadata, measurements, opts)
+function figureHandles = analyze_temporal_sensitivity_data(calibration_metadata, measurements, opts)
 % Analyze the results of a temporal sensitivity light logger calibration measurement (post-conversion)
 %
 % Syntax:
@@ -29,6 +29,8 @@ arguments
     opts.plotAGC logical = false;
     opts.plotEachMeasure logical = false;
 end
+
+figureHandles = {};
 
 % Define the world FPS (Note: if you changed FPS elsewhere, you will need to change it here too)
 world_fps = 120;
@@ -61,18 +63,21 @@ for cc = 1:numel(contrast_levels)
         for mm = 1:n_measures
             % Initialize figures for the raw time serie,s measured vs fit and AGC settings
             % for this measurement
-            raw_time_series_fig = figure;
+            raw_time_series_fig = figure('Name', sprintf("Temporal_Sensitivity_Time_Series_C_%0.2f_NDF_%0.2f_M_%d", contrast_level, NDF, mm));
             raw_time_series_plot = tiledlayout(raw_time_series_fig, numel(frequencies), 1);
             sgtitle(raw_time_series_plot, sprintf("Time Series Data | C: %.2f | NDF: %.2f | M: %d", contrast_level, NDF, mm));
+            figureHandles{end+1,1} = raw_time_series_fig;
 
-            measured_fit_fig = figure;
+            measured_fit_fig = figure('Name', sprintf("Temporal_Sensitivity_Measured_vs_Fit_C_%0.2f_NDF_%0.2f_M_%d", contrast_level, NDF, mm));
             measured_fit_plot = tiledlayout(measured_fit_fig, numel(frequencies), 1);
             sgtitle(measured_fit_plot, sprintf("Measured vs Fit Contrast Units | C: %.2f | NDF: %.2f | M: %d", contrast_level, NDF, mm));
+            figureHandles{end+1,1} = measured_fit_fig;
 
             if opts.plotAGC
-                agc_settings_fig = figure;
+                agc_settings_fig = figure('Name', sprintf("Temporal_Sensitivity_AGC_C_%0.2f_NDF_%0.2f_M_%d", contrast_level, NDF, mm));
                 agc_settings_plot = tiledlayout(agc_settings_fig, numel(frequencies), 1);
                 sgtitle(agc_settings_plot, sprintf("AGC Performance | C: %.2f | NDF: %.2f | M: %d", contrast_level, NDF, mm));
+                figureHandles{end+1,1} = agc_settings_fig;
             end
 
             % Iterate over the frequences
@@ -152,10 +157,16 @@ for cc = 1:numel(contrast_levels)
     end % NDF
 
     % Contrast the TTF per measure per contrast and NDF
-    plot_TTF(NDFs, contrast_level, frequencies, response_amplitude_data, world_fps, contrast_attenuation_with_frequency, opts);
+    plotTtfHandle = plot_TTF(NDFs, contrast_level, frequencies, response_amplitude_data, world_fps, contrast_attenuation_with_frequency, opts);
+    if(~isempty(plotTtfHandle))
+        figureHandles{end+1,1} = plotTtfHandle;
+    end
 
     % Construct the TTF of the average of the measurements
-    plot_mean_TTF(NDFs, contrast_level, frequencies, response_amplitude_data, world_fps, contrast_attenuation_with_frequency, opts);
+    meanTtfHandle = plot_mean_TTF(NDFs, contrast_level, frequencies, response_amplitude_data, world_fps, contrast_attenuation_with_frequency, opts);
+    if(~isempty(meanTtfHandle))
+        figureHandles{end+1,1} = meanTtfHandle;
+    end
 
 
 end % Contrast
@@ -182,10 +193,12 @@ filterAmp = f(1);
 end
 
 % Local function to plot the TTF of all measures of a certain contrast level
-function plot_TTF(NDFs, contrast_level, frequencies, response_amplitude_data, world_fps, contrast_attenuation_with_frequency, opts)
+function figHandle = plot_TTF(NDFs, contrast_level, frequencies, response_amplitude_data, world_fps, contrast_attenuation_with_frequency, opts)
 % Construct the Mean TTF for this contrast level
+figHandle = [];
 if opts.plotEachMeasure
-    figure ;
+    figHandle = figure('Name', sprintf("Temporal_Sensitivity_TTF_All_Measures_C_%0.2f", contrast_level));
+    set(figHandle, 'Position', [100 100 500 400]);
 
     % Make a list of colors for each ND level for the conjoined plot
     colorList = [
@@ -238,8 +251,10 @@ if opts.plotEachMeasure
     % Label and clean up the plot
     xlabel("Frequency [hz]");
     ylabel("Relative Contrast Response");
-    legend show;
+    legend('Location', 'northeastoutside');
     a = gca();
+    axis square;
+    pbaspect([1 1 1]);
     a.XTick = log10(frequencies);
     a.XTickLabels = arrayfun(@(x) num2str(x),frequencies,'UniformOutput',false);
 end
@@ -247,9 +262,10 @@ end
 
 
 % Local function to plot the mean TTF
-function plot_mean_TTF(NDFs, contrast_level, frequencies, response_amplitude_data, world_fps, contrast_attenuation_with_frequency, opts)
+function figHandle = plot_mean_TTF(NDFs, contrast_level, frequencies, response_amplitude_data, world_fps, contrast_attenuation_with_frequency, opts)
 % Construct the Mean TTF for this contrast level
-figure ;
+figHandle = figure('Name', sprintf("Temporal_Sensitivity_TTF_Mean_C_%0.2f", contrast_level));
+set(figHandle, 'Position', [100 100 500 400]);   % less wide, more compact
 
 % Make a list of colors for each ND level for the conjoined plot
     colorList = [
@@ -310,10 +326,13 @@ title(sprintf("World TTF Avg Amplitude | Contrast: %.2f | Approx freq %2.2f Hz",
 % Label and clean up the plot
 xlabel("Frequency [hz]");
 ylabel("Mean Relative Contrast Response");
-legend show;
+legend('Location', 'northeastoutside');
 a = gca();
 a.XTick = log10(frequencies);
 a.XTickLabels = arrayfun(@(x) num2str(x),frequencies,'UniformOutput',false);
 set(gcf, 'Color', 'w');
+
+axis square;          % makes axes box square
+pbaspect([1 1 1]);   % prevents horizontal stretching
 
 end

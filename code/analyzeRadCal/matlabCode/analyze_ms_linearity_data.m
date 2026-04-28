@@ -1,5 +1,5 @@
 % Analyze linearity calibration data collected from the MS
-function  analyze_ms_linearity_data(calibration_metadata, measurements, opts)
+function figureHandles = analyze_ms_linearity_data(calibration_metadata, measurements, opts)
 % Analyze the results of an ms linearity light logger calibration measurement (post-conversion)
 %
 % Syntax:
@@ -56,7 +56,16 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements, opts)
         opts.plotAllNDF logical = true;
         opts.plotIllum logical = true;
         opts.save_illum_to_MS logical = false;
+        opts.output_path = false;
     end
+
+    figureHandles = {};
+
+    % Defaults for all of the plotting we will do
+    set(groot, 'DefaultAxesFontSize', 16);
+    set(groot, 'DefaultTextFontSize', 16);
+    set(groot, 'DefaultAxesColor', 'w');
+    set(groot, 'DefaultFigureColor', 'w');
 
     % Save the path to CombiExperiments. We will use this as a relative
     % path to find other files
@@ -156,15 +165,17 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements, opts)
             % Create a tiledlayout figure we will use to show the counts by settings
             % level for this chip across NDF levels
             [rows, cols] = find_min_figsize(numel(calibration_metadata.NDFs));
-            figure;
-            set(gcf, 'Color', 'w');
+            countsByNdfFig = figure('Name', sprintf("MS_Linearity_Counts_By_NDF_%s", chip));
+            set(countsByNdfFig, 'Color', 'w');
             counts_by_NDF_tiled = tiledlayout(rows, cols);
             title(counts_by_NDF_tiled, sprintf("Counts by NDF Level | C: %s", chip), 'FontWeight', 'Bold');
+            figureHandles{end+1,1} = countsByNdfFig;
 
             % Create a tabbed figure with one tab per NDF level.
             % Each tab will have all of a given chip's channels on it for that NDF
             uif = uifigure('Name', sprintf("%s Channel Linearity Per NDF", chip));
             tab_group = uitabgroup(uif);
+            figureHandles{end+1,1} = uif;
         end
 
         % Initialize a cell array that will hold the measured/predicted value by NDF
@@ -286,9 +297,10 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements, opts)
 
 
         for ch = 1:n_detector_channels
-            figure;
+            acrossNdfFig = figure('Name', sprintf("MS_Linearity_%s_Channel_%d", chip, ch));
             across_NDF_channel_ax = axes;
             hold(across_NDF_channel_ax, 'on');
+            figureHandles{end+1,1} = acrossNdfFig;
 
             if opts.plotAllNDF
                 n_ndfs_to_plot = numel(calibration_metadata.NDFs);
@@ -344,6 +356,8 @@ function  analyze_ms_linearity_data(calibration_metadata, measurements, opts)
                 xlabel(across_NDF_channel_ax, 'log Illuminance [lux]');
                 ylabel(across_NDF_channel_ax, 'log measured sensor count');
                 title(across_NDF_channel_ax, sprintf('%s Channel %d Sensor Count vs Illuminance', chip, ch));
+                axis(across_NDF_channel_ax, 'square');   % makes box square
+                axis(across_NDF_channel_ax, 'equal');    % equal scaling (important for identity line)
             end
 
             hold(across_NDF_channel_ax, 'off');

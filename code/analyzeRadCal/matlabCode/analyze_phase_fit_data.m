@@ -1,4 +1,4 @@
-function analyze_phase_fit_data(calibration_metadata, measurements)
+function figureHandles = analyze_phase_fit_data(calibration_metadata, measurements)
 % Analyze the results of a phase fitting light logger calibration measurement (post-conversion)
 %
 % Syntax:
@@ -28,6 +28,14 @@ function analyze_phase_fit_data(calibration_metadata, measurements)
         measurements; % The parsed + converted metadata for the phase alignment measuremnet 
     end 
 
+    figureHandles = {};
+
+    set(groot, 'DefaultAxesFontSize', 16);
+    set(groot, 'DefaultTextFontSize', 16);
+    set(groot, 'DefaultAxesColor', 'w');
+    set(groot, 'DefaultFigureColor', 'w');
+
+
     % Specify the number of measurements to discard from the start of the pupil
     % recording (as there is a start-up effect on the signal here)
     nPupilFramesToDiscard = 120;
@@ -38,6 +46,7 @@ function analyze_phase_fit_data(calibration_metadata, measurements)
     contrast_levels = calibration_metadata.contrast_levels;
     frequencies = calibration_metadata.frequencies;
     n_measures = calibration_metadata.n_measures;
+    world_AS_offsets_by_frequency = cell(numel(frequencies), 1);
 
     % First, we will iterate over the NDFs
     for nn = 1:numel(NDFs)
@@ -105,6 +114,9 @@ function analyze_phase_fit_data(calibration_metadata, measurements)
 
                     % Calculate the temporal offsets in seconds
                     world_AS_temporal_offset_seconds = (world_AS_phase_diff / (2 * pi)) / frequency;
+                    
+                    % Accumulate offsets for this frequency (across ALL NDFs/contrasts/measures)
+                    world_AS_offsets_by_frequency{ff}(end+1) = world_AS_temporal_offset_seconds;
                     %world_pupil_temporal_offset_seconds = (world_pupil_phase_diff / (2 * pi)) / frequency;
 
                     % Let's save these offsets for this measure 
@@ -125,10 +137,10 @@ function analyze_phase_fit_data(calibration_metadata, measurements)
                 std_temporal_offset_seconds_by_frequency = std(temporal_offset_seconds_by_frequency, [], 2); 
 
                 % Report these values to the terminal 
-                fprintf("NDF: %.2f | C: %.2f | F: %.2f | Mean Offset (W-AS): %.3f [ms] | STD Offset: %.3f [ms]\n", NDF, contrast, frequency,...
+                %fprintf("NDF: %.2f | C: %.2f | F: %.2f | Mean Offset (W-AS): %.3f [ms] | STD Offset: %.3f [ms]\n", NDF, contrast, frequency,...
                                                                                                               mean_temporal_offset_seconds_by_frequency(ms_temporal_offset_mat_row) * 1000,...
                                                                                                               (std_temporal_offset_seconds_by_frequency(ms_temporal_offset_mat_row)* 1000)...
-                       );
+                %       );
                 %{
                 fprintf("NDF: %.2f | C: %.2f | F: %.2f | Mean Offset (W-P): %.3f [ms] | STD Offset: %3.f\n [ms]", NDF, contrast, frequency,...
                                                                                                              mean_temporal_offset_seconds_by_frequency(pupil_temporal_offset_mat_row) * 1000,...
@@ -142,6 +154,25 @@ function analyze_phase_fit_data(calibration_metadata, measurements)
 
     end % NDF 
 
+    % ============================================================
+    % Compute GLOBAL averages per frequency (across ALL NDFs,
+    % ALL contrasts, ALL measures)
+    % ============================================================
+
+    mean_world_AS_offset_by_frequency = nan(numel(frequencies), 1);
+    std_world_AS_offset_by_frequency  = nan(numel(frequencies), 1);
+
+    for ff = 1:numel(frequencies)
+        offsets_this_frequency = world_AS_offsets_by_frequency{ff};
+
+        mean_world_AS_offset_by_frequency(ff) = mean(offsets_this_frequency, 'omitnan');
+        std_world_AS_offset_by_frequency(ff)  = std(offsets_this_frequency, 'omitnan');
+
+        fprintf("F: %.3f hz | GLOBAL Avg Offset (W-AS): %.3f [ms] | STD: %.3f [ms]\n", ...
+            frequencies(ff), ...
+            mean_world_AS_offset_by_frequency(ff) * 1000, ...
+            std_world_AS_offset_by_frequency(ff) * 1000);
+    end
 
 
     % Now, we will iterate over the measurements. We will do this to take the average phase
@@ -195,10 +226,11 @@ function analyze_phase_fit_data(calibration_metadata, measurements)
         temporal_offsets_secs('W-P') = world_pupil_temporal_offset_secs;
         %}
 
-        figure ;
+        sensorFitsFig = figure('Name', sprintf("Phase_Fit_Sensor_Fits_M_%d", nn));
         t = tiledlayout(2,1);
         h = sgtitle(sprintf("Sensor Fits | M: %d", nn));
         h.FontWeight = 'bold';
+        figureHandles{end+1,1} = sensorFitsFig;
 
         % First tile we will plot the slow video world camera and its fit
         nexttile;
@@ -229,14 +261,15 @@ function analyze_phase_fit_data(calibration_metadata, measurements)
 
 
         % Plot the sensors before and after alignment
-        figure ;
-        t = tiledlayout(2, 2);
+        alignmentFig = figure('Name', sprintf("Phase_Fit_Alignment_M_%d", nn));
+        t = tiledlayout(2, 1);   % stack vertically instead of horizontally
         h = sgtitle(sprintf("Sensor Phase Alignment | M: %d", nn));
         h.FontWeight = 'bold';
+        figureHandles{end+1,1} = alignmentFig;
 
         % First, plot the sensors before the alignment
         nexttile;
-        title(sprintf("%.3f hz | Before Alignment", frequencies(1)));
+        title(sprintf("Before Alignment | F: %.3f hz", frequencies(1)));
         hold on ;
         yyaxis left
         plot(slow_measurement.W.t, convert_to_contrast(slow_measurement.W.v), '.', 'DisplayName', 'World');
@@ -246,21 +279,35 @@ function analyze_phase_fit_data(calibration_metadata, measurements)
         ylabel("Contrast");
 
         % Show the legend for this plot
-        legend show;
+        legend('Location', 'northeastoutside');
 
-        % First, plot the sensors after the alignment
+        % ============================================================
+        % Plot AFTER alignment using GLOBAL average offset
+        % ============================================================
+
         nexttile;
-        title(sprintf("%.3f hz | After Alignment", frequencies(1)));
+
+        % Use GLOBAL average offset (across all NDFs/contrasts/measures)
+        mean_world_ms_AS_temporal_offset_secs = mean_world_AS_offset_by_frequency(1);
+
+        title(sprintf("After Alignment | F: %.3f hz | Avg Offset: %.3f ms", ...
+            frequencies(1), ...
+            mean_world_ms_AS_temporal_offset_secs * 1000));
+
         hold on ;
         yyaxis left
-        plot(slow_measurement.W.t, convert_to_contrast(slow_measurement.W.v), '.', 'DisplayName', 'World');
+        plot(slow_measurement.W.t, ...
+            convert_to_contrast(slow_measurement.W.v), '.', ...
+            'DisplayName', 'World');
+
         yyaxis right
-        plot(slow_measurement.M.t.AS+world_ms_AS_temporal_offset_secs(nn), convert_to_contrast(slow_measurement.M.v.AS(:, 5)), '.', 'DisplayName', 'MS-AS');
+        plot(slow_measurement.M.t.AS + mean_world_ms_AS_temporal_offset_secs, ...
+            convert_to_contrast(slow_measurement.M.v.AS(:, 5)), '.', ...
+            'DisplayName', 'MS-AS');
+
         xlabel("Time [s]");
         ylabel("Contrast");
-
-        % Show the legend for this plot
-        legend show;
+        legend('Location', 'northeastoutside');
         
         %{
         % First, plot the sensors before the alignment

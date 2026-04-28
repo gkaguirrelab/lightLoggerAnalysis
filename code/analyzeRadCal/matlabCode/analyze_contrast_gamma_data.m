@@ -1,4 +1,4 @@
-function analyze_contrast_gamma_data(calibration_metadata, measurements)
+function figureHandles = analyze_contrast_gamma_data(calibration_metadata, measurements)
 % Analyze the results of a contrast gamma light logger calibration measurement (post-conversion)
 %
 % Syntax:
@@ -27,7 +27,15 @@ function analyze_contrast_gamma_data(calibration_metadata, measurements)
         calibration_metadata; % The parsed + converted metadata for the contrast gamma measuremnet 
         measurements; % The parsed + conveerted contrast gamma measurements 
     end
+
+    figureHandles = {};
     
+    % Defaults for all of the plotting we will do
+    set(groot, 'DefaultAxesFontSize', 16);
+    set(groot, 'DefaultTextFontSize', 16);
+    set(groot, 'DefaultAxesColor', 'w');
+    set(groot, 'DefaultFigureColor', 'w');
+
     % Retrieve the NDFs, frequencies and contrast levels used to make the measurements
     % as well as the number of measurements made at each level
     NDFs = calibration_metadata.NDFs; 
@@ -51,7 +59,7 @@ function analyze_contrast_gamma_data(calibration_metadata, measurements)
     for ff = 1:numel(frequencies)
         frequency = frequencies(ff);
 
-        figure;
+        contrastGammaFig = figure('Name', sprintf("Contrast_Gamma_F_%0.2f", frequency));
         hold on;
         title(sprintf("Contrast Gamma | F: %.2f", frequency));
         xlabel("Contrast");
@@ -59,6 +67,7 @@ function analyze_contrast_gamma_data(calibration_metadata, measurements)
         xlim([-0.05 1.05]);
         ylim([-0.05 1.05]);
         axis square
+        figureHandles{end+1,1} = contrastGammaFig;
 
         for nn = 1:numel(NDFs)
             NDF = NDFs(nn);
@@ -94,8 +103,8 @@ function analyze_contrast_gamma_data(calibration_metadata, measurements)
             fit_slopes_per_NDF(nn, ff) = p(1);
         end
 
-        plot([0 1], [0 1], ':k', 'DisplayName', 'Reference Line');
-        legend('Location', 'best');
+        plot([0 1], [0 1], ':k', 'DisplayName', 'Identity Line');
+        legend('Location', 'northeastoutside');
         hold off;
     end
 
