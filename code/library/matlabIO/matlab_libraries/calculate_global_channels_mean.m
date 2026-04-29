@@ -6,6 +6,7 @@ function global_means = calculate_global_channels_mean(video_path, options)
         options.channels = [1, 2, 3]; 
         options.verbose = false 
         options.start_end = false; 
+        options.zeros_as_nans = false; 
     end 
 
     % First, let's open a video reader to stream frames from the video 
@@ -28,8 +29,12 @@ function global_means = calculate_global_channels_mean(video_path, options)
         % If we want the natural log 
         % it is as follows 
         case "loge"
-            transformation = @(x) log(x + 10e-9);
+            if(options.zeros_as_nans)
+                transformation = @(x) log(x);
+            else
+                transformation = @(x) log(x + 10e-9);
 
+            end
         otherwise
             error("Unsupported transformation %s", options.sum_of);
 
@@ -57,7 +62,7 @@ function global_means = calculate_global_channels_mean(video_path, options)
         % Read the target frame from the video 
         frame = video_reader.readFrame('frameNum', ii, ...
                                         'color', options.color,... 
-                                        'zeros_as_nans', false...
+                                        'zeros_as_nans', options.zeros_as_nans...
                                        ); 
         
         % Sum the target channels 

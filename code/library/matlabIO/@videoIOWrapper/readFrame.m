@@ -7,7 +7,14 @@ function frame = readFrame(obj, options)
         options.verbose = false; 
         options.force_rebuffer = false; 
         options.parallel_buffer = true; 
+        options.dark_noise = 16;  
+    
+    % dark noise that we calculated by taking a several 
+    % minute long recording of the camera wrapped in completely black 
+    % cloth and then taking the mean of a 40-40 center region over space 
+    % and time
     end 
+    
     verbose = options.verbose; 
 
     % Save a list of the LMS colorspace types  use later 
@@ -60,6 +67,7 @@ function frame = readFrame(obj, options)
     % This should be recalculated when they are used 
     persistent normalization_factors
 
+    % If any rebuffer condition has been met, let's rebuffer
     should_rebuffer = any([no_buffer_exists, color_changed, overran_buffer, underran_buffer, options.force_rebuffer]);
     if(should_rebuffer)
         if(verbose)
@@ -84,7 +92,8 @@ function frame = readFrame(obj, options)
                                           python_color,...
                                           py.int(frameNum - 1), py.int((frameNum - 1) + block_size),...
                                           options.zeros_as_nans,...
-                                          options.verbose...
+                                          options.verbose,...
+                                          options.dark_noise...
                                          )
 
 
@@ -115,6 +124,27 @@ function frame = readFrame(obj, options)
             read_ahead_buffer = permute(read_ahead_buffer, [4 3 2 1]);
         end 
 
+
+        % Display a progress bar if desired 
+        % for in-MATLAB processing
+        dq = [];
+        if(options.verbose)
+            % Create a waitbar for the parallel loop
+            hWait = waitbar(0, 'Converting RGB frames to LMS...');
+
+            % Progress counter
+            nFrames = size(read_ahead_buffer, 1);
+            progressCount = 0;
+
+            % DataQueue lets parfor workers notify the client process
+            dq = parallel.pool.DataQueue;
+
+            % Update waitbar each time a worker finishes one frame
+            afterEach(dq, @updateWaitbar);
+            
+        end 
+
+
         % The buffer is now in memory. If we want to convert to LMS, we should do that now
         % so the whole buffer is in LMS space
         if(ismember(options.color, LMS_colorspace_types))
@@ -128,28 +158,24 @@ function frame = readFrame(obj, options)
             T_receptors = obj.T_receptors;  
             camera_used = obj.camera_used; 
 
-            % Iterate over the buffer 
+            % Iterate over the buffer either in parallel or sequentially 
+
+            % Parallel buffering 
             if(options.parallel_buffer)
-                if(options.verbose)
-                    % Create a waitbar for the parallel loop
-                    hWait = waitbar(0, 'Converting RGB frames to LMS...');
-
-                    % Progress counter
-                    nFrames = size(read_ahead_buffer, 1);
-                    progressCount = 0;
-
-                    % DataQueue lets parfor workers notify the client process
-                    dq = parallel.pool.DataQueue;
-
-                    % Update waitbar each time a worker finishes one frame
-                    afterEach(dq, @updateWaitbar);
-                    
-                end 
 
                 parfor pp = 1:size(read_ahead_buffer, 1)
-                    read_ahead_buffer(pp, :, :, :) = rgb2lms(squeeze(read_ahead_buffer(pp, :, :, :)), T_receptors, T_camera,...
-                                                         "camera", camera_used...
-                                                        );
+                    rgb_frame = squeeze(read_ahead_buffer(pp, :, :, :)); 
+                    
+                    % If all zeros, do not work and simply use the same frame
+                    if(~any(rgb_frame(:)))
+                        converted = rgb_frame; 
+
+                    % Otherwise, convert to LMS
+                    else
+                        converted = rgb2lms(rgb_frame, T_receptors, T_camera, "camera", camera_used); 
+                    end 
+
+                    read_ahead_buffer(pp, :, :, :) = converted;
                     
                     if(options.verbose)
                         % Send progress update back to client
@@ -163,15 +189,37 @@ function frame = readFrame(obj, options)
                     close(hWait);
                 end 
 
+
+            % Sequential buffering 
             else 
                 for pp = 1:size(read_ahead_buffer, 1)
                     if(options.verbose)
                         fprintf("Converting frame %d / %d \n", pp, size(read_ahead_buffer, 1));
                     end 
 
-                    read_ahead_buffer(pp, :, :, :) = rgb2lms(squeeze(read_ahead_buffer(pp, :, :, :)), T_receptors, T_camera,...
-                                                         "camera", camera_used...
-                                                        );
+                    rgb_frame = squeeze(read_ahead_buffer(pp, :, :, :)); 
+                    
+                    % If all zeros, do no work and simply use the same frame
+                    if(~any(rgb_frame(:)))
+                        converted = rgb_frame; 
+
+                    % Otherwise, convert to LMS
+                    else
+                        converted = rgb2lms(rgb_frame, T_receptors, T_camera, "camera", camera_used); 
+                    end 
+
+                    read_ahead_buffer(pp, :, :, :) = converted;
+
+                    if(options.verbose)
+                        % Send progress update back to client
+                        send(dq, pp);
+                    end 
+
+                end 
+
+                % Close waitbar when complete
+                if(options.verbose)
+                    close(hWait);
                 end 
             end
             
@@ -250,22 +298,40 @@ function frame = readFrame(obj, options)
                                                                             "color", "LMS",...
                                                                             "sum_of", "loge",...
                                                                             "channels", [1, 2, 3],...
-                                                                            "verbose", verbose...
+                                                                            "verbose", verbose,...
+                                                                            "start_end", [1, 200],...
+                                                                            "zeros_as_nans", options.zeros_as_nans...
                                                                             ); 
 
                 end     
 
 
                 % Let's calculate the normalized buffer
-                
-                % we add a small epsilon to fight zeros and thus causing nans here 
-                anti_zero_epsilon = 10e-9; 
-                l_hat = log(read_ahead_buffer(:, :, :, 1) + anti_zero_epsilon) - normalization_factors(1); 
-                m_hat = log(read_ahead_buffer(:, :, :, 2) + anti_zero_epsilon) - normalization_factors(2);
-                s_hat = log(read_ahead_buffer(:, :, :, 3) + anti_zero_epsilon) - normalization_factors(3);
-                assert(~any(isnan(l_hat(:) )));
-                assert(~any(isnan(m_hat(:) )));
-                assert(~any(isnan(s_hat(:) )));
+
+                % First, we need to set zeros equal to NaNs if we would like
+                if(options.zeros_as_nans)
+                    L_temp = read_ahead_buffer(:, :, :, 1); 
+                    M_temp = read_ahead_buffer(:, :, :, 2);
+                    S_temp = read_ahead_buffer(:, :, :, 3);
+                    L_temp(L_temp == 0) = NaN;
+                    M_temp(M_temp == 0) = NaN;
+                    S_temp(S_temp == 0) = NaN;
+
+                    L = L_temp;
+                    M = M_temp; 
+                    S = S_temp; 
+
+                % Otherwise, we add a small epsilon to fight zeros and thus causing nans here 
+                else
+                    anti_zero_epsilon = 10e-9;
+                    L = read_ahead_buffer(:, :, :, 1) + anti_zero_epsilon;
+                    M = read_ahead_buffer(:, :, :, 2) + anti_zero_epsilon; 
+                    S = read_ahead_buffer(:, :, :, 3) + anti_zero_epsilon; 
+                end 
+
+                l_hat = log(L) - normalization_factors(1); 
+                m_hat = log(M) - normalization_factors(2);
+                s_hat = log(S) - normalization_factors(3);
 
                 % %% ------------------------------------------------------------------------
                 % Achromatic signal (overall brightness)
@@ -353,15 +419,19 @@ function frame = readFrame(obj, options)
         error("Frame read of inhomogenous shape to metadata");
     end     
 
-    % If we are converting zeros to NaNs
-    if (options.zeros_as_nans)
+    % If we are converting zeros to NaNs and not in a contrast 
+    % mode (e.g. 0 contrast is something we want to know)
+    if (options.zeros_as_nans && ~ismember(obj.current_reading_color_mode, normalized_color_types) )
 
+        % 2 Channel: replace all 0s with NaN
+        % e.g. each pixel is a 0 goes to NaN
         if (ndims(frame) == 2 || size(frame,3) == 1)
-            % 2 Channel: replace all 0s with NaN
+            
             frame(frame == 0) = nan;
 
+        % 3 channel: find pixels where ALL channels are zero
+        % and make that pixel NaN            
         elseif (ndims(frame) == 3 && size(frame,3) == 3)
-            % 3 channel: find pixels where ALL channels are zero
             zeroMask = (frame(:,:,1) == 0) & ...
                     (frame(:,:,2) == 0) & ...
                     (frame(:,:,3) == 0);
@@ -388,8 +458,6 @@ function frame = readFrame(obj, options)
     end 
 
     return ; 
-
-
 
     % Local function used to update progress waitbars
     function updateWaitbar(~)

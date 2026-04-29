@@ -36,16 +36,18 @@ function converted = rgb2lms(frame, T_receptors, T_camera, options)
     [nRows, nCols, nChannels] = size(frame);
     assert(nChannels == 3, 'Input frame must have size nRows x nCols x 3.');
 
+    % If the input was entirely 0 just output 0s early
+    if(~any(frame(:)))
+        converted = zeros(size(frame), 'like', frame);
+        return ; 
+    end 
 
     % Create the spectrum implied by the rgb camera weights, and then project
     % that on the receptors. ensure convert to double for floating point math 
     frame_flat = double(reshape(frame, [], 3));     
 
-    % Subtract the dark noise that we calculated by taking a several 
-    % minute long recording of the camera wrapped in completely black 
-    % cloth and then taking the mean of a 40-40 center region over space 
-    % and time
-    frame_flat = max(min(frame_flat - options.dark_noise, 255), 0); 
+    % Clip to [0, 255] for valid image range
+    frame_flat = max(min(frame_flat, 255), 0); 
     converted_flat = (T_receptors * (frame_flat * T_camera )' )';
 
     % Then we need to reshape back to the shape of the image

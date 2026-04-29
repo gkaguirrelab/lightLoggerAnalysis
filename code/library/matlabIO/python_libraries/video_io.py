@@ -380,7 +380,8 @@ def video_to_hdf5(video_path: str, output_path: str,
                  start_frame: int=0, 
                  end_frame: int | float = float("inf"),
                  zeros_as_nans: bool=False,
-                 visualize_results: bool=False
+                 visualize_results: bool=False,
+                 dark_noise: float=16
                 ) -> None:
     assert os.path.exists(video_path), f"Video path: {video_path} does not exist"
     assert output_path.endswith(".hdf5"), f"Output path: {output_path} must end in .hdf5"
@@ -451,6 +452,11 @@ def video_to_hdf5(video_path: str, output_path: str,
                 video_stream.release() 
                 raise Exception(f"Color mode: {color_mode} is unsupported")
 
+            # If we want to subtract the darknoise from the image, 
+            # do it now
+            if(dark_noise > 0):
+                dark_noise_mask: np.ndarray = frame <= dark_noise
+                frame[dark_noise_mask] = 0
 
             # Convert to floats so we can use NaN 
             if(zeros_as_nans is True):
