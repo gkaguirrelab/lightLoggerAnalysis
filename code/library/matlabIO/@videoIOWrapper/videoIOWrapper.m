@@ -45,6 +45,10 @@ classdef videoIOWrapper < handle
         % Public so that we can set it when writing
         FrameRate
 
+        % Save normalization factors if we calculated them 
+        % for the current reading channel 
+        normalization_factors; 
+
     end
 
     methods

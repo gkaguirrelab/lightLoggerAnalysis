@@ -66,24 +66,13 @@ def generate_world_videos(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
                          ) -> None:
     
     # First, let's find all of the subjects in this experiment 
-    subject_paths: list[str] = natsorted(list(
-                                              set(
-                                                    [os.path.join(src_dir, subject_name) 
-                                                        for subject_name in os.listdir(src_dir) 
-                                                        if re.fullmatch(r"FLIC_\d+", subject_name) 
-                                                        and os.path.isdir(os.path.join(src_dir, subject_name))
-                                                        
-                                                        # If subjects to skip were specified and the subject was not in them OR subjects to process were specified and the subject is in them 
-                                                        # OR neither of these were specified just take everything by default
-                                                        if ( ( _extract_num_from_id(subject_name) not in subjects_to_skip and len(subjects_to_skip) > 0 ) 
-                                                             or (_extract_num_from_id(subject_name) in subjects_to_process ) 
-                                                             or ( len(subjects_to_skip) == 0 and len(subjects_to_process) == 0 )
-                                                           )
-
-                                                    ]
-                                                )
-                                            )
-                                        ) 
+    subject_paths: list[str] = natsorted([
+        os.path.join(src_dir, subject_name)
+        for subject_name in os.listdir(src_dir)
+        if re.fullmatch(r"FLIC_\d+", subject_name)
+        and os.path.isdir(os.path.join(src_dir, subject_name))
+        and _is_desired_item(_extract_num_from_id(subject_name), subjects_to_process, subjects_to_skip)
+    ]) 
     assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
 
     # Now, let's iterate over all the subject paths 
@@ -94,26 +83,18 @@ def generate_world_videos(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
         subject_id: str = os.path.basename(subject_path)
         subject_id_number: int = int(re.search("\d+", subject_id).group())
 
-        if(subject_id_number in subjects_to_skip or (len(subjects_to_process) > 0 and subject_id_number not in subjects_to_process)):
-            continue
-
         # Iterate over the activites for this subject 
-        activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in natsorted(os.listdir(subject_path))
-                                      if os.path.isdir(os.path.join(subject_path, filename))
-                                      if ( ( filename not in activities_to_skip and len(activities_to_skip) > 0)
-                                           or ( filename in activities_to_process )
-                                           or ( len(activities_to_skip) == 0 and len(activities_to_process) == 0)
-                                        ) 
-                                         
-                                     ]
+        activites_paths: list[str] = [
+            os.path.join(subject_path, filename)
+            for filename in natsorted(os.listdir(subject_path))
+            if os.path.isdir(os.path.join(subject_path, filename))
+            and _is_desired_item(filename, activities_to_process, activities_to_skip)
+        ]
         activities_iterator: Iterable = range(len(activites_paths)) if verbose is False else tqdm(range(len(activites_paths)), desc="Processing Activities", leave=False)
         for activity_num in activities_iterator:
             # Retrieve the activity path and activity name
             activity_path: str = activites_paths[activity_num]
             activity_name: str = os.path.basename(activity_path)
-
-            if(activity_name in activities_to_skip or (len(activities_to_process) > 0 and activity_name not in activities_to_process)):
-                continue 
 
             # Construct the path to the chunks that form the world video 
             world_video_in: str = os.path.join(activity_path, "GKA")
@@ -179,17 +160,19 @@ def generate_egocentric_mapper_results(src_dir: str="/Volumes/FLIC_raw/NEWscript
                                        show_video_preview: bool=False, 
                                        overwrite_existing: bool=False,
                                        subjects_to_skip: Iterable=set(), 
+                                       subjects_to_process: Iterable=set(), 
                                        activities_to_skip: Iterable=set(), 
+                                       activities_to_process: Iterable=set(), 
                                        verbose: bool=False
                                       ) -> None:
     # First, let's find all of the subjects in this experiment 
-    subject_paths: list[str] = natsorted([os.path.join(src_dir, subject_name) 
-                                          for subject_name in os.listdir(src_dir) 
-                                          if re.fullmatch(r"FLIC_\d+", subject_name) 
-                                          and os.path.isdir(os.path.join(src_dir, subject_name))
-                                          if _extract_num_from_id(subject_name) not in subjects_to_skip
-                                         ]
-                                        ) 
+    subject_paths: list[str] = natsorted([
+        os.path.join(src_dir, subject_name)
+        for subject_name in os.listdir(src_dir)
+        if re.fullmatch(r"FLIC_\d+", subject_name)
+        and os.path.isdir(os.path.join(src_dir, subject_name))
+        and _is_desired_item(_extract_num_from_id(subject_name), subjects_to_process, subjects_to_skip)
+    ]) 
     assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
 
 
@@ -201,17 +184,17 @@ def generate_egocentric_mapper_results(src_dir: str="/Volumes/FLIC_raw/NEWscript
         subject_id: str = os.path.basename(subject_path)
 
         # Iterate over the activites for this subject 
-        activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in natsorted(os.listdir(subject_path))
-                                      if os.path.isdir(os.path.join(subject_path, filename))
-                                     ]
+        activites_paths: list[str] = [
+            os.path.join(subject_path, filename)
+            for filename in natsorted(os.listdir(subject_path))
+            if os.path.isdir(os.path.join(subject_path, filename))
+            and _is_desired_item(filename, activities_to_process, activities_to_skip)
+        ]
         activities_iterator: Iterable = range(len(activites_paths)) if verbose is False else tqdm(range(len(activites_paths)), desc="Processing Activities", leave=False)
         for activity_num in activities_iterator:
             # Retrieve the activity path and activity name
             activity_path: str = activites_paths[activity_num]
             activity_name: str = os.path.basename(activity_path)
-
-            if(activity_name in activities_to_skip):
-                continue
 
             # Next, let's find the paths to both the Neon and the world videos 
             neon_dir: str = os.path.join(activity_path, "Neon")
@@ -270,7 +253,9 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/NEWscript
                                        verbose: bool=False,
                                        video_types: Iterable[Literal["tag", "task"]]= ("tag", "task"),
                                        subjects_to_skip: Iterable=set(), 
+                                       subjects_to_process: Iterable=set(), 
                                        activities_to_skip: Iterable= set(),
+                                       activities_to_process: Iterable=set(), 
                                        projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = set(["virtuallyFoveated", "justProjection"])
                                       ) -> None:
     
@@ -283,15 +268,14 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/NEWscript
     
 
     # First, let's find all of the subjects in this experiment 
-    subject_paths: list[str] = natsorted([os.path.join(src_dir, subject_name) 
-                                          for subject_name in os.listdir(src_dir) 
-                                          if re.fullmatch(r"FLIC_\d+", subject_name) 
-                                          and os.path.isdir(os.path.join(src_dir, subject_name))
-                                          if _extract_num_from_id(subject_name) not in subjects_to_skip
-                                         ]
-                                        ) 
+    subject_paths: list[str] = natsorted([
+        os.path.join(src_dir, subject_name)
+        for subject_name in os.listdir(src_dir)
+        if re.fullmatch(r"FLIC_\d+", subject_name)
+        and os.path.isdir(os.path.join(src_dir, subject_name))
+        and _is_desired_item(_extract_num_from_id(subject_name), subjects_to_process, subjects_to_skip)
+    ]) 
     assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
-
 
     # Now, let's iterate over all the subject paths 
     subject_iterator: Iterable = range(len(subject_paths)) if verbose is False else tqdm(range(len(subject_paths)), desc="Processing Subjects", leave=True)
@@ -301,23 +285,18 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/NEWscript
         subject_id: str = os.path.basename(subject_path)
         subject_id_number: int = int(re.search("\d+", subject_id).group())
         
-        # Skip desired subjects 
-        if(subject_id_number in subjects_to_skip):
-            continue 
-
         # Iterate over the activites for this subject 
-        activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in natsorted(os.listdir(subject_path))
-                                      if os.path.isdir(os.path.join(subject_path, filename))
-                                     ]
+        activites_paths: list[str] = [
+            os.path.join(subject_path, filename)
+            for filename in natsorted(os.listdir(subject_path))
+            if os.path.isdir(os.path.join(subject_path, filename))
+            and _is_desired_item(filename, activities_to_process, activities_to_skip)
+        ]
         activities_iterator: Iterable = range(len(activites_paths)) if verbose is False else tqdm(range(len(activites_paths)), desc="Processing Activities", leave=False)
         for activity_num in activities_iterator:
             # Retrieve the activity path and activity name
             activity_path: str = activites_paths[activity_num]
             activity_name: str = os.path.basename(activity_path)
-
-            # Skip any desired activities
-            if(activity_name in activities_to_skip):
-                continue 
 
             # Define a temporary output location (to guard against permission issues)
             temp_output_dir: str = os.path.join(os.path.expanduser("~/Desktop"), "temp_output_dir_foveation")
@@ -406,10 +385,12 @@ def generate_spds(src_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoo
                   dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026",
                   overwrite_existing: bool=False,
                   subjects_to_skip: Iterable=set(), 
+                  subjects_to_process: Iterable=set(), 
                   activities_to_skip: Iterable=set(["lunch", "phone"]), 
+                  activities_to_process: Iterable=set(), 
                   projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = set(["virtuallyFoveated", "justProjection"]), 
                   projection_types_for_bounds_calculations:  Iterable[Literal["virtuallyFoveated", "justProjection"]] = ["virtuallyFoveated", "justProjection"],
-                  color_mode: Literal["L+M+S", "L-M", "GRAY", "a", "c_cm", "c_s"] = "L+M+S",
+                  color_mode: Literal["L+M+S", "L-M", "GRAY", "a", "c_lm", "c_s"] = "L+M+S",
                   common_axes: bool=False, 
                   verbose: bool=False) -> None:
     
@@ -420,15 +401,14 @@ def generate_spds(src_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoo
     eng.pyenv('Version', '~/Documents/MATLAB/projects/lightLoggerAnalysis/analysis_env/bin/python', nargout=0)
     eng.tbUseProject('lightLoggerAnalysis', nargout=0)
     
-
-     # First, let's find all of the subjects in this experiment 
-    subject_paths: list[str] = natsorted([os.path.join(src_dir, subject_name) 
-                                          for subject_name in os.listdir(src_dir) 
-                                          if re.fullmatch(r"FLIC_\d+", subject_name) 
-                                          and os.path.isdir(os.path.join(src_dir, subject_name))
-                                          if _extract_num_from_id(subject_name) not in subjects_to_skip
-                                         ]
-                                        ) 
+    # First, let's find all of the subjects in this experiment 
+    subject_paths: list[str] = natsorted([
+        os.path.join(src_dir, subject_name)
+        for subject_name in os.listdir(src_dir)
+        if re.fullmatch(r"FLIC_\d+", subject_name)
+        and os.path.isdir(os.path.join(src_dir, subject_name))
+        and _is_desired_item(_extract_num_from_id(subject_name), subjects_to_process, subjects_to_skip)
+    ]) 
     assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
 
     # Now, let's iterate over all the subject paths 
@@ -438,23 +418,19 @@ def generate_spds(src_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoo
         subject_path: str = subject_paths[subject_num]
         subject_id: str = os.path.basename(subject_path)
         subject_id_number: int = int(re.search("\d+", subject_id).group())
-
-        # Skip subjects we dont want to process 
-        if(subject_id_number in subjects_to_skip):
-            continue
-
+         
         # Iterate over the activites for this subject 
-        activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in natsorted(os.listdir(subject_path))
-                                      if os.path.isdir(os.path.join(subject_path, filename))
-                                     ]
+        activites_paths: list[str] = [
+            os.path.join(subject_path, filename)
+            for filename in natsorted(os.listdir(subject_path))
+            if os.path.isdir(os.path.join(subject_path, filename))
+            and _is_desired_item(filename, activities_to_process, activities_to_skip)
+        ]
         activities_iterator: Iterable = range(len(activites_paths)) if verbose is False else tqdm(range(len(activites_paths)), desc="Processing Activities", leave=False)
         for activity_num in activities_iterator:
             # Retrieve the activity path and activity name
             activity_path: str = activites_paths[activity_num]
             activity_name: str = os.path.basename(activity_path)
-
-            if(activity_name in activities_to_skip):
-                continue
 
             # Generate the output path
             output_dir: str = os.path.join(dst_dir, color_mode, subject_id, activity_name)
@@ -509,8 +485,12 @@ def generate_spds(src_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoo
     
     # Close the MATLAB engine
     eng.quit() 
-
+    
     return 
+
+def _is_desired_item(item, items_to_process: Iterable, items_to_skip: Iterable) -> bool:
+    return (item in items_to_process if len(items_to_process) > 0 else item not in items_to_skip)
+    
 
 def group_spds_per_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026", 
                            dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026",

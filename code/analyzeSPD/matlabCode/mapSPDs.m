@@ -323,7 +323,7 @@ function frame_chunk = load_frame_chunk(video_reader, start_frame, num_frames_to
     % Read the target amount of frames 
     insertion_index = 1; 
     for ii = start_frame : start_frame + num_frames_to_read - 1
-        read_frame = video_reader.readFrame('frameNum', ii, "zeros_as_nans", true, 'color', color_mode, 'verbose', verbose);
+        read_frame = video_reader.readFrame('frameNum', ii, "zeros_as_nans", true, 'color', color_mode, 'verbose', verbose, 'dark_noise', 16);
         [read_height, read_width] = size(read_frame);
         if(read_height ~= video_reader.Height || read_width ~= video_reader.Width)
             fprintf("Frame shape (%d, %d) does not match video shape (%d, %d)\n", read_height, read_width, video_reader.Height, video_reader.Width); 

@@ -1,4 +1,7 @@
-function generate_calibration_figures()
+function generate_calibration_figures(output_path)
+    arguments 
+        output_path; 
+    end     
 
     % Get the path to the DropBox location where calibration data lives
     dropbox_basedir = getpref('lightLoggerAnalysis', 'dropboxBaseDir'); 
@@ -54,7 +57,7 @@ function generate_calibration_figures()
         light_logger_calibration_data = light_logger_calibration_data.(experiment_fieldname); 
 
         % Generate the figures 
-        analyze_light_logger_calibration_data(light_logger_calibration_data, 'figure_output_path', fullfile(dropbox_basedir, 'FLIC_analysis', 'calibration_temp')); 
+        analyze_light_logger_calibration_data(light_logger_calibration_data, 'figure_output_path', output_path); 
 
     end 
 

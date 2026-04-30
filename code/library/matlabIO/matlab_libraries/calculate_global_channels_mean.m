@@ -1,8 +1,8 @@
 function global_means = calculate_global_channels_mean(video_path, options)
     arguments 
         video_path string;         
-        options.color {mustBeMember(options.color, ["RGB","BGR","GRAY", "LMS", "L+M+S", "L-M", "a", "c_lm", "c_s"])}; 
-        options.sum_of {mustBeMember(options.sum_of, ["value", "loge"])}; 
+        options.color {mustBeMember(options.color, ["RGB","BGR","GRAY", "LMS", "L+M+S", "L-M", "a", "c_lm", "c_s"])} = "RGB"; 
+        options.sum_of {mustBeMember(options.sum_of, ["value", "loge"])} = "value"; 
         options.channels = [1, 2, 3]; 
         options.verbose = false 
         options.start_end = false; 
@@ -17,6 +17,9 @@ function global_means = calculate_global_channels_mean(video_path, options)
     % we would like to mean over 
     global_sums = zeros(numel(options.channels), 1); 
 
+    % Initialuze the count of the number of nun NaN values for each channel. 
+    total_non_nan = zeros(numel(options.channels), 1); 
+    
     % Define the transformation that will handle any modifications 
     % to the value that we are summing (suc as by taking the natural log)
     switch(options.sum_of)
@@ -71,8 +74,10 @@ function global_means = calculate_global_channels_mean(video_path, options)
             target_channel = options.channels(ch);
             channel_data = frame(:, :, target_channel);
             global_sums(ch) = global_sums(ch) + sum( transformation(channel_data(:)), 'omitnan');                
+
+            % Keep adding to the count of non NaN values by channel 
+            total_non_nan(ch) = total_non_nan(ch) + sum(~isnan(channel_data(:))); 
         end 
-        assert(~any(isnan(global_sums(:) ))); 
 
         % ---- UPDATE PROGRESS BAR ----
         if options.verbose
@@ -87,13 +92,13 @@ function global_means = calculate_global_channels_mean(video_path, options)
         close(h_wait);
     end
 
-    % The number of total values is num_frames * (IMAGE_SIZE)
+    % calculate the means 
     global_means = global_sums; 
-    total_num_values = n_frames * video_reader.Height * video_reader.Width; 
     for ch = 1:numel(options.channels)
+        total_num_values = total_non_nan(ch); 
+
         global_means(ch) = global_sums(ch) / total_num_values;
     end     
-    assert(~any(isnan(global_means(:) ))); 
 
     return 
 

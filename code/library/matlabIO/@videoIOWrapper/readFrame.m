@@ -7,7 +7,7 @@ function frame = readFrame(obj, options)
         options.verbose = false; 
         options.force_rebuffer = false; 
         options.parallel_buffer = true; 
-        options.dark_noise = 16;  
+        options.dark_noise = 0;  
     
     % dark noise that we calculated by taking a several 
     % minute long recording of the camera wrapped in completely black 
@@ -62,10 +62,6 @@ function frame = readFrame(obj, options)
     color_changed = string(obj.current_reading_color_mode) ~= string(options.color); 
     overran_buffer = frameNum > ( (obj.buffer_start_frame + obj.read_ahead_buffer_size) - 1); 
     underran_buffer = frameNum < obj.buffer_start_frame; 
-
-    % Persistent normalization factors used with normalized color types. 
-    % This should be recalculated when they are used 
-    persistent normalization_factors
 
     % If any rebuffer condition has been met, let's rebuffer
     should_rebuffer = any([no_buffer_exists, color_changed, overran_buffer, underran_buffer, options.force_rebuffer]);
@@ -287,19 +283,18 @@ function frame = readFrame(obj, options)
                 % color types for the first time, we need 
                 % to calculate the normalization factors 
                 % for each of l, m, s
-                if(isempty(normalization_factors))
+                if(isempty(obj.normalization_factors))
                     if(verbose)
                         disp("Calculating normalization factors")
                     end 
 
                     % Calculate the normalization factors 
                     % using the Python helper function 
-                    normalization_factors = calculate_global_channels_mean(obj.full_video_path, ...
+                    obj.normalization_factors = calculate_global_channels_mean(obj.full_video_path, ...
                                                                             "color", "LMS",...
                                                                             "sum_of", "loge",...
                                                                             "channels", [1, 2, 3],...
                                                                             "verbose", verbose,...
-                                                                            "start_end", [1, 200],...
                                                                             "zeros_as_nans", options.zeros_as_nans...
                                                                             ); 
 
@@ -329,9 +324,9 @@ function frame = readFrame(obj, options)
                     S = read_ahead_buffer(:, :, :, 3) + anti_zero_epsilon; 
                 end 
 
-                l_hat = log(L) - normalization_factors(1); 
-                m_hat = log(M) - normalization_factors(2);
-                s_hat = log(S) - normalization_factors(3);
+                l_hat = log(L) - obj.normalization_factors(1); 
+                m_hat = log(M) - obj.normalization_factors(2);
+                s_hat = log(S) - obj.normalization_factors(3);
 
                 % %% ------------------------------------------------------------------------
                 % Achromatic signal (overall brightness)

@@ -82,11 +82,24 @@ function export_figure_handles(figureHandles, figure_output_path)
         mkdir(figure_output_path);
     end
 
+    pdf_output_path = fullfile(figure_output_path, "pdfs");
+    eps_output_path = fullfile(figure_output_path, "eps");
+
+    if(~exist(pdf_output_path, "dir"))
+        mkdir(pdf_output_path);
+    end
+
+    if(~exist(eps_output_path, "dir"))
+        mkdir(eps_output_path);
+    end
+
     for ii = 1:numel(figureHandles)
         figHandle = figureHandles{ii};
         if(isempty(figHandle) || ~isgraphics(figHandle))
             continue;
         end
+
+        is_ui_figure = isa(figHandle, 'matlab.ui.Figure');
 
         figName = string(figHandle.Name);
         if(strlength(strtrim(figName)) == 0)
@@ -95,12 +108,25 @@ function export_figure_handles(figureHandles, figure_output_path)
 
         figName = regexprep(figName, '[^\w\d-]+', '_');
         figName = regexprep(figName, '_+', '_');
-        exportPath = fullfile(figure_output_path, sprintf("%02d_%s.pdf", ii, figName));
+        pdf_export_path = fullfile(pdf_output_path, sprintf("%02d_%s.pdf", ii, figName));
+        eps_export_path = fullfile(eps_output_path, sprintf("%02d_%s.eps", ii, figName));
 
         try
-            exportgraphics(figHandle, exportPath, 'ContentType', 'vector');
+            if(is_ui_figure)
+                exportapp(figHandle, pdf_export_path);
+            else
+                exportgraphics(figHandle, pdf_export_path, 'ContentType', 'vector');
+            end
         catch
-            exportapp(figHandle, exportPath);
+            exportapp(figHandle, pdf_export_path);
+        end
+
+        if(~is_ui_figure)
+            try
+                exportgraphics(figHandle, eps_export_path, 'ContentType', 'vector');
+            catch
+                print(figHandle, eps_export_path, '-depsc', '-painters');
+            end
         end
 
         if(isgraphics(figHandle))
