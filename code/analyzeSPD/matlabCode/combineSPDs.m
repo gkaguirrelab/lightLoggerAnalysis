@@ -112,7 +112,7 @@ function figure_handle = localPlotSPD(activity_struct, subject_id, activity_name
             if (~isempty(center_freq))
                 center_handle = loglog(ax, center_freq, center_spd, 'Color', center_color, 'LineStyle', line_style, 'LineWidth', 2.0);
                 legend_handles(end+1) = center_handle; 
-                legend_labels{end+1} = sprintf('%s %s center', color_mode, projection_type); %
+                legend_labels{end+1} = sprintf('%s %s center', color_mode, projection_type); 
             end
 
             [periphery_freq, periphery_spd] = iCleanSpdForPlot(frq, region_averages.periphery);
