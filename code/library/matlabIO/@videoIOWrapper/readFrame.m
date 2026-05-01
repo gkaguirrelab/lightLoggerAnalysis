@@ -86,6 +86,10 @@ function frame = readFrame(obj, options)
         if(verbose)
             disp("CONVERTING TO HDF5"); 
         end     
+
+        % Python reading ONLY supports format of GRAY, RGB, BGR. Therefore, values should be 0-255
+        % once they come out of here at MAXIMUM.
+        % if floor and ceiling is desired to be NaNs, then 0 and 255 should come out as NaNs
         obj.utility_library.video_to_hdf5(obj.full_video_path, obj.temporary_reading_hdf5_filepath,...
                                           python_color,...
                                           py.int(frameNum - 1), py.int((frameNum - 1) + block_size),...
@@ -122,6 +126,14 @@ function frame = readFrame(obj, options)
             read_ahead_buffer = permute(read_ahead_buffer, [4 3 2 1]);
         end 
 
+        % Guard against bad values immediately after reading in the buffer 
+        if(options.zeros_as_nans)
+            assert(~any(read_ahead_buffer(:) <= 0), "0 was requested to be NaNs but values <= 0 were detected in the buffer after it has been read in"); 
+        end 
+
+        if(options.ceiling_as_nans)
+            assert(~any(read_ahead_buffer(:) >= 255), "255 was requested to be NaNs but values >= 255 were detected in the buffer after it has been read in");
+        end 
 
         % Display a progress bar if desired 
         % for in-MATLAB processing
