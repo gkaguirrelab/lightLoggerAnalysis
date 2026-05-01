@@ -1538,6 +1538,158 @@ def generate_spds_across_all(src_dir: str="/Users/zacharykelly/Aguirre-Brainard 
 
     return 
 
+"""Give an iterable of desired color modes 
+   and desired subjects/activites, 
+   generate a plot for each subject/activity 
+   with them all on it 
+"""
+def combine_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026", 
+                 dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026", 
+                 overwrite_existing: bool=False,
+                 verbose: bool=False,  
+                 subjects_to_skip: Iterable=set(),
+                 subjects_to_process: Iterable=set(),  
+                 activities_to_skip: Iterable=set(["lunch", "phone"]), 
+                 activities_to_process: Iterable=set(), 
+                 projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = ["virtuallyFoveated", "justProjection"],
+                 color_modes_to_skip: Iterable[Literal["a", "c_lm", "c_s", "L-M", "L+M+S"]] = set(),
+                 color_modes_to_process: Iterable[Literal["a", "c_lm", "c_s", "L-M", "L+M+S"]] = set()
+                ) -> None:
+    
+    # Ensure the inputs we later use for set equality are in set form 
+    subjects_to_skip = set(subjects_to_skip)
+    subjects_to_process = set(subjects_to_process)
+    activities_to_skip = set(activities_to_skip)
+    activities_to_process = set(activities_to_process)
+
+    # First, let's get the desired color modes from the source directory
+    # that we will combine
+    color_mode_paths: list[str] = natsorted([
+        os.path.join(src_dir, color_mode)
+        for color_mode in os.listdir(src_dir)
+        if not color_mode.startswith(".")
+        and os.path.isdir(os.path.join(src_dir, color_mode))
+        and _is_desired_item(color_mode, color_modes_to_process, color_modes_to_skip)
+    ]) 
+    assert len(color_mode_paths) > 0, f"No colormode directories found in: {src_dir}" 
+
+
+    # Now, let's collect all of the subjects 
+    # we want to process from the first colormode 
+    subject_ids: set[str] = set( subject_id
+                                  for subject_id in os.listdir(color_mode_paths[0])
+                                  if os.path.isdir(os.path.join(color_mode_paths[0], subject_id))
+                                  and _is_desired_item(_extract_num_from_id(subject_id), subjects_to_process, subjects_to_skip)
+                                 )
+    subject_ids_list: list[str] = list(subject_ids)
+
+    # Assert that the very first colormode has all of the subjects we want to process 
+    # if we have specified them 
+    if(len(subjects_to_process) > 0):
+        assert subject_ids == subjects_to_process, f"Subjects in {color_mode_paths[0]} are {subject_ids} but {subjects_to_process} were requested"
+
+    # Now we need to do the same thing with the activities requested 
+    activity_names: set[str] = set( activity_name 
+                                    for activity_name in os.listdir(os.path.join(color_mode_paths[0], subject_ids_list[0]))
+                                    if os.path.isdir(os.path.join(color_mode_paths[0], subject_ids_list[0], activity_name))
+                                    and _is_desired_item(activity_name, activities_to_process, activities_to_skip)
+                                  )
+    activity_names_list: list[str] = list(activity_names)
+
+    if(len(activities_to_process) > 0):
+        assert activity_names == activities_to_process, f"Activities in {os.path.join(color_mode_paths[0], subject_ids_list[0])} are {activity_names} but {activities_to_process} were requested"
+
+    # Ending dictionary should be of form 
+    # {subject: {activity: 
+    #               {color_mode: 
+    #                           {projection_type: path}
+    #                }
+    #           }
+    # }
+    spds_to_process: dict = {}
+
+    # Now we need to go through every colormode, subject. and activity and make sure they have the same 
+    # set of requested items 
+    for color_mode_path in color_mode_paths:
+        # Extract the given color_mode 
+        color_mode: str = os.path.basename(color_mode_path)
+        
+        # Find the subjects of this colormode 
+        color_mode_subjects: set[str] =  set( subject_id
+                                               for subject_id in os.listdir(color_mode_path)
+                                               if os.path.isdir(os.path.join(color_mode_path, subject_id))
+                                               and _is_desired_item(_extract_num_from_id(subject_id), subjects_to_process, subjects_to_skip)
+                                            )
+
+        # Assert that this is all of the same subjects we are supposed to process 
+        assert color_mode_subjects == subject_ids, f"Colormode: {color_mode} has subjects: {color_mode_subjects} but {subject_ids} were requested"
+
+        # Now, per subject, we need to make sure it has all of the activities we want 
+        for subject_id in color_mode_subjects:
+            # Create the path to this subject folder 
+            subject_path: str = os.path.join(color_mode_path, subject_id)
+            assert os.path.exists(subject_path), f"Subject path: {subject_path} does not exist"
+
+            # Find the activities in this subject path 
+            subject_activities: set[str] = set( activity_name 
+                                                for activity_name in os.listdir(subject_path)
+                                                if os.path.isdir(os.path.join(subject_path, activity_name))
+                                                and _is_desired_item(activity_name, activities_to_process, activities_to_skip)
+                                             )
+
+            # Assert it has all of the desired activities we want 
+            assert subject_activities == activity_names, f"Subject path: {subject_path} has activities: {subject_activities} but: {activity_names} were requested"
+
+            # If this is all true, let's make sure we have the projection files we want to include
+            # per activity 
+            for activity_name in subject_activities:
+                # Construct the path to this activity 
+                activity_path: str = os.path.join(subject_path, activity_name)
+                assert os.path.exists(activity_path), f"Activity path: {activity_path} does not exist"
+
+                for projection_type in projection_types:
+                    # Construct the path to this SPD file
+                    spd_results_path: str = os.path.join(activity_path, f"{subject_id}_{activity_name}_{projection_type}_SPDResults.mat")
+                    assert os.path.exists(spd_results_path), f"Path: {spd_results_path} does not exist when projection types: {projection_types} were requested"
+
+                    # Build the dictionary that tracks these paths 
+                    
+                    # If we have never seen this subject before, 
+                    # we need to build the entire dictionary structure
+                    if(subject_id not in spds_to_process):
+                        spds_to_process[subject_id] = {activity_name: 
+                                                                {color_mode: 
+                                                                        {projection_type: spd_results_path}
+                                                                }
+                                                       }
+
+                    # Otherwise, let's see what we have seen before 
+                    else:
+                        # If we have seen the subject but not the activity for this subject before 
+                        if(activity_name not in spds_to_process[subject_id]):
+                            spds_to_process[subject_id][activity_name] = {color_mode: 
+                                                                                {projection_type: spd_results_path}
+                                                                        }
+
+                        # Otherwise, let's see what we have seen before
+                        else:
+                            # Otherwise, if we have seen this subject_id and activity name but not this color mode before 
+                            if(color_mode not in spds_to_process[subject_id][activity_name]):
+                                spds_to_process[subject_id][activity_name][color_mode] = { projection_type: spd_results_path }
+
+
+                            # Otherwise, we simply have not seen this projection type before. Let's just add it to the dict 
+                            else:
+                                spds_to_process[subject_id][activity_name][color_mode][projection_type] = spd_results_path
+
+
+    # Call the MATLAB plotting function
+    # to generate and output the plots
+
+    return
+
+
+
 # -----------------------------------------------------------------------------
 # unpack_neon_recordings
 #

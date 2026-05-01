@@ -99,7 +99,12 @@ function export_figure_handles(figureHandles, figure_output_path)
             continue;
         end
 
-        is_ui_figure = isa(figHandle, 'matlab.ui.Figure');
+        if(is_figure_blank(figHandle))
+            if(isgraphics(figHandle))
+                close(figHandle);
+            end
+            continue;
+        end
 
         figName = string(figHandle.Name);
         if(strlength(strtrim(figName)) == 0)
@@ -111,26 +116,47 @@ function export_figure_handles(figureHandles, figure_output_path)
         pdf_export_path = fullfile(pdf_output_path, sprintf("%02d_%s.pdf", ii, figName));
         eps_export_path = fullfile(eps_output_path, sprintf("%02d_%s.eps", ii, figName));
 
+        pdf_export_succeeded = false;
+        eps_export_succeeded = false;
+
         try
-            if(is_ui_figure)
-                exportapp(figHandle, pdf_export_path);
-            else
-                exportgraphics(figHandle, pdf_export_path, 'ContentType', 'vector');
-            end
+            exportgraphics(figHandle, pdf_export_path, 'ContentType', 'vector');
+            pdf_export_succeeded = exist(pdf_export_path, "file") ~= 0;
         catch
             exportapp(figHandle, pdf_export_path);
+            pdf_export_succeeded = exist(pdf_export_path, "file") ~= 0;
         end
 
-        if(~is_ui_figure)
-            try
-                exportgraphics(figHandle, eps_export_path, 'ContentType', 'vector');
-            catch
-                print(figHandle, eps_export_path, '-depsc', '-painters');
-            end
+        try
+            exportgraphics(figHandle, eps_export_path, 'ContentType', 'vector');
+            eps_export_succeeded = exist(eps_export_path, "file") ~= 0;
+        catch
+            print(figHandle, eps_export_path, '-depsc', '-painters');
+            eps_export_succeeded = exist(eps_export_path, "file") ~= 0;
+        end
+
+        if(~pdf_export_succeeded)
+            error("Failed to export PDF for figure %d (%s)", ii, figName);
+        end
+
+        if(~eps_export_succeeded)
+            error("Failed to export EPS for figure %d (%s)", ii, figName);
         end
 
         if(isgraphics(figHandle))
             close(figHandle);
+        end
+    end
+end
+
+function tf = is_figure_blank(figHandle)
+    tf = true;
+
+    axesHandles = findall(figHandle, 'Type', 'axes');
+    for ax = axesHandles'
+        if(~isempty(allchild(ax)))
+            tf = false;
+            return;
         end
     end
 end
