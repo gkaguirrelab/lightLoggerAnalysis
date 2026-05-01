@@ -133,11 +133,14 @@ function figure_handle = localPlotSPD(activity_struct, subject_id, activity_name
     ylabel(ax, 'Spectral power density (contrast^2/Hz)');
     title(ax, sprintf('%s | %s', subject_id, activity_name), 'Interpreter', 'none');
     axis(ax, 'square');
+    xlim(ax, [1 60]);
+    xticks(ax, [1 2 4 8 16 32]);
+    xticklabels(ax, {'1', '2', '4', '8', '16', '32'});
 
     reference_handle = iPlotReferenceLine(ax);
     if (isgraphics(reference_handle))
         legend_handles(end+1) = reference_handle;
-        legend_labels{end+1} = 'Reference (10^{-2} f^{-2})';
+        legend_labels{end+1} = '1/f^2';
     end
 
     if (~isempty(legend_handles))
