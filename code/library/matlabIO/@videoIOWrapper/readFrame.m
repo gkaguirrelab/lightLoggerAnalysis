@@ -162,11 +162,13 @@ function frame = readFrame(obj, options)
             if(options.parallel_buffer)
 
                 parfor pp = 1:size(read_ahead_buffer, 1)
+                    % Read the RGB frame
                     rgb_frame = squeeze(read_ahead_buffer(pp, :, :, :)); 
-                    assert(~any(rgb_frame(:) == 0), "RGB Frame has value of 0 instead of NaN when converting to LMS"); 
+                    assert(~any(rgb_frame(:) <= 0), "RGB Frame has value of 0 instead of NaN when converting to LMS"); 
+                    assert(~any(rgb_frame(:) >= 255), "RGB Frame has value of 255 instead of NaN when converting to LMS"); 
                     
+                    % Convert to LMS
                     converted = rgb2lms(rgb_frame, T_receptors, T_camera, "camera", camera_used); 
-
                     read_ahead_buffer(pp, :, :, :) = converted;
                     
                     if(options.verbose)
@@ -185,12 +187,13 @@ function frame = readFrame(obj, options)
             % Sequential buffering 
             else 
                 for pp = 1:size(read_ahead_buffer, 1)
+                    % Read the RGB frame
                     rgb_frame = squeeze(read_ahead_buffer(pp, :, :, :)); 
-                    assert(~any(rgb_frame(:) == 0), "RGB Frame has value of 0 instead of NaN when converting to LMS"); 
+                    assert(~any(rgb_frame(:) <= 0), "RGB Frame has value of 0 instead of NaN when converting to LMS"); 
+                    assert(~any(rgb_frame(:) >= 255), "RGB Frame has value of 255 instead of NaN when converting to LMS"); 
                     
+                    % Convert to LMS
                     converted = rgb2lms(rgb_frame, T_receptors, T_camera, "camera", camera_used); 
-                    
-
                     read_ahead_buffer(pp, :, :, :) = converted;
 
                     if(options.verbose)
