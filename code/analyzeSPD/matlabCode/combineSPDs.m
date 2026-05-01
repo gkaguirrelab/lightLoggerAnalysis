@@ -135,8 +135,8 @@ function figure_handle = localPlotSPD(activity_struct, subject_id, activity_name
     ylabel(ax, 'Spectral power density (contrast^2/Hz)');
     title(ax, sprintf('%s | %s', subject_id, activity_name), 'Interpreter', 'none');
     axis(ax, 'square');
-    xlim(ax, [1 60]);
-    xticks(ax, [1 2 4 8 16 32]);
+    xlim(ax, [1 64]);
+    xticks(ax, [1 2 4 8 16 32 64]);
     xticklabels(ax, {'1', '2', '4', '8', '16', '32'});
 
     reference_handle = iPlotReferenceLine(ax);
