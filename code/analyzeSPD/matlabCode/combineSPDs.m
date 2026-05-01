@@ -29,12 +29,14 @@ function combineSPDs(spds, output_path, options)
 
     % Iterate over subjects and activities.
     subjects = fieldnames(spds);
-    for ss = 1:numel(subjects)
+    num_subjects = numel(subjects);
+    for ss = 1:num_subjects 
         subject_id = subjects{ss};
         subject_struct = spds.(subject_id);
 
         activity_names = fieldnames(subject_struct);
-        for aa = 1:numel(activity_names)
+        num_activities = numel(activity_names); 
+        for aa = 1:num_activities
             activity_name = activity_names{aa};
             activity_struct = subject_struct.(activity_name);
 
@@ -48,7 +50,7 @@ function combineSPDs(spds, output_path, options)
 
             % Print out verbose information if we want it
             if (options.verbose)
-                fprintf('Combining SPDs for %s | %s\n', subject_id, activity_name);
+                fprintf('Generating SPD plots for subject: %d / %d | activity: %d / %d\n', ss, num_subjects, aa, num_activities);
             end
 
             % Plot and output the combined SPDs
