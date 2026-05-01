@@ -380,8 +380,8 @@ def video_to_hdf5(video_path: str, output_path: str,
                  start_frame: int=0, 
                  end_frame: int | float = float("inf"),
                  zeros_as_nans: bool=False,
+                 ceiling_as_nans: bool=False, 
                  visualize_results: bool=False,
-                 dark_noise: float=16
                 ) -> None:
     assert os.path.exists(video_path), f"Video path: {video_path} does not exist"
     assert output_path.endswith(".hdf5"), f"Output path: {output_path} must end in .hdf5"
@@ -452,16 +452,46 @@ def video_to_hdf5(video_path: str, output_path: str,
                 video_stream.release() 
                 raise Exception(f"Color mode: {color_mode} is unsupported")
 
-            # If we want to subtract the darknoise from the image, 
-            # do it now
-            if(dark_noise > 0):
-                dark_noise_mask: np.ndarray = frame <= dark_noise
-                frame[dark_noise_mask] = 0
+            # Covert this frame to float right away 
+            # for our transformations and for the fact 
+            # that it will be saved as a float
+            frame = frame.astype(np.float64)
 
-            # Convert to floats so we can use NaN 
-            if(zeros_as_nans is True):
-                frame = frame.astype(np.float64)
-                frame[frame == 0] = np.nan
+            # We need to handle zeros to NaNs 
+            # and ceilings to NaN differently 
+            # based on the shape if the image 
+            if(frame.ndim == 2):
+                
+                # If we are in a 2D image and want 
+                # to make zeros nan, that is easy
+                if(zeros_as_nans is True):
+                    frame[frame == 0] = np.nan
+
+                # Same for ceiling 
+                if(ceiling_as_nans is True):
+                    frame[frame >= 255] = np.nan
+
+            elif(frame.ndim == 3):
+                # If we are 3D image, we want to make 
+                # pixels that ALL channels are 0 
+                # into NaNs
+                if(zeros_as_nans is True):
+                    # Create a mask that is all of the pixels whose 
+                    # all 3 channels are == 0
+                    zero_mask_three_d: np.ndarray = np.all(frame == 0, axis=2)
+
+                    # Set these pixels equal to fully NaN
+                    frame[zero_mask_three_d] = np.nan
+
+                # Same for ceiling, but >= 255 
+                if(ceiling_as_nans is True):
+                    # Create a mask that is all of the pixels whose 
+                    # all 3 channels are >= 255
+                    ceiling_mask_three_d: np.ndarray = np.all(frame >= 255, axis=2)
+
+                    # Set these pixels equal to fully NaN
+                    frame[ceiling_mask_three_d] = np.nan
+
 
             # Append to the dataset 
             if color_mode.upper() == "GRAY":
@@ -485,6 +515,7 @@ def world_chunks_to_video(recording_path: str,
                           output_path: str,
                           apply_color_weights: bool=False, 
                           apply_floor_ceiling: bool=False,
+                          remove_dark_noise: bool=False, 
                           debayer_images: bool=False, 
                           apply_digital_gain: bool=False,
                           fill_missing_frames: bool=False,
@@ -651,6 +682,13 @@ def world_chunks_to_video(recording_path: str,
                                                    frame_buffer
                                                 )
         
+
+        # Now, if we want to REMOVE the dark noise (darknoise = 0)
+        # let's do that now to 
+        if(remove_dark_noise is True):
+            dark_noise_mask = frame_buffer == world_util.WORLD_DARK_NOISE
+            frame_buffer[dark_noise_mask] = 0 
+
         # I just did digital gain, therefore this will immediately 
         # trigger and 
 
@@ -660,11 +698,7 @@ def world_chunks_to_video(recording_path: str,
 
         # If we want to embed the timestamps in the frame buffer, do that now
         if(embed_timestamps is True):
-            frame_buffer = np.array([world_util.embed_timestamp(frame, timestamp)
-                            for frame, timestamp in zip(frame_buffer, t_vector)
-                           ],
-                           dtype=np.uint8
-                           )
+            raise NotImplementedError()
 
         # ALL TRANSFORMATIONS ARE DONE AT THIS POINT. 
         # WE NEED TO CONVERT TO BGR TO WRITE FRAMES WITH CV2

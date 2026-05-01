@@ -4,15 +4,10 @@ function frame = readFrame(obj, options)
         options.frameNum {mustBeNumeric} = []; 
         options.color {mustBeMember(options.color, ["RGB","BGR","GRAY", "LMS", "L+M+S", "L-M", "a", "c_lm", "c_s"])} = "RGB";
         options.zeros_as_nans = false; 
+        options.ceiling_as_nans = false;
         options.verbose = false; 
         options.force_rebuffer = false; 
         options.parallel_buffer = true; 
-        options.dark_noise = 0;  
-    
-    % dark noise that we calculated by taking a several 
-    % minute long recording of the camera wrapped in completely black 
-    % cloth and then taking the mean of a 40-40 center region over space 
-    % and time
     end 
     
     verbose = options.verbose; 
@@ -63,6 +58,13 @@ function frame = readFrame(obj, options)
     overran_buffer = frameNum > ( (obj.buffer_start_frame + obj.read_ahead_buffer_size) - 1); 
     underran_buffer = frameNum < obj.buffer_start_frame; 
 
+    % When converting to LMS we must ensure ceiling as NaN 
+    % and zeros_as_nans are true 
+    if(ismember(obj.current_reading_color_mode, LMS_colorspace_types))
+        assert(options.zeros_as_nans && options.ceiling_as_nans, "When converting to LMS types, both ceiling and floor must be NaN"); 
+    end 
+
+
     % If any rebuffer condition has been met, let's rebuffer
     should_rebuffer = any([no_buffer_exists, color_changed, overran_buffer, underran_buffer, options.force_rebuffer]);
     if(should_rebuffer)
@@ -84,12 +86,16 @@ function frame = readFrame(obj, options)
         if(verbose)
             disp("CONVERTING TO HDF5"); 
         end     
+
+        % Python reading ONLY supports format of GRAY, RGB, BGR. Therefore, values should be 0-255
+        % once they come out of here at MAXIMUM.
+        % if floor and ceiling is desired to be NaNs, then 0 and 255 should come out as NaNs
         obj.utility_library.video_to_hdf5(obj.full_video_path, obj.temporary_reading_hdf5_filepath,...
                                           python_color,...
                                           py.int(frameNum - 1), py.int((frameNum - 1) + block_size),...
                                           options.zeros_as_nans,...
-                                          options.verbose,...
-                                          options.dark_noise...
+                                          options.ceiling_as_nans,...
+                                          options.verbose...
                                          )
 
 
@@ -120,6 +126,14 @@ function frame = readFrame(obj, options)
             read_ahead_buffer = permute(read_ahead_buffer, [4 3 2 1]);
         end 
 
+        % Guard against bad values immediately after reading in the buffer 
+        if(options.zeros_as_nans)
+            assert(~any(read_ahead_buffer(:) <= 0), "0 was requested to be NaNs but values <= 0 were detected in the buffer after it has been read in"); 
+        end 
+
+        if(options.ceiling_as_nans)
+            assert(~any(read_ahead_buffer(:) >= 255), "255 was requested to be NaNs but values >= 255 were detected in the buffer after it has been read in");
+        end 
 
         % Display a progress bar if desired 
         % for in-MATLAB processing
@@ -160,17 +174,13 @@ function frame = readFrame(obj, options)
             if(options.parallel_buffer)
 
                 parfor pp = 1:size(read_ahead_buffer, 1)
+                    % Read the RGB frame
                     rgb_frame = squeeze(read_ahead_buffer(pp, :, :, :)); 
+                    assert(~any(rgb_frame(:) <= 0), "RGB Frame has value of 0 instead of NaN when converting to LMS"); 
+                    assert(~any(rgb_frame(:) >= 255), "RGB Frame has value of 255 instead of NaN when converting to LMS"); 
                     
-                    % If all zeros, do not work and simply use the same frame
-                    if(~any(rgb_frame(:)))
-                        converted = rgb_frame; 
-
-                    % Otherwise, convert to LMS
-                    else
-                        converted = rgb2lms(rgb_frame, T_receptors, T_camera, "camera", camera_used); 
-                    end 
-
+                    % Convert to LMS
+                    converted = rgb2lms(rgb_frame, T_receptors, T_camera, "camera", camera_used); 
                     read_ahead_buffer(pp, :, :, :) = converted;
                     
                     if(options.verbose)
@@ -189,21 +199,13 @@ function frame = readFrame(obj, options)
             % Sequential buffering 
             else 
                 for pp = 1:size(read_ahead_buffer, 1)
-                    if(options.verbose)
-                        fprintf("Converting frame %d / %d \n", pp, size(read_ahead_buffer, 1));
-                    end 
-
+                    % Read the RGB frame
                     rgb_frame = squeeze(read_ahead_buffer(pp, :, :, :)); 
+                    assert(~any(rgb_frame(:) <= 0), "RGB Frame has value of 0 instead of NaN when converting to LMS"); 
+                    assert(~any(rgb_frame(:) >= 255), "RGB Frame has value of 255 instead of NaN when converting to LMS"); 
                     
-                    % If all zeros, do no work and simply use the same frame
-                    if(~any(rgb_frame(:)))
-                        converted = rgb_frame; 
-
-                    % Otherwise, convert to LMS
-                    else
-                        converted = rgb2lms(rgb_frame, T_receptors, T_camera, "camera", camera_used); 
-                    end 
-
+                    % Convert to LMS
+                    converted = rgb2lms(rgb_frame, T_receptors, T_camera, "camera", camera_used); 
                     read_ahead_buffer(pp, :, :, :) = converted;
 
                     if(options.verbose)
@@ -218,7 +220,7 @@ function frame = readFrame(obj, options)
                     close(hWait);
                 end 
             end
-            
+
             % We first check if we are not in the normalized space 
             % This is a more simple calculation 
             % that does not require knowing certain normalization values
@@ -296,34 +298,13 @@ function frame = readFrame(obj, options)
                                                                             "channels", [1, 2, 3],...
                                                                             "verbose", verbose,...
                                                                             "zeros_as_nans", options.zeros_as_nans...
+                                                                            "ceiling_as_nans", options.ceiling_as_nans... 
                                                                             ); 
 
                 end     
 
 
                 % Let's calculate the normalized buffer
-
-                % First, we need to set zeros equal to NaNs if we would like
-                if(options.zeros_as_nans)
-                    L_temp = read_ahead_buffer(:, :, :, 1); 
-                    M_temp = read_ahead_buffer(:, :, :, 2);
-                    S_temp = read_ahead_buffer(:, :, :, 3);
-                    L_temp(L_temp == 0) = NaN;
-                    M_temp(M_temp == 0) = NaN;
-                    S_temp(S_temp == 0) = NaN;
-
-                    L = L_temp;
-                    M = M_temp; 
-                    S = S_temp; 
-
-                % Otherwise, we add a small epsilon to fight zeros and thus causing nans here 
-                else
-                    anti_zero_epsilon = 10e-9;
-                    L = read_ahead_buffer(:, :, :, 1) + anti_zero_epsilon;
-                    M = read_ahead_buffer(:, :, :, 2) + anti_zero_epsilon; 
-                    S = read_ahead_buffer(:, :, :, 3) + anti_zero_epsilon; 
-                end 
-
                 l_hat = log(L) - obj.normalization_factors(1); 
                 m_hat = log(M) - obj.normalization_factors(2);
                 s_hat = log(S) - obj.normalization_factors(3);
@@ -414,32 +395,8 @@ function frame = readFrame(obj, options)
         error("Frame read of inhomogenous shape to metadata");
     end     
 
-    % If we are converting zeros to NaNs and not in a contrast 
-    % mode (e.g. 0 contrast is something we want to know)
-    if (options.zeros_as_nans && ~ismember(obj.current_reading_color_mode, normalized_color_types) )
 
-        % 2 Channel: replace all 0s with NaN
-        % e.g. each pixel is a 0 goes to NaN
-        if (ndims(frame) == 2 || size(frame,3) == 1)
-            
-            frame(frame == 0) = nan;
 
-        % 3 channel: find pixels where ALL channels are zero
-        % and make that pixel NaN            
-        elseif (ndims(frame) == 3 && size(frame,3) == 3)
-            zeroMask = (frame(:,:,1) == 0) & ...
-                    (frame(:,:,2) == 0) & ...
-                    (frame(:,:,3) == 0);
-
-            % Apply mask to all channels
-            for c = 1:3
-                tmp = frame(:,:,c);
-                tmp(zeroMask) = nan;
-                frame(:,:,c) = tmp;
-            end
-        end
-
-    end
     % Ensure we are not returning an empty variable 
     if(isempty(frame))
         error("readFrame is about to return an empty variable");

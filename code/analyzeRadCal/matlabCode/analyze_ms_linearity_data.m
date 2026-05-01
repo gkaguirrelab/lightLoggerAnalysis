@@ -170,12 +170,6 @@ function figureHandles = analyze_ms_linearity_data(calibration_metadata, measure
             counts_by_NDF_tiled = tiledlayout(rows, cols);
             title(counts_by_NDF_tiled, sprintf("Counts by NDF Level | C: %s", chip), 'FontWeight', 'Bold');
             figureHandles{end+1,1} = countsByNdfFig;
-
-            % Create a tabbed figure with one tab per NDF level.
-            % Each tab will have all of a given chip's channels on it for that NDF
-            uif = uifigure('Name', sprintf("%s Channel Linearity Per NDF", chip));
-            tab_group = uitabgroup(uif);
-            figureHandles{end+1,1} = uif;
         end
 
         % Initialize a cell array that will hold the measured/predicted value by NDF
@@ -188,12 +182,13 @@ function figureHandles = analyze_ms_linearity_data(calibration_metadata, measure
             NDF = calibration_metadata.NDFs(nn);
 
             if opts.plotSettingLevel
-                % Create a new tab for this NDF for measured/predicted plot
-                tab = uitab(tab_group, 'Title', sprintf("NDF %.0f", NDF));
-
-                % Define a tiled layout that will go in this tab
+                % Create a standard figure for this NDF so it can be exported to EPS
+                measuredPredictedFig = figure('Name', sprintf("MS_Linearity_%s_Measured_vs_Predicted_NDF_%0.0f", chip, NDF));
+                set(measuredPredictedFig, 'Color', 'w');
                 [rows, cols] = find_min_figsize(n_channels_map(chip));
-                measured_predicted_tiled = tiledlayout(tab, rows, cols);
+                measured_predicted_tiled = tiledlayout(measuredPredictedFig, rows, cols);
+                title(measured_predicted_tiled, sprintf("%s Measured vs Predicted | NDF %.0f", chip, NDF), 'FontWeight', 'Bold');
+                figureHandles{end+1,1} = measuredPredictedFig;
             end
 
             % Retrieve the cal file for this NDF
@@ -327,9 +322,7 @@ function figureHandles = analyze_ms_linearity_data(calibration_metadata, measure
                 plot(across_NDF_channel_ax, [limits(1), limits(2)], [limits(1), limits(2)], ':k', "DisplayName", "IdentityLine");
 
                 title(across_NDF_channel_ax, sprintf("Channel %d", ch));
-                xlim(across_NDF_channel_ax, limits);
                 xlabel(across_NDF_channel_ax, sprintf('%s predicted irradiance [log]', chip));
-                ylim(across_NDF_channel_ax, limits);
                 ylabel(across_NDF_channel_ax, sprintf('%s measured counts [log]', chip));
 
                 legend(across_NDF_channel_ax, 'Location', 'bestoutside');
@@ -351,13 +344,9 @@ function figureHandles = analyze_ms_linearity_data(calibration_metadata, measure
                     p.MarkerEdgeAlpha = 0.4;
                 end
 
-                set(across_NDF_channel_ax, 'YLim', limits);
-                set(across_NDF_channel_ax, 'XLim', limits);
                 xlabel(across_NDF_channel_ax, 'log Illuminance [lux]');
                 ylabel(across_NDF_channel_ax, 'log measured sensor count');
                 title(across_NDF_channel_ax, sprintf('%s Channel %d Sensor Count vs Illuminance', chip, ch));
-                axis(across_NDF_channel_ax, 'square');   % makes box square
-                axis(across_NDF_channel_ax, 'equal');    % equal scaling (important for identity line)
             end
 
             hold(across_NDF_channel_ax, 'off');
@@ -380,7 +369,12 @@ function figureHandles = analyze_ms_linearity_data(calibration_metadata, measure
 
             xmin = min(x); 
             xmax = max(x); 
-            if isempty(xmin) || isempty(xmax) || ~isfinite(xmin) || ~isfinite(xmax) || xmin == xmax
+            ymin = min(y);
+            ymax = max(y);
+            common_min = min([xmin; ymin]);
+            common_max = max([xmax; ymax]);
+
+            if isempty(common_min) || isempty(common_max) || ~isfinite(common_min) || ~isfinite(common_max) || common_min == common_max
                 warning("Invalid x range for fit: xmin=%s xmax=%s", mat2str(xmin), mat2str(xmax));
                 disp("Does the TS chip have valid data?");
                 continue;
@@ -391,6 +385,10 @@ function figureHandles = analyze_ms_linearity_data(calibration_metadata, measure
 
             hold(across_NDF_channel_ax, 'on');
             plot(across_NDF_channel_ax, x_fit, y_fit, 'k:', 'LineWidth', 1, "DisplayName", "Fit Line");
+            set(across_NDF_channel_ax, 'XLim', [common_min, common_max]);
+            set(across_NDF_channel_ax, 'YLim', get(across_NDF_channel_ax, 'XLim'));
+            pbaspect(across_NDF_channel_ax, [1 1 1]);
+            axis(across_NDF_channel_ax, 'square');
             legend(across_NDF_channel_ax, 'Location', 'bestoutside');
         end % channel loop
     end % chip loop
