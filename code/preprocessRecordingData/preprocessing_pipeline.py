@@ -1555,7 +1555,14 @@ def combine_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/
                  color_modes_to_skip: Iterable[Literal["a", "c_lm", "c_s", "L-M", "L+M+S"]] = set(),
                  color_modes_to_process: Iterable[Literal["a", "c_lm", "c_s", "L-M", "L+M+S"]] = set()
                 ) -> None:
+    import matlab.engine
     
+    # Initialize the MATLAB engine to utilize the MATLAB function we have developed for this purpose 
+    #eng: object = matlab.engine.start_matlab()  
+    #eng.pyenv('Version', '~/Documents/MATLAB/projects/lightLoggerAnalysis/analysis_env/bin/python', nargout=0)
+    #eng.tbUseProject('lightLoggerAnalysis', nargout=0)
+
+
     # Ensure the inputs we later use for set equality are in set form 
     subjects_to_skip = set(subjects_to_skip)
     subjects_to_process = set(subjects_to_process)
@@ -1570,9 +1577,10 @@ def combine_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/
         if not color_mode.startswith(".")
         and os.path.isdir(os.path.join(src_dir, color_mode))
         and _is_desired_item(color_mode, color_modes_to_process, color_modes_to_skip)
+        and not color_mode.startswith("combination")
     ]) 
     assert len(color_mode_paths) > 0, f"No colormode directories found in: {src_dir}" 
-
+    color_modes_list: list[str] = [ os.path.basename(path) for path in color_mode_paths ]
 
     # Now, let's collect all of the subjects 
     # we want to process from the first colormode 
@@ -1682,9 +1690,23 @@ def combine_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/
                             else:
                                 spds_to_process[subject_id][activity_name][color_mode][projection_type] = spd_results_path
 
+    # Save this information out to a temp file to feed into matlab 
+    temp_output_path: str = os.path.join(os.path.expanduser("~/Desktop"), 'temp_combining_spds.mat')
+    scipy.io.savemat(temp_output_path, {"spds": spds_to_process})
+
+
+    # Generate the real output path that we will tell MATLAB to output to
+    output_path: str = os.path.join(dst_dir, f"combination_{ '#'.join(color_modes_list) } ")
+    print(output_path)
 
     # Call the MATLAB plotting function
     # to generate and output the plots
+
+    
+
+
+    # Close the MATLAB engine 
+    #eng.quit() 
 
     return
 

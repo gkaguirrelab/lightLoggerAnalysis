@@ -7,6 +7,7 @@ function global_means = calculate_global_channels_mean(video_path, options)
         options.verbose = false 
         options.start_end = false; 
         options.zeros_as_nans = false; 
+        options.ceiling_as_nans = false; 
     end 
 
     % First, let's open a video reader to stream frames from the video 
@@ -65,7 +66,8 @@ function global_means = calculate_global_channels_mean(video_path, options)
         % Read the target frame from the video 
         frame = video_reader.readFrame('frameNum', ii, ...
                                         'color', options.color,... 
-                                        'zeros_as_nans', options.zeros_as_nans...
+                                        'zeros_as_nans', options.zeros_as_nans,...
+                                        'ceiling_as_nans', options.ceiling_as_nans...
                                        ); 
         
         % Sum the target channels 

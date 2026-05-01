@@ -4,6 +4,7 @@ function frame = readFrame(obj, options)
         options.frameNum {mustBeNumeric} = []; 
         options.color {mustBeMember(options.color, ["RGB","BGR","GRAY", "LMS", "L+M+S", "L-M", "a", "c_lm", "c_s"])} = "RGB";
         options.zeros_as_nans = false; 
+        options.ceiling_as_nans = false;
         options.verbose = false; 
         options.force_rebuffer = false; 
         options.parallel_buffer = true; 
@@ -88,6 +89,7 @@ function frame = readFrame(obj, options)
                                           python_color,...
                                           py.int(frameNum - 1), py.int((frameNum - 1) + block_size),...
                                           options.zeros_as_nans,...
+                                          options.ceiling_as_nans,...
                                           options.verbose,...
                                           options.dark_noise...
                                          )
@@ -296,6 +298,7 @@ function frame = readFrame(obj, options)
                                                                             "channels", [1, 2, 3],...
                                                                             "verbose", verbose,...
                                                                             "zeros_as_nans", options.zeros_as_nans...
+                                                                            "ceiling_as_nans", options.ceiling_as_nans... 
                                                                             ); 
 
                 end     
@@ -304,6 +307,7 @@ function frame = readFrame(obj, options)
                 % Let's calculate the normalized buffer
 
                 % First, we need to set zeros equal to NaNs if we would like
+                % this is because 
                 if(options.zeros_as_nans)
                     L_temp = read_ahead_buffer(:, :, :, 1); 
                     M_temp = read_ahead_buffer(:, :, :, 2);
@@ -422,7 +426,7 @@ function frame = readFrame(obj, options)
         % e.g. each pixel is a 0 goes to NaN
         if (ndims(frame) == 2 || size(frame,3) == 1)
             
-            frame(frame == 0) = nan;
+            frame(frame = 0) = nan;
 
         % 3 channel: find pixels where ALL channels are zero
         % and make that pixel NaN            
@@ -440,6 +444,35 @@ function frame = readFrame(obj, options)
         end
 
     end
+
+    % If we are converting the ceiling of the image to NaN 
+    % and the frame is not in any altered color space, then 
+    % we enforce this (e.g. since LMS space can get far above 255 and this is expected) 
+    if(options.ceiling_as_nans && ~ismember(obj.current_reading_color_mode, LMS_colorspace_types)) 
+        % 2 Channel: replace all 255s with NaN
+        % e.g. each pixel is a 255 goes to NaN
+        if (ndims(frame) == 2 || size(frame,3) == 1)
+            
+            frame(frame >= 255) = nan;
+
+        % 3 channel: find pixels where ALL channels are zero
+        % and make that pixel NaN            
+        elseif (ndims(frame) == 3 && size(frame,3) == 3)
+            ceilingMask = (frame(:,:,1) >= 255) & ...
+                    (frame(:,:,2) >= 255) & ...
+                    (frame(:,:,3) >= 255);
+
+            % Apply mask to all channels
+            for c = 1:3
+                tmp = frame(:,:,c);
+                tmp(ceilingMask) = nan;
+                frame(:,:,c) = tmp;
+            end
+        end
+
+
+    end 
+
     % Ensure we are not returning an empty variable 
     if(isempty(frame))
         error("readFrame is about to return an empty variable");

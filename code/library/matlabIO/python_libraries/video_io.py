@@ -380,6 +380,7 @@ def video_to_hdf5(video_path: str, output_path: str,
                  start_frame: int=0, 
                  end_frame: int | float = float("inf"),
                  zeros_as_nans: bool=False,
+                 ceiling_as_nans: bool=False, 
                  visualize_results: bool=False,
                  dark_noise: float=16
                 ) -> None:
@@ -452,16 +453,52 @@ def video_to_hdf5(video_path: str, output_path: str,
                 video_stream.release() 
                 raise Exception(f"Color mode: {color_mode} is unsupported")
 
+            # Covert this frame to float right away 
+            # for our transformations and for the fact 
+            # that it will be saved as a float
+            frame = frame.astype(np.float64)
+
             # If we want to subtract the darknoise from the image, 
             # do it now
             if(dark_noise > 0):
                 dark_noise_mask: np.ndarray = frame <= dark_noise
                 frame[dark_noise_mask] = 0
 
-            # Convert to floats so we can use NaN 
-            if(zeros_as_nans is True):
-                frame = frame.astype(np.float64)
-                frame[frame == 0] = np.nan
+            # We need to handle zeros to NaNs 
+            # and ceilings to NaN differently 
+            # based on the shape if the image 
+            if(frame.ndim == 2):
+                
+                # If we are in a 2D image and want 
+                # to make zeros nan, that is easy
+                if(zeros_as_nans is True):
+                    frame[frame == 0] = np.nan
+
+                # Same for ceiling 
+                if(ceiling_as_nans is True):
+                    frame[frame >= 255] = np.nan
+
+            elif(frame.ndim == 3):
+                # If we are 3D image, we want to make 
+                # pixels that ALL channels are 0 
+                # into NaNs
+                if(zeros_as_nans is True):
+                    # Create a mask that is all of the pixels whose 
+                    # all 3 channels are == 0
+                    zero_mask_three_d: np.ndarray = np.all(frame == 0, axis=2)
+
+                    # Set these pixels equal to fully NaN
+                    frame[zero_mask_three_d] = np.nan
+
+                # Same for ceiling, but >= 255 
+                if(ceiling_as_nans is True):
+                    # Create a mask that is all of the pixels whose 
+                    # all 3 channels are >= 255
+                    ceiling_mask_three_d: np.ndarray = np.all(frame >= 255, axis=2)
+
+                    # Set these pixels equal to fully NaN
+                    frame[ceiling_mask_three_d] = np.nan
+
 
             # Append to the dataset 
             if color_mode.upper() == "GRAY":
