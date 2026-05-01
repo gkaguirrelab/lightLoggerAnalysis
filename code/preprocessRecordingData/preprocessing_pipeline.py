@@ -59,6 +59,7 @@ def generate_world_videos(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
                           overwrite_existing: bool=False,
                           apply_color_weights: bool=True, 
                           apply_floor_ceiling: bool=True,
+                          remove_dark_noise: bool=True, 
                           debayer_images: bool=True, 
                           apply_digital_gain: bool=True, 
                           fill_missing_frames: bool=True, 
@@ -120,6 +121,7 @@ def generate_world_videos(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
                                            world_video_out,
                                            apply_color_weights=apply_color_weights, 
                                            apply_floor_ceiling=apply_floor_ceiling,
+                                           remove_dark_noise=remove_dark_noise,
                                            debayer_images=debayer_images,
                                            apply_digital_gain=apply_digital_gain, 
                                            fill_missing_frames=fill_missing_frames,
@@ -1558,9 +1560,9 @@ def combine_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/
     import matlab.engine
     
     # Initialize the MATLAB engine to utilize the MATLAB function we have developed for this purpose 
-    #eng: object = matlab.engine.start_matlab()  
-    #eng.pyenv('Version', '~/Documents/MATLAB/projects/lightLoggerAnalysis/analysis_env/bin/python', nargout=0)
-    #eng.tbUseProject('lightLoggerAnalysis', nargout=0)
+    eng: object = matlab.engine.start_matlab()  
+    eng.pyenv('Version', '~/Documents/MATLAB/projects/lightLoggerAnalysis/analysis_env/bin/python', nargout=0)
+    eng.tbUseProject('lightLoggerAnalysis', nargout=0)
 
 
     # Ensure the inputs we later use for set equality are in set form 
@@ -1697,16 +1699,18 @@ def combine_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/
 
     # Generate the real output path that we will tell MATLAB to output to
     output_path: str = os.path.join(dst_dir, f"combination_{ '#'.join(color_modes_list) } ")
-    print(output_path)
 
     # Call the MATLAB plotting function
     # to generate and output the plots
-
-    
-
+    eng.combineSPDs(temp_output_path, 
+                    output_path, 
+                    "overwrite_existing", overwrite_existing, 
+                    "verbose", verbose,
+                    nargout=0
+                    )
 
     # Close the MATLAB engine 
-    #eng.quit() 
+    eng.quit() 
 
     return
 

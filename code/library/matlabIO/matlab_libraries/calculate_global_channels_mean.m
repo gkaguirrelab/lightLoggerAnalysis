@@ -33,12 +33,7 @@ function global_means = calculate_global_channels_mean(video_path, options)
         % If we want the natural log 
         % it is as follows 
         case "loge"
-            if(options.zeros_as_nans)
-                transformation = @(x) log(x);
-            else
-                transformation = @(x) log(x + 10e-9);
-
-            end
+            transformation = @(x) log(x);
         otherwise
             error("Unsupported transformation %s", options.sum_of);
 
@@ -75,6 +70,7 @@ function global_means = calculate_global_channels_mean(video_path, options)
         for ch = 1:numel(options.channels)
             target_channel = options.channels(ch);
             channel_data = frame(:, :, target_channel);
+        
             global_sums(ch) = global_sums(ch) + sum( transformation(channel_data(:)), 'omitnan');                
 
             % Keep adding to the count of non NaN values by channel 

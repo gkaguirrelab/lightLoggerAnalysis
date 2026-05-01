@@ -382,7 +382,6 @@ def video_to_hdf5(video_path: str, output_path: str,
                  zeros_as_nans: bool=False,
                  ceiling_as_nans: bool=False, 
                  visualize_results: bool=False,
-                 dark_noise: float=16
                 ) -> None:
     assert os.path.exists(video_path), f"Video path: {video_path} does not exist"
     assert output_path.endswith(".hdf5"), f"Output path: {output_path} must end in .hdf5"
@@ -458,12 +457,6 @@ def video_to_hdf5(video_path: str, output_path: str,
             # that it will be saved as a float
             frame = frame.astype(np.float64)
 
-            # If we want to subtract the darknoise from the image, 
-            # do it now
-            if(dark_noise > 0):
-                dark_noise_mask: np.ndarray = frame <= dark_noise
-                frame[dark_noise_mask] = 0
-
             # We need to handle zeros to NaNs 
             # and ceilings to NaN differently 
             # based on the shape if the image 
@@ -522,6 +515,7 @@ def world_chunks_to_video(recording_path: str,
                           output_path: str,
                           apply_color_weights: bool=False, 
                           apply_floor_ceiling: bool=False,
+                          remove_dark_noise: bool=False, 
                           debayer_images: bool=False, 
                           apply_digital_gain: bool=False,
                           fill_missing_frames: bool=False,
@@ -688,6 +682,13 @@ def world_chunks_to_video(recording_path: str,
                                                    frame_buffer
                                                 )
         
+
+        # Now, if we want to REMOVE the dark noise (darknoise = 0)
+        # let's do that now to 
+        if(remove_dark_noise is True):
+            dark_noise_mask = frame_buffer == world_util.WORLD_DARK_NOISE
+            frame_buffer[dark_noise_mask] = 0 
+
         # I just did digital gain, therefore this will immediately 
         # trigger and 
 
@@ -697,11 +698,7 @@ def world_chunks_to_video(recording_path: str,
 
         # If we want to embed the timestamps in the frame buffer, do that now
         if(embed_timestamps is True):
-            frame_buffer = np.array([world_util.embed_timestamp(frame, timestamp)
-                            for frame, timestamp in zip(frame_buffer, t_vector)
-                           ],
-                           dtype=np.uint8
-                           )
+            raise NotImplementedError()
 
         # ALL TRANSFORMATIONS ARE DONE AT THIS POINT. 
         # WE NEED TO CONVERT TO BGR TO WRITE FRAMES WITH CV2
