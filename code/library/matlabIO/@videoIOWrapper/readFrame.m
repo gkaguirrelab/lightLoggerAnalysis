@@ -2,7 +2,8 @@ function frame = readFrame(obj, options)
     arguments 
         obj 
         options.frameNum {mustBeNumeric} = []; 
-        options.color {mustBeMember(options.color, ["RGB","BGR","GRAY", "LMS", "L+M+S", "L-M", "a", "c_lm", "c_s"])} = "RGB";
+        options.color {mustBeMember(options.color, ["RGB","BGR","GRAY", "LMS", "L+M+S", "L+M", "S", "L-M", "a", "c_lm", "c_s"])} = "RGB";
+        options.apply_floor_ceiling = false; 
         options.zeros_as_nans = false; 
         options.ceiling_as_nans = false;
         options.verbose = false; 
@@ -221,6 +222,11 @@ function frame = readFrame(obj, options)
                 end 
             end
 
+            % Let's extract the LMS channels for later use
+            L = squeeze(read_ahead_buffer(:,:,:,1));
+            M = squeeze(read_ahead_buffer(:,:,:,2));
+            S = squeeze(read_ahead_buffer(:,:,:,3));
+
             % We first check if we are not in the normalized space 
             % This is a more simple calculation 
             % that does not require knowing certain normalization values
@@ -233,20 +239,15 @@ function frame = readFrame(obj, options)
                 % If L-M, we need to add 2 channels and remove the third 
                 % This leaves us a 2D image
                 elseif(options.color == "L+M")
-                    L = read_ahead_buffer(:,:,:,1);
-                    M = read_ahead_buffer(:,:,:,2);
                     read_ahead_buffer = squeeze(L + M);
 
                 % If L-M, we need to subtract 2 channels and remove the third 
                 % This leaves us a 2D image
                 elseif (options.color == "L-M")
-                    L = read_ahead_buffer(:,:,:,1);
-                    M = read_ahead_buffer(:,:,:,2);
                     read_ahead_buffer = squeeze(L - M);
                 
                 % If S, then we need to simply extract the last channel of the image 
                 elseif (options.color == "S")
-                    S = read_ahead_buffer(:, :, :, 3);
                     read_ahead_buffer = squeeze(S);
                 end 
             
@@ -297,12 +298,11 @@ function frame = readFrame(obj, options)
                                                                             "sum_of", "loge",...
                                                                             "channels", [1, 2, 3],...
                                                                             "verbose", verbose,...
-                                                                            "zeros_as_nans", options.zeros_as_nans...
+                                                                            "zeros_as_nans", options.zeros_as_nans,...
                                                                             "ceiling_as_nans", options.ceiling_as_nans... 
                                                                             ); 
 
                 end     
-
 
                 % Let's calculate the normalized buffer
                 l_hat = log(L) - obj.normalization_factors(1); 

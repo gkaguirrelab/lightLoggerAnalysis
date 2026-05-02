@@ -379,6 +379,7 @@ def video_to_hdf5(video_path: str, output_path: str,
                  color_mode: Literal["GRAY", "RGB", "BGR"]="RGB",
                  start_frame: int=0, 
                  end_frame: int | float = float("inf"),
+                 apply_floor_celing: bool=False, 
                  zeros_as_nans: bool=False,
                  ceiling_as_nans: bool=False, 
                  visualize_results: bool=False,
@@ -456,6 +457,22 @@ def video_to_hdf5(video_path: str, output_path: str,
             # for our transformations and for the fact 
             # that it will be saved as a float
             frame = frame.astype(np.float64)
+
+
+            # If we want to apply floor ceiling, 
+            # we clip the values of each pixel (and all channels in that
+            # pixel to the DARKNOISE < x <= 255 RANGE)
+            if(apply_floor_celing is True):
+                # Clip to the ceiling
+                frame = np.where((frame >= 255).any(axis=-1, keepdims=True),
+                                     255,
+                                     frame
+                                    )
+                # Clip to the floor 
+                frame = np.where((frame <= 0).any(axis=-1, keepdims=True),
+                                    0,
+                                    frame
+                                )
 
             # We need to handle zeros to NaNs 
             # and ceilings to NaN differently 
@@ -677,7 +694,7 @@ def world_chunks_to_video(recording_path: str,
                                     )
             
             # We also do this for the dark noise we have calculated 
-            frame_buffer = frame_buffer = np.where((frame_buffer <= world_util.WORLD_DARK_NOISE).any(axis=3, keepdims=True),
+            frame_buffer = np.where((frame_buffer <= world_util.WORLD_DARK_NOISE).any(axis=3, keepdims=True),
                                                    world_util.WORLD_DARK_NOISE,
                                                    frame_buffer
                                                 )
@@ -708,6 +725,8 @@ def world_chunks_to_video(recording_path: str,
             else:
                 raise RuntimeError(f"Unsupported colorspace conversion: {current_color_space} -> RBG")
 
+        assert frame_buffer.dtype == np.uint8
+
         # Retrieve the current chunk start time 
         current_chunk_start_time = t_vector[0]
 
@@ -728,7 +747,7 @@ def world_chunks_to_video(recording_path: str,
         # Write the number of missing frames in between as the previous frame 
         for missing_timestamp in missing_timestamps:
             missing_frame: np.ndarray = world_util.embed_timestamp(dummy_frame, missing_timestamp) if embed_timestamps is True else dummy_frame
-            assert missing_frame.dtype == np.uint8 and len(missing_frame.shape) == 3 if debayer_images is True else 2 
+            assert missing_frame.dtype == np.uint8 and ( len(missing_frame.shape) == 3 if debayer_images is True else len(missing_frame.shape) == 2 ) 
             video_writer.write(missing_frame)
 
         # Initialize variables to track the previous timestamp 
@@ -764,11 +783,11 @@ def world_chunks_to_video(recording_path: str,
             for missing_timestamp in missing_timestamps:
                 missing_frame: np.ndarray = world_util.embed_timestamp(dummy_frame, missing_timestamp) if embed_timestamps is True else dummy_frame
                 
-                assert missing_frame.dtype == np.uint8 and len(missing_frame.shape) == 3 if debayer_images is True else 2 
+                assert missing_frame.dtype == np.uint8 and ( len(missing_frame.shape) == 3 if debayer_images is True else len(missing_frame.shape) == 2 )
                 video_writer.write(missing_frame)
             
             # Write the current frame 
-            assert frame.dtype == np.uint8 and len(frame.shape) == 3 if debayer_images is True else 2 
+            assert frame.dtype == np.uint8 and ( len(frame.shape) == 3 if debayer_images is True else len(frame.shape) == 2 )
             video_writer.write(frame)
 
             # Save the current timestamp as the previous timestamp

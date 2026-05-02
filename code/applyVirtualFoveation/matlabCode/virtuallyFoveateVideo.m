@@ -240,7 +240,7 @@ function virtuallyFoveateVideo(world_video, sensor_t_cell, gaze_angles, gaze_off
        % Now that all these frames have been processed in parallel, let's write them out to the disk
         for oo = 1:size(output_buffer, 1)
             frame_to_write = squeeze(output_buffer(oo, :, :, :)); 
-            world_frame_writer.writeVideo(frame_to_write); 
+            world_frame_writer.writeVideo(frame_to_write, "apply_floor_ceiling", true); 
         end 
 
         % Update the start for the next chunk 
