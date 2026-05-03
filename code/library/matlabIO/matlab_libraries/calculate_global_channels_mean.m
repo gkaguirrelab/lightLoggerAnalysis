@@ -79,6 +79,10 @@ function global_means = calculate_global_channels_mean(video_path, options)
             total_non_nan(ch) = total_non_nan(ch) + sum(~isnan(channel_data(:))); 
         end 
 
+        % If at ANY point these go to NaN, this is bad 
+        assert(~any(isnan(global_sums))); 
+        assert(~any(isnan(total_non_nan)));
+
         % ---- UPDATE PROGRESS BAR ----
         if options.verbose
             waitbar(ii / n_frames, h_wait, ...
@@ -97,8 +101,16 @@ function global_means = calculate_global_channels_mean(video_path, options)
     for ch = 1:numel(options.channels)
         total_num_values = total_non_nan(ch); 
 
+        if(total_num_values == 0)
+            global_means(ch) = 0; 
+            continue; 
+        end 
+
         global_means(ch) = global_sums(ch) / total_num_values;
     end     
+
+    % Assert the final results are not nan 
+    assert(~any(isnan(global_means(:)))); 
 
     return 
 
