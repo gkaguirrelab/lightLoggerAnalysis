@@ -1596,7 +1596,7 @@ def combine_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/
     # Assert that the very first colormode has all of the subjects we want to process 
     # if we have specified them 
     if(len(subjects_to_process) > 0):
-        assert subject_ids == subjects_to_process, f"Subjects in {color_mode_paths[0]} are {subject_ids} but {subjects_to_process} were requested"
+        assert set(_extract_num_from_id(id_) for id_ in subject_ids) == subjects_to_process, f"Subjects in {color_mode_paths[0]} are {subject_ids} but {subjects_to_process} were requested"
 
     # Now we need to do the same thing with the activities requested 
     activity_names: set[str] = set( activity_name 
@@ -1698,7 +1698,7 @@ def combine_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/
 
 
     # Generate the real output path that we will tell MATLAB to output to
-    output_path: str = os.path.join(dst_dir, f"combination_{ '#'.join(color_modes_list) } ")
+    output_path: str = os.path.join(dst_dir, f"combination_{ '#'.join(color_modes_list) }")
 
     # Call the MATLAB plotting function
     # to generate and output the plots
@@ -1708,6 +1708,9 @@ def combine_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/
                     "verbose", verbose,
                     nargout=0
                     )
+    
+    # Remove the temp file
+    os.remove(temp_output_path)
 
     # Close the MATLAB engine 
     eng.quit() 
