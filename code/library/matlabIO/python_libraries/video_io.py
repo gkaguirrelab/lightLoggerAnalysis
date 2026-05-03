@@ -383,6 +383,8 @@ def video_to_hdf5(video_path: str, output_path: str,
                  zeros_as_nans: bool=False,
                  ceiling_as_nans: bool=False, 
                  visualize_results: bool=False,
+                 ceiling: int=255, 
+                 floor: int=0
                 ) -> None:
     assert os.path.exists(video_path), f"Video path: {video_path} does not exist"
     assert output_path.endswith(".hdf5"), f"Output path: {output_path} must end in .hdf5"
@@ -464,12 +466,12 @@ def video_to_hdf5(video_path: str, output_path: str,
             # pixel to the DARKNOISE < x <= 255 RANGE)
             if(apply_floor_celing is True):
                 # Clip to the ceiling
-                frame = np.where((frame >= 255).any(axis=-1, keepdims=True),
+                frame = np.where((frame >= ceiling).any(axis=-1, keepdims=True),
                                      255,
                                      frame
                                     )
                 # Clip to the floor 
-                frame = np.where((frame <= 0).any(axis=-1, keepdims=True),
+                frame = np.where((frame <= floor).any(axis=-1, keepdims=True),
                                     0,
                                     frame
                                 )
@@ -539,7 +541,9 @@ def world_chunks_to_video(recording_path: str,
                           convert_to_seconds: bool=True,
                           embed_timestamps: bool=False,
                           verbose: bool=False,
-                          start_end: tuple[int | float] = (0, float("inf"))
+                          start_end: tuple[int | float] = (0, float("inf")),
+                          ceiling: int=255, 
+                          floor: int=world_util.WORLD_DARK_NOISE
                          ) -> None:
     if(fill_missing_frames and not convert_to_seconds):
         raise Exception("Haven't handled this case. This will generate millions of extra frames")
@@ -688,14 +692,14 @@ def world_chunks_to_video(recording_path: str,
             
             # Therefore, we first turn any pixel that has any channel maxed out 
             # into a maxed out (white pixel)
-            frame_buffer = np.where((frame_buffer >= 255).any(axis=3, keepdims=True),
-                                     255,
+            frame_buffer = np.where((frame_buffer >= ceiling).any(axis=3, keepdims=True),
+                                     ceiling,
                                      frame_buffer
                                     )
             
             # We also do this for the dark noise we have calculated 
-            frame_buffer = np.where((frame_buffer <= world_util.WORLD_DARK_NOISE).any(axis=3, keepdims=True),
-                                                   world_util.WORLD_DARK_NOISE,
+            frame_buffer = np.where((frame_buffer <= floor).any(axis=3, keepdims=True),
+                                                   floor,
                                                    frame_buffer
                                                 )
         
