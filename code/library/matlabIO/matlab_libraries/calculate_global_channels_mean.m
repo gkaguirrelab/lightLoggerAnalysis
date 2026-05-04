@@ -38,7 +38,7 @@ function global_means = calculate_global_channels_mean(video_path, options)
                 transformation = @(x) log(x + 10e-9); % epsiolon to fight inf
             
             else
-                transformation = @(x) log(x); % Add a small epsilon so 0s dont cause INF behavior
+                transformation = @(x) log(x); 
             end 
 
         otherwise
