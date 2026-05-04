@@ -497,7 +497,7 @@ def video_to_hdf5(video_path: str, output_path: str,
                 if(zeros_as_nans is True):
                     # Create a mask that is all of the pixels whose 
                     # all 3 channels are == 0
-                    zero_mask_three_d: np.ndarray = np.all(frame == 0, axis=2)
+                    zero_mask_three_d: np.ndarray = np.all(frame == floor, axis=2)
 
                     # Set these pixels equal to fully NaN
                     frame[zero_mask_three_d] = np.nan
@@ -506,7 +506,7 @@ def video_to_hdf5(video_path: str, output_path: str,
                 if(ceiling_as_nans is True):
                     # Create a mask that is all of the pixels whose 
                     # all 3 channels are >= 255
-                    ceiling_mask_three_d: np.ndarray = np.all(frame >= 255, axis=2)
+                    ceiling_mask_three_d: np.ndarray = np.all(frame >= ceiling, axis=2)
 
                     # Set these pixels equal to fully NaN
                     frame[ceiling_mask_three_d] = np.nan
@@ -692,12 +692,14 @@ def world_chunks_to_video(recording_path: str,
             
             # Therefore, we first turn any pixel that has any channel maxed out 
             # into a maxed out (white pixel)
+            # this should make pixels who have channel values (e.g. [ceiling - 5, ceiling -5, ceiling] = [ceiling, ceiling, ceiling])
             frame_buffer = np.where((frame_buffer >= ceiling).any(axis=3, keepdims=True),
                                      ceiling,
                                      frame_buffer
                                     )
             
             # We also do this for the dark noise we have calculated 
+            # this should make pixels who have channel values (e.g. [floor -5, floor +5, floor] = [floor, floor, floor])
             frame_buffer = np.where((frame_buffer <= floor).any(axis=3, keepdims=True),
                                                    floor,
                                                    frame_buffer

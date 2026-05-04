@@ -9,6 +9,7 @@ function global_means = calculate_global_channels_mean(video_path, options)
         options.zeros_as_nans = false; 
         options.ceiling_as_nans = false; 
         options.apply_floor_ceiling = false; 
+        options.epsilon = 10e-9; 
     end 
 
     % First, let's open a video reader to stream frames from the video 
@@ -34,7 +35,7 @@ function global_means = calculate_global_channels_mean(video_path, options)
         % If we want the natural log 
         % it is as follows 
         case "loge"
-            transformation = @(x) log(x);
+            transformation = @(x) log(x + options.epsilon); % Add a small epsilon so 0s dont cause INF behavior
         otherwise
             error("Unsupported transformation %s", options.sum_of);
 
@@ -82,6 +83,10 @@ function global_means = calculate_global_channels_mean(video_path, options)
         % If at ANY point these go to NaN, this is bad 
         assert(~any(isnan(global_sums))); 
         assert(~any(isnan(total_non_nan)));
+
+        % If ANY point these go to INF this is also bad 
+        assert(~any(isinf(global_sums)));
+        assert(~any(isinf(total_non_nan)));
 
         % ---- UPDATE PROGRESS BAR ----
         if options.verbose

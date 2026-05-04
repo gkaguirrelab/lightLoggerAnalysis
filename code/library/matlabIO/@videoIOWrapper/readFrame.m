@@ -9,6 +9,7 @@ function frame = readFrame(obj, options)
         options.verbose = false; 
         options.force_rebuffer = false; 
         options.parallel_buffer = true; 
+        options.global_mean_start_end = false; 
     end 
     
     verbose = options.verbose; 
@@ -287,6 +288,7 @@ function frame = readFrame(obj, options)
                 % color types for the first time, we need 
                 % to calculate the normalization factors 
                 % for each of l, m, s
+                epsilon = 10e-9; % We use an epsilon here to fight zeros after LMS conversion
                 if(isempty(obj.normalization_factors))
                     if(verbose)
                         disp("Calculating normalization factors")
@@ -301,15 +303,21 @@ function frame = readFrame(obj, options)
                                                                             "verbose", verbose,...
                                                                             "zeros_as_nans", options.zeros_as_nans,...
                                                                             "ceiling_as_nans", options.ceiling_as_nans,...
-                                                                            "apply_floor_ceiling", options.apply_floor_ceiling... 
+                                                                            "apply_floor_ceiling", options.apply_floor_ceiling,... 
+                                                                            "start_end", options.global_mean_start_end,...
+                                                                            "epsilon", epsilon... 
                                                                             ); 
 
                 end     
 
                 % Let's calculate the normalized buffer
-                l_hat = log(L) - obj.normalization_factors(1); 
-                m_hat = log(M) - obj.normalization_factors(2);
-                s_hat = log(S) - obj.normalization_factors(3);
+                l_hat = log(L + epsilon) - obj.normalization_factors(1); 
+                m_hat = log(M + epsilon) - obj.normalization_factors(2);
+                s_hat = log(S + epsilon) - obj.normalization_factors(3);
+                assert(~any(isinf(l_hat(:))));
+                assert(~any(isinf(m_hat(:))));
+                assert(~any(isinf(s_hat(:))));
+
 
                 % %% ------------------------------------------------------------------------
                 % Achromatic signal (overall brightness)
