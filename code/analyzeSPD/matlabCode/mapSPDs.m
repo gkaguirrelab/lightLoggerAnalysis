@@ -273,7 +273,7 @@ function [exponentMap, varianceMap, spdByRegion, frq, medianImage, frameDropVect
     % Get the mean spd by region
     spdByRegion = squeeze(mean(spdByRegion,3,'omitmissing'));
 
-    assert(~all(isinan(exponentMap(:))));
+    assert(~all(isnan(exponentMap(:))));
     assert(~all(isnan(varianceMap(:))));
     assert(~all(isnan(medianImage(:)))); 
     assert(~all(isnan(spdByRegion(:))));
