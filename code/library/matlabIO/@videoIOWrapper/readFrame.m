@@ -184,6 +184,7 @@ function frame = readFrame(obj, options)
                     
                     % Convert to LMS
                     converted = rgb2lms(rgb_frame, T_receptors, T_camera, "camera", camera_used); 
+                    assert(~any(converted(:) == 0));  % Non-zero RGB frames (we just confirmed above we do not have 0s). Can never map to 0 
                     read_ahead_buffer(pp, :, :, :) = converted;
                     
                     if(options.verbose)
@@ -209,6 +210,7 @@ function frame = readFrame(obj, options)
                     
                     % Convert to LMS
                     converted = rgb2lms(rgb_frame, T_receptors, T_camera, "camera", camera_used); 
+                    assert(~any(converted(:) == 0)); % Non-zero RGB frames (we just confirmed above we do not have 0s). Can never map to 0 
                     read_ahead_buffer(pp, :, :, :) = converted;
 
                     if(options.verbose)
@@ -225,9 +227,9 @@ function frame = readFrame(obj, options)
             end
 
             % Let's extract the LMS channels for later use
-            L = squeeze(read_ahead_buffer(:,:,:,1));
-            M = squeeze(read_ahead_buffer(:,:,:,2));
-            S = squeeze(read_ahead_buffer(:,:,:,3));
+            L = read_ahead_buffer(:,:,:,1);
+            M = read_ahead_buffer(:,:,:,2);
+            S = read_ahead_buffer(:,:,:,3);
 
             % We first check if we are not in the normalized space 
             % This is a more simple calculation 
@@ -241,16 +243,16 @@ function frame = readFrame(obj, options)
                 % If L-M, we need to add 2 channels and remove the third 
                 % This leaves us a 2D image
                 elseif(options.color == "L+M")
-                    read_ahead_buffer = squeeze(L + M);
+                    read_ahead_buffer = L + M;
 
                 % If L-M, we need to subtract 2 channels and remove the third 
                 % This leaves us a 2D image
                 elseif (options.color == "L-M")
-                    read_ahead_buffer = squeeze(L - M);
+                    read_ahead_buffer = L - M;
                 
                 % If S, then we need to simply extract the last channel of the image 
                 elseif (options.color == "S")
-                    read_ahead_buffer = squeeze(S);
+                    read_ahead_buffer = S;
                 end 
             
             else
@@ -288,7 +290,6 @@ function frame = readFrame(obj, options)
                 % color types for the first time, we need 
                 % to calculate the normalization factors 
                 % for each of l, m, s
-                epsilon = 10e-9; % We use an epsilon here to fight zeros after LMS conversion
                 if(isempty(obj.normalization_factors))
                     if(verbose)
                         disp("Calculating normalization factors")
@@ -304,16 +305,15 @@ function frame = readFrame(obj, options)
                                                                             "zeros_as_nans", options.zeros_as_nans,...
                                                                             "ceiling_as_nans", options.ceiling_as_nans,...
                                                                             "apply_floor_ceiling", options.apply_floor_ceiling,... 
-                                                                            "start_end", options.global_mean_start_end,...
-                                                                            "epsilon", epsilon... 
+                                                                            "start_end", options.global_mean_start_end...
                                                                             ); 
 
                 end     
 
                 % Let's calculate the normalized buffer
-                l_hat = log(L + epsilon) - obj.normalization_factors(1); 
-                m_hat = log(M + epsilon) - obj.normalization_factors(2);
-                s_hat = log(S + epsilon) - obj.normalization_factors(3);
+                l_hat = log(L) - obj.normalization_factors(1); 
+                m_hat = log(M) - obj.normalization_factors(2);
+                s_hat = log(S) - obj.normalization_factors(3);
                 assert(~any(isinf(l_hat(:))));
                 assert(~any(isinf(m_hat(:))));
                 assert(~any(isinf(s_hat(:))));

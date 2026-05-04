@@ -335,6 +335,9 @@ function frame_chunk = load_frame_chunk(video_reader, start_frame, num_frames_to
             error("FRAME SHAPE HAS BECOME INHOMOGENOUS\n"); 
         end 
 
+        % NaNs are okay, but no value should be INF 
+        assert(~any(isinf(read_frame(:))));
+
         frame_chunk(insertion_index, :, :) = read_frame; 
         insertion_index = insertion_index + 1; 
     end 

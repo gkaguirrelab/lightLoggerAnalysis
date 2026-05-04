@@ -9,7 +9,6 @@ function global_means = calculate_global_channels_mean(video_path, options)
         options.zeros_as_nans = false; 
         options.ceiling_as_nans = false; 
         options.apply_floor_ceiling = false; 
-        options.epsilon = 10e-9; 
     end 
 
     % First, let's open a video reader to stream frames from the video 
@@ -35,13 +34,17 @@ function global_means = calculate_global_channels_mean(video_path, options)
         % If we want the natural log 
         % it is as follows 
         case "loge"
-            transformation = @(x) log(x + options.epsilon); % Add a small epsilon so 0s dont cause INF behavior
+            if(~options.zeros_as_nans)
+                transformation = @(x) log(x + 10e-9); % epsiolon to fight inf
+            
+            else
+                transformation = @(x) log(x); % Add a small epsilon so 0s dont cause INF behavior
+            end 
+
         otherwise
             error("Unsupported transformation %s", options.sum_of);
 
     end 
-
-
 
     % Next, let's iterate over the frames of the video 
     if options.verbose
@@ -74,6 +77,10 @@ function global_means = calculate_global_channels_mean(video_path, options)
             target_channel = options.channels(ch);
             channel_data = frame(:, :, target_channel);
         
+            if(~options.zeros_as_nans && options.sum_of == "loge")
+                assert(~any(frame(:) <= 0)); 
+            end     
+
             global_sums(ch) = global_sums(ch) + sum( transformation(channel_data(:)), 'omitnan');                
 
             % Keep adding to the count of non NaN values by channel 
@@ -114,8 +121,9 @@ function global_means = calculate_global_channels_mean(video_path, options)
         global_means(ch) = global_sums(ch) / total_num_values;
     end     
 
-    % Assert the final results are not nan 
+    % Assert the final results are not nan and not INF 
     assert(~any(isnan(global_means(:)))); 
+    assert(~any(isinf(global_means(:))));
 
     return 
 

@@ -46,7 +46,7 @@ function [spd, frq] = calcTemporalSPD(v, fps, options)
         options.applyFieldCorrection (1,1) logical = false
         options.byChannel (1,1) logical = false
         options.camera (1,:) char {mustBeMember(options.camera, {'standard', 'imx219'})} = 'imx219'
-        options.nan_threshold = 1;
+        options.nan_threshold = 0.1;
     end
 
     % Convert video data to double and get dimensions
