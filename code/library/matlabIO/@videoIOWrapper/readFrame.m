@@ -2,12 +2,14 @@ function frame = readFrame(obj, options)
     arguments 
         obj 
         options.frameNum {mustBeNumeric} = []; 
-        options.color {mustBeMember(options.color, ["RGB","BGR","GRAY", "LMS", "L+M+S", "L-M", "a", "c_lm", "c_s"])} = "RGB";
+        options.color {mustBeMember(options.color, ["RGB","BGR","GRAY", "LMS", "L+M+S", "L+M", "S", "L-M", "a", "c_lm", "c_s"])} = "RGB";
+        options.apply_floor_ceiling = false; 
         options.zeros_as_nans = false; 
         options.ceiling_as_nans = false;
         options.verbose = false; 
         options.force_rebuffer = false; 
         options.parallel_buffer = true; 
+        options.global_mean_start_end = false; 
     end 
     
     verbose = options.verbose; 
@@ -93,6 +95,7 @@ function frame = readFrame(obj, options)
         obj.utility_library.video_to_hdf5(obj.full_video_path, obj.temporary_reading_hdf5_filepath,...
                                           python_color,...
                                           py.int(frameNum - 1), py.int((frameNum - 1) + block_size),...
+                                          options.apply_floor_ceiling,...
                                           options.zeros_as_nans,...
                                           options.ceiling_as_nans,...
                                           options.verbose...
@@ -181,6 +184,7 @@ function frame = readFrame(obj, options)
                     
                     % Convert to LMS
                     converted = rgb2lms(rgb_frame, T_receptors, T_camera, "camera", camera_used); 
+                    assert(~any(converted(:) == 0));  % Non-zero RGB frames (we just confirmed above we do not have 0s). Can never map to 0 
                     read_ahead_buffer(pp, :, :, :) = converted;
                     
                     if(options.verbose)
@@ -206,6 +210,7 @@ function frame = readFrame(obj, options)
                     
                     % Convert to LMS
                     converted = rgb2lms(rgb_frame, T_receptors, T_camera, "camera", camera_used); 
+                    assert(~any(converted(:) == 0)); % Non-zero RGB frames (we just confirmed above we do not have 0s). Can never map to 0 
                     read_ahead_buffer(pp, :, :, :) = converted;
 
                     if(options.verbose)
@@ -221,6 +226,11 @@ function frame = readFrame(obj, options)
                 end 
             end
 
+            % Let's extract the LMS channels for later use
+            L = read_ahead_buffer(:,:,:,1);
+            M = read_ahead_buffer(:,:,:,2);
+            S = read_ahead_buffer(:,:,:,3);
+
             % We first check if we are not in the normalized space 
             % This is a more simple calculation 
             % that does not require knowing certain normalization values
@@ -233,21 +243,16 @@ function frame = readFrame(obj, options)
                 % If L-M, we need to add 2 channels and remove the third 
                 % This leaves us a 2D image
                 elseif(options.color == "L+M")
-                    L = read_ahead_buffer(:,:,:,1);
-                    M = read_ahead_buffer(:,:,:,2);
-                    read_ahead_buffer = squeeze(L + M);
+                    read_ahead_buffer = L + M;
 
                 % If L-M, we need to subtract 2 channels and remove the third 
                 % This leaves us a 2D image
                 elseif (options.color == "L-M")
-                    L = read_ahead_buffer(:,:,:,1);
-                    M = read_ahead_buffer(:,:,:,2);
-                    read_ahead_buffer = squeeze(L - M);
+                    read_ahead_buffer = L - M;
                 
                 % If S, then we need to simply extract the last channel of the image 
                 elseif (options.color == "S")
-                    S = read_ahead_buffer(:, :, :, 3);
-                    read_ahead_buffer = squeeze(S);
+                    read_ahead_buffer = S;
                 end 
             
             else
@@ -297,17 +302,22 @@ function frame = readFrame(obj, options)
                                                                             "sum_of", "loge",...
                                                                             "channels", [1, 2, 3],...
                                                                             "verbose", verbose,...
-                                                                            "zeros_as_nans", options.zeros_as_nans...
-                                                                            "ceiling_as_nans", options.ceiling_as_nans... 
+                                                                            "zeros_as_nans", options.zeros_as_nans,...
+                                                                            "ceiling_as_nans", options.ceiling_as_nans,...
+                                                                            "apply_floor_ceiling", options.apply_floor_ceiling,... 
+                                                                            "start_end", options.global_mean_start_end...
                                                                             ); 
 
                 end     
-
 
                 % Let's calculate the normalized buffer
                 l_hat = log(L) - obj.normalization_factors(1); 
                 m_hat = log(M) - obj.normalization_factors(2);
                 s_hat = log(S) - obj.normalization_factors(3);
+                assert(~any(isinf(l_hat(:))));
+                assert(~any(isinf(m_hat(:))));
+                assert(~any(isinf(s_hat(:))));
+
 
                 % %% ------------------------------------------------------------------------
                 % Achromatic signal (overall brightness)

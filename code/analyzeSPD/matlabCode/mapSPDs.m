@@ -273,6 +273,11 @@ function [exponentMap, varianceMap, spdByRegion, frq, medianImage, frameDropVect
     % Get the mean spd by region
     spdByRegion = squeeze(mean(spdByRegion,3,'omitmissing'));
 
+    assert(~all(isnan(exponentMap(:))));
+    assert(~all(isnan(varianceMap(:))));
+    assert(~all(isnan(medianImage(:)))); 
+    assert(~all(isnan(spdByRegion(:))));
+
     % Show the results if requested
     if options.doPlot
 
@@ -323,31 +328,15 @@ function frame_chunk = load_frame_chunk(video_reader, start_frame, num_frames_to
     % Read the target amount of frames 
     insertion_index = 1; 
     for ii = start_frame : start_frame + num_frames_to_read - 1
-        read_frame = video_reader.readFrame('frameNum', ii, "zeros_as_nans", true, 'color', color_mode, 'verbose', verbose, 'dark_noise', 16);
+        read_frame = video_reader.readFrame('frameNum', ii, "zeros_as_nans", true, 'color', color_mode, 'verbose', verbose, 'ceiling_as_nans', true, 'apply_floor_ceiling', true);
         [read_height, read_width] = size(read_frame);
         if(read_height ~= video_reader.Height || read_width ~= video_reader.Width)
             fprintf("Frame shape (%d, %d) does not match video shape (%d, %d)\n", read_height, read_width, video_reader.Height, video_reader.Width); 
             error("FRAME SHAPE HAS BECOME INHOMOGENOUS\n"); 
         end 
 
-        % For SPD analysis, we want to ensure absolutely NO zeros can be in the image
-        if (ndims(read_frame) == 2 || size(read_frame,3) == 1)
-            % Grayscale: check any zero
-            if any(read_frame(:) == 0)
-                error("Zero value detected in grayscale frame at frame %d", ii);
-            end
-
-        elseif (ndims(read_frame) == 3)
-            % Multi-channel: check any pixel that is entirely zero across channels
-            zeroMask = true(size(read_frame,1), size(read_frame,2));
-            for c = 1:size(read_frame,3)
-                zeroMask = zeroMask & (read_frame(:,:,c) == 0);
-            end
-
-            if any(zeroMask(:))
-                error("Zero pixel (all channels == 0) detected in frame %d", ii);
-            end
-        end
+        % NaNs are okay, but no value should be INF 
+        assert(~any(isinf(read_frame(:))));
 
         frame_chunk(insertion_index, :, :) = read_frame; 
         insertion_index = insertion_index + 1; 

@@ -8,6 +8,7 @@ function global_means = calculate_global_channels_mean(video_path, options)
         options.start_end = false; 
         options.zeros_as_nans = false; 
         options.ceiling_as_nans = false; 
+        options.apply_floor_ceiling = false; 
     end 
 
     % First, let's open a video reader to stream frames from the video 
@@ -33,13 +34,17 @@ function global_means = calculate_global_channels_mean(video_path, options)
         % If we want the natural log 
         % it is as follows 
         case "loge"
-            transformation = @(x) log(x);
+            if(~options.zeros_as_nans)
+                transformation = @(x) log(x + 10e-9); % epsiolon to fight inf
+            
+            else
+                transformation = @(x) log(x); 
+            end 
+
         otherwise
             error("Unsupported transformation %s", options.sum_of);
 
     end 
-
-
 
     % Next, let's iterate over the frames of the video 
     if options.verbose
@@ -62,7 +67,8 @@ function global_means = calculate_global_channels_mean(video_path, options)
         frame = video_reader.readFrame('frameNum', ii, ...
                                         'color', options.color,... 
                                         'zeros_as_nans', options.zeros_as_nans,...
-                                        'ceiling_as_nans', options.ceiling_as_nans...
+                                        'ceiling_as_nans', options.ceiling_as_nans,...
+                                        'apply_floor_ceiling', options.apply_floor_ceiling...
                                        ); 
         
         % Sum the target channels 
@@ -71,11 +77,23 @@ function global_means = calculate_global_channels_mean(video_path, options)
             target_channel = options.channels(ch);
             channel_data = frame(:, :, target_channel);
         
+            if(~options.zeros_as_nans && options.sum_of == "loge")
+                assert(~any(frame(:) <= 0)); 
+            end     
+
             global_sums(ch) = global_sums(ch) + sum( transformation(channel_data(:)), 'omitnan');                
 
             % Keep adding to the count of non NaN values by channel 
             total_non_nan(ch) = total_non_nan(ch) + sum(~isnan(channel_data(:))); 
         end 
+
+        % If at ANY point these go to NaN, this is bad 
+        assert(~any(isnan(global_sums))); 
+        assert(~any(isnan(total_non_nan)));
+
+        % If ANY point these go to INF this is also bad 
+        assert(~any(isinf(global_sums)));
+        assert(~any(isinf(total_non_nan)));
 
         % ---- UPDATE PROGRESS BAR ----
         if options.verbose
@@ -95,8 +113,17 @@ function global_means = calculate_global_channels_mean(video_path, options)
     for ch = 1:numel(options.channels)
         total_num_values = total_non_nan(ch); 
 
+        if(total_num_values == 0)
+            global_means(ch) = 0; 
+            continue; 
+        end 
+
         global_means(ch) = global_sums(ch) / total_num_values;
     end     
+
+    % Assert the final results are not nan and not INF 
+    assert(~any(isnan(global_means(:)))); 
+    assert(~any(isinf(global_means(:))));
 
     return 
 

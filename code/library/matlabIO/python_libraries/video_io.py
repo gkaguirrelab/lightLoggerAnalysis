@@ -379,9 +379,12 @@ def video_to_hdf5(video_path: str, output_path: str,
                  color_mode: Literal["GRAY", "RGB", "BGR"]="RGB",
                  start_frame: int=0, 
                  end_frame: int | float = float("inf"),
+                 apply_floor_celing: bool=False, 
                  zeros_as_nans: bool=False,
                  ceiling_as_nans: bool=False, 
                  visualize_results: bool=False,
+                 ceiling: int=255, 
+                 floor: int=0
                 ) -> None:
     assert os.path.exists(video_path), f"Video path: {video_path} does not exist"
     assert output_path.endswith(".hdf5"), f"Output path: {output_path} must end in .hdf5"
@@ -457,6 +460,22 @@ def video_to_hdf5(video_path: str, output_path: str,
             # that it will be saved as a float
             frame = frame.astype(np.float64)
 
+
+            # If we want to apply floor ceiling, 
+            # we clip the values of each pixel (and all channels in that
+            # pixel to the DARKNOISE < x <= 255 RANGE)
+            if(apply_floor_celing is True):
+                # Clip to the ceiling
+                frame = np.where((frame >= ceiling).any(axis=-1, keepdims=True),
+                                     255,
+                                     frame
+                                    )
+                # Clip to the floor 
+                frame = np.where((frame <= floor).any(axis=-1, keepdims=True),
+                                    0,
+                                    frame
+                                )
+
             # We need to handle zeros to NaNs 
             # and ceilings to NaN differently 
             # based on the shape if the image 
@@ -478,7 +497,7 @@ def video_to_hdf5(video_path: str, output_path: str,
                 if(zeros_as_nans is True):
                     # Create a mask that is all of the pixels whose 
                     # all 3 channels are == 0
-                    zero_mask_three_d: np.ndarray = np.all(frame == 0, axis=2)
+                    zero_mask_three_d: np.ndarray = np.all(frame == floor, axis=2)
 
                     # Set these pixels equal to fully NaN
                     frame[zero_mask_three_d] = np.nan
@@ -487,7 +506,7 @@ def video_to_hdf5(video_path: str, output_path: str,
                 if(ceiling_as_nans is True):
                     # Create a mask that is all of the pixels whose 
                     # all 3 channels are >= 255
-                    ceiling_mask_three_d: np.ndarray = np.all(frame >= 255, axis=2)
+                    ceiling_mask_three_d: np.ndarray = np.all(frame >= ceiling, axis=2)
 
                     # Set these pixels equal to fully NaN
                     frame[ceiling_mask_three_d] = np.nan
@@ -522,7 +541,9 @@ def world_chunks_to_video(recording_path: str,
                           convert_to_seconds: bool=True,
                           embed_timestamps: bool=False,
                           verbose: bool=False,
-                          start_end: tuple[int | float] = (0, float("inf"))
+                          start_end: tuple[int | float] = (0, float("inf")),
+                          ceiling: int=255, 
+                          floor: int=world_util.WORLD_DARK_NOISE
                          ) -> None:
     if(fill_missing_frames and not convert_to_seconds):
         raise Exception("Haven't handled this case. This will generate millions of extra frames")
@@ -671,14 +692,16 @@ def world_chunks_to_video(recording_path: str,
             
             # Therefore, we first turn any pixel that has any channel maxed out 
             # into a maxed out (white pixel)
-            frame_buffer = np.where((frame_buffer >= 255).any(axis=3, keepdims=True),
-                                     255,
+            # this should make pixels who have channel values (e.g. [ceiling - 5, ceiling -5, ceiling] = [ceiling, ceiling, ceiling])
+            frame_buffer = np.where((frame_buffer >= ceiling).any(axis=3, keepdims=True),
+                                     ceiling,
                                      frame_buffer
                                     )
             
             # We also do this for the dark noise we have calculated 
-            frame_buffer = frame_buffer = np.where((frame_buffer <= world_util.WORLD_DARK_NOISE).any(axis=3, keepdims=True),
-                                                   world_util.WORLD_DARK_NOISE,
+            # this should make pixels who have channel values (e.g. [floor -5, floor +5, floor] = [floor, floor, floor])
+            frame_buffer = np.where((frame_buffer <= floor).any(axis=3, keepdims=True),
+                                                   floor,
                                                    frame_buffer
                                                 )
         
@@ -708,6 +731,8 @@ def world_chunks_to_video(recording_path: str,
             else:
                 raise RuntimeError(f"Unsupported colorspace conversion: {current_color_space} -> RBG")
 
+        assert frame_buffer.dtype == np.uint8
+
         # Retrieve the current chunk start time 
         current_chunk_start_time = t_vector[0]
 
@@ -728,7 +753,7 @@ def world_chunks_to_video(recording_path: str,
         # Write the number of missing frames in between as the previous frame 
         for missing_timestamp in missing_timestamps:
             missing_frame: np.ndarray = world_util.embed_timestamp(dummy_frame, missing_timestamp) if embed_timestamps is True else dummy_frame
-            assert missing_frame.dtype == np.uint8 and len(missing_frame.shape) == 3 if debayer_images is True else 2 
+            assert missing_frame.dtype == np.uint8 and ( len(missing_frame.shape) == 3 if debayer_images is True else len(missing_frame.shape) == 2 ) 
             video_writer.write(missing_frame)
 
         # Initialize variables to track the previous timestamp 
@@ -764,11 +789,11 @@ def world_chunks_to_video(recording_path: str,
             for missing_timestamp in missing_timestamps:
                 missing_frame: np.ndarray = world_util.embed_timestamp(dummy_frame, missing_timestamp) if embed_timestamps is True else dummy_frame
                 
-                assert missing_frame.dtype == np.uint8 and len(missing_frame.shape) == 3 if debayer_images is True else 2 
+                assert missing_frame.dtype == np.uint8 and ( len(missing_frame.shape) == 3 if debayer_images is True else len(missing_frame.shape) == 2 )
                 video_writer.write(missing_frame)
             
             # Write the current frame 
-            assert frame.dtype == np.uint8 and len(frame.shape) == 3 if debayer_images is True else 2 
+            assert frame.dtype == np.uint8 and ( len(frame.shape) == 3 if debayer_images is True else len(frame.shape) == 2 )
             video_writer.write(frame)
 
             # Save the current timestamp as the previous timestamp

@@ -1596,7 +1596,7 @@ def combine_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/
     # Assert that the very first colormode has all of the subjects we want to process 
     # if we have specified them 
     if(len(subjects_to_process) > 0):
-        assert subject_ids == subjects_to_process, f"Subjects in {color_mode_paths[0]} are {subject_ids} but {subjects_to_process} were requested"
+        assert set(_extract_num_from_id(id_) for id_ in subject_ids) == subjects_to_process, f"Subjects in {color_mode_paths[0]} are {subject_ids} but {subjects_to_process} were requested"
 
     # Now we need to do the same thing with the activities requested 
     activity_names: set[str] = set( activity_name 
@@ -1698,7 +1698,7 @@ def combine_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/
 
 
     # Generate the real output path that we will tell MATLAB to output to
-    output_path: str = os.path.join(dst_dir, f"combination_{ '#'.join(color_modes_list) } ")
+    output_path: str = os.path.join(dst_dir, f"combination_{ '#'.join(color_modes_list) }")
 
     # Call the MATLAB plotting function
     # to generate and output the plots
@@ -1708,6 +1708,9 @@ def combine_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/
                     "verbose", verbose,
                     nargout=0
                     )
+    
+    # Remove the temp file
+    os.remove(temp_output_path)
 
     # Close the MATLAB engine 
     eng.quit() 
@@ -2459,7 +2462,9 @@ def generate_actigraphy_graphs(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoor
                                 verbose=False, 
                                 color_mode: Literal["L+M+S", "L-M", "GRAY"] = "L+M+S", 
                                 subjects_to_skip: Iterable=set(), 
-                                activities_to_skip: Iterable=set()
+                                subjects_to_process: Iterable=set(), 
+                                activities_to_skip: Iterable=set(), 
+                                activities_to_process: Iterable=set()
                               ) -> None:
     import matlab.engine
     
@@ -2473,15 +2478,16 @@ def generate_actigraphy_graphs(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoor
     # Construct the paths to the raw and processing dirs 
     assert all(os.path.exists(x) for x in (raw_dir, processing_dir))
 
-    # First, let's find all of the subjects in this experiment 
-    subject_paths: list[str] = natsorted([os.path.join(raw_dir, subject_name) 
-                                          for subject_name in os.listdir(raw_dir) 
-                                          if re.fullmatch(r"FLIC_\d+", subject_name) 
-                                          and os.path.isdir(os.path.join(raw_dir, subject_name))
-                                          if _extract_num_from_id(subject_name) not in subjects_to_skip
-                                         ]
-                                        ) 
+     # First, let's find all of the subjects in this experiment 
+    subject_paths: list[str] = natsorted([
+        os.path.join(raw_dir, subject_name)
+        for subject_name in os.listdir(raw_dir)
+        if re.fullmatch(r"FLIC_\d+", subject_name)
+        and os.path.isdir(os.path.join(raw_dir, subject_name))
+        and _is_desired_item(_extract_num_from_id(subject_name), subjects_to_process, subjects_to_skip)
+    ]) 
     assert len(subject_paths) > 0, f"No subject directories found in: {raw_dir}" 
+
 
     # Now, let's iterate over all the subject paths 
     subject_iterator: Iterable = range(len(subject_paths)) if verbose is False else tqdm(range(len(subject_paths)), desc="Processing Subjects", leave=True)
@@ -2491,27 +2497,23 @@ def generate_actigraphy_graphs(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoor
         subject_id: str = os.path.basename(subject_raw_path)
         subject_id_number: int = int(re.search("\d+", subject_id).group())
 
-        # Skip subjects we are not interested in examining 
-        if(subject_id_number in subjects_to_skip):
-            continue
-
         # Construct the path to this subject in the processing directory 
         subject_processing_path: str = os.path.join(processing_dir, subject_id)
         assert os.path.exists(subject_processing_path), f"Problem with: {subject_processing_path}"
 
         # Iterate over the activites for this subject 
-        activites_paths: list[str] = [os.path.join(subject_raw_path, filename) for filename in natsorted(os.listdir(subject_raw_path))
-                                      if os.path.isdir(os.path.join(subject_raw_path, filename))
-                                     ]
+         # Iterate over the activites for this subject 
+        activites_paths: list[str] = [
+            os.path.join(subject_raw_path, filename)
+            for filename in natsorted(os.listdir(subject_raw_path))
+            if os.path.isdir(os.path.join(subject_raw_path, filename))
+            and _is_desired_item(filename, activities_to_process, activities_to_skip)
+        ]
         activities_iterator: Iterable = range(len(activites_paths)) if verbose is False else tqdm(range(len(activites_paths)), desc="Processing Activities", leave=False)
         for activity_num in activities_iterator:
             # Retrieve the activity path and activity name
             activity_raw_path: str = activites_paths[activity_num]
             activity_name: str = os.path.basename(activity_raw_path)
-
-            # Skip desired activites 
-            if(activity_name in activities_to_skip):
-                continue 
 
             activitiy_processing_path: str = os.path.join(subject_processing_path, activity_name)
             assert os.path.exists(activitiy_processing_path), f"Problem with: {activitiy_processing_path}"

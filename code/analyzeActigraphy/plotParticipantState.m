@@ -16,6 +16,8 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
         options.winSizeSec = 5;  
         options.force_recalc = false; 
         options.w_as_offset = -139.354; % milliseconds
+        options.active_threshold = 0.025;
+        options.outdoor_threshold = 10 ^ 2.5;
 
     end
     winSizeSec = options.winSizeSec; 
@@ -64,7 +66,7 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     MS2illum_lux = msCounts2Illuminance(ms_v);
     
     % Classify outdoor/indoor based on this 
-    outdoor_threshold = 10 ^ 2.5; 
+    outdoor_threshold = options.outdoor_threshold; 
     outdoor_indoor_classifications = ~classifyIndoorOutdoorPeriods(path_to_raw_recording, ...
                                                                   "window_size_seconds", options.winSizeSec,...
                                                                   "outdoor_threshold", outdoor_threshold...
@@ -93,7 +95,7 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     magAccel = sqrt(sum(IMUdata{:, {'accelerationX_g_', 'accelerationY_g_', 'accelerationZ_g_'}}.^2, 2));
     enmo = max(0, magAccel - 1); 
     activityIndex = movmean(enmo, winSizeSamples, 'omitnan'); 
-    active_threshold = 0.05; 
+    active_threshold = options.active_threshold; 
     active_inactive_classifications = classifyActiveInactivePeriods(IMUdata, ...
                                                                     "window_size_seconds", options.winSizeSec,...
                                                                     "active_threshold", active_threshold...
@@ -137,38 +139,54 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     cOutdoor = [1 1 0];   % yellow
     cActive  = [0 1 0];   % green
     cTaskBounds = [0 0.65 1];
+    summaryAxisFontSize = 11;
+    summaryLabelFontSize = 13;
+    summaryTitleFontSize = 24;
+    summaryLegendFontSize = 9;
     
     %----------------------------------------------
     %% Figure 1: Session Summary (Updated to 5 rows)
-    figure('Color', 'w', 'Units', 'normalized', 'Position', [0.05 0.05 0.3 0.9], 'Name', 'Summary');
+    figure('Color', 'w', 'Units', 'inches', 'Position', [1 1 14.5 8.32], 'Name', 'Summary');
     tlo1 = tiledlayout(5, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
+    tlo1.OuterPosition = [0.05 0.06 0.66 0.90];
     
     % Subplot 1: ENMO
     ax1 = nexttile(tlo1); 
     hold(ax1, 'on');
 
+    formattedTaskTitle = format_activity_title(string(activity));
     pENMO = plot(ax1, timeMinIMU, activityIndex, 'k', 'LineWidth', 1.2, 'DisplayName', 'ENMO');
-    ylabel(ax1, 'Activity (g)'); 
-    title(ax1, [figureTitle ' - ' num2str(winSizeSec) 's Window']);
+    ylabel(ax1, 'Activity (g)', 'FontSize', summaryLabelFontSize); 
+    title(ax1, formattedTaskTitle, 'FontSize', summaryTitleFontSize, 'FontWeight', 'bold');
     ylim(ax1, [0, 0.2]);
     grid(ax1, 'on');
+    ax1.FontSize = summaryAxisFontSize;
+    ax1.XTickLabel = [];
 
 
     % Subplot 2: Rotational Vel
     ax2 = nexttile(tlo1); hold(ax2, 'on');
-    plot(ax2, timeMinIMU, vRoll,  'Color', [cRoll  0.3], 'DisplayName', 'Roll');
-    plot(ax2, timeMinIMU, vPitch, 'Color', [cPitch 0.3], 'DisplayName', 'Pitch');
-    plot(ax2, timeMinIMU, vYaw,   'Color', [cYaw   0.3], 'DisplayName', 'Yaw');
-    ylabel(ax2, 'Rot. Vel (deg/s)'); legend('FontSize', 7); grid on;
+    pRoll = plot(ax2, timeMinIMU, vRoll,  'Color', [cRoll  0.3], 'LineWidth', 1.2, 'DisplayName', 'Roll');
+    pPitch = plot(ax2, timeMinIMU, vPitch, 'Color', [cPitch 0.3], 'LineWidth', 1.2, 'DisplayName', 'Pitch');
+    pYaw = plot(ax2, timeMinIMU, vYaw,   'Color', [cYaw   0.3], 'LineWidth', 1.2, 'DisplayName', 'Yaw');
+    ylabel(ax2, 'Rot. Vel (deg/s)', 'FontSize', summaryLabelFontSize); grid on;
     ylim([-360, 360]);
+    ax2.FontSize = summaryAxisFontSize;
+    ax2.XTickLabel = [];
+    lgd2 = legend(ax2, [pRoll, pPitch, pYaw], {'Roll', 'Pitch', 'Yaw'}, 'FontSize', summaryLegendFontSize, 'Location', 'northeastoutside');
+    lgd2.Box = 'off';
     
 
     % Subplot 3: Gaze
     ax3 = nexttile(tlo1); hold(ax3, 'on');
-    plot(ax3, timeMinGaze, gazeElev, 'Color', cPitch, 'DisplayName', 'Elev');
-    plot(ax3, timeMinGaze, gazeAzim, 'Color', cYaw, 'DisplayName', 'Azim');
-    ylabel(ax3, 'Gaze (deg)'); legend('FontSize', 7); grid on;
+    pElev = plot(ax3, timeMinGaze, gazeElev, 'Color', cPitch, 'LineWidth', 1.2, 'DisplayName', 'Elev');
+    pAzim = plot(ax3, timeMinGaze, gazeAzim, 'Color', cYaw, 'LineWidth', 1.2, 'DisplayName', 'Azim');
+    ylabel(ax3, 'Gaze (deg)', 'FontSize', summaryLabelFontSize); grid on;
     ylim([-60, 60]);
+    ax3.FontSize = summaryAxisFontSize;
+    ax3.XTickLabel = [];
+    lgd3 = legend(ax3, [pElev, pAzim], {'Elev', 'Azim'}, 'FontSize', summaryLegendFontSize, 'Location', 'northeastoutside');
+    lgd3.Box = 'off';
     
     % Subplot 4: Eye State
     ax4 = nexttile(tlo1); hold(ax4, 'on');
@@ -176,14 +194,17 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     timeMinBlinks = (double(blinkData.startTimestamp_ns_) - double(t0)) / 1e9 / 60;
     pBlink = stem(ax4, timeMinBlinks, zeros(size(timeMinBlinks)) + 2.0, 'Color', [0.6 0.6 0.6], 'Marker', 'none', 'DisplayName', 'Blinks');
     pAperture = plot(ax4, timeMinEye, smoothAperture, '-', 'Color', cApert, 'LineWidth', 1.2, 'DisplayName', 'Aperture'); 
-    ylabel('Eyelid Aperture (mm)'); ax4.YAxis(1).Color = cApert; 
+    ylabel('Eyelid Aperture (mm)', 'FontSize', summaryLabelFontSize); ax4.YAxis(1).Color = cApert; 
     ylim(ax4, [0, 15]);
     yyaxis right
     pPupil = plot(ax4, timeMinEye, smoothPupil, '-', 'Color', cPupil, 'LineWidth', 1.2, 'DisplayName', 'Pupil');
     ylim(ax4, [2, 6]);
-    ylabel('Pupil (mm)'); ax4.YAxis(2).Color = cPupil; 
+    ylabel('Pupil (mm)', 'FontSize', summaryLabelFontSize); ax4.YAxis(2).Color = cPupil; 
     grid on;
-    legend(ax4, [pAperture, pPupil, pBlink], {'Eyelid openness', 'Pupil size', 'Blinks'}, 'FontSize', 7, 'Location', 'best');
+    ax4.FontSize = summaryAxisFontSize;
+    ax4.XTickLabel = [];
+    lgd4 = legend(ax4, [pAperture, pPupil, pBlink], {'Eyelid openness', 'Pupil size', 'Blinks'}, 'FontSize', summaryLegendFontSize, 'Location', 'northeastoutside');
+    lgd4.Box = 'off';
 
     % Subplot 5: Absolute Illuminance (Lux)
     ax5 = nexttile(tlo1);
@@ -194,10 +215,11 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     ax5.YScale = 'log';
     ax5.YMinorGrid = 'off'; 
     ax5.YGrid = 'on';      
-    ylabel(ax5, 'Illum (Lux)'); 
-    xlabel(ax5, 'Time (min)');
+    ylabel(ax5, 'Illum (Lux)', 'FontSize', summaryLabelFontSize); 
+    xlabel(ax5, 'Time (min)', 'FontSize', summaryLabelFontSize);
     ylim(ax5, [1, 10e4]); 
     grid(ax5, 'on');
+    ax5.FontSize = summaryAxisFontSize;
 
     linkaxes([ax1, ax2, ax3, ax4, ax5], 'x');
     % Find the maximum time across your data to set a tight limit
@@ -224,7 +246,9 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
         'LineWidth', 1.5, ...
         'HandleVisibility', 'off');
 
-    legend(ax1, [pENMO, hActive], {'ENMO', 'Active threshold'}, 'FontSize', 7);
+    pTaskPeriod1 = plot(ax1, nan, nan, '-', 'Color', cTaskBounds, 'LineWidth', 1.8, 'DisplayName', 'Task period');
+    lgd1 = legend(ax1, [pENMO, hActive, pTaskPeriod1], {'ENMO', 'Active threshold', 'Task period'}, 'FontSize', summaryLegendFontSize, 'Location', 'northeastoutside');
+    lgd1.Box = 'off';
 
 
     xl5 = xlim(ax5);
@@ -245,15 +269,28 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
         'LineWidth', 1.5, ...
         'HandleVisibility', 'off');
 
-    legend(ax5, [pLux, hOutdoor], {'Illum', 'Outdoor threshold'}, 'FontSize', 7);
+    lgd5 = legend(ax5, [pLux, hOutdoor], {'Illum', 'Outdoor threshold'}, 'FontSize', summaryLegendFontSize, 'Location', 'northeastoutside');
+    lgd5.Box = 'off';
+    
+    % Keep the legends at MATLAB's native northeastoutside placement.
+    lgd1.Location = 'northeastoutside';
+    lgd2.Location = 'northeastoutside';
+    lgd3.Location = 'northeastoutside';
+    lgd4.Location = 'northeastoutside';
+    lgd5.Location = 'northeastoutside';
+    drawnow;
+
+    % Move all summary legends except the eyelid/pupil legend further to
+    % the right by a fixed amount in inches.
+    legend_shift_in = 0.4;
+    lgd1.Units = 'inches'; lgd1.Position(1) = lgd1.Position(1) + legend_shift_in;
+    lgd2.Units = 'inches'; lgd2.Position(1) = lgd2.Position(1) + legend_shift_in;
+    lgd3.Units = 'inches'; lgd3.Position(1) = lgd3.Position(1) + legend_shift_in;
+    lgd5.Units = 'inches'; lgd5.Position(1) = lgd5.Position(1) + legend_shift_in;
 
     % Save the figure if desired 
     if(options.save_figures)
-        output_path = fullfile(output_dir, "actigraphy_summary.pdf");
-        exportgraphics(gcf, output_path, ...
-        'ContentType', 'vector', ...   
-        'BackgroundColor', 'white', ...
-        'Resolution', 300);
+        export_figure_dual(gcf, output_dir, "actigraphy_summary");
         close(gcf); 
     end 
 
@@ -267,7 +304,7 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     validP = find(~isnan(interpPitch) & ~isnan(gazeElev));
     validY = find(~isnan(interpYaw) & ~isnan(gazeAzim));
 
-    figure('Color', 'w', 'Units', 'normalized', 'Position', [0.36 0.5 0.3 0.4], 'Name', 'Gaze-Head Corr');
+    figure('Color', 'w', 'Units', 'normalized', 'Position', [0.08 0.52 0.52 0.34], 'Name', 'Gaze-Head Corr');
     tlo2 = tiledlayout(1, 2, 'TileSpacing', 'loose', 'Padding', 'compact');
     axA = nexttile(tlo2); hold(axA, 'on');
     scatter(axA, interpPitch(validP), gazeElev(validP), 10, cPitch, 'filled',...
@@ -294,11 +331,7 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     drawnow;
     % Save the figure if desired 
     if(options.save_figures)
-        output_path = fullfile(output_dir, "gaze_head_correlation.pdf");
-        exportgraphics(gcf, output_path, ...
-        'ContentType', 'vector', ...   
-        'BackgroundColor', 'white', ...
-        'Resolution', 300);
+        export_figure_dual(gcf, output_dir, "gaze_head_correlation");
         close(gcf); 
     end 
 
@@ -312,7 +345,7 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     validA = find(~isnan(activityIndex) & ~isnan(interpAperture));
     validPup = find(~isnan(activityIndex) & ~isnan(interpPupil));
 
-    figure('Color', 'w', 'Units', 'normalized', 'Position', [0.36 0.05 0.3 0.4], 'Name', 'Activity-Eye Corr');
+    figure('Color', 'w', 'Units', 'normalized', 'Position', [0.08 0.10 0.52 0.34], 'Name', 'Activity-Eye Corr');
     tlo3 = tiledlayout(1, 2, 'TileSpacing', 'loose', 'Padding', 'compact');
     
     axC = nexttile(tlo3); hold(axC, 'on');
@@ -343,11 +376,7 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     drawnow;
     % Save the figure if desired 
     if(options.save_figures)
-        output_path = fullfile(output_dir, "activity_vs_eyestate.pdf");
-        exportgraphics(gcf, output_path, ...
-        'ContentType', 'vector', ...   
-        'BackgroundColor', 'white', ...
-        'Resolution', 300);
+        export_figure_dual(gcf, output_dir, "activity_vs_eyestate");
         close(gcf); 
     end 
 
@@ -357,7 +386,7 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     logLux = log10(MS2illum_lux + eps); 
     interpLogLux_Eye = interp1(double(ms_t), logLux, eyeTime, 'nearest', NaN);
 
-    figure('Color', 'w', 'Units', 'normalized', 'Position', [0.1 0.1 0.6 0.4], 'Name', 'Illuminance Correlations');
+    figure('Color', 'w', 'Units', 'normalized', 'Position', [0.08 0.10 0.58 0.36], 'Name', 'Illuminance Correlations');
     tlo4 = tiledlayout(1, 2, 'TileSpacing', 'loose', 'Padding', 'compact');
     
     % Panel 1: Log(Lux) vs. Eyelid Aperture
@@ -394,11 +423,7 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     drawnow;
         % Save the figure if desired 
     if(options.save_figures)
-        output_path = fullfile(output_dir, "illuminance_vs_eyestate.pdf");
-        exportgraphics(gcf, output_path, ...
-        'ContentType', 'vector', ...   
-        'BackgroundColor', 'white', ...
-        'Resolution', 300);
+        export_figure_dual(gcf, output_dir, "illuminance_vs_eyestate");
         close(gcf); 
     end 
 
@@ -556,4 +581,24 @@ function add_task_boundary_lines(axesHandles, timeMinTask, lineColor)
         xline(ax, timeMinTask(1), '-', 'Color', lineColor, 'LineWidth', 1.8, 'HandleVisibility', 'off');
         xline(ax, timeMinTask(2), '-', 'Color', lineColor, 'LineWidth', 1.8, 'HandleVisibility', 'off');
     end
+end
+
+function export_figure_dual(figHandle, output_dir, basename)
+    pdf_path = fullfile(output_dir, basename + ".pdf");
+    eps_path = fullfile(output_dir, basename + ".eps");
+
+    exportgraphics(figHandle, pdf_path, ...
+        'ContentType', 'vector', ...
+        'BackgroundColor', 'white', ...
+        'Resolution', 300);
+
+    exportgraphics(figHandle, eps_path, ...
+        'ContentType', 'vector', ...
+        'BackgroundColor', 'white', ...
+        'Resolution', 300);
+end
+
+function formatted_title = format_activity_title(activity_name)
+    formatted_title = regexprep(char(activity_name), '([a-z])([A-Z])', '$1 $2');
+    formatted_title(1) = upper(formatted_title(1));
 end
