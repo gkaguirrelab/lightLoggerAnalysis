@@ -139,38 +139,54 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     cOutdoor = [1 1 0];   % yellow
     cActive  = [0 1 0];   % green
     cTaskBounds = [0 0.65 1];
+    summaryAxisFontSize = 11;
+    summaryLabelFontSize = 13;
+    summaryTitleFontSize = 24;
+    summaryLegendFontSize = 9;
     
     %----------------------------------------------
     %% Figure 1: Session Summary (Updated to 5 rows)
-    figure('Color', 'w', 'Units', 'normalized', 'Position', [0.04 0.08 0.5 0.82], 'Name', 'Summary');
+    figure('Color', 'w', 'Units', 'inches', 'Position', [1 1 14.5 8.32], 'Name', 'Summary');
     tlo1 = tiledlayout(5, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
+    tlo1.OuterPosition = [0.05 0.06 0.66 0.90];
     
     % Subplot 1: ENMO
     ax1 = nexttile(tlo1); 
     hold(ax1, 'on');
 
+    formattedTaskTitle = format_activity_title(string(activity));
     pENMO = plot(ax1, timeMinIMU, activityIndex, 'k', 'LineWidth', 1.2, 'DisplayName', 'ENMO');
-    ylabel(ax1, 'Activity (g)'); 
-    title(ax1, [figureTitle ' - ' num2str(winSizeSec) 's Window']);
+    ylabel(ax1, 'Activity (g)', 'FontSize', summaryLabelFontSize); 
+    title(ax1, formattedTaskTitle, 'FontSize', summaryTitleFontSize, 'FontWeight', 'bold');
     ylim(ax1, [0, 0.2]);
     grid(ax1, 'on');
+    ax1.FontSize = summaryAxisFontSize;
+    ax1.XTickLabel = [];
 
 
     % Subplot 2: Rotational Vel
     ax2 = nexttile(tlo1); hold(ax2, 'on');
-    plot(ax2, timeMinIMU, vRoll,  'Color', [cRoll  0.3], 'DisplayName', 'Roll');
-    plot(ax2, timeMinIMU, vPitch, 'Color', [cPitch 0.3], 'DisplayName', 'Pitch');
-    plot(ax2, timeMinIMU, vYaw,   'Color', [cYaw   0.3], 'DisplayName', 'Yaw');
-    ylabel(ax2, 'Rot. Vel (deg/s)'); grid on;
+    pRoll = plot(ax2, timeMinIMU, vRoll,  'Color', [cRoll  0.3], 'LineWidth', 1.2, 'DisplayName', 'Roll');
+    pPitch = plot(ax2, timeMinIMU, vPitch, 'Color', [cPitch 0.3], 'LineWidth', 1.2, 'DisplayName', 'Pitch');
+    pYaw = plot(ax2, timeMinIMU, vYaw,   'Color', [cYaw   0.3], 'LineWidth', 1.2, 'DisplayName', 'Yaw');
+    ylabel(ax2, 'Rot. Vel (deg/s)', 'FontSize', summaryLabelFontSize); grid on;
     ylim([-360, 360]);
+    ax2.FontSize = summaryAxisFontSize;
+    ax2.XTickLabel = [];
+    lgd2 = legend(ax2, [pRoll, pPitch, pYaw], {'Roll', 'Pitch', 'Yaw'}, 'FontSize', summaryLegendFontSize, 'Location', 'northeastoutside');
+    lgd2.Box = 'off';
     
 
     % Subplot 3: Gaze
     ax3 = nexttile(tlo1); hold(ax3, 'on');
-    plot(ax3, timeMinGaze, gazeElev, 'Color', cPitch, 'DisplayName', 'Elev');
-    plot(ax3, timeMinGaze, gazeAzim, 'Color', cYaw, 'DisplayName', 'Azim');
-    ylabel(ax3, 'Gaze (deg)'); grid on;
+    pElev = plot(ax3, timeMinGaze, gazeElev, 'Color', cPitch, 'LineWidth', 1.2, 'DisplayName', 'Elev');
+    pAzim = plot(ax3, timeMinGaze, gazeAzim, 'Color', cYaw, 'LineWidth', 1.2, 'DisplayName', 'Azim');
+    ylabel(ax3, 'Gaze (deg)', 'FontSize', summaryLabelFontSize); grid on;
     ylim([-60, 60]);
+    ax3.FontSize = summaryAxisFontSize;
+    ax3.XTickLabel = [];
+    lgd3 = legend(ax3, [pElev, pAzim], {'Elev', 'Azim'}, 'FontSize', summaryLegendFontSize, 'Location', 'northeastoutside');
+    lgd3.Box = 'off';
     
     % Subplot 4: Eye State
     ax4 = nexttile(tlo1); hold(ax4, 'on');
@@ -178,14 +194,17 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     timeMinBlinks = (double(blinkData.startTimestamp_ns_) - double(t0)) / 1e9 / 60;
     pBlink = stem(ax4, timeMinBlinks, zeros(size(timeMinBlinks)) + 2.0, 'Color', [0.6 0.6 0.6], 'Marker', 'none', 'DisplayName', 'Blinks');
     pAperture = plot(ax4, timeMinEye, smoothAperture, '-', 'Color', cApert, 'LineWidth', 1.2, 'DisplayName', 'Aperture'); 
-    ylabel('Eyelid Aperture (mm)'); ax4.YAxis(1).Color = cApert; 
+    ylabel('Eyelid Aperture (mm)', 'FontSize', summaryLabelFontSize); ax4.YAxis(1).Color = cApert; 
     ylim(ax4, [0, 15]);
     yyaxis right
     pPupil = plot(ax4, timeMinEye, smoothPupil, '-', 'Color', cPupil, 'LineWidth', 1.2, 'DisplayName', 'Pupil');
     ylim(ax4, [2, 6]);
-    ylabel('Pupil (mm)'); ax4.YAxis(2).Color = cPupil; 
+    ylabel('Pupil (mm)', 'FontSize', summaryLabelFontSize); ax4.YAxis(2).Color = cPupil; 
     grid on;
-    legend(ax4, [pAperture, pPupil, pBlink], {'Eyelid openness', 'Pupil size', 'Blinks'}, 'FontSize', 7, 'Location', 'northeastoutside');
+    ax4.FontSize = summaryAxisFontSize;
+    ax4.XTickLabel = [];
+    lgd4 = legend(ax4, [pAperture, pPupil, pBlink], {'Eyelid openness', 'Pupil size', 'Blinks'}, 'FontSize', summaryLegendFontSize, 'Location', 'northeastoutside');
+    lgd4.Box = 'off';
 
     % Subplot 5: Absolute Illuminance (Lux)
     ax5 = nexttile(tlo1);
@@ -196,10 +215,11 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     ax5.YScale = 'log';
     ax5.YMinorGrid = 'off'; 
     ax5.YGrid = 'on';      
-    ylabel(ax5, 'Illum (Lux)'); 
-    xlabel(ax5, 'Time (min)');
+    ylabel(ax5, 'Illum (Lux)', 'FontSize', summaryLabelFontSize); 
+    xlabel(ax5, 'Time (min)', 'FontSize', summaryLabelFontSize);
     ylim(ax5, [1, 10e4]); 
     grid(ax5, 'on');
+    ax5.FontSize = summaryAxisFontSize;
 
     linkaxes([ax1, ax2, ax3, ax4, ax5], 'x');
     % Find the maximum time across your data to set a tight limit
@@ -227,7 +247,8 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
         'HandleVisibility', 'off');
 
     pTaskPeriod1 = plot(ax1, nan, nan, '-', 'Color', cTaskBounds, 'LineWidth', 1.8, 'DisplayName', 'Task period');
-    legend(ax1, [pENMO, hActive, pTaskPeriod1], {'ENMO', 'Active threshold', 'Task period'}, 'FontSize', 7, 'Location', 'northeastoutside');
+    lgd1 = legend(ax1, [pENMO, hActive, pTaskPeriod1], {'ENMO', 'Active threshold', 'Task period'}, 'FontSize', summaryLegendFontSize, 'Location', 'northeastoutside');
+    lgd1.Box = 'off';
 
 
     xl5 = xlim(ax5);
@@ -248,7 +269,15 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
         'LineWidth', 1.5, ...
         'HandleVisibility', 'off');
 
-    legend(ax5, [pLux, hOutdoor], {'Illum', 'Outdoor threshold'}, 'FontSize', 7, 'Location', 'northeastoutside');
+    lgd5 = legend(ax5, [pLux, hOutdoor], {'Illum', 'Outdoor threshold'}, 'FontSize', summaryLegendFontSize, 'Location', 'northeastoutside');
+    lgd5.Box = 'off';
+    
+    % Keep the legends at MATLAB's native northeastoutside placement.
+    lgd1.Location = 'northeastoutside';
+    lgd2.Location = 'northeastoutside';
+    lgd3.Location = 'northeastoutside';
+    lgd4.Location = 'northeastoutside';
+    lgd5.Location = 'northeastoutside';
 
     % Save the figure if desired 
     if(options.save_figures)
@@ -558,4 +587,9 @@ function export_figure_dual(figHandle, output_dir, basename)
         'ContentType', 'vector', ...
         'BackgroundColor', 'white', ...
         'Resolution', 300);
+end
+
+function formatted_title = format_activity_title(activity_name)
+    formatted_title = regexprep(char(activity_name), '([a-z])([A-Z])', '$1 $2');
+    formatted_title(1) = upper(formatted_title(1));
 end
