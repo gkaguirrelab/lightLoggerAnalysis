@@ -93,7 +93,7 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     magAccel = sqrt(sum(IMUdata{:, {'accelerationX_g_', 'accelerationY_g_', 'accelerationZ_g_'}}.^2, 2));
     enmo = max(0, magAccel - 1); 
     activityIndex = movmean(enmo, winSizeSamples, 'omitnan'); 
-    active_threshold = 0.05; 
+    active_threshold = 0.0025; 
     active_inactive_classifications = classifyActiveInactivePeriods(IMUdata, ...
                                                                     "window_size_seconds", options.winSizeSec,...
                                                                     "active_threshold", active_threshold...
@@ -140,7 +140,7 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     
     %----------------------------------------------
     %% Figure 1: Session Summary (Updated to 5 rows)
-    figure('Color', 'w', 'Units', 'normalized', 'Position', [0.05 0.05 0.3 0.9], 'Name', 'Summary');
+    figure('Color', 'w', 'Units', 'normalized', 'Position', [0.04 0.08 0.5 0.82], 'Name', 'Summary');
     tlo1 = tiledlayout(5, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
     
     % Subplot 1: ENMO
@@ -249,11 +249,7 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
 
     % Save the figure if desired 
     if(options.save_figures)
-        output_path = fullfile(output_dir, "actigraphy_summary.pdf");
-        exportgraphics(gcf, output_path, ...
-        'ContentType', 'vector', ...   
-        'BackgroundColor', 'white', ...
-        'Resolution', 300);
+        export_figure_dual(gcf, output_dir, "actigraphy_summary");
         close(gcf); 
     end 
 
@@ -267,7 +263,7 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     validP = find(~isnan(interpPitch) & ~isnan(gazeElev));
     validY = find(~isnan(interpYaw) & ~isnan(gazeAzim));
 
-    figure('Color', 'w', 'Units', 'normalized', 'Position', [0.36 0.5 0.3 0.4], 'Name', 'Gaze-Head Corr');
+    figure('Color', 'w', 'Units', 'normalized', 'Position', [0.08 0.52 0.52 0.34], 'Name', 'Gaze-Head Corr');
     tlo2 = tiledlayout(1, 2, 'TileSpacing', 'loose', 'Padding', 'compact');
     axA = nexttile(tlo2); hold(axA, 'on');
     scatter(axA, interpPitch(validP), gazeElev(validP), 10, cPitch, 'filled',...
@@ -294,11 +290,7 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     drawnow;
     % Save the figure if desired 
     if(options.save_figures)
-        output_path = fullfile(output_dir, "gaze_head_correlation.pdf");
-        exportgraphics(gcf, output_path, ...
-        'ContentType', 'vector', ...   
-        'BackgroundColor', 'white', ...
-        'Resolution', 300);
+        export_figure_dual(gcf, output_dir, "gaze_head_correlation");
         close(gcf); 
     end 
 
@@ -312,7 +304,7 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     validA = find(~isnan(activityIndex) & ~isnan(interpAperture));
     validPup = find(~isnan(activityIndex) & ~isnan(interpPupil));
 
-    figure('Color', 'w', 'Units', 'normalized', 'Position', [0.36 0.05 0.3 0.4], 'Name', 'Activity-Eye Corr');
+    figure('Color', 'w', 'Units', 'normalized', 'Position', [0.08 0.10 0.52 0.34], 'Name', 'Activity-Eye Corr');
     tlo3 = tiledlayout(1, 2, 'TileSpacing', 'loose', 'Padding', 'compact');
     
     axC = nexttile(tlo3); hold(axC, 'on');
@@ -343,11 +335,7 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     drawnow;
     % Save the figure if desired 
     if(options.save_figures)
-        output_path = fullfile(output_dir, "activity_vs_eyestate.pdf");
-        exportgraphics(gcf, output_path, ...
-        'ContentType', 'vector', ...   
-        'BackgroundColor', 'white', ...
-        'Resolution', 300);
+        export_figure_dual(gcf, output_dir, "activity_vs_eyestate");
         close(gcf); 
     end 
 
@@ -357,7 +345,7 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     logLux = log10(MS2illum_lux + eps); 
     interpLogLux_Eye = interp1(double(ms_t), logLux, eyeTime, 'nearest', NaN);
 
-    figure('Color', 'w', 'Units', 'normalized', 'Position', [0.1 0.1 0.6 0.4], 'Name', 'Illuminance Correlations');
+    figure('Color', 'w', 'Units', 'normalized', 'Position', [0.08 0.10 0.58 0.36], 'Name', 'Illuminance Correlations');
     tlo4 = tiledlayout(1, 2, 'TileSpacing', 'loose', 'Padding', 'compact');
     
     % Panel 1: Log(Lux) vs. Eyelid Aperture
@@ -394,11 +382,7 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     drawnow;
         % Save the figure if desired 
     if(options.save_figures)
-        output_path = fullfile(output_dir, "illuminance_vs_eyestate.pdf");
-        exportgraphics(gcf, output_path, ...
-        'ContentType', 'vector', ...   
-        'BackgroundColor', 'white', ...
-        'Resolution', 300);
+        export_figure_dual(gcf, output_dir, "illuminance_vs_eyestate");
         close(gcf); 
     end 
 
@@ -556,4 +540,19 @@ function add_task_boundary_lines(axesHandles, timeMinTask, lineColor)
         xline(ax, timeMinTask(1), '-', 'Color', lineColor, 'LineWidth', 1.8, 'HandleVisibility', 'off');
         xline(ax, timeMinTask(2), '-', 'Color', lineColor, 'LineWidth', 1.8, 'HandleVisibility', 'off');
     end
+end
+
+function export_figure_dual(figHandle, output_dir, basename)
+    pdf_path = fullfile(output_dir, basename + ".pdf");
+    eps_path = fullfile(output_dir, basename + ".eps");
+
+    exportgraphics(figHandle, pdf_path, ...
+        'ContentType', 'vector', ...
+        'BackgroundColor', 'white', ...
+        'Resolution', 300);
+
+    exportgraphics(figHandle, eps_path, ...
+        'ContentType', 'vector', ...
+        'BackgroundColor', 'white', ...
+        'Resolution', 300);
 end
