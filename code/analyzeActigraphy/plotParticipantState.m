@@ -16,6 +16,8 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
         options.winSizeSec = 5;  
         options.force_recalc = false; 
         options.w_as_offset = -139.354; % milliseconds
+        options.active_threshold = 0.025;
+        options.outdoor_threshold = 10 ^ 2.5;
 
     end
     winSizeSec = options.winSizeSec; 
@@ -64,7 +66,7 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     MS2illum_lux = msCounts2Illuminance(ms_v);
     
     % Classify outdoor/indoor based on this 
-    outdoor_threshold = 10 ^ 2.5; 
+    outdoor_threshold = options.outdoor_threshold; 
     outdoor_indoor_classifications = ~classifyIndoorOutdoorPeriods(path_to_raw_recording, ...
                                                                   "window_size_seconds", options.winSizeSec,...
                                                                   "outdoor_threshold", outdoor_threshold...
@@ -93,7 +95,7 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     magAccel = sqrt(sum(IMUdata{:, {'accelerationX_g_', 'accelerationY_g_', 'accelerationZ_g_'}}.^2, 2));
     enmo = max(0, magAccel - 1); 
     activityIndex = movmean(enmo, winSizeSamples, 'omitnan'); 
-    active_threshold = 0.0025; 
+    active_threshold = options.active_threshold; 
     active_inactive_classifications = classifyActiveInactivePeriods(IMUdata, ...
                                                                     "window_size_seconds", options.winSizeSec,...
                                                                     "active_threshold", active_threshold...
@@ -159,8 +161,7 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     plot(ax2, timeMinIMU, vRoll,  'Color', [cRoll  0.3], 'DisplayName', 'Roll');
     plot(ax2, timeMinIMU, vPitch, 'Color', [cPitch 0.3], 'DisplayName', 'Pitch');
     plot(ax2, timeMinIMU, vYaw,   'Color', [cYaw   0.3], 'DisplayName', 'Yaw');
-    pTaskPeriod2 = plot(ax2, nan, nan, '-', 'Color', cTaskBounds, 'LineWidth', 1.8, 'DisplayName', 'Task period');
-    ylabel(ax2, 'Rot. Vel (deg/s)'); legend(ax2, [pTaskPeriod2], {'Task period'}, 'FontSize', 7, 'Location', 'northeastoutside'); grid on;
+    ylabel(ax2, 'Rot. Vel (deg/s)'); grid on;
     ylim([-360, 360]);
     
 
@@ -168,8 +169,7 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     ax3 = nexttile(tlo1); hold(ax3, 'on');
     plot(ax3, timeMinGaze, gazeElev, 'Color', cPitch, 'DisplayName', 'Elev');
     plot(ax3, timeMinGaze, gazeAzim, 'Color', cYaw, 'DisplayName', 'Azim');
-    pTaskPeriod3 = plot(ax3, nan, nan, '-', 'Color', cTaskBounds, 'LineWidth', 1.8, 'DisplayName', 'Task period');
-    ylabel(ax3, 'Gaze (deg)'); legend(ax3, [pTaskPeriod3], {'Task period'}, 'FontSize', 7, 'Location', 'northeastoutside'); grid on;
+    ylabel(ax3, 'Gaze (deg)'); grid on;
     ylim([-60, 60]);
     
     % Subplot 4: Eye State
@@ -185,8 +185,7 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     ylim(ax4, [2, 6]);
     ylabel('Pupil (mm)'); ax4.YAxis(2).Color = cPupil; 
     grid on;
-    pTaskPeriod4 = plot(ax4, nan, nan, '-', 'Color', cTaskBounds, 'LineWidth', 1.8, 'DisplayName', 'Task period');
-    legend(ax4, [pAperture, pPupil, pBlink, pTaskPeriod4], {'Eyelid openness', 'Pupil size', 'Blinks', 'Task period'}, 'FontSize', 7, 'Location', 'northeastoutside');
+    legend(ax4, [pAperture, pPupil, pBlink], {'Eyelid openness', 'Pupil size', 'Blinks'}, 'FontSize', 7, 'Location', 'northeastoutside');
 
     % Subplot 5: Absolute Illuminance (Lux)
     ax5 = nexttile(tlo1);
@@ -249,8 +248,7 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
         'LineWidth', 1.5, ...
         'HandleVisibility', 'off');
 
-    pTaskPeriod5 = plot(ax5, nan, nan, '-', 'Color', cTaskBounds, 'LineWidth', 1.8, 'DisplayName', 'Task period');
-    legend(ax5, [pLux, hOutdoor, pTaskPeriod5], {'Illum', 'Outdoor threshold', 'Task period'}, 'FontSize', 7, 'Location', 'northeastoutside');
+    legend(ax5, [pLux, hOutdoor], {'Illum', 'Outdoor threshold'}, 'FontSize', 7, 'Location', 'northeastoutside');
 
     % Save the figure if desired 
     if(options.save_figures)
