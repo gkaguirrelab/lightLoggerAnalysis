@@ -278,6 +278,15 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     lgd3.Location = 'northeastoutside';
     lgd4.Location = 'northeastoutside';
     lgd5.Location = 'northeastoutside';
+    drawnow;
+
+    % Move all summary legends except the eyelid/pupil legend further to
+    % the right by a fixed amount in inches.
+    legend_shift_in = 0.4;
+    lgd1.Units = 'inches'; lgd1.Position(1) = lgd1.Position(1) + legend_shift_in;
+    lgd2.Units = 'inches'; lgd2.Position(1) = lgd2.Position(1) + legend_shift_in;
+    lgd3.Units = 'inches'; lgd3.Position(1) = lgd3.Position(1) + legend_shift_in;
+    lgd5.Units = 'inches'; lgd5.Position(1) = lgd5.Position(1) + legend_shift_in;
 
     % Save the figure if desired 
     if(options.save_figures)
