@@ -159,7 +159,8 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     plot(ax2, timeMinIMU, vRoll,  'Color', [cRoll  0.3], 'DisplayName', 'Roll');
     plot(ax2, timeMinIMU, vPitch, 'Color', [cPitch 0.3], 'DisplayName', 'Pitch');
     plot(ax2, timeMinIMU, vYaw,   'Color', [cYaw   0.3], 'DisplayName', 'Yaw');
-    ylabel(ax2, 'Rot. Vel (deg/s)'); legend('FontSize', 7); grid on;
+    pTaskPeriod2 = plot(ax2, nan, nan, '-', 'Color', cTaskBounds, 'LineWidth', 1.8, 'DisplayName', 'Task period');
+    ylabel(ax2, 'Rot. Vel (deg/s)'); legend(ax2, [pTaskPeriod2], {'Task period'}, 'FontSize', 7, 'Location', 'northeastoutside'); grid on;
     ylim([-360, 360]);
     
 
@@ -167,7 +168,8 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     ax3 = nexttile(tlo1); hold(ax3, 'on');
     plot(ax3, timeMinGaze, gazeElev, 'Color', cPitch, 'DisplayName', 'Elev');
     plot(ax3, timeMinGaze, gazeAzim, 'Color', cYaw, 'DisplayName', 'Azim');
-    ylabel(ax3, 'Gaze (deg)'); legend('FontSize', 7); grid on;
+    pTaskPeriod3 = plot(ax3, nan, nan, '-', 'Color', cTaskBounds, 'LineWidth', 1.8, 'DisplayName', 'Task period');
+    ylabel(ax3, 'Gaze (deg)'); legend(ax3, [pTaskPeriod3], {'Task period'}, 'FontSize', 7, 'Location', 'northeastoutside'); grid on;
     ylim([-60, 60]);
     
     % Subplot 4: Eye State
@@ -183,7 +185,8 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     ylim(ax4, [2, 6]);
     ylabel('Pupil (mm)'); ax4.YAxis(2).Color = cPupil; 
     grid on;
-    legend(ax4, [pAperture, pPupil, pBlink], {'Eyelid openness', 'Pupil size', 'Blinks'}, 'FontSize', 7, 'Location', 'best');
+    pTaskPeriod4 = plot(ax4, nan, nan, '-', 'Color', cTaskBounds, 'LineWidth', 1.8, 'DisplayName', 'Task period');
+    legend(ax4, [pAperture, pPupil, pBlink, pTaskPeriod4], {'Eyelid openness', 'Pupil size', 'Blinks', 'Task period'}, 'FontSize', 7, 'Location', 'northeastoutside');
 
     % Subplot 5: Absolute Illuminance (Lux)
     ax5 = nexttile(tlo1);
@@ -224,7 +227,8 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
         'LineWidth', 1.5, ...
         'HandleVisibility', 'off');
 
-    legend(ax1, [pENMO, hActive], {'ENMO', 'Active threshold'}, 'FontSize', 7);
+    pTaskPeriod1 = plot(ax1, nan, nan, '-', 'Color', cTaskBounds, 'LineWidth', 1.8, 'DisplayName', 'Task period');
+    legend(ax1, [pENMO, hActive, pTaskPeriod1], {'ENMO', 'Active threshold', 'Task period'}, 'FontSize', 7, 'Location', 'northeastoutside');
 
 
     xl5 = xlim(ax5);
@@ -245,7 +249,8 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
         'LineWidth', 1.5, ...
         'HandleVisibility', 'off');
 
-    legend(ax5, [pLux, hOutdoor], {'Illum', 'Outdoor threshold'}, 'FontSize', 7);
+    pTaskPeriod5 = plot(ax5, nan, nan, '-', 'Color', cTaskBounds, 'LineWidth', 1.8, 'DisplayName', 'Task period');
+    legend(ax5, [pLux, hOutdoor, pTaskPeriod5], {'Illum', 'Outdoor threshold', 'Task period'}, 'FontSize', 7, 'Location', 'northeastoutside');
 
     % Save the figure if desired 
     if(options.save_figures)
