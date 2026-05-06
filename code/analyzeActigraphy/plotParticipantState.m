@@ -48,8 +48,14 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
 
     % With this information, we can also get the start/ending time of the activity in neon time 
     tag_task_start_end_frames = load(path_to_activity_start_end).tag_task_start_end; 
+
+    % Clip the tag start end to the world t length 
+    % This is due to rare rounding error in the neon alignment that clips off 
+    % some small number of frames sometimes 
     tag_start_end_frames = tag_task_start_end_frames.tag; 
     task_start_end_frames = tag_task_start_end_frames.task; 
+    tag_start_end_frames  = max(min(tag_start_end_frames,  numel(world_t)), 1);
+    task_start_end_frames = max(min(task_start_end_frames, numel(world_t)), 1);
     tag_start_end_neon_time = world_t(tag_start_end_frames); 
     task_start_end_neon_time = world_t(task_start_end_frames);
 

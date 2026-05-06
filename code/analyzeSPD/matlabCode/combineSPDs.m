@@ -1,7 +1,7 @@
-function combineSPDs(spds, output_path, options)
+function combineSPDs(spds, output_dir, options)
     arguments
         spds
-        output_path
+        output_dir
         options.overwrite_existing = false
         options.verbose = true
     end
@@ -23,8 +23,8 @@ function combineSPDs(spds, output_path, options)
     %}
 
     % If the output path does not exist, make it
-    if (~isfolder(output_path))
-        mkdir(output_path);
+    if (~isfolder(output_dir))
+        mkdir(output_dir);
     end
 
     % Iterate over subjects and activities.
@@ -33,15 +33,23 @@ function combineSPDs(spds, output_path, options)
     for ss = 1:num_subjects 
         subject_id = subjects{ss};
         subject_struct = spds.(subject_id);
+        subject_output_dir = fullfile(output_dir, subject_id);
+        if(~isfolder(subject_output_dir))
+            mkdir(subject_output_dir); 
+        end     
 
         activity_names = fieldnames(subject_struct);
         num_activities = numel(activity_names); 
         for aa = 1:num_activities
             activity_name = activity_names{aa};
             activity_struct = subject_struct.(activity_name);
+            activity_output_dir = fullfile(subject_output_dir, activity_name);
+            if(~isfolder(activity_output_dir))
+                mkdir(activity_output_dir); 
+            end 
 
-            % Generate the output filepath
-            output_filepath = fullfile(output_path, sprintf('%s_%s_combinedSPDs.pdf', subject_id, activity_name));
+            % Generate the output filepath for the SPD graph
+            output_filepath = fullfile(activity_output_dir, sprintf('%s_%s_spdByRegion.pdf', subject_id, activity_name));
 
             % If we do not want to overwrite existing data, just skip
             if (isfile(output_filepath) && ~options.overwrite_existing)
@@ -53,16 +61,40 @@ function combineSPDs(spds, output_path, options)
                 fprintf('Generating SPD plots for subject: %d / %d | activity: %d / %d\n', ss, num_subjects, aa, num_activities);
             end
 
-            % Plot and output the combined SPDs
-            figure_handle = localPlotSPD(activity_struct, subject_id, activity_name);
+            % Plot the SPDs and calculate their best fit lines as well
+            [figure_handle, activity_best_fit_lines] = localPlotSPD(activity_struct, subject_id, activity_name);
+            
+            % Save the figure 
             exportgraphics(figure_handle, output_filepath, 'ContentType', 'vector');
             close(figure_handle);
+
+            % Output the best fit line information for each color mode and projection type of this activity 
+            % as .mat files 
+            activity_color_modes = fieldnames(activity_best_fit_lines); 
+            for cc = 1:numel(activity_color_modes)
+                color_mode = activity_color_modes{cc}; 
+                color_mode_struct = activity_best_fit_lines.(color_mode); 
+
+                projection_types = fieldnames(color_mode_struct); 
+                for pp = 1:numel(projection_types)
+                    projection_type = projection_types{pp};
+                    projection_struct = color_mode_struct.(projection_type); 
+                    bestFit = projection_struct; 
+
+                    % Output the .mat file here. Include both the color
+                    % mode and projection type in the filename so each
+                    % saved fit remains distinct.
+                    best_fit_output_path = fullfile(activity_output_dir, sprintf("%s_%s_bestFit.mat", color_mode, projection_type)); 
+                    save(best_fit_output_path, 'bestFit'); 
+                end 
+            end     
+        
         end
     end
 end
 
 % Local Function to Handle the SPD plotting
-function figure_handle = localPlotSPD(activity_struct, subject_id, activity_name)
+function [figure_handle, best_fit_lines] = localPlotSPD(activity_struct, subject_id, activity_name)
     % Initialize the figure that we will draw too
     fig = figure('Color', 'w', 'Position', [100 100 1100 650]);
     ax = axes('Parent', fig, 'Position', [0.08 0.14 0.60 0.76]);
@@ -74,6 +106,7 @@ function figure_handle = localPlotSPD(activity_struct, subject_id, activity_name
     % Initialize containers for the legends of the figures
     legend_handles = gobjects(0);
     legend_labels = {};
+    best_fit_lines = struct();
 
     % Iterate over the color modes
     color_modes = fieldnames(activity_struct);
@@ -117,6 +150,7 @@ function figure_handle = localPlotSPD(activity_struct, subject_id, activity_name
                 center_handle = loglog(ax, center_freq, center_spd, 'Color', center_color, 'LineStyle', line_style, 'LineWidth', 2.0);
                 legend_handles(end+1) = center_handle; 
                 legend_labels{end+1} = iFormatLegendLabel(color_mode, projection_type, 'center'); 
+                best_fit_lines.(color_mode).(projection_type).center = iComputeBestFitLine(center_freq, center_spd);
             end
 
             % Plot the periphery SPD with a lighter version
@@ -126,6 +160,7 @@ function figure_handle = localPlotSPD(activity_struct, subject_id, activity_name
                 periphery_handle = loglog(ax, periphery_freq, periphery_spd, 'Color', periphery_color, 'LineStyle', line_style, 'LineWidth', 2.0);
                 legend_handles(end+1) = periphery_handle; 
                 legend_labels{end+1} = iFormatLegendLabel(color_mode, projection_type, 'periphery');
+                best_fit_lines.(color_mode).(projection_type).periphery = iComputeBestFitLine(periphery_freq, periphery_spd);
             end
         end
     end
@@ -137,7 +172,7 @@ function figure_handle = localPlotSPD(activity_struct, subject_id, activity_name
     axis(ax, 'square');
     xlim(ax, [1 64]);
     xticks(ax, [1 2 4 8 16 32 64]);
-    xticklabels(ax, {'1', '2', '4', '8', '16', '32'});
+    xticklabels(ax, {'1', '2', '4', '8', '16', '32', '64'});
 
     reference_handle = iPlotReferenceLine(ax);
     if (isgraphics(reference_handle))
@@ -164,6 +199,23 @@ function figure_handle = localPlotSPD(activity_struct, subject_id, activity_name
 
     % Return the figure handle
     figure_handle = fig;
+end
+
+
+function best_fit_line = iComputeBestFitLine(frq, spd)
+    % Compute the best-fit line in log-log space for a cleaned SPD curve
+    x = log10(frq(:));
+    y = log10(spd(:));
+    coefficients = polyfit(x, y, 1);
+    y_fit = polyval(coefficients, x);
+
+    best_fit_line = struct();
+    best_fit_line.slope = coefficients(1);
+    best_fit_line.intercept = coefficients(2);
+    best_fit_line.log10_frequency = x;
+    best_fit_line.log10_spd_fit = y_fit;
+    best_fit_line.frequency = frq(:);
+    best_fit_line.spd_fit = 10 .^ y_fit;
 end
 
 

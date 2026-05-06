@@ -1579,7 +1579,8 @@ def combine_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/
         if not color_mode.startswith(".")
         and os.path.isdir(os.path.join(src_dir, color_mode))
         and _is_desired_item(color_mode, color_modes_to_process, color_modes_to_skip)
-        and not color_mode.startswith("combination")
+        and "#" not in color_mode
+        and not color_mode.startswith("actigraphy")
     ]) 
     assert len(color_mode_paths) > 0, f"No colormode directories found in: {src_dir}" 
     color_modes_list: list[str] = [ os.path.basename(path) for path in color_mode_paths ]
@@ -1696,9 +1697,9 @@ def combine_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/
     temp_output_path: str = os.path.join(os.path.expanduser("~/Desktop"), 'temp_combining_spds.mat')
     scipy.io.savemat(temp_output_path, {"spds": spds_to_process})
 
-
     # Generate the real output path that we will tell MATLAB to output to
-    output_path: str = os.path.join(dst_dir, f"combination_{ '#'.join(color_modes_list) }")
+    output_path: str = os.path.join(dst_dir, '#'.join(color_modes_list))
+    os.makedirs(output_path, exist_ok=True)
 
     # Call the MATLAB plotting function
     # to generate and output the plots
@@ -2459,8 +2460,7 @@ def generate_actigraphy_graphs(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoor
                                processing_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoorVideos2026",
                                dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026", 
                                overwrite_exsiting=False, 
-                                verbose=False, 
-                                color_mode: Literal["L+M+S", "L-M", "GRAY"] = "L+M+S", 
+                                verbose=False,  
                                 subjects_to_skip: Iterable=set(), 
                                 subjects_to_process: Iterable=set(), 
                                 activities_to_skip: Iterable=set(), 
@@ -2536,7 +2536,7 @@ def generate_actigraphy_graphs(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoor
             assert os.path.exists(world_timestamps_neon_time), f"Problem with: {world_timestamps_neon_time}"
 
             # Construct the output dir 
-            output_dir: str = os.path.join(dst_dir, color_mode, subject_id, activity_name)
+            output_dir: str = os.path.join(dst_dir, "actigraphy_data", subject_id, activity_name)
 
             # Several files are output, but we just check the summary file here for simplicity
             output_filepath: str = os.path.join(output_dir, "actigraphy_summary.pdf")
