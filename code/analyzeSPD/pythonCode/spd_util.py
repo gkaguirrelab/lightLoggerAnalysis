@@ -19,7 +19,14 @@ def load_spds(src_dir: str,
                 ) -> dict | None:
     
     # Convert everything to set if not set already for fast lookups
-    # TODO: 
+    subjects_to_skip = set(subjects_to_skip)
+    subjects_to_process = set(subjects_to_process)
+    activities_to_skip = set(activities_to_skip)
+    activities_to_process = set(activities_to_process)
+    color_modes_to_skip = set(color_modes_to_skip)
+    color_modes_to_process = set(color_modes_to_process)
+    projection_types_to_skip = set(projection_types_to_skip)
+    projection_types_to_process = set(projection_types_to_process)
 
     # Define the output dictionary
     output_dict: dict = {}
