@@ -5,7 +5,7 @@ from natsort import natsorted
 from scipy.io import loadmat, savemat
 
 
-def gather_spds(src_dir: str,
+def load_spds(src_dir: str,
                 subjects_to_skip: Iterable=set(),
                 subjects_to_process: Iterable=set(), 
                 activities_to_skip: Iterable=set(), 
