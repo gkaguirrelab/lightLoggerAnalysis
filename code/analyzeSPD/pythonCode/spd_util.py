@@ -14,6 +14,7 @@ def gather_spds(src_dir: str,
                 color_modes_to_process: Iterable=set(), 
                 projection_types_to_skip: Iterable=set(), 
                 projection_types_to_process: Iterable=set(), 
+                include_best_fit: bool=False, 
                 output_as_mat: str = ""
                 ) -> dict | None:
     
@@ -85,7 +86,7 @@ def gather_spds(src_dir: str,
 
                     # Load in this data 
                     output_dict[color_mode][subject_id][activity_name][projection_type] = {"spd": loadmat(projection_spd_path),
-                                                                                           "best_fit": loadmat(projection_best_fit_path)  
+                                                                                           "best_fit": loadmat(projection_best_fit_path) if include_best_fit else projection_best_fit_path
                                                                                          }
 
     # If we want to output as a mat file (does a bunch of auto conversion for us, do it now)
