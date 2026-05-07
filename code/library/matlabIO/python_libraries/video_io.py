@@ -16,6 +16,7 @@ from scipy.signal import find_peaks
 import pytesseract
 import matplotlib.pyplot as plt
 import re
+import subprocess
 
 # Import utility libraries
 light_logger_analysis_dir_path: str = os.path.expanduser("~/Documents/MATLAB/projects/lightLoggerAnalysis")
