@@ -16,6 +16,7 @@ from scipy.signal import find_peaks
 import pytesseract
 import matplotlib.pyplot as plt
 import re
+import subprocess
 
 # Import utility libraries
 light_logger_analysis_dir_path: str = os.path.expanduser("~/Documents/MATLAB/projects/lightLoggerAnalysis")
@@ -199,14 +200,14 @@ def inspect_video_FPS(video_path: str) -> float:
 
     # Calculate the number of frames 
     fps: float = int(video_stream.get(cv2.CAP_PROP_FPS)) 
-    assert fps != 0, "Could not estimate FPS. cv2 returned 0 FPS."
+    if(fps == 0):
+        warnings.warn("cv2 returned 0 FPS. Falling back to FFMPEG...")
 
     # Close the capture stream 
     video_stream.release()  
 
     # Return the number of frames 
     return fps
-
 
 """Given a path to a video, return the number of frames in that video"""
 def inspect_video_frame_count(video_path: str) -> int:

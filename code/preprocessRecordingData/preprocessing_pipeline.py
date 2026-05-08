@@ -21,6 +21,7 @@ import requests
 light_loger_analysis_dir: str = str(pathlib.Path(__file__).parents[2]) 
 video_util_path: str = os.path.join(light_loger_analysis_dir, "code", "library", "matlabIO", "python_libraries")
 virtual_foveation_util_path: str = os.path.join(light_loger_analysis_dir, "code", "applyVirtualFoveation", "pythonCode")
+spd_util_path: str = os.path.join(light_loger_analysis_dir, "code", "analyzeSPD", "pythonCode")
 
 custom_library_paths: list[str] = (light_loger_analysis_dir, video_util_path, virtual_foveation_util_path)
 assert all(os.path.exists(path) for path in custom_library_paths)
@@ -31,6 +32,7 @@ for path in custom_library_paths:
 # Import the custom libraries 
 import video_io 
 import virtual_foveation
+import spd_util
 
 # -----------------------------------------------------------------------------
 # generate_world_videos
@@ -736,6 +738,147 @@ def group_spds_across_subjects(src_dir: str="/Users/zacharykelly/Aguirre-Brainar
 
     # Remove the figure after it is finisehd 
     os.remove(temp_output_filepath)
+
+    return 
+
+def adjust_spd_axes_copy(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026",
+                    dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026",
+                    subjects_to_skip: Iterable= set(),
+                    activities_to_skip: Iterable= set(),
+                     projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = set(["virtuallyFoveated", "justProjection"]),
+                    projection_types_for_bounds_calculations:  Iterable[Literal["virtuallyFoveated", "justProjection"]] = ["virtuallyFoveated", "justProjection"],  
+                    combine_figures: bool=True,
+                    overwrite_existing: bool=False, 
+                    color_mode: Literal["L+M+S", "L-M", "GRAY"] = "L+M+S", 
+                    verbose: bool=False
+                   ) -> None:
+    import matlab.engine
+
+    # Initialize the MATLAB engine to utilize the MATLAB function we have developed for this purpose 
+    eng: object = matlab.engine.start_matlab()  
+    eng.pyenv('Version', '~/Documents/MATLAB/projects/lightLoggerAnalysis/analysis_env/bin/python', nargout=0)
+    eng.tbUseProject('lightLoggerAnalysis', nargout=0)
+    
+
+     # First, let's find all of the subjects in this experiment 
+    subject_paths: list[str] = natsorted([os.path.join(src_dir, color_mode, subject_name) 
+                                          for subject_name in os.listdir(os.path.join(src_dir, color_mode)) 
+                                          if re.fullmatch(r"FLIC_\d+", subject_name) 
+                                          and os.path.isdir(os.path.join(src_dir, color_mode, subject_name))
+                                          if _extract_num_from_id(subject_name) not in subjects_to_skip
+                                         ]
+                                        ) 
+    assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
+
+    # First, we will find the min/max axes across all activites. 
+    # This will let us build the power by freq graph 
+    across_all_axes_min_maxes: dict[str, np.ndarray[float]] = _find_spd_axes_across_all(subject_paths, 
+                                                                        subjects_to_skip,
+                                                                        activities_to_skip,
+                                                                        projection_types_for_bounds_calculations,
+                                                                        verbose=False
+                                                                        )
+
+    # Next we will find the colorbar min/maxs by subject 
+    per_subject_axes_min_maxes: dict[str, np.ndarray[float]] = _find_spd_axes_per_subject(subject_paths, 
+                                                                        subjects_to_skip,
+                                                                        activities_to_skip,
+                                                                        projection_types_for_bounds_calculations,
+                                                                        verbose=False
+                                                                    )
+
+    # Now, let's iterate over all the subject paths 
+    subject_iterator: Iterable = range(len(subject_paths)) if verbose is False else tqdm(range(len(subject_paths)), desc="Processing Subjects", leave=False)
+    for subject_num in subject_iterator:
+        # Retrieve the subject path and subject name
+        subject_path: str = subject_paths[subject_num]
+        subject_id: str = os.path.basename(subject_path)
+        subject_id_number: int = int(re.search("\d+", subject_id).group())
+
+        # Skip unwatned subjects 
+        if(subject_id_number in subjects_to_skip):
+            continue 
+
+        # Construct the min maxes for this subject 
+        axes_min_maxes: dict[str, np.ndarray] = per_subject_axes_min_maxes[subject_id_number]
+        axes_min_maxes["spdByRegion"] = across_all_axes_min_maxes["spdByRegion"]
+        axes_min_maxes["spdByRegion"]["bounds"][0] = max(axes_min_maxes["spdByRegion"]["bounds"][0], 10e-9)
+        axes_min_maxes["frq"] = across_all_axes_min_maxes["frq"]
+        axes_min_maxes["frq"]["bounds"][0] = max(axes_min_maxes["frq"]["bounds"][0], 10e-9)
+
+        # We need to ensure x and y of the loglog spd plot are finite and > 0 
+        if( not (all(axes_min_maxes["spdByRegion"]["bounds"] > 0) and all(axes_min_maxes["frq"]["bounds"] > 0))):
+            raise Exception(f"Zero or negative X or Y axis in Log SPD plot: {axes_min_maxes}")
+
+        if( not (all(np.isfinite(axes_min_maxes["spdByRegion"]["bounds"]))) and not all(np.isfinite(axes_min_maxes["frq"]["bounds"]))):
+            raise Exception(f"Infinite X or Y axis in Log SPD plot: {axes_min_maxes}")
+
+        # Iterate over the activites for this subject 
+        activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in natsorted(os.listdir(subject_path))
+                                    if os.path.isdir(os.path.join(subject_path, filename))
+                                    ]
+        activities_iterator: Iterable = range(len(activites_paths)) if verbose is False else tqdm(range(len(activites_paths)), desc="Processing Activities", leave=False)
+        for activity_num in activities_iterator:
+            # Retrieve the activity path and activity name
+            activity_path: str = activites_paths[activity_num]
+            activity_name: str = os.path.basename(activity_path)
+
+            # Skip unwanted activites 
+            if(activity_name in activities_to_skip):
+                continue 
+
+
+            # We will put both projection types onto the same graph
+            # so make a temporary .mat file that contains the path to do this 
+            if(combine_figures is True):
+                # Generate the path to the SPD results file
+                temp_combined_dict: dict = {activity_name: {projection_type: os.path.join(activity_path, f"{subject_id}_{activity_name}_{projection_type}_SPDResults.mat")
+                                                            for projection_type in projection_types}
+                                            }
+                
+                # Assert that these paths exist
+                assert all(os.path.exists(path) for projection_type, path in temp_combined_dict[activity_name].items())
+                
+            
+
+                output_dir: str = os.path.join(dst_dir, color_mode, subject_id, activity_name)
+                title: str = f"{subject_id}_{activity_name}_modesCombined"
+                eng.plotSPDs_copy(temp_combined_dict[activity_name]["virtuallyFoveated"],
+                                "exponent_clim", axes_min_maxes["exponentMap"]["bounds"], 
+                                "variance_clim", axes_min_maxes["varianceMap"]["bounds"], 
+                                "spd_xlim", axes_min_maxes["frq"]["bounds"], 
+                                "spd_ylim", axes_min_maxes["spdByRegion"]["bounds"],
+                                "overwrite_existing", overwrite_existing, 
+                                "output_dir", output_dir,
+                                "title", title,
+                                "justProjectionActivityData", temp_combined_dict[activity_name]["justProjection"], 
+                                nargout=0
+                            ) 
+                
+            # Otherwise output separate figures
+            else:
+                # Iterate over the projection types 
+                for projection_type in projection_types:
+                    # Generate the path to the SPD results file
+                    spd_results_filepath: str = os.path.join(activity_path, f"{subject_id}_{activity_name}_{projection_type}_SPDResults.mat")
+                    assert os.path.exists(spd_results_filepath), f"SPD Results path does not exist: {spd_results_filepath}"
+                    
+                    output_dir: str = os.path.join(dst_dir, color_mode, subject_id, activity_name)
+                    title: str = f"{subject_id}_{activity_name}_{projection_type}"
+                    eng.plotSPDs_copy(spd_results_filepath,
+                                 "exponent_clim", axes_min_maxes["exponentMap"]["bounds"], 
+                                 "variance_clim", axes_min_maxes["varianceMap"]["bounds"], 
+                                 "spd_xlim", axes_min_maxes["frq"]["bounds"], 
+                                 "spd_ylim", axes_min_maxes["spdByRegion"]["bounds"],
+                                 "overwrite_existing", overwrite_existing, 
+                                 "output_dir", output_dir,
+                                 "title", title,
+                                 nargout=0
+                                ) 
+
+
+    # Close the matlab engine 
+    eng.quit() 
 
     return 
 
@@ -1538,7 +1681,119 @@ def generate_spds_across_all(src_dir: str="/Users/zacharykelly/Aguirre-Brainard 
     # Close the MATLAB engine
     eng.quit() 
 
+    return
+
+
+
+def generate_mean_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026", 
+                       dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026", 
+                       overwrite_existing: bool=False, 
+                       verbose: bool=False, 
+                       subjects_to_skip: Iterable=set(), 
+                       subjects_to_process: Iterable=set(), 
+                       activities_to_skip: Iterable=set(), 
+                       activities_to_process: Iterable=set(), 
+                       projection_types_to_skip: Iterable[Literal["justProjection", "virtuallyFoveated"]]=set(), 
+                       projection_types_to_process: Iterable[Literal["justProjection", "virtuallyFoveated"]]=set(), 
+                       color_modes_to_skip: Iterable[Literal["a", "c_lm", "c_s"]]=set(), 
+                       color_modes_to_process: Iterable[Literal["a", "c_lm", "c_s"]]=set(), 
+                       dimension: Literal["subject", "activity", "all"]="all"
+                        ) -> None:
+
+    # First, let's load the paths to the SPDs that we want 
+    # returns a dict in the form: 
+
+    # color_mode, subject, activity, projection_type
+    spd_paths: dict = spd_util.load_spds(src_dir, 
+                                         subjects_to_skip=subjects_to_skip,
+                                         subjects_to_process=subjects_to_process, 
+                                         activities_to_skip=activities_to_skip, 
+                                         activities_to_process=activities_to_process, 
+                                         color_modes_to_skip=color_modes_to_skip, 
+                                         color_modes_to_process=color_modes_to_process, 
+                                         projection_types_to_skip=projection_types_to_skip, 
+                                         projection_types_to_process=projection_types_to_process, 
+                                         paths_only=True, 
+                                        )
+    color_modes: list = list(spd_paths.keys())
+    
+    # Now, let's iterate over the colormodes we will process 
+    color_mode_iterator: Iterable = range(len(color_modes)) if verbose is False else tqdm(range(len(color_modes)), desc="Processing color modes")
+    for color_mode_num in color_mode_iterator:
+        # Retrieve the current colormode and its field in the dictionary 
+        color_mode: Literal["a", "c_lm", "c_s"] = color_modes[color_mode_num]
+        color_mode_dict: dict = spd_paths[color_mode]
+
+        # Next, let's determine the dimensions we want to mean over 
+
+        # Mean over all the subjects for a given activity 
+        if(dimension == "subject"):
+            # If we want to mean on the subject dimension, 
+            # that means for each activity, there should be one "subject" 
+            # per activity in the end 
+
+            # First, let's gather the activities 
+            subjects: list[str] = list(color_mode_dict.keys())
+            activities: list[str] = list(color_mode_dict[subjects[0]].keys()) 
+            activities_iterator: Iterable = range(len(activities)) if verbose is False else tqdm(range(len(activities)), desc="Meaning across subjects dimension", leave=False)
+            for activity_num in activities_iterator:
+                # Retrieve the activity name 
+                activity: str = activities[activity_num]
+
+                # Assemble a list of the form [ {projection_types: paths} ] for all the subjects of this activiity 
+                subjects_flattened: list[dict] = [ color_mode_dict[subject][activity] for subject in subject]
+
+                # Generate the output path 
+                output_path: str = os.path.join(dst_dir, color_mode, "acrossSubject", activity, "meanSPDs.mat")
+                if(os.path.exists(output_path) and overwrite_existing is False):
+                    continue 
+
+                # Pass to MATLAB to do the meaning
+                #eng.meanSPDs(subjects_flattened)
+        
+        # Mean over all the activities for a given subject 
+        elif(dimension == "activity"):
+            # If we want to mean over the activity dimension, 
+            # that means that each subject should have a single "activity" in the end 
+
+            # Let's iterate over the subjects 
+            subjects: list[str] = list(color_mode_dict.keys()) 
+            subject_iterator: Iterable = range(len(subjects)) if verbose is False else tqdm(range(len(subjects)), desc='Meaning across activity dimension', leave=False)
+            for subject_num in subject_iterator:
+                # Retrieve the subject name 
+                subject: str = subjects[subject_num]
+                    
+                # Mean across activities here and get a single SPD back 
+                subject_dict: dict = color_mode_dict[subject]
+                activities: list[str] = list(subject_dict).keys()
+
+                # Assemble a list of the form [ {projection_types: paths} ] for all the activities of this subject
+                activities_flattened: list[dict] = [ subject_dict[activity] for activity in activities ] 
+                
+                # Generate the output path 
+                output_path: str = os.path.join(dst_dir, color_mode, "acrossActivity", subject, "meanSPDs.mat")
+                if(os.path.exists(output_path) and overwrite_existing is False):
+                    continue 
+
+                # Pass to MATLAB to do the meaning
+                #eng.meanSPDs(activities_flattened, "output_path", output_path)
+
+        # Mean over all subjects and all activities 
+        elif(dimension == "all"):
+            # If we want to mean over all, that means we 
+            # end up with 1 SPD for this colormode 
+              # First, let's gather the activities 
+            subjects: list[str] = list(color_mode_dict.keys())
+            activities: list[str] = list(color_mode_dict[subjects[0]].keys()) 
+            pass 
+
+        # Otherwise, unsupported mode that we should never reach 
+        else:
+            raise RuntimeError(f"Unsupported mean dimension: {dimension}")
+
     return 
+
+
 
 """Give an iterable of desired color modes 
    and desired subjects/activites, 

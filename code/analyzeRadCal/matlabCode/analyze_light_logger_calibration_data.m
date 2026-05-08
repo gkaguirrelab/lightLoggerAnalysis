@@ -17,6 +17,8 @@ function figureHandles = analyze_light_logger_calibration_data(light_logger_cali
 %                                     for the calibration measurement. 
 %   opts.figure_output_path         - false or path. If not logical, export
 %                                     all generated figures to this folder.
+%   opts.export_eps                 - Logical. If true, also export EPS
+%                                     versions of each figure.
 %                              
 %
 % Examples:
@@ -28,6 +30,7 @@ function figureHandles = analyze_light_logger_calibration_data(light_logger_cali
     arguments 
         light_logger_calibration_data; % Struct that has both converted metadata and readings from the experiment 
         opts.figure_output_path = false;
+        opts.export_eps logical = true;
     end 
 
     figureHandles = {};
@@ -72,25 +75,27 @@ function figureHandles = analyze_light_logger_calibration_data(light_logger_cali
     end
 
     if(~islogical(opts.figure_output_path))
-        export_figure_handles(figureHandles, opts.figure_output_path);
+        export_figure_handles(figureHandles, opts.figure_output_path, opts.export_eps);
     end
 
 end
 
-function export_figure_handles(figureHandles, figure_output_path)
+function export_figure_handles(figureHandles, figure_output_path, export_eps)
     if(~exist(figure_output_path, "dir"))
         mkdir(figure_output_path);
     end
 
     pdf_output_path = fullfile(figure_output_path, "pdfs");
-    eps_output_path = fullfile(figure_output_path, "eps");
 
     if(~exist(pdf_output_path, "dir"))
         mkdir(pdf_output_path);
     end
 
-    if(~exist(eps_output_path, "dir"))
-        mkdir(eps_output_path);
+    if(export_eps)
+        eps_output_path = fullfile(figure_output_path, "eps");
+        if(~exist(eps_output_path, "dir"))
+            mkdir(eps_output_path);
+        end
     end
 
     for ii = 1:numel(figureHandles)
@@ -114,10 +119,8 @@ function export_figure_handles(figureHandles, figure_output_path)
         figName = regexprep(figName, '[^\w\d-]+', '_');
         figName = regexprep(figName, '_+', '_');
         pdf_export_path = fullfile(pdf_output_path, sprintf("%02d_%s.pdf", ii, figName));
-        eps_export_path = fullfile(eps_output_path, sprintf("%02d_%s.eps", ii, figName));
 
         pdf_export_succeeded = false;
-        eps_export_succeeded = false;
 
         try
             exportgraphics(figHandle, pdf_export_path, 'ContentType', 'vector');
@@ -127,20 +130,25 @@ function export_figure_handles(figureHandles, figure_output_path)
             pdf_export_succeeded = exist(pdf_export_path, "file") ~= 0;
         end
 
-        try
-            exportgraphics(figHandle, eps_export_path, 'ContentType', 'vector');
-            eps_export_succeeded = exist(eps_export_path, "file") ~= 0;
-        catch
-            print(figHandle, eps_export_path, '-depsc', '-painters');
-            eps_export_succeeded = exist(eps_export_path, "file") ~= 0;
-        end
-
         if(~pdf_export_succeeded)
             error("Failed to export PDF for figure %d (%s)", ii, figName);
         end
 
-        if(~eps_export_succeeded)
-            error("Failed to export EPS for figure %d (%s)", ii, figName);
+        if(export_eps)
+            eps_export_path = fullfile(eps_output_path, sprintf("%02d_%s.eps", ii, figName));
+            eps_export_succeeded = false;
+
+            try
+                exportgraphics(figHandle, eps_export_path, 'ContentType', 'vector');
+                eps_export_succeeded = exist(eps_export_path, "file") ~= 0;
+            catch
+                print(figHandle, eps_export_path, '-depsc', '-painters');
+                eps_export_succeeded = exist(eps_export_path, "file") ~= 0;
+            end
+
+            if(~eps_export_succeeded)
+                error("Failed to export EPS for figure %d (%s)", ii, figName);
+            end
         end
 
         if(isgraphics(figHandle))

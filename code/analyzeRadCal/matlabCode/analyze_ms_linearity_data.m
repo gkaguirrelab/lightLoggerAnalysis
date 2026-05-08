@@ -369,12 +369,8 @@ function figureHandles = analyze_ms_linearity_data(calibration_metadata, measure
 
             xmin = min(x); 
             xmax = max(x); 
-            ymin = min(y);
-            ymax = max(y);
-            common_min = min([xmin; ymin]);
-            common_max = max([xmax; ymax]);
 
-            if isempty(common_min) || isempty(common_max) || ~isfinite(common_min) || ~isfinite(common_max) || common_min == common_max
+            if isempty(xmin) || isempty(xmax) || ~isfinite(xmin) || ~isfinite(xmax) || xmin == xmax
                 warning("Invalid x range for fit: xmin=%s xmax=%s", mat2str(xmin), mat2str(xmax));
                 disp("Does the TS chip have valid data?");
                 continue;
@@ -385,10 +381,17 @@ function figureHandles = analyze_ms_linearity_data(calibration_metadata, measure
 
             hold(across_NDF_channel_ax, 'on');
             plot(across_NDF_channel_ax, x_fit, y_fit, 'k:', 'LineWidth', 1, "DisplayName", "Fit Line");
-            set(across_NDF_channel_ax, 'XLim', [common_min, common_max]);
-            set(across_NDF_channel_ax, 'YLim', get(across_NDF_channel_ax, 'XLim'));
-            pbaspect(across_NDF_channel_ax, [1 1 1]);
-            axis(across_NDF_channel_ax, 'square');
+
+            if opts.plotIllum
+                set(across_NDF_channel_ax, 'XLim', [-1, 6]);
+                set(across_NDF_channel_ax, 'YLim', [-1, 6]);
+                pbaspect(across_NDF_channel_ax, [1 1 1]);
+                axis(across_NDF_channel_ax, 'square');
+            else
+                pbaspect(across_NDF_channel_ax, [1 1 1]);
+                axis(across_NDF_channel_ax, 'square');
+            end
+
             legend(across_NDF_channel_ax, 'Location', 'bestoutside');
         end % channel loop
     end % chip loop

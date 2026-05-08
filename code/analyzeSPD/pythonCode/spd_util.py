@@ -1,6 +1,6 @@
 import os 
 import re
-from typing import Iterable, Any
+from typing import Iterable, Literal, Any
 from natsort import natsorted
 from scipy.io import loadmat, savemat
 
@@ -10,11 +10,11 @@ def load_spds(src_dir: str,
                 subjects_to_process: Iterable=set(), 
                 activities_to_skip: Iterable=set(), 
                 activities_to_process: Iterable=set(), 
-                color_modes_to_skip: Iterable=set(), 
-                color_modes_to_process: Iterable=set(), 
+                color_modes_to_skip: Iterable[Literal["a", "c_lm", "c_s"]]=set(), 
+                color_modes_to_process: Iterable[Literal["a", "c_lm", "c_s"]]=set(), 
                 projection_types_to_skip: Iterable=set(), 
                 projection_types_to_process: Iterable=set(), 
-                include_best_fit: bool=False, 
+                paths_only: bool=False, 
                 output_as_mat: str = ""
                 ) -> dict | None:
     
@@ -89,13 +89,16 @@ def load_spds(src_dir: str,
                 # Now, let's load in the data from this projection type
                 for projection_type in valid_projection_types:
                     projection_spd_path: str = ""
+                    assert os.path.exists(projection_spd_path), f"Path does not exist: {projection_spd_path}"
+
                     projection_best_fit_path: str = ""
+                    assert os.path.exists(projection_best_fit_path), f"Path does not exist: {projection_best_fit_path}"
 
-                    # Load in this data 
-                    output_dict[color_mode][subject_id][activity_name][projection_type] = {"spd": loadmat(projection_spd_path),
-                                                                                           "best_fit": loadmat(projection_best_fit_path) if include_best_fit else projection_best_fit_path
-                                                                                         }
-
+                    # Load in this data (either as path or loading in the mat file)
+                    output_dict[color_mode][subject_id][activity_name][projection_type] = {"spd": loadmat(projection_spd_path) if not paths_only else projection_spd_path,
+                                                                                           "best_fit": loadmat(projection_best_fit_path) if not paths_only else projection_best_fit_path
+                                                                                          }
+                    
     # If we want to output as a mat file (does a bunch of auto conversion for us, do it now)
     if(output_as_mat != ""):
         savemat(output_as_mat, {"spds": output_dict})
