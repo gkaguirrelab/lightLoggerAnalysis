@@ -5,7 +5,7 @@ function outputPaths = makeVirtualFoveationProcessFigures(varargin)
 %{
     makeVirtualFoveationProcessFigures();
     makeVirtualFoveationProcessFigures( ...
-        "frameIdx", time2frame([3 48 333], 120), ...
+        "frameIdx", time2frame([1 31 508], 120), ...
         "lineStyle", "dashed");
 %}
     % Parse name-value pairs or single structure input
@@ -31,8 +31,8 @@ function outputPaths = makeVirtualFoveationProcessFigures(varargin)
     
     % Default parameters with updated line style option
     defaultOptions = struct( ...
-        'justProjectionVideo', fullfile(dropBoxBaseDir, 'FLIC_admin', 'Presentations', 'LightLoggerDemoVideos', 'FLIC_2001_walkIndoor_task_justProjection.avi'), ...
-        'virtuallyFoveatedVideo', fullfile(dropBoxBaseDir, 'FLIC_admin', 'Presentations', 'LightLoggerDemoVideos', 'FLIC_2001_walkIndoor_task_virtuallyFoveated.avi'), ...
+        'justProjectionVideo', fullfile(dropBoxBaseDir, 'FLIC_admin', 'Presentations', 'LightLoggerDemoVideos', 'FLIC_2001_walkBiopond_task_justProjection.avi'), ...
+        'virtuallyFoveatedVideo', fullfile(dropBoxBaseDir, 'FLIC_admin', 'Presentations', 'LightLoggerDemoVideos', 'FLIC_2001_walkBiopond_task_virtuallyFoveated.avi'), ...
         'frameIdx', [], ...
         'timestamp', [3 48 333], ...
         'fps', 120, ...
@@ -133,25 +133,9 @@ function outputPaths = makeVirtualFoveationProcessFigures(varargin)
 end
 
 function videoReader = iOpenVideoReader(videoPath, readAheadBufferSize)
-    try
         videoReader.reader = videoIOWrapper(videoPath, "ioAction", 'read', ...
             "readAheadBufferSize", readAheadBufferSize);
         videoReader.type = "videoIOWrapper";
-    catch err
-        warning("makeVirtualFoveationProcessFigures:VideoIOWrapperFallback", ...
-            "Falling back to MATLAB VideoReader for %s. videoIOWrapper error: %s", ...
-            videoPath, err.message);
-        try
-            videoReader.reader = VideoReader(videoPath);
-            videoReader.type = "VideoReader";
-        catch videoReaderErr
-            warning("makeVirtualFoveationProcessFigures:FfmpegFallback", ...
-                "Falling back to ffmpeg frame extraction for %s. VideoReader error: %s", ...
-                videoPath, videoReaderErr.message);
-            videoReader.reader = string(videoPath);
-            videoReader.type = "ffmpeg";
-        end
-    end
 end
 
 function nFrames = iNumFrames(videoReader)
@@ -169,10 +153,6 @@ function frame = iReadVideoFrame(videoReader, frameIdx)
     switch videoReader.type
         case "videoIOWrapper"
             frame = videoReader.reader.readFrame("frameNum", frameIdx, "color", "RGB");
-        case "VideoReader"
-            frame = read(videoReader.reader, frameIdx);
-        case "ffmpeg"
-            frame = iReadFrameWithFfmpeg(videoReader.reader, frameIdx);
     end
 end
 
@@ -182,23 +162,6 @@ function iCloseVideoReader(videoReader)
     end
 end
 
-function frame = iReadFrameWithFfmpeg(videoPath, frameIdx)
-    ffmpegPath = iFindExecutable("ffmpeg");
-    tempPng = string(tempname) + ".png";
-    cleanupObj = onCleanup(@() iDeleteIfExists(tempPng));
-    zeroBasedFrameIdx = frameIdx - 1;
-    cmd = sprintf("%s -v error -y -i %s -vf %s -vframes 1 %s", ...
-        iShellQuote(ffmpegPath), ...
-        iShellQuote(videoPath), ...
-        iShellQuote(sprintf("select=eq(n\\,%d)", zeroBasedFrameIdx)), ...
-        iShellQuote(tempPng));
-    [status, msg] = system(cmd);
-    if status ~= 0 || ~isfile(tempPng)
-        error("Could not extract frame %d from %s with ffmpeg. %s", ...
-            frameIdx, videoPath, msg);
-    end
-    frame = imread(tempPng);
-end
 
 function executablePath = iFindExecutable(executableName)
     homebrewPath = "/opt/homebrew/bin/" + executableName;
@@ -234,22 +197,40 @@ function annotatedFrame = iAddEccentricityOverlay(frame, fovDegrees, eccentricit
     centerY = (nRows + 1) / 2;
     degPerPix = fovDegrees / nRows;
     
+    % Colors
+    black = uint8([0 0 0]);
+    grey  = uint8([128 128 128]);
     white = uint8([255 255 255]);
-    grey = uint8([128 128 128]);
+    
+    % Outline thickness
+    outlineWidth = lineWidth + 2; 
     
     % Compute the arm pixel length corresponding to 10 degrees
     armPix10 = 10 / degPerPix;
     
-    % Draw only the 10-degree arms of the meridian lines at the 4 outer ends
+    %% 1. Draw Meridian Arms (White with Black Outlines)
+    % We draw all 4 black outlines first, then all 4 white cores
+    
+    % --- Black Outlines (Thicker) ---
+    annotatedFrame = iDrawLine(annotatedFrame, centerX, 1, centerX, 1 + armPix10, black, outlineWidth, lineStyle); % Top
+    annotatedFrame = iDrawLine(annotatedFrame, centerX, nRows, centerX, nRows - armPix10, black, outlineWidth, lineStyle); % Bottom
+    annotatedFrame = iDrawLine(annotatedFrame, 1, centerY, 1 + armPix10, centerY, black, outlineWidth, lineStyle); % Left
+    annotatedFrame = iDrawLine(annotatedFrame, nCols, centerY, nCols - armPix10, centerY, black, outlineWidth, lineStyle); % Right
+    
+    % --- White Cores (Original Width) ---
     annotatedFrame = iDrawLine(annotatedFrame, centerX, 1, centerX, 1 + armPix10, white, lineWidth, lineStyle);
     annotatedFrame = iDrawLine(annotatedFrame, centerX, nRows, centerX, nRows - armPix10, white, lineWidth, lineStyle);
     annotatedFrame = iDrawLine(annotatedFrame, 1, centerY, 1 + armPix10, centerY, white, lineWidth, lineStyle);
     annotatedFrame = iDrawLine(annotatedFrame, nCols, centerY, nCols - armPix10, centerY, white, lineWidth, lineStyle);
     
-    % Dynamically draw rings using the eccentricitiesDeg array
+    %% 2. Draw Eccentricity Rings (Gray with Black Outlines)
     for ee = 1:numel(eccentricitiesDeg)
         radiusPix = eccentricitiesDeg(ee) / degPerPix;
-        % All eccentricity rings are grey
+        
+        % Black Outline
+        annotatedFrame = iDrawCircle(annotatedFrame, centerX, centerY, radiusPix, black, outlineWidth, lineStyle);
+        
+        % Gray Core
         annotatedFrame = iDrawCircle(annotatedFrame, centerX, centerY, radiusPix, grey, lineWidth, lineStyle);
     end
 end
