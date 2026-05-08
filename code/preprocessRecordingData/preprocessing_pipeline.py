@@ -1697,7 +1697,7 @@ def generate_mean_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dr
                        projection_types_to_process: Iterable[Literal["justProjection", "virtuallyFoveated"]]=set(), 
                        color_modes_to_skip: Iterable[Literal["a", "c_lm", "c_s"]]=set(), 
                        color_modes_to_process: Iterable[Literal["a", "c_lm", "c_s"]]=set(), 
-                       dimension: Literal["subject", "activity", "subject_then_activity"] = "all"
+                       dimension: Literal["subject", "activity", "activity_then_subject"] = "subject"
                     ) -> None:
 
     import matlab.engine
@@ -1789,15 +1789,27 @@ def generate_mean_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dr
                 eng.meanSPDs(activities_flattened, "output_path", output_path)
 
         # Mean over all subjects and all activities 
-        elif(dimension == "subject_then_activity"):
+        elif(dimension == "activity_then_subject"):
             # If we want to mean over all, that means we 
             # end up with 1 SPD for this colormode 
-              # First, let's gather the activities 
+            # First, let's gather the activities 
             subjects: list[str] = list(color_mode_dict.keys())
             activities: list[str] = list(color_mode_dict[subjects[0]].keys()) 
             
             # First, average all activites for a given subject 
+            #generate_mean_spds(src_dir=src_dir,
+            #                   dst_dir=, 
+            #                   )
+
+
+            
             # Then average these averages. This is the STD that we care about. 
+            
+            
+            # Remove the temp dirs used along the way 
+            
+            
+            
             raise NotImplementedError()
 
 
@@ -1867,6 +1879,7 @@ def combine_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/
     subject_ids: set[str] = set( subject_id
                                   for subject_id in os.listdir(color_mode_paths[0])
                                   if os.path.isdir(os.path.join(color_mode_paths[0], subject_id))
+                                  if not subject_id.startswith(".")
                                   and subject_id.startswith("FLIC")
                                   and _is_desired_item(_extract_num_from_id(subject_id), subjects_to_process, subjects_to_skip)
                                  )
@@ -1996,6 +2009,121 @@ def combine_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/
     eng.quit() 
 
     return
+
+
+def plot_mean_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026", 
+                 dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026", 
+                 overwrite_existing: bool=False,
+                 verbose: bool=False,  
+                 dimension: Literal["acrossActivityThenSubject", "acrossSubject", "acrossActivity"]="acrossActivity", 
+                 subjects_to_skip: Iterable=set(),
+                 subjects_to_process: Iterable[]=set(),  
+                 activities_to_skip: Iterable=set(["lunch", "phone"]), 
+                 activities_to_process: Iterable=set(), 
+                 projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = ["virtuallyFoveated", "justProjection"],
+                 color_modes_to_skip: Iterable[Literal["a", "c_lm", "c_s", "L-M", "L+M+S"]] = set(),
+                 color_modes_to_process: Iterable[Literal["a", "c_lm", "c_s", "L-M", "L+M+S"]] = set()
+                ) -> None:
+    # First, let's get the path to the valid color modes 
+    color_mode_paths: list[str] = [ os.path.join(src_dir, filename)
+                                    for filename in natsorted(os.listdir(src_dir))
+                                    if not filename.startswith("actigraphy")
+                                    and not filename.startswith(".")
+                                    and _is_desired_item(filename, color_modes_to_process, color_modes_to_skip)  
+                                  ]
+    color_modes_list: list[str] = [os.path.basename(path) for path in color_mode_paths]
+
+
+    # Let's initialize the plotting dict
+    # This dict will be of the form 
+    # {color_mode: ACTIVITY_NAME, SUBJECT_NAME OR ALL: } # TODO: Still figuring this out 
+    spds_to_process: dict = {}
+
+    color_mode_iterator: Iterable = range(len(color_mode_paths)) if verbose is False else tqdm(range(len(custom_library_paths)), desc="Processing color modes")
+    for color_mode_num in color_mode_paths:
+        # Retrieve the current colormode 
+        color_mode_path: str = color_mode_paths[color_mode_num]
+        color_mode: str = os.path.basename(color_mode)
+
+        # Get the path to this dimension 
+        dimension_path: str = os.path.join(color_mode_path, dimension)
+        assert os.path.exists(dimension_path), f"Path does not exist: {dimension_path}"
+
+        # If the dimension is across activity, 
+        # that means that we have 1 average activity for each subject 
+        if(dimension == "acrossActivity"):
+            # Let's get the subjects in this dimension
+            subject_paths: list[str] = [ os.path.join(dimension_path, filename)
+                                        for filename in natsorted(os.listdir(dimension_path))
+                                        if not filename.startswith(".")
+                                        and os.path.isdir(os.path.join(dimension_path, filename))
+                                        and _is_desired_item(filename, subjects_to_process, subjects_to_skip)
+                                        ]
+            
+            # Iterate over these subjects and plot their results 
+            subject_iterator: Iterable = range(len(subject_paths)) if verbose is False else tqdm(range(len(subject_paths)))
+            for subject_num in subject_iterator:
+                # Retrieve the current subject 
+                subject_path: str = subject_paths[subject_num]
+                subject_id: str = os.path.basename(subject_path)
+
+                # Find the average SPD file here 
+                avg_spd_path: str = os.path.join(subject_path, f"meanSPDs.mat")
+                assert os.path.exists(avg_spd_path), f"Path does not exist: {avg_spd_path}"
+
+        
+        # If dimension is across subject that means that 
+        # we have 1 subject for each activity 
+        elif(dimension == "acrossSubject"):
+            # Let's get the activity paths 
+            activity_paths: list[str] = [ os.path.join(dimension_path, filename) 
+                                            for filename in natsorted(os.listdir(dimension_path))
+                                            if not filename.startswith(".")
+                                            and os.path.isdir(os.path.join(dimension_path, filename))
+                                            and _is_desired_item(filename, activities_to_process, activities_to_skip)
+                                        ]
+            activity_iterator: Iterable = range(len(activity_paths)) if verbose is False else tqdm(range(len(activity_paths)))
+            for activity_num in activity_iterator:
+                # Retrieve the activity path and name 
+                activity_path: str = activity_paths[activity_num]
+                activity_name: str = os.path.basename(activity_path)
+
+                # Find the SPD file here 
+                avg_spd_path: str = os.path.join(activity_path, f"meanSPDs.mat")
+                assert os.path.exists(avg_spd_path), f"Path does not exist: {avg_spd_path}"
+
+                # Now plot and save to the output directory 
+
+
+
+
+
+        # If dimension is across activity then subject 
+        # that means we have 1 SPD output 
+        elif(dimension == "acrossActivityThenSubject"):
+            raise NotImplementedError()
+        
+        # Otherwise, we have an unsupported mode 
+        else:
+            raise RuntimeError(f"Unsupported dimension: {dimension}")
+
+        
+    # Now, let's call the MATLAB plotting function
+
+    # TODO: Still figuring this out 
+    raise NotImplementedError()
+
+    # Generate the real output path that we will tell MATLAB to output to
+    #output_path: str = os.path.join(dst_dir, '#'.join(color_modes_list))
+    #os.makedirs(output_path, exist_ok=True)
+
+    # Call the MATLAB plotting function 
+    # eng.plotMeanSPDs()
+
+    # Close the MATLAB engine 
+    # eng.close() 
+
+    return 
 
 
 
