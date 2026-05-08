@@ -23,7 +23,7 @@ video_util_path: str = os.path.join(light_loger_analysis_dir, "code", "library",
 virtual_foveation_util_path: str = os.path.join(light_loger_analysis_dir, "code", "applyVirtualFoveation", "pythonCode")
 spd_util_path: str = os.path.join(light_loger_analysis_dir, "code", "analyzeSPD", "pythonCode")
 
-custom_library_paths: list[str] = (light_loger_analysis_dir, video_util_path, virtual_foveation_util_path)
+custom_library_paths: list[str] = (light_loger_analysis_dir, video_util_path, virtual_foveation_util_path, spd_util_path)
 assert all(os.path.exists(path) for path in custom_library_paths)
 
 for path in custom_library_paths:
@@ -1700,6 +1700,14 @@ def generate_mean_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dr
                        dimension: Literal["subject", "activity", "all"]="all"
                         ) -> None:
 
+    import matlab.engine
+    
+    # Initialize the MATLAB engine to utilize the MATLAB function we have developed for this purpose 
+    eng: object = matlab.engine.start_matlab()  
+    eng.pyenv('Version', '~/Documents/MATLAB/projects/lightLoggerAnalysis/analysis_env/bin/python', nargout=0)
+    eng.tbUseProject('lightLoggerAnalysis', nargout=0)
+
+
     # First, let's load the paths to the SPDs that we want 
     # returns a dict in the form: 
 
@@ -1749,7 +1757,7 @@ def generate_mean_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dr
                     continue 
 
                 # Pass to MATLAB to do the meaning
-                #eng.meanSPDs(subjects_flattened)
+                eng.meanSPDs(subjects_flattened)
         
         # Mean over all the activities for a given subject 
         elif(dimension == "activity"):
@@ -1765,7 +1773,7 @@ def generate_mean_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dr
                     
                 # Mean across activities here and get a single SPD back 
                 subject_dict: dict = color_mode_dict[subject]
-                activities: list[str] = list(subject_dict).keys()
+                activities: list[str] = list(subject_dict.keys())
 
                 # Assemble a list of the form [ {projection_types: paths} ] for all the activities of this subject
                 activities_flattened: list[dict] = [ subject_dict[activity] for activity in activities ] 
@@ -1776,7 +1784,7 @@ def generate_mean_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dr
                     continue 
 
                 # Pass to MATLAB to do the meaning
-                #eng.meanSPDs(activities_flattened, "output_path", output_path)
+                eng.meanSPDs(activities_flattened, "output_path", output_path)
 
         # Mean over all subjects and all activities 
         elif(dimension == "all"):
@@ -1790,6 +1798,11 @@ def generate_mean_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dr
         # Otherwise, unsupported mode that we should never reach 
         else:
             raise RuntimeError(f"Unsupported mean dimension: {dimension}")
+
+
+    # Close the MALTAB engine now that we are done 
+
+
 
     return 
 

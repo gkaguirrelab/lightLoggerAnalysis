@@ -39,7 +39,7 @@ def load_spds(src_dir: str,
                                    and not filename.startswith("actigraphy")
                                    and _is_desired(filename, color_modes_to_process, color_modes_to_skip)
                                 ]
-    assert len(color_modes_to_process) == 0 or ( len(color_modes_to_process) > 0 and set(color_mode_paths) == color_modes_to_process), f"Color modes to process requested were: {color_modes_to_process} but color modes found were: {color_mode_paths}"
+    assert len(color_modes_to_process) == 0 or ( len(color_modes_to_process) > 0 and set(os.path.basename(path) for path in color_mode_paths) == color_modes_to_process), f"Color modes to process requested were: {color_modes_to_process} but color modes found were: {color_mode_paths}"
 
     # Then, let's gather all of the subjects in the src_dir
     for color_mode_path in color_mode_paths:
@@ -48,13 +48,15 @@ def load_spds(src_dir: str,
         # Initialize this field in the output dict
         output_dict[color_mode] = {}
 
+
+        assert len(os.listdir(color_mode_path)) > 0, f"No files found in path: {color_mode_path}"
         subject_paths: list[str] = [ os.path.join(color_mode_path, filename)
                                     for filename in natsorted(os.listdir(color_mode_path))
                                     if os.path.isdir(os.path.join(color_mode_path, filename))
                                     and not filename.startswith(".")
-                                    and _is_desired(filename, subjects_to_process, subjects_to_skip)
+                                    and _is_desired(_extract_num_from_id(os.path.basename(filename)), subjects_to_process, subjects_to_skip)
                                 ]
-        assert len(subjects_to_process) == 0 or ( len(subjects_to_process) > 0 and set(subject_paths) == subjects_to_process), f"Subjects to process requested were: {subjects_to_process} but color modes found were: {subject_paths}"
+        assert len(subjects_to_process) == 0 or ( len(subjects_to_process) > 0 and set( _extract_num_from_id(os.path.basename(path)) for path in subject_paths) == subjects_to_process), f"Subjects to process requested were: {subjects_to_process} but subjects found were: {subject_paths}"
 
         # Now, let's gather all of the activities we want to load in
         for subject_path in subject_paths:
@@ -69,17 +71,17 @@ def load_spds(src_dir: str,
                                           and not filename.startswith(".")
                                           and _is_desired(filename, activities_to_process, activities_to_skip)
                                         ]
-            assert len(activities_to_process) == 0 or ( len(activities_to_process) > 0 and set(subject_paths) == activities_to_process), f"Activities to process requested were: {activities_to_process} but color modes found were: {activity_paths}"
+            assert len(activities_to_process) == 0 or ( len(activities_to_process) > 0 and set(os.path.basename(path) for path in activity_paths) == activities_to_process), f"Activities to process requested were: {activities_to_process} but color modes found were: {activity_paths}"
 
             # Now, let's gather the projection paths 
             for activity_path in activity_paths:
-                activity_name: str = os.path.basenane(activity_path)
+                activity_name: str = os.path.basename(activity_path)
 
                 # Initialize this field in the subject of this colormode 
                 output_dict[color_mode][subject_id][activity_name] = {}
 
                 valid_projection_types: list[str] = natsorted([projection_type for projection_type in 
-                                                             ("justProjection", "virtualFoveation") 
+                                                             ("justProjection", "virtuallyFoveated") 
                                                               if _is_desired(projection_type, projection_types_to_process, projection_types_to_skip)
 
                                                               ]
@@ -88,10 +90,10 @@ def load_spds(src_dir: str,
 
                 # Now, let's load in the data from this projection type
                 for projection_type in valid_projection_types:
-                    projection_spd_path: str = ""
+                    projection_spd_path: str = os.path.join(activity_path, f"{subject_id}_{activity_name}_{projection_type}_SPDResults.mat")
                     assert os.path.exists(projection_spd_path), f"Path does not exist: {projection_spd_path}"
 
-                    projection_best_fit_path: str = ""
+                    projection_best_fit_path: str = os.path.join(activity_path, f"{color_mode}_{projection_type}_bestFit.mat")
                     assert os.path.exists(projection_best_fit_path), f"Path does not exist: {projection_best_fit_path}"
 
                     # Load in this data (either as path or loading in the mat file)
@@ -107,7 +109,14 @@ def load_spds(src_dir: str,
     return output_dict
 
 def _is_desired(item: Any, to_process: Iterable, to_skip: Iterable) -> bool:
-    return True
+    if(item in to_process):
+        return True 
+    
+    return len(to_process) == 0 and item not in to_skip
+
+def _extract_num_from_id(subject_id: str) -> int:
+    assert re.fullmatch("FLIC_\d+", subject_id), f"{subject_id} does not fit the format FLIC_[NUM]"
+    return int(re.search(r"\d+", subject_id).group())
 
 
 
