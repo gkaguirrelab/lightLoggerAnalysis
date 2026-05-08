@@ -101,6 +101,9 @@ setpref(projectName, "video_io_util_path", video_io_util_path);
 virtual_foveation_util_path = fullfile(light_logger_analysis_path, "code", "applyVirtualFoveation", "pythonCode", "virtual_foveation.py");
 setpref(projectName, "virtual_foveation_util_path", virtual_foveation_util_path); 
 
+spd_util_path = fullfile(light_logger_analysis_path, "code", "analyzeSPD", "pythonCode", "spd_util.py"); 
+setpref("lightLoggerAnalysis", "spd_util_path", spd_util_path)
+
 % Save the path to FLIC_raw and FLIC_processing on the NAS 
 FLIC_raw_dir = "/Volumes/FLIC_raw"; 
 setpref(projectName, "FLIC_raw_dir", FLIC_raw_dir); 

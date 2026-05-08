@@ -32,6 +32,18 @@ function avgSPDStruct = meanSPDs(spds, options)
         spd_by_regions = [];
         median_images = [];
         frqs = [];
+        best_fit_center_slope = [];
+        best_fit_center_intercept = [];
+        best_fit_center_log10_frequency = [];
+        best_fit_center_log10_spd_fit = [];
+        best_fit_center_frequency = [];
+        best_fit_center_spd_fit = [];
+        best_fit_periphery_slope = [];
+        best_fit_periphery_intercept = [];
+        best_fit_periphery_log10_frequency = [];
+        best_fit_periphery_log10_spd_fit = [];
+        best_fit_periphery_frequency = [];
+        best_fit_periphery_spd_fit = [];
 
         % Iterate over the SPDs we have been provided
         for ii = 1:numel(spds)
@@ -40,7 +52,8 @@ function avgSPDStruct = meanSPDs(spds, options)
             
             % Load in the SPD from the current spd
             loaded_projection_spd = iLoadProjectionEntry(current_spd.(projection_type).spd);
-   
+            loaded_projection_best_fit = iLoadBestFitEntry(current_spd.(projection_type).best_fit);
+            
 
             % Save this spd's items 
             exponent_maps(:, :, ii) = loaded_projection_spd.exponentMap;
@@ -48,6 +61,23 @@ function avgSPDStruct = meanSPDs(spds, options)
             spd_by_regions(:, :, :, ii) = loaded_projection_spd.spdByRegion;
             median_images(:, :, ii) = loaded_projection_spd.medianImage;
             frqs(:, ii) = loaded_projection_spd.frq(:);
+
+            % Save this SPD's best-fit-line quantities for both the center
+            % and periphery regions. Scalar coefficients are stacked across
+            % columns, while vector-valued fit curves are aligned row-wise.
+            best_fit_center_slope(1, ii) = loaded_projection_best_fit.center.slope;
+            best_fit_center_intercept(1, ii) = loaded_projection_best_fit.center.intercept;
+            best_fit_center_log10_frequency(:, ii) = loaded_projection_best_fit.center.log10_frequency(:);
+            best_fit_center_log10_spd_fit(:, ii) = loaded_projection_best_fit.center.log10_spd_fit(:);
+            best_fit_center_frequency(:, ii) = loaded_projection_best_fit.center.frequency(:);
+            best_fit_center_spd_fit(:, ii) = loaded_projection_best_fit.center.spd_fit(:);
+
+            best_fit_periphery_slope(1, ii) = loaded_projection_best_fit.periphery.slope;
+            best_fit_periphery_intercept(1, ii) = loaded_projection_best_fit.periphery.intercept;
+            best_fit_periphery_log10_frequency(:, ii) = loaded_projection_best_fit.periphery.log10_frequency(:);
+            best_fit_periphery_log10_spd_fit(:, ii) = loaded_projection_best_fit.periphery.log10_spd_fit(:);
+            best_fit_periphery_frequency(:, ii) = loaded_projection_best_fit.periphery.frequency(:);
+            best_fit_periphery_spd_fit(:, ii) = loaded_projection_best_fit.periphery.spd_fit(:);
         end
 
         % Calculate the mean and STD of this projection type for all the SPDs
@@ -62,6 +92,36 @@ function avgSPDStruct = meanSPDs(spds, options)
         avgSPDStruct.std.(projection_type).spdByRegion = std(spd_by_regions, 0, 4, 'omitmissing');
         avgSPDStruct.std.(projection_type).medianImage = std(median_images, 0, 3, 'omitmissing');
         avgSPDStruct.std.(projection_type).frq = std(frqs, 0, 2, 'omitmissing');
+
+        % Average the best-fit-line outputs for each spatial region and
+        % store them alongside the main SPD summary fields.
+        avgSPDStruct.mean.(projection_type).best_fit.center.slope = mean(best_fit_center_slope, 2, 'omitmissing');
+        avgSPDStruct.mean.(projection_type).best_fit.center.intercept = mean(best_fit_center_intercept, 2, 'omitmissing');
+        avgSPDStruct.mean.(projection_type).best_fit.center.log10_frequency = mean(best_fit_center_log10_frequency, 2, 'omitmissing');
+        avgSPDStruct.mean.(projection_type).best_fit.center.log10_spd_fit = mean(best_fit_center_log10_spd_fit, 2, 'omitmissing');
+        avgSPDStruct.mean.(projection_type).best_fit.center.frequency = mean(best_fit_center_frequency, 2, 'omitmissing');
+        avgSPDStruct.mean.(projection_type).best_fit.center.spd_fit = mean(best_fit_center_spd_fit, 2, 'omitmissing');
+
+        avgSPDStruct.mean.(projection_type).best_fit.periphery.slope = mean(best_fit_periphery_slope, 2, 'omitmissing');
+        avgSPDStruct.mean.(projection_type).best_fit.periphery.intercept = mean(best_fit_periphery_intercept, 2, 'omitmissing');
+        avgSPDStruct.mean.(projection_type).best_fit.periphery.log10_frequency = mean(best_fit_periphery_log10_frequency, 2, 'omitmissing');
+        avgSPDStruct.mean.(projection_type).best_fit.periphery.log10_spd_fit = mean(best_fit_periphery_log10_spd_fit, 2, 'omitmissing');
+        avgSPDStruct.mean.(projection_type).best_fit.periphery.frequency = mean(best_fit_periphery_frequency, 2, 'omitmissing');
+        avgSPDStruct.mean.(projection_type).best_fit.periphery.spd_fit = mean(best_fit_periphery_spd_fit, 2, 'omitmissing');
+
+        avgSPDStruct.std.(projection_type).best_fit.center.slope = std(best_fit_center_slope, 0, 2, 'omitmissing');
+        avgSPDStruct.std.(projection_type).best_fit.center.intercept = std(best_fit_center_intercept, 0, 2, 'omitmissing');
+        avgSPDStruct.std.(projection_type).best_fit.center.log10_frequency = std(best_fit_center_log10_frequency, 0, 2, 'omitmissing');
+        avgSPDStruct.std.(projection_type).best_fit.center.log10_spd_fit = std(best_fit_center_log10_spd_fit, 0, 2, 'omitmissing');
+        avgSPDStruct.std.(projection_type).best_fit.center.frequency = std(best_fit_center_frequency, 0, 2, 'omitmissing');
+        avgSPDStruct.std.(projection_type).best_fit.center.spd_fit = std(best_fit_center_spd_fit, 0, 2, 'omitmissing');
+
+        avgSPDStruct.std.(projection_type).best_fit.periphery.slope = std(best_fit_periphery_slope, 0, 2, 'omitmissing');
+        avgSPDStruct.std.(projection_type).best_fit.periphery.intercept = std(best_fit_periphery_intercept, 0, 2, 'omitmissing');
+        avgSPDStruct.std.(projection_type).best_fit.periphery.log10_frequency = std(best_fit_periphery_log10_frequency, 0, 2, 'omitmissing');
+        avgSPDStruct.std.(projection_type).best_fit.periphery.log10_spd_fit = std(best_fit_periphery_log10_spd_fit, 0, 2, 'omitmissing');
+        avgSPDStruct.std.(projection_type).best_fit.periphery.frequency = std(best_fit_periphery_frequency, 0, 2, 'omitmissing');
+        avgSPDStruct.std.(projection_type).best_fit.periphery.spd_fit = std(best_fit_periphery_spd_fit, 0, 2, 'omitmissing');
 
         %%%% 
     end
@@ -101,4 +161,28 @@ function loaded_spd = iLoadProjectionEntry(projection_entry)
     loaded_spd = loaded_mat.activityData.(activity_names{1});
     
     return;
+end
+
+
+function loaded_best_fit = iLoadBestFitEntry(best_fit_entry)
+% Normalize a best-fit leaf into the struct saved by combineSPDs, with
+% `.center` and `.periphery` subfields.
+
+    % If we passed in a string path to the best-fit data, load it in.
+    if (isstring(best_fit_entry) || ischar(best_fit_entry))
+        loaded_mat = load(best_fit_entry);
+
+    % Otherwise, if we already have a struct, use it directly.
+    elseif (isstruct(best_fit_entry))
+        loaded_mat = best_fit_entry;
+
+    % Otherwise, throw an error for an unsupported type.
+    else
+        error("Unsupported best-fit entry type: %s", class(best_fit_entry));
+    end
+
+    % Read in the loaded best fit field
+    loaded_best_fit = loaded_mat.bestFit;
+    return;
+
 end

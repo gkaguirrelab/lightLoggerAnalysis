@@ -54,6 +54,7 @@ def load_spds(src_dir: str,
                                     for filename in natsorted(os.listdir(color_mode_path))
                                     if os.path.isdir(os.path.join(color_mode_path, filename))
                                     and not filename.startswith(".")
+                                    and filename.startswith("FLIC")
                                     and _is_desired(_extract_num_from_id(os.path.basename(filename)), subjects_to_process, subjects_to_skip)
                                 ]
         assert len(subjects_to_process) == 0 or ( len(subjects_to_process) > 0 and set( _extract_num_from_id(os.path.basename(path)) for path in subject_paths) == subjects_to_process), f"Subjects to process requested were: {subjects_to_process} but subjects found were: {subject_paths}"

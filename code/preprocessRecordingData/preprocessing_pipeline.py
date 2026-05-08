@@ -1697,8 +1697,8 @@ def generate_mean_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dr
                        projection_types_to_process: Iterable[Literal["justProjection", "virtuallyFoveated"]]=set(), 
                        color_modes_to_skip: Iterable[Literal["a", "c_lm", "c_s"]]=set(), 
                        color_modes_to_process: Iterable[Literal["a", "c_lm", "c_s"]]=set(), 
-                       dimension: Literal["subject", "activity", "all"]="all"
-                        ) -> None:
+                       dimension: Literal["subject", "activity", "subject_then_activity"] = "all"
+                    ) -> None:
 
     import matlab.engine
     
@@ -1749,15 +1749,16 @@ def generate_mean_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dr
                 activity: str = activities[activity_num]
 
                 # Assemble a list of the form [ {projection_types: paths} ] for all the subjects of this activiity 
-                subjects_flattened: list[dict] = [ color_mode_dict[subject][activity] for subject in subject]
+                subjects_flattened: list[dict] = [ color_mode_dict[subject][activity] for subject in subjects]
 
                 # Generate the output path 
                 output_path: str = os.path.join(dst_dir, color_mode, "acrossSubject", activity, "meanSPDs.mat")
                 if(os.path.exists(output_path) and overwrite_existing is False):
                     continue 
+                os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
                 # Pass to MATLAB to do the meaning
-                eng.meanSPDs(subjects_flattened)
+                eng.meanSPDs(subjects_flattened, "output_path", output_path)
         
         # Mean over all the activities for a given subject 
         elif(dimension == "activity"):
@@ -1782,26 +1783,34 @@ def generate_mean_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dr
                 output_path: str = os.path.join(dst_dir, color_mode, "acrossActivity", subject, "meanSPDs.mat")
                 if(os.path.exists(output_path) and overwrite_existing is False):
                     continue 
+                os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
                 # Pass to MATLAB to do the meaning
                 eng.meanSPDs(activities_flattened, "output_path", output_path)
 
         # Mean over all subjects and all activities 
-        elif(dimension == "all"):
+        elif(dimension == "subject_then_activity"):
             # If we want to mean over all, that means we 
             # end up with 1 SPD for this colormode 
               # First, let's gather the activities 
             subjects: list[str] = list(color_mode_dict.keys())
             activities: list[str] = list(color_mode_dict[subjects[0]].keys()) 
-            pass 
+            
+            # First, average all activites for a given subject 
+            # Then average these averages. This is the STD that we care about. 
+            raise NotImplementedError()
+
 
         # Otherwise, unsupported mode that we should never reach 
         else:
             raise RuntimeError(f"Unsupported mean dimension: {dimension}")
 
 
-    # Close the MALTAB engine now that we are done 
+    # TODO: include standard deviation of the best fit lines
 
+
+    # Close the MALTAB engine now that we are done 
+    eng.quit()
 
 
     return 
@@ -1858,6 +1867,7 @@ def combine_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/
     subject_ids: set[str] = set( subject_id
                                   for subject_id in os.listdir(color_mode_paths[0])
                                   if os.path.isdir(os.path.join(color_mode_paths[0], subject_id))
+                                  and subject_id.startswith("FLIC")
                                   and _is_desired_item(_extract_num_from_id(subject_id), subjects_to_process, subjects_to_skip)
                                  )
     subject_ids_list: list[str] = list(subject_ids)
@@ -1897,6 +1907,7 @@ def combine_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/
         color_mode_subjects: set[str] =  set( subject_id
                                                for subject_id in os.listdir(color_mode_path)
                                                if os.path.isdir(os.path.join(color_mode_path, subject_id))
+                                               and subject_id.startswith("FLIC")
                                                and _is_desired_item(_extract_num_from_id(subject_id), subjects_to_process, subjects_to_skip)
                                             )
 
