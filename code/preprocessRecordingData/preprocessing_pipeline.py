@@ -1742,6 +1742,7 @@ def generate_mean_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dr
 
             # First, let's gather the activities 
             subjects: list[str] = list(color_mode_dict.keys())
+
             activities: list[str] = list(color_mode_dict[subjects[0]].keys()) 
             activities_iterator: Iterable = range(len(activities)) if verbose is False else tqdm(range(len(activities)), desc="Meaning across subjects dimension", leave=False)
             for activity_num in activities_iterator:
@@ -2017,7 +2018,7 @@ def plot_mean_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbo
                  verbose: bool=False,  
                  dimension: Literal["acrossActivityThenSubject", "acrossSubject", "acrossActivity"]="acrossActivity", 
                  subjects_to_skip: Iterable=set(),
-                 subjects_to_process: Iterable[]=set(),  
+                 subjects_to_process: Iterable=set(),  
                  activities_to_skip: Iterable=set(["lunch", "phone"]), 
                  activities_to_process: Iterable=set(), 
                  projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = ["virtuallyFoveated", "justProjection"],

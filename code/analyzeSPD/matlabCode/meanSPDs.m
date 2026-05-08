@@ -7,11 +7,13 @@ function avgSPDStruct = meanSPDs(spds, options)
     % The input argument of spds is a flat 
     % cell array of structs 
     % of the form {projection_type: SPDStruct (OR PATH TO SPD STRUCT): fields_to_average }
-    
+    spds = cell(spds);
+
     % The output avgSPDStruct should contain the following information 
     % should have the following form 
     % {mean: {projection_type: mean_of_fields_to_average}, std: {projection_type: std_of_fields_to_average}, n: numel(spds) }
-    
+
+
     avgSPDStruct = struct();
     avgSPDStruct.mean = struct();
     avgSPDStruct.std = struct();
@@ -129,10 +131,15 @@ function avgSPDStruct = meanSPDs(spds, options)
     % If output path is not "", 
     % then we output to the target location
     if(~(options.output_path == ""))
+
+        disp("this is the output path")
+        disp(options.output_path)
         save(options.output_path, "avgSPDStruct")
 
     end 
 
+
+    disp("THIS IS THE N COMING IN")
 
 end 
 

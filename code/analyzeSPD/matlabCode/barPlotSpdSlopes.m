@@ -1,4 +1,4 @@
-function barPlotSpdSlopes(best_fit_lines, activity_name)
+function barPlotSpdSlopes(activity_name, options)
 % PLOT_SPD_SLOPES Creates a vertically stacked 4-tile bar plot with SEM error bars.
 %
 % Inputs:
@@ -7,12 +7,91 @@ function barPlotSpdSlopes(best_fit_lines, activity_name)
 % Example
 %{
     barPlotSpdSlopes(best_fit_lines, 'walkOutdoor')
-%}
+%}  
+    arguments 
+        activity_name 
+        options.src_dir = fullfile(getpref("lightLogger", "dropboxBaseDir"), "FLIC_analysis", "lightLogger", "NEWscriptedIndoorOutdoorVideos2026") 
+        options.color_mode = "a"
+    end 
+
+
+    % Given activity name, load in the spds and best fit lines 
+    % for all the subjects 
+    spds_and_best_fits = loadSPDs(options.src_dir, "activities_to_process", {activity_name}, "color_modes_to_process", {options.color_mode}); 
+
+    % The plotting code below was originally written for an older
+    % `best_fit_lines` structure of the form:
+    %
+    %   best_fit_lines.(subject).(activity).(color_mode).(projection_type)
+    %
+    % where each projection-type leaf directly contained the `.center`
+    % and `.periphery` fit information.
+    %
+    % The newer input structure returned by `loadSPDs` is now:
+    %
+    %   spds_and_best_fits.(color_mode).(subject).(activity).(projection_type).best_fit.bestFit
+    %
+    % To preserve the existing plotting logic exactly as written below, we
+    % first adapt the new structure back into the older `best_fit_lines`
+    % layout expected by the original plotting code.
+    best_fit_lines = struct();
+
+    % Retrieve the color-mode fields present in the loaded structure.
+    color_modes = fieldnames(spds_and_best_fits);
+
+    % Iterate over color modes first because they now form the top-level
+    % fields of the loaded SPD/best-fit structure.
+    for cc = 1:numel(color_modes)
+        color_mode = color_modes{cc};
+        color_mode_struct = spds_and_best_fits.(color_mode);
+
+        % Retrieve the subjects available for this color mode.
+        subjects_for_color = fieldnames(color_mode_struct);
+        for ss = 1:numel(subjects_for_color)
+            subject_id = subjects_for_color{ss};
+            subject_struct = color_mode_struct.(subject_id);
+
+            % The requested activity should be one of the subject fields if
+            % the load/filtering succeeded. Skip safely if it is absent.
+            if (~isfield(subject_struct, activity_name))
+                continue;
+            end
+
+            activity_struct = subject_struct.(activity_name);
+            projection_types = fieldnames(activity_struct);
+
+            % Iterate over the projection types (e.g. justProjection and
+            % virtuallyFoveated) and pull the inner `bestFit` payload out
+            % to match the legacy plotting layout.
+            for pp = 1:numel(projection_types)
+                projection_type = projection_types{pp};
+                projection_struct = activity_struct.(projection_type);
+
+                if (~isfield(projection_struct, "best_fit"))
+                    continue;
+                end
+
+                best_fit_struct = projection_struct.best_fit;
+                if (isfield(best_fit_struct, "bestFit"))
+                    best_fit_struct = best_fit_struct.bestFit;
+                end
+
+                best_fit_lines.(subject_id).(activity_name).(color_mode).(projection_type) = best_fit_struct;
+            end
+        end
+    end
+
     subjects = fieldnames(best_fit_lines);
     num_subjects = length(subjects);
     
-    conditions = {'a', 'c_lm', 'c_s'};
-    condition_names = {'Achromatic', 'L-M', 'S'};
+    % Use the color modes actually present in the loaded structure so the
+    % plotting code continues to work whether one or multiple color modes
+    % were requested upstream.
+    conditions = color_modes;
+    condition_names = cell(size(conditions));
+    for cc = 1:numel(conditions)
+        condition_names{cc} = iFormatConditionName(conditions{cc});
+    end
     num_conditions = length(conditions);
 
     % Define colors: {Dark, Light}
@@ -162,4 +241,20 @@ function barPlotSpdSlopes(best_fit_lines, activity_name)
         'FontWeight', 'bold', 'FontSize', 11);
         
     box off;
+end
+
+
+function condition_name = iFormatConditionName(condition)
+% Convert internal color-mode identifiers into readable panel labels.
+
+    switch string(condition)
+        case "a"
+            condition_name = 'Achromatic';
+        case "c_lm"
+            condition_name = 'L-M';
+        case "c_s"
+            condition_name = 'S';
+        otherwise
+            condition_name = char(condition);
+    end
 end
