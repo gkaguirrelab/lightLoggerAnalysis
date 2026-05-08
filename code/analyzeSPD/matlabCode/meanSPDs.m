@@ -131,15 +131,8 @@ function avgSPDStruct = meanSPDs(spds, options)
     % If output path is not "", 
     % then we output to the target location
     if(~(options.output_path == ""))
-
-        disp("this is the output path")
-        disp(options.output_path)
         save(options.output_path, "avgSPDStruct")
-
     end 
-
-
-    disp("THIS IS THE N COMING IN")
 
 end 
 

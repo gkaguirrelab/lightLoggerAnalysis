@@ -2025,6 +2025,13 @@ def plot_mean_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbo
                  color_modes_to_skip: Iterable[Literal["a", "c_lm", "c_s", "L-M", "L+M+S"]] = set(),
                  color_modes_to_process: Iterable[Literal["a", "c_lm", "c_s", "L-M", "L+M+S"]] = set()
                 ) -> None:
+    import matlab.engine
+
+    # Initialize the MATLAB engine to utilize the MATLAB function we have developed for this purpose 
+    eng: object = matlab.engine.start_matlab()  
+    eng.pyenv('Version', '~/Documents/MATLAB/projects/lightLoggerAnalysis/analysis_env/bin/python', nargout=0)
+    eng.tbUseProject('lightLoggerAnalysis', nargout=0)
+
     # First, let's get the path to the valid color modes 
     color_mode_paths: list[str] = [ os.path.join(src_dir, filename)
                                     for filename in natsorted(os.listdir(src_dir))
@@ -2037,14 +2044,19 @@ def plot_mean_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbo
 
     # Let's initialize the plotting dict
     # This dict will be of the form 
-    # {color_mode: ACTIVITY_NAME, SUBJECT_NAME OR ALL: } # TODO: Still figuring this out 
+    # {color_mode: 
+    #               activity_name: avg_spd_path if acrossSubject 
+    #               subject_id: {activity_name: avg_spd_path} if acrossActivity
+    #               TODO: what about acrossActivityThenSubject
+    # }
     spds_to_process: dict = {}
 
-    color_mode_iterator: Iterable = range(len(color_mode_paths)) if verbose is False else tqdm(range(len(custom_library_paths)), desc="Processing color modes")
-    for color_mode_num in color_mode_paths:
+    color_mode_iterator: Iterable = range(len(color_mode_paths)) if verbose is False else tqdm(range(len(color_mode_paths)), desc="Processing color modes")
+    for color_mode_num in color_mode_iterator:
         # Retrieve the current colormode 
         color_mode_path: str = color_mode_paths[color_mode_num]
-        color_mode: str = os.path.basename(color_mode)
+        color_mode: str = os.path.basename(color_mode_path)
+        spds_to_process[color_mode] = {}
 
         # Get the path to this dimension 
         dimension_path: str = os.path.join(color_mode_path, dimension)
@@ -2053,6 +2065,8 @@ def plot_mean_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbo
         # If the dimension is across activity, 
         # that means that we have 1 average activity for each subject 
         if(dimension == "acrossActivity"):
+            raise NotImplementedError() 
+
             # Let's get the subjects in this dimension
             subject_paths: list[str] = [ os.path.join(dimension_path, filename)
                                         for filename in natsorted(os.listdir(dimension_path))
@@ -2093,36 +2107,41 @@ def plot_mean_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbo
                 avg_spd_path: str = os.path.join(activity_path, f"meanSPDs.mat")
                 assert os.path.exists(avg_spd_path), f"Path does not exist: {avg_spd_path}"
 
-                # Now plot and save to the output directory 
-
-
-
-
+                # Now save it to the dictionary to be plotted 
+                spds_to_process[color_mode][activity_name] = avg_spd_path
 
         # If dimension is across activity then subject 
         # that means we have 1 SPD output 
         elif(dimension == "acrossActivityThenSubject"):
+            raise NotImplementedError() 
+
             raise NotImplementedError()
         
         # Otherwise, we have an unsupported mode 
         else:
             raise RuntimeError(f"Unsupported dimension: {dimension}")
 
-        
-    # Now, let's call the MATLAB plotting function
-
-    # TODO: Still figuring this out 
-    raise NotImplementedError()
-
     # Generate the real output path that we will tell MATLAB to output to
-    #output_path: str = os.path.join(dst_dir, '#'.join(color_modes_list))
-    #os.makedirs(output_path, exist_ok=True)
+    output_path: str = os.path.join(dst_dir, "#".join(color_modes_list), dimension)
+    if(os.path.exists(output_path) and overwrite_existing is False):
+        return
+    
+    # Save this information out to a temp file to feed into matlab 
+    temp_output_path: str = os.path.join(os.path.expanduser("~/Desktop"), 'temp_plotting_mean_spds.mat')
+    scipy.io.savemat(temp_output_path, {"spds": spds_to_process})
+    os.makedirs(os.path.basename(output_path), exist_ok=True)
 
     # Call the MATLAB plotting function 
-    # eng.plotMeanSPDs()
+    eng.plotMeanSPDs(temp_output_path,
+                     "output_dir", output_path,
+                     nargout=0
+                    )
+
+    # Remove the temp file 
+    os.remove(temp_output_path)
 
     # Close the MATLAB engine 
-    # eng.close() 
+    eng.quit() 
 
     return 
 
