@@ -2129,7 +2129,7 @@ def plot_mean_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbo
     # Save this information out to a temp file to feed into matlab 
     temp_output_path: str = os.path.join(os.path.expanduser("~/Desktop"), 'temp_plotting_mean_spds.mat')
     scipy.io.savemat(temp_output_path, {"spds": spds_to_process})
-    os.makedirs(os.path.basename(output_path), exist_ok=True)
+    os.makedirs(output_path, exist_ok=True)
 
     # Call the MATLAB plotting function 
     eng.plotMeanSPDs(temp_output_path,

@@ -22,8 +22,9 @@ function plotMeanSPDs(spds, options)
 %                           Python `plot_mean_spds` helper.
 %
 % Optional key/value pairs:
-%   output_path           - String. Target PDF path. If empty, figures are
-%                           created but not exported.
+%   output_dir            - String. Target output directory. If empty,
+%                           figures are created but not exported. The
+%                           directory is created automatically if needed.
 %
 % Notes:
 %   The current Python caller may provide either of these top-level
@@ -88,11 +89,33 @@ function plotMeanSPDs(spds, options)
         % combineSPDs.
         figure_handle = iPlotMeanActivity(activity_struct, activity_name);
 
-        % Output the figure if requested
+        % Also plot exponent and variance maps for each color mode using
+        % the same side-by-side map logic used elsewhere in the SPD
+        % plotting code. The helper returns the full handle struct so the
+        % export loop below can simply iterate over it.
+        map_handles = iPlotMeanMaps(activity_struct, activity_name);
+
+        % Output the figure if requested. `options.output_dir` is treated
+        % as a directory path, so create it if it does not already exist.
         if (~(options.output_dir == ""))
+            if (~isfolder(options.output_dir))
+                mkdir(options.output_dir);
+            end
+
             output_filepath = fullfile(options.output_dir, sprintf('%s_spdByRegion.pdf', activity_name));
             exportgraphics(figure_handle, output_filepath, 'ContentType', 'vector');
             close(figure_handle);
+
+            for cc = 1:numel(color_modes)
+                color_mode = color_modes{cc};
+                exponent_output_filepath = fullfile(options.output_dir, sprintf('%s_%s_exponentMap.pdf', activity_name, color_mode));
+                variance_output_filepath = fullfile(options.output_dir, sprintf('%s_%s_varianceMap.pdf', activity_name, color_mode));
+
+                exportgraphics(map_handles.(color_mode).exponentMap, exponent_output_filepath, 'ContentType', 'vector');
+                exportgraphics(map_handles.(color_mode).varianceMap, variance_output_filepath, 'ContentType', 'vector');
+                close(map_handles.(color_mode).exponentMap);
+                close(map_handles.(color_mode).varianceMap);
+            end
         end
     end
 
@@ -134,19 +157,27 @@ end
 function figure_handle = iPlotMeanActivity(activity_struct, activity_name)
 % Plot one averaged activity using the same combineSPDs styling.
 
+    axis_font_size = 14;
+    label_font_size = 18;
+    title_font_size = 20;
+    legend_font_size = 15;
+
     fig = figure('Color', 'w', 'Position', [100 100 1100 650]);
     ax = axes('Parent', fig, 'Position', [0.08 0.14 0.60 0.76]);
     hold(ax, 'on');
-    grid(ax, 'on');
+    grid(ax, 'off');
     box(ax, 'off');
     set(ax, 'XScale', 'log', 'YScale', 'log');
+    ax.FontSize = axis_font_size;
 
     legend_handles = gobjects(0);
     legend_labels = {};
 
     color_modes = fieldnames(activity_struct);
+    has_multiple_color_modes = numel(color_modes) > 1;
     for cc = 1:numel(color_modes)
         color_mode = color_modes{cc};
+        has_added_compact_color_mode_legend_item = false;
         projection_struct = activity_struct.(color_mode);
         projection_types = fieldnames(projection_struct);
 
@@ -167,22 +198,30 @@ function figure_handle = iPlotMeanActivity(activity_struct, activity_name)
             [center_freq, center_spd] = iCleanSpdForPlot(frq, region_averages.center);
             if (~isempty(center_freq))
                 center_handle = loglog(ax, center_freq, center_spd, 'Color', center_color, 'LineStyle', line_style, 'LineWidth', 2.0);
-                legend_handles(end+1) = center_handle; %#ok<AGROW>
-                legend_labels{end+1} = iFormatLegendLabel(color_mode, projection_type, 'center'); %#ok<AGROW>
+                if (~has_multiple_color_modes || cc == 1)
+                    legend_handles(end+1) = center_handle; %#ok<AGROW>
+                    legend_labels{end+1} = iFormatLegendLabel(color_mode, projection_type, 'center'); %#ok<AGROW>
+                elseif (~has_added_compact_color_mode_legend_item)
+                    legend_handles(end+1) = center_handle; %#ok<AGROW>
+                    legend_labels{end+1} = iFormatColorModeLabel(color_mode); %#ok<AGROW>
+                    has_added_compact_color_mode_legend_item = true;
+                end
             end
 
             [periphery_freq, periphery_spd] = iCleanSpdForPlot(frq, region_averages.periphery);
             if (~isempty(periphery_freq))
                 periphery_handle = loglog(ax, periphery_freq, periphery_spd, 'Color', periphery_color, 'LineStyle', line_style, 'LineWidth', 2.0);
-                legend_handles(end+1) = periphery_handle; %#ok<AGROW>
-                legend_labels{end+1} = iFormatLegendLabel(color_mode, projection_type, 'periphery'); %#ok<AGROW>
+                if (~has_multiple_color_modes || cc == 1)
+                    legend_handles(end+1) = periphery_handle; %#ok<AGROW>
+                    legend_labels{end+1} = iFormatLegendLabel(color_mode, projection_type, 'periphery'); %#ok<AGROW>
+                end
             end
         end
     end
 
-    xlabel(ax, 'Frequency (Hz)');
-    ylabel(ax, 'Spectral power density (contrast^2/Hz)');
-    title(ax, activity_name, 'Interpreter', 'none');
+    xlabel(ax, 'Frequency (Hz)', 'FontSize', label_font_size);
+    ylabel(ax, 'Spectral power density (contrast^2/Hz)', 'FontSize', label_font_size);
+    title(ax, activity_name, 'Interpreter', 'none', 'FontSize', title_font_size);
     axis(ax, 'square');
     xlim(ax, [1 64]);
     xticks(ax, [1 2 4 8 16 32 64]);
@@ -195,8 +234,9 @@ function figure_handle = iPlotMeanActivity(activity_struct, activity_name)
     end
 
     if (~isempty(legend_handles))
-        legend(ax, legend_handles, legend_labels, ...
+        legend_handle = legend(ax, legend_handles, legend_labels, ...
             'Interpreter', 'tex', 'Location', 'northeastoutside');
+        legend_handle.FontSize = legend_font_size;
     end
 
     annotation(fig, 'textbox', [0.72 0.08 0.24 0.40], ...
@@ -246,6 +286,106 @@ function [frq, region_averages] = iLoadMeanSpdRegionAverages(avg_spd_struct)
 
     region_averages.center = iComputeRegionMean(spd_by_region, center_mask);
     region_averages.periphery = iComputeRegionMean(spd_by_region, periphery_mask);
+end
+
+
+function map_handles = iPlotMeanMaps(activity_struct, activity_name)
+% Plot exponent and variance maps for each color mode using the averaged
+% justProjection / virtuallyFoveated mean payloads. Return the figure
+% handles in a struct so the caller can export and close them outside.
+
+    color_modes = fieldnames(activity_struct);
+    map_handles = struct();
+
+    for cc = 1:numel(color_modes)
+        color_mode = color_modes{cc};
+        color_mode_struct = activity_struct.(color_mode);
+
+        just_projection_exponent_map = color_mode_struct.justProjection.exponentMap;
+        just_projection_variance_map = color_mode_struct.justProjection.varianceMap;
+        virtually_foveated_exponent_map = color_mode_struct.virtuallyFoveated.exponentMap;
+        virtually_foveated_variance_map = color_mode_struct.virtuallyFoveated.varianceMap;
+
+        ellipseTransparentParams = [240, 240, 120000, .75, 0];
+        p = ellipse_ex2im(ellipse_transparent2ex(ellipseTransparentParams));
+        myEllipse = @(x,y) p(1).*x.^2 + p(2).*x.*y + p(3).*y.^2 + p(4).*x + p(5).*y + p(6);
+        [X, Y] = meshgrid(1:480, 1:480);
+        mask = double(myEllipse(X,Y) < 1e-9);
+
+        just_projection_exponent_map(mask == 0) = nan;
+        just_projection_variance_map(mask == 0) = nan;
+        virtually_foveated_exponent_map(mask == 0) = nan;
+        virtually_foveated_variance_map(mask == 0) = nan;
+
+        fov_degrees = 120;
+        deg_per_pix = fov_degrees / size(virtually_foveated_exponent_map, 1);
+
+        map_handles.(color_mode).exponentMap = figure('Color', 'w');
+        tiledlayout(1,2);
+
+        nexttile;
+        imagesc(-just_projection_exponent_map);
+        hold on
+        plot(240,240,'+k')
+        for ii = [5, 10, 20, 40]
+            viscircles([240 240], ii/deg_per_pix, 'Color', 'k', 'LineWidth', 1, 'EnhanceVisibility', false);
+        end
+        title(sprintf('Exponent - %s - %s - justProjection', activity_name, color_mode), 'Interpreter', 'none')
+        axis square
+        set(gca, 'XTick', [], 'YTick', []);
+        colormap(hot);
+        cb = colorbar;
+        cb.Ticks = iGetQuarterStepTicks(clim);
+        cb.TickLabels = arrayfun(@(x) sprintf('%.2f', x), cb.Ticks, 'UniformOutput', false);
+
+        nexttile;
+        imagesc(-virtually_foveated_exponent_map);
+        hold on
+        plot(240,240,'+k')
+        for ii = [5, 10, 20, 40]
+            viscircles([240 240], ii/deg_per_pix, 'Color', 'k', 'LineWidth', 1, 'EnhanceVisibility', false);
+        end
+        title(sprintf('Exponent - %s - %s - virtuallyFoveated', activity_name, color_mode), 'Interpreter', 'none')
+        axis square
+        set(gca, 'XTick', [], 'YTick', []);
+        colormap(hot);
+        cb = colorbar;
+        cb.Ticks = iGetQuarterStepTicks(clim);
+        cb.TickLabels = arrayfun(@(x) sprintf('%.2f', x), cb.Ticks, 'UniformOutput', false);
+
+        map_handles.(color_mode).varianceMap = figure('Color', 'w');
+        tiledlayout(1,2);
+
+        nexttile;
+        imagesc(just_projection_variance_map);
+        hold on
+        plot(240,240,'+k')
+        for ii = [5, 10, 20, 40]
+            viscircles([240 240], ii/deg_per_pix, 'Color', 'k', 'LineWidth', 1, 'EnhanceVisibility', false);
+        end
+        title(sprintf('Contrast Variance - %s - %s - justProjection', activity_name, color_mode), 'Interpreter', 'none')
+        axis square
+        set(gca, 'XTick', [], 'YTick', []);
+        colormap(hot);
+        cb = colorbar;
+        cb.Ticks = iGetQuarterStepTicks(clim);
+        cb.TickLabels = arrayfun(@(x) sprintf('%.2f', x), cb.Ticks, 'UniformOutput', false);
+
+        nexttile;
+        imagesc(virtually_foveated_variance_map);
+        hold on
+        plot(240,240,'+k')
+        for ii = [5, 10, 20, 40]
+            viscircles([240 240], ii/deg_per_pix, 'Color', 'k', 'LineWidth', 1, 'EnhanceVisibility', false);
+        end
+        title(sprintf('Contrast Variance - %s - %s - virtuallyFoveated', activity_name, color_mode), 'Interpreter', 'none')
+        axis square
+        set(gca, 'XTick', [], 'YTick', []);
+        colormap(hot);
+        cb = colorbar;
+        cb.Ticks = iGetQuarterStepTicks(clim);
+        cb.TickLabels = arrayfun(@(x) sprintf('%.2f', x), cb.Ticks, 'UniformOutput', false);
+    end
 end
 
 
@@ -379,4 +519,22 @@ function formula_text = iGetFormulaAnnotationText()
         ''
         'Source: van Hateren et al.'
         }, newline);
+end
+
+
+function ticks = iGetQuarterStepTicks(climVals)
+% Build colorbar ticks at 0.25 increments across the provided limits.
+
+    tickStart = ceil(climVals(1) / 0.25) * 0.25;
+    tickEnd = floor(climVals(2) / 0.25) * 0.25;
+
+    if (~isfinite(tickStart) || ~isfinite(tickEnd) || tickStart > tickEnd)
+        ticks = climVals(:).';
+        return;
+    end
+
+    ticks = tickStart:0.25:tickEnd;
+    if (isempty(ticks))
+        ticks = climVals(:).';
+    end
 end

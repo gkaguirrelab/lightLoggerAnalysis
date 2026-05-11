@@ -68,6 +68,23 @@ function combineSPDs(spds, output_dir, options)
             exportgraphics(figure_handle, output_filepath, 'ContentType', 'vector');
             close(figure_handle);
 
+            % Also plot exponent and variance maps for each color mode
+            % using the same map-plotting style as plotSPDs_copy. The
+            % helper returns figure handles only; export them here.
+            map_handles = localPlotMaps(activity_struct, activity_name);
+            activity_color_modes = fieldnames(map_handles);
+            for cc = 1:numel(activity_color_modes)
+                color_mode = activity_color_modes{cc};
+
+                exponent_output_filepath = fullfile(activity_output_dir, sprintf('%s_%s_%s_exponentMap.pdf', subject_id, activity_name, color_mode));
+                variance_output_filepath = fullfile(activity_output_dir, sprintf('%s_%s_%s_varianceMap.pdf', subject_id, activity_name, color_mode));
+
+                exportgraphics(map_handles.(color_mode).exponentMap, exponent_output_filepath, 'ContentType', 'vector');
+                exportgraphics(map_handles.(color_mode).varianceMap, variance_output_filepath, 'ContentType', 'vector');
+                close(map_handles.(color_mode).exponentMap);
+                close(map_handles.(color_mode).varianceMap);
+            end
+
             % Output the best fit line information for each color mode and projection type of this activity 
             % as .mat files 
             activity_color_modes = fieldnames(activity_best_fit_lines); 
@@ -96,12 +113,18 @@ end
 % Local Function to Handle the SPD plotting
 function [figure_handle, best_fit_lines] = localPlotSPD(activity_struct, subject_id, activity_name)
     % Initialize the figure that we will draw too
+    axis_font_size = 14;
+    label_font_size = 18;
+    title_font_size = 20;
+    legend_font_size = 15;
+
     fig = figure('Color', 'w', 'Position', [100 100 1100 650]);
     ax = axes('Parent', fig, 'Position', [0.08 0.14 0.60 0.76]);
     hold(ax, 'on');
-    grid(ax, 'on');
+    grid(ax, 'off');
     box(ax, 'off');
     set(ax, 'XScale', 'log', 'YScale', 'log');
+    ax.FontSize = axis_font_size;
 
     % Initialize containers for the legends of the figures
     legend_handles = gobjects(0);
@@ -110,9 +133,11 @@ function [figure_handle, best_fit_lines] = localPlotSPD(activity_struct, subject
 
     % Iterate over the color modes
     color_modes = fieldnames(activity_struct);
+    has_multiple_color_modes = numel(color_modes) > 1;
     for cc = 1:numel(color_modes)
         % Retireve the name of this color mode
         color_mode = color_modes{cc};
+        has_added_compact_color_mode_legend_item = false;
         
         % Retrieve the struct of projection types for this
         % activity 
@@ -148,8 +173,14 @@ function [figure_handle, best_fit_lines] = localPlotSPD(activity_struct, subject
             [center_freq, center_spd] = iCleanSpdForPlot(frq, region_averages.center);
             if (~isempty(center_freq))
                 center_handle = loglog(ax, center_freq, center_spd, 'Color', center_color, 'LineStyle', line_style, 'LineWidth', 2.0);
-                legend_handles(end+1) = center_handle; 
-                legend_labels{end+1} = iFormatLegendLabel(color_mode, projection_type, 'center'); 
+                if (~has_multiple_color_modes || cc == 1)
+                    legend_handles(end+1) = center_handle; 
+                    legend_labels{end+1} = iFormatLegendLabel(color_mode, projection_type, 'center'); 
+                elseif (~has_added_compact_color_mode_legend_item)
+                    legend_handles(end+1) = center_handle;
+                    legend_labels{end+1} = iFormatColorModeLabel(color_mode);
+                    has_added_compact_color_mode_legend_item = true;
+                end
                 best_fit_lines.(color_mode).(projection_type).center = iComputeBestFitLine(center_freq, center_spd);
             end
 
@@ -158,17 +189,19 @@ function [figure_handle, best_fit_lines] = localPlotSPD(activity_struct, subject
             [periphery_freq, periphery_spd] = iCleanSpdForPlot(frq, region_averages.periphery);
             if (~isempty(periphery_freq))
                 periphery_handle = loglog(ax, periphery_freq, periphery_spd, 'Color', periphery_color, 'LineStyle', line_style, 'LineWidth', 2.0);
-                legend_handles(end+1) = periphery_handle; 
-                legend_labels{end+1} = iFormatLegendLabel(color_mode, projection_type, 'periphery');
+                if (~has_multiple_color_modes || cc == 1)
+                    legend_handles(end+1) = periphery_handle; 
+                    legend_labels{end+1} = iFormatLegendLabel(color_mode, projection_type, 'periphery');
+                end
                 best_fit_lines.(color_mode).(projection_type).periphery = iComputeBestFitLine(periphery_freq, periphery_spd);
             end
         end
     end
 
     % Label the Plot
-    xlabel(ax, 'Frequency (Hz)');
-    ylabel(ax, 'Spectral power density (contrast^2/Hz)');
-    title(ax, sprintf('%s | %s', subject_id, activity_name), 'Interpreter', 'none');
+    xlabel(ax, 'Frequency (Hz)', 'FontSize', label_font_size);
+    ylabel(ax, 'Spectral power density (contrast^2/Hz)', 'FontSize', label_font_size);
+    title(ax, sprintf('%s | %s', subject_id, activity_name), 'Interpreter', 'none', 'FontSize', title_font_size);
     axis(ax, 'square');
     xlim(ax, [1 64]);
     xticks(ax, [1 2 4 8 16 32 64]);
@@ -181,8 +214,9 @@ function [figure_handle, best_fit_lines] = localPlotSPD(activity_struct, subject
     end
 
     if (~isempty(legend_handles))
-        legend(ax, legend_handles, legend_labels, ...
+        legend_handle = legend(ax, legend_handles, legend_labels, ...
             'Interpreter', 'tex', 'Location', 'northeastoutside');
+        legend_handle.FontSize = legend_font_size;
     end
 
     % Add a separate textbox with the formula definitions so the
@@ -262,6 +296,122 @@ function [frq, region_averages] = iLoadSpdRegionAverages(spd_path, projection_ty
     % regions separately
     region_averages.center = iComputeRegionMean(spd_by_region, center_mask);
     region_averages.periphery = iComputeRegionMean(spd_by_region, periphery_mask);
+end
+
+
+function map_handles = localPlotMaps(activity_struct, activity_name)
+% Plot exponent and variance maps for each color mode using the same
+% justProjection / virtuallyFoveated side-by-side style as plotSPDs_copy.
+% Return the figure handles so the caller can export them outside.
+
+    color_modes = fieldnames(activity_struct);
+    map_handles = struct();
+
+    for cc = 1:numel(color_modes)
+        color_mode = color_modes{cc};
+        color_mode_struct = activity_struct.(color_mode);
+
+        just_projection_data = iLoadProjectionPayload(color_mode_struct.justProjection);
+        virtually_foveated_data = iLoadProjectionPayload(color_mode_struct.virtuallyFoveated);
+
+        just_projection_exponent_map = just_projection_data.exponentMap;
+        just_projection_variance_map = just_projection_data.varianceMap;
+        virtually_foveated_exponent_map = virtually_foveated_data.exponentMap;
+        virtually_foveated_variance_map = virtually_foveated_data.varianceMap;
+
+        ellipseTransparentParams = [240, 240, 120000, .75, 0];
+        p = ellipse_ex2im(ellipse_transparent2ex(ellipseTransparentParams));
+        myEllipse = @(x,y) p(1).*x.^2 + p(2).*x.*y + p(3).*y.^2 + p(4).*x + p(5).*y + p(6);
+        [X, Y] = meshgrid(1:480, 1:480);
+        mask = double(myEllipse(X,Y) < 1e-9);
+
+        just_projection_exponent_map(mask == 0) = nan;
+        just_projection_variance_map(mask == 0) = nan;
+        virtually_foveated_exponent_map(mask == 0) = nan;
+        virtually_foveated_variance_map(mask == 0) = nan;
+
+        fov_degrees = 120;
+        deg_per_pix = fov_degrees / size(virtually_foveated_exponent_map, 1);
+
+        map_handles.(color_mode).exponentMap = figure('Color', 'w');
+        tiledlayout(1,2);
+
+        nexttile;
+        imagesc(-just_projection_exponent_map);
+        hold on
+        plot(240,240,'+k')
+        for ii = [5, 10, 20, 40]
+            viscircles([240 240], ii/deg_per_pix, 'Color', 'k', 'LineWidth', 1, 'EnhanceVisibility', false);
+        end
+        title(sprintf('Exponent - %s - %s - justProjection', activity_name, color_mode), 'Interpreter', 'none')
+        axis square
+        set(gca, 'XTick', [], 'YTick', []);
+        colormap(hot);
+        cb = colorbar;
+        cb.Ticks = iGetQuarterStepTicks(clim);
+        cb.TickLabels = arrayfun(@(x) sprintf('%.2f', x), cb.Ticks, 'UniformOutput', false);
+
+        nexttile;
+        imagesc(-virtually_foveated_exponent_map);
+        hold on
+        plot(240,240,'+k')
+        for ii = [5, 10, 20, 40]
+            viscircles([240 240], ii/deg_per_pix, 'Color', 'k', 'LineWidth', 1, 'EnhanceVisibility', false);
+        end
+        title(sprintf('Exponent - %s - %s - virtuallyFoveated', activity_name, color_mode), 'Interpreter', 'none')
+        axis square
+        set(gca, 'XTick', [], 'YTick', []);
+        colormap(hot);
+        cb = colorbar;
+        cb.Ticks = iGetQuarterStepTicks(clim);
+        cb.TickLabels = arrayfun(@(x) sprintf('%.2f', x), cb.Ticks, 'UniformOutput', false);
+
+        map_handles.(color_mode).varianceMap = figure('Color', 'w');
+        tiledlayout(1,2);
+
+        nexttile;
+        imagesc(just_projection_variance_map);
+        hold on
+        plot(240,240,'+k')
+        for ii = [5, 10, 20, 40]
+            viscircles([240 240], ii/deg_per_pix, 'Color', 'k', 'LineWidth', 1, 'EnhanceVisibility', false);
+        end
+        title(sprintf('Contrast Variance - %s - %s - justProjection', activity_name, color_mode), 'Interpreter', 'none')
+        axis square
+        set(gca, 'XTick', [], 'YTick', []);
+        colormap(hot);
+        cb = colorbar;
+        cb.Ticks = iGetQuarterStepTicks(clim);
+        cb.TickLabels = arrayfun(@(x) sprintf('%.2f', x), cb.Ticks, 'UniformOutput', false);
+
+        nexttile;
+        imagesc(virtually_foveated_variance_map);
+        hold on
+        plot(240,240,'+k')
+        for ii = [5, 10, 20, 40]
+            viscircles([240 240], ii/deg_per_pix, 'Color', 'k', 'LineWidth', 1, 'EnhanceVisibility', false);
+        end
+        title(sprintf('Contrast Variance - %s - %s - virtuallyFoveated', activity_name, color_mode), 'Interpreter', 'none')
+        axis square
+        set(gca, 'XTick', [], 'YTick', []);
+        colormap(hot);
+        cb = colorbar;
+        cb.Ticks = iGetQuarterStepTicks(clim);
+        cb.TickLabels = arrayfun(@(x) sprintf('%.2f', x), cb.Ticks, 'UniformOutput', false);
+    end
+end
+
+
+function loaded_projection = iLoadProjectionPayload(projection_entry)
+% Load either a filepath-backed projection entry or a preloaded SPD struct.
+
+    if (isstring(projection_entry) || ischar(projection_entry))
+        loaded_mat = load(projection_entry);
+        activity_names = fieldnames(loaded_mat.activityData);
+        loaded_projection = loaded_mat.activityData.(activity_names{1});
+    else
+        loaded_projection = projection_entry;
+    end
 end
 
 
@@ -407,4 +557,22 @@ function formula_text = iGetFormulaAnnotationText()
         ''
         'Source: van Hateren et al.'
         }, newline);
+end
+
+
+function ticks = iGetQuarterStepTicks(climVals)
+% Build colorbar ticks at 0.25 increments across the provided limits.
+
+    tickStart = ceil(climVals(1) / 0.25) * 0.25;
+    tickEnd = floor(climVals(2) / 0.25) * 0.25;
+
+    if (~isfinite(tickStart) || ~isfinite(tickEnd) || tickStart > tickEnd)
+        ticks = climVals(:).';
+        return;
+    end
+
+    ticks = tickStart:0.25:tickEnd;
+    if (isempty(ticks))
+        ticks = climVals(:).';
+    end
 end

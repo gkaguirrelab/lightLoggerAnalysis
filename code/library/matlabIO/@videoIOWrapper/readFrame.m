@@ -62,7 +62,7 @@ function frame = readFrame(obj, options)
 
     % When converting to LMS we must ensure ceiling as NaN 
     % and zeros_as_nans are true 
-    if(ismember(obj.current_reading_color_mode, LMS_colorspace_types))
+    if(ismember(options.color, LMS_colorspace_types))
         assert(options.zeros_as_nans && options.ceiling_as_nans, "When converting to LMS types, both ceiling and floor must be NaN"); 
     end 
 
