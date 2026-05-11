@@ -224,6 +224,7 @@ function figure_handle = iPlotMeanActivity(activity_struct, activity_name)
     title(ax, activity_name, 'Interpreter', 'none', 'FontSize', title_font_size);
     axis(ax, 'square');
     xlim(ax, [1 64]);
+    ylim(ax, [1e-10 1e-1]);
     xticks(ax, [1 2 4 8 16 32 64]);
     xticklabels(ax, {'1', '2', '4', '8', '16', '32', '64'});
 
