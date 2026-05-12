@@ -2653,7 +2653,9 @@ def verify_virtually_foveated_video_integrity(src_dir: str="/Volumes/FLIC_proces
 
 def transfer_light_logger_recordings(src_dir: str="/Volumes/T7 Shield", 
                                      dst_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026", 
+                                     subjects_to_skip: Iterable=set(), 
                                      subjects_to_transfer: Iterable=set(), 
+                                     activities_to_skip: Iterable=set(), 
                                      activities_to_transfer: Iterable=set(),
                                      overwrite_existing: bool=False, 
                                      verbose: bool=False
@@ -2687,7 +2689,10 @@ def transfer_light_logger_recordings(src_dir: str="/Volumes/T7 Shield",
         # If the subject has not been seen before, this is very simple
         if(subject_id not in parsed_recording_map):
             parsed_recording_map[subject_id] = {activity_name: 
-                                                    {"recording_number": recording_number}
+                                                    {"recording_number": recording_number,
+                                                     "recording_name": recording_name, 
+                                                    }
+                                                    
                                                }
         
         # If the subject has been seen before, let's check if the activity 
@@ -2706,23 +2711,28 @@ def transfer_light_logger_recordings(src_dir: str="/Volumes/T7 Shield",
                 if(recording_number > parsed_recording_map[subject_id][activity_name]["recording_number"]):
                     parsed_recording_map[subject_id][activity_name] = {"recording_number": recording_number, "recording_name": recording_name}
 
-
-
     # Now, let's iterate over all the subject paths 
-    subjects_to_download: list[int] = list(subjects_to_transfer)
-    subject_iterator: Iterable = range(len(subjects_to_transfer)) if verbose is False else tqdm(range(len(subjects_to_transfer)), desc="Processing Subjects", leave=True)
+    subjects_to_download: list[int] = [subject for subject in parsed_recording_map 
+                                       if _is_desired_item(subject, subjects_to_transfer, subjects_to_skip)
+                                      ]
+    subject_iterator: Iterable = range(len(subjects_to_download)) if verbose is False else tqdm(range(len(subjects_to_download)), desc="Processing Subjects", leave=True)
     for subject_num in subject_iterator:
         # Retrieve the subject path and subject name
         subject_id_num = subjects_to_download[subject_num]
-        assert subject_id_num in parsed_recording_map, f"Subject id num: {subject_id_num} not in cloud recordings subjects: {parsed_recording_map.keys()}"
+        assert subject_id_num in parsed_recording_map, f"Subject id num: {subject_id_num} not in SSD recordings subjects: {parsed_recording_map.keys()}"
 
         # Retrieve just the recordings for this subject 
         subject_recordings: dict = parsed_recording_map[subject_id_num]
 
-        activities_iterator: Iterable = range(len(activities_to_transfer)) if verbose is False else tqdm(range(len(activities_to_transfer)), desc="Processing Activities", leave=False)
+        # Filter the recordings for this subject
+        activities_to_download: list[str] = [activity for activity in subject_recordings
+                                             if _is_desired_item(activity, activities_to_transfer, activities_to_skip) 
+                                            ]
+
+        activities_iterator: Iterable = range(len(activities_to_download)) if verbose is False else tqdm(range(len(activities_to_download)), desc="Processing Activities", leave=False)
         for activity_num in activities_iterator:
             # Retrieve the activity path and activity name
-            activity_name: str = activities_to_transfer[activity_num]
+            activity_name: str = activities_to_download[activity_num]
             assert activity_name in subject_recordings, f"Activity: {activity_name} not in subject: {subject_id_num} recordings: {subject_recordings.keys()}"
 
             # Retrieve this activity recording's infop 
@@ -2758,7 +2768,9 @@ def download_pupil_cloud_recordings(api_key: str,
                                     api_url = "https://api.cloud.pupil-labs.com/v2",
                                     workspace_id: str="default", 
                                     subjects_to_download: Iterable=set(), 
+                                    subjects_to_skip: Iterable=set(), 
                                     activities_to_download: Iterable=set(),
+                                    activities_to_skip: Iterable=set(), 
                                     overwrite_existing: bool=False, 
                                     verbose: bool=False
                                 ) -> None:
@@ -2800,7 +2812,10 @@ def download_pupil_cloud_recordings(api_key: str,
         # If the subject has not been seen before, this is very simple 
         if(subject_id not in parsed_recording_map):
             parsed_recording_map[subject_id] = {activity_name: 
-                                                    {"recording_number": recording_number, "id": recording_id}
+                                                    {"recording_number": recording_number,
+                                                     "recording_name": recording_name, 
+                                                    }
+                                                    
                                                }
         
         # If the subject has been seen before, let's check if the activity 
@@ -2820,8 +2835,10 @@ def download_pupil_cloud_recordings(api_key: str,
                     parsed_recording_map[subject_id][activity_name] = {"recording_number": recording_number, "id": recording_id}
 
     # Now, let's iterate over all the subject paths 
-    subjects_to_download: list[int] = list(subjects_to_download)
-    subject_iterator: Iterable = range(len(subjects_to_download)) if verbose is False else tqdm(range(len(subjects_to_download)), desc="Processing Subjects", leave=True)
+    subjects_to_transfer: list[int] = [subject for subject in parsed_recording_map 
+                                       if _is_desired_item(subject, subjects_to_download, subjects_to_skip)
+                                      ]
+    subject_iterator: Iterable = range(len(subjects_to_transfer)) if verbose is False else tqdm(range(len(subjects_to_transfer)), desc="Processing Subjects", leave=True)
     for subject_num in subject_iterator:
         # Retrieve the subject path and subject name
         subject_id_num = subjects_to_download[subject_num]
@@ -2830,10 +2847,15 @@ def download_pupil_cloud_recordings(api_key: str,
         # Retrieve just the recordings for this subject 
         subject_recordings: dict = parsed_recording_map[subject_id_num]
 
-        activities_iterator: Iterable = range(len(activities_to_download)) if verbose is False else tqdm(range(len(activities_to_download)), desc="Processing Activities", leave=False)
+        # Filter the recordings for this subject
+        activities_to_transfer: list[str] = [activity for activity in subject_recordings
+                                             if _is_desired_item(activity, activities_to_download, activities_to_skip) 
+                                            ]
+
+        activities_iterator: Iterable = range(len(activities_to_transfer)) if verbose is False else tqdm(range(len(activities_to_transfer)), desc="Processing Activities", leave=False)
         for activity_num in activities_iterator:
             # Retrieve the activity path and activity name
-            activity_name: str = activities_to_download[activity_num]
+            activity_name: str = activities_to_transfer[activity_num]
             assert activity_name in subject_recordings, f"Activity: {activity_name} not in subject: {subject_id_num} recordings: {subject_recordings.keys()}"
 
             # Retrieve this activity recording's infop 
@@ -2868,8 +2890,6 @@ def download_pupil_cloud_recordings(api_key: str,
             with save_path.open("wb") as fd:
                 for chunk in r.iter_content(chunk_size=1024 * 1024):
                     fd.write(chunk)
-
-            # TODO: few more. thigns here 
 
     # After all the recordings have been downloaded, we will unpack them 
     # here 
