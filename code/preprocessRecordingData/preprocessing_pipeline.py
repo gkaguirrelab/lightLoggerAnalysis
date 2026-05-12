@@ -2798,14 +2798,26 @@ def download_pupil_cloud_recordings(api_key: str,
 
         # Let's break the recording name down into the desired fields 
         
-       # First, we will find the subject ID
-        subject_id: int = int(re.search(r"^FLIC_(\d+)", recording_name).group(1))
+        # First, we will find the subject ID
+        try:
+            subject_id: int = int(re.search(r"^FLIC_(\d+)", recording_name).group(1))
+        except:
+            warnings.warn(f"Recording name: {recording_name} has no subject_id, Skipping...")
+            continue
 
         # Find the activity
-        activity_name: str = re.search(r"^FLIC_\d+_([A-Za-z]+)", recording_name).group(1)
+        try:
+            activity_name: str = re.search(r"^FLIC_\d+_([A-Za-z]+)", recording_name).group(1)
+        except:
+            warnings.warn(f"Recording name: {recording_name} has no activity name, Skipping...")
+            continue
 
         # Find the recording number
-        recording_number: int = int(re.search(r"_(\d+)$", recording_name).group(1))
+        try:
+            recording_number: int = int(re.search(r"_(\d+)$", recording_name).group(1))
+        except:
+            warnings.warn(f"Recording name: {recording_name} has no recording number, Skipping...")
+            continue
 
         # Now, we will save it into the parsed recording dictionary 
 
@@ -2813,7 +2825,7 @@ def download_pupil_cloud_recordings(api_key: str,
         if(subject_id not in parsed_recording_map):
             parsed_recording_map[subject_id] = {activity_name: 
                                                     {"recording_number": recording_number,
-                                                     "recording_name": recording_name, 
+                                                     "id": recording_id
                                                     }
                                                     
                                                }
@@ -2860,6 +2872,8 @@ def download_pupil_cloud_recordings(api_key: str,
 
             # Retrieve this activity recording's infop 
             activity_recording: dict = subject_recordings[activity_name]
+            print(activity_recording)
+
 
             # Now, we will retrieve the recording id to download 
             recording_id: str = activity_recording["id"]

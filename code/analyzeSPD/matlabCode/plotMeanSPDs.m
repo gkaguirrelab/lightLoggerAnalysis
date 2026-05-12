@@ -319,10 +319,6 @@ function map_handles = iPlotMeanMaps(activity_struct, activity_name)
 
         fov_degrees = 120;
         deg_per_pix = fov_degrees / size(virtually_foveated_exponent_map, 1);
-        exponent_clim = iGetSharedColorLimits(-just_projection_exponent_map, -virtually_foveated_exponent_map);
-        exponent_ticks = iGetQuarterStepTicks(exponent_clim);
-        variance_clim = iGetSharedColorLimits(just_projection_variance_map, virtually_foveated_variance_map);
-        variance_ticks = iGetColorbarTicks(variance_clim, 5);
 
         map_handles.(color_mode).exponentMap = figure('Color', 'w', 'Position', [100 100 1500 650]);
         tiledlayout(1, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
@@ -338,9 +334,9 @@ function map_handles = iPlotMeanMaps(activity_struct, activity_name)
         axis square
         set(gca, 'XTick', [], 'YTick', []);
         colormap(hot);
-        clim(exponent_clim);
+        exponent_clim = clim(gca);
         cb = colorbar;
-        cb.Ticks = exponent_ticks;
+        cb.Ticks = iGetQuarterStepTicks(exponent_clim);
         cb.TickLabels = iFormatExponentTickLabels(cb.Ticks);
 
         nexttile;
@@ -354,9 +350,9 @@ function map_handles = iPlotMeanMaps(activity_struct, activity_name)
         axis square
         set(gca, 'XTick', [], 'YTick', []);
         colormap(hot);
-        clim(exponent_clim);
+        exponent_clim = clim(gca);
         cb = colorbar;
-        cb.Ticks = exponent_ticks;
+        cb.Ticks = iGetQuarterStepTicks(exponent_clim);
         cb.TickLabels = iFormatExponentTickLabels(cb.Ticks);
 
         map_handles.(color_mode).varianceMap = figure('Color', 'w', 'Position', [100 100 1500 650]);
@@ -373,11 +369,7 @@ function map_handles = iPlotMeanMaps(activity_struct, activity_name)
         axis square
         set(gca, 'XTick', [], 'YTick', []);
         colormap(hot);
-        clim(variance_clim);
         cb = colorbar;
-        cb.Ticks = variance_ticks;
-        cb.TickLabelInterpreter = 'tex';
-        cb.TickLabels = iFormatPowerOfTenTickLabels(cb.Ticks);
 
         nexttile;
         imagesc(virtually_foveated_variance_map);
@@ -390,11 +382,7 @@ function map_handles = iPlotMeanMaps(activity_struct, activity_name)
         axis square
         set(gca, 'XTick', [], 'YTick', []);
         colormap(hot);
-        clim(variance_clim);
         cb = colorbar;
-        cb.Ticks = variance_ticks;
-        cb.TickLabelInterpreter = 'tex';
-        cb.TickLabels = iFormatPowerOfTenTickLabels(cb.Ticks);
     end
 end
 
@@ -556,67 +544,3 @@ function tick_labels = iFormatExponentTickLabels(ticks)
     tick_labels = arrayfun(@(x) sprintf('%.2f', x), ticks, 'UniformOutput', false);
 end
 
-
-function tick_labels = iFormatPowerOfTenTickLabels(ticks)
-% Format log10 variance ticks as powers of ten.
-
-    decimal_places = iGetAdaptiveDecimalPlaces(ticks, 2, 6);
-    format_spec = sprintf('10^{%%.%df}', decimal_places);
-    tick_labels = arrayfun(@(x) sprintf(format_spec, x), ticks, 'UniformOutput', false);
-end
-
-
-function clim_vals = iGetSharedColorLimits(first_map, second_map)
-% Compute one shared color range across a justProjection/foveated pair.
-
-    combined_values = [first_map(:); second_map(:)];
-    combined_values = combined_values(isfinite(combined_values));
-
-    if (isempty(combined_values))
-        clim_vals = [0 1];
-        return;
-    end
-
-    clim_vals = [min(combined_values) max(combined_values)];
-    if (clim_vals(1) == clim_vals(2))
-        delta = max(abs(clim_vals(1)) * 0.05, 1e-6);
-        clim_vals = clim_vals + [-delta delta];
-    end
-end
-
-
-function ticks = iGetColorbarTicks(climVals, num_ticks)
-% Build evenly spaced colorbar ticks across the provided limits.
-
-    if (~all(isfinite(climVals)) || numel(climVals) ~= 2)
-        ticks = [0 1];
-        return;
-    end
-
-    if (climVals(1) == climVals(2))
-        ticks = climVals(1);
-        return;
-    end
-
-    ticks = linspace(climVals(1), climVals(2), num_ticks);
-end
-
-
-function decimal_places = iGetAdaptiveDecimalPlaces(values, min_decimals, max_decimals)
-% Choose enough decimal places so nearby tick labels remain distinguishable.
-
-    values = sort(unique(values(isfinite(values))));
-    if (numel(values) < 2)
-        decimal_places = min_decimals;
-        return;
-    end
-
-    min_step = min(diff(values));
-    if (min_step <= 0)
-        decimal_places = min_decimals;
-        return;
-    end
-
-    decimal_places = ceil(-log10(min_step)) + 1;
-    decimal_places = max(min_decimals, min(max_decimals, decimal_places));
-end
