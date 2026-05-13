@@ -671,8 +671,7 @@ def world_chunks_to_video(recording_path: str,
             
         # If we want to debayer the image
         if(debayer_images is True):
-            # Note: When writing color images to cv2.VideoWriter, it expects a BGR instead of RGB 
-            # frame, so also convert now 
+            assert current_color_space == "BAYER"
             frame_buffer = np.array([world_util.debayer_image( 
                                                                 ( frame if frame.dtype == np.uint8 else np.clip(np.round(frame), 0, 255).astype(np.uint8) ) 
                                                             ) 

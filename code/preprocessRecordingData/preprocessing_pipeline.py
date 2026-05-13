@@ -2872,8 +2872,6 @@ def download_pupil_cloud_recordings(api_key: str,
 
             # Retrieve this activity recording's infop 
             activity_recording: dict = subject_recordings[activity_name]
-            print(activity_recording)
-
 
             # Now, we will retrieve the recording id to download 
             recording_id: str = activity_recording["id"]
