@@ -1082,6 +1082,22 @@ def find_events(video_path: str,
     return matched_frame_nums[-1] if len(matched_frame_nums) > 0 else None
 
 
+def convert_avi_to_mp4(input_path: str, output_path: str) -> None:
+    cmd = [
+        "ffmpeg",
+        "-y",                     # force overwrite
+        "-i", input_path,
+        "-c:v", "libx264",
+        "-crf", "18",
+        "-preset", "slow",
+        "-c:a", "aac",
+        "-b:a", "192k",
+        output_path
+    ]
+
+    subprocess.run(cmd, check=True)
+
+
 def main():
     return 
 
