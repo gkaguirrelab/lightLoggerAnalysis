@@ -44,7 +44,10 @@ WORLD_FIELDING_FUNCTIONS: dict[tuple[int], np.ndarray] = {(480, 640): np.ones((4
 WORLD_DARK_NOISE: float = 16
 
 """Debayer a world camera image into an RGB image"""
-def debayer_image(image: np.ndarray, visualize_results: bool=False) -> np.ndarray | tuple[np.ndarray, object]:
+def debayer_image(image: np.ndarray, 
+                  visualize_results: bool=False, 
+                  dst: np.ndarray | None=None
+                ) -> np.ndarray | tuple[np.ndarray, object]:
     # Initialize a variable for the figure handle that 
     # will be used to visualize (if desired)
     fig: object | None = None
@@ -53,7 +56,11 @@ def debayer_image(image: np.ndarray, visualize_results: bool=False) -> np.ndarra
     guarded_image: np.ndarray = image if image.dtype == np.uint8 else np.clip(np.round(image), 0, 255).astype(np.uint8)
 
     # Debayer the image according to the sensor's bayer pattern
-    debayered_image: np.ndarray = cv2.cvtColor(guarded_image, cv2.COLOR_BayerRG2RGB)
+    # either in place, or not in place depending on input args
+    if(dst is None):
+        debayered_image: np.ndarray = cv2.cvtColor(guarded_image, cv2.COLOR_BayerRG2RGB)
+    else:
+        cv2.cvtColor(guarded_image, cv2.COLOR_BayerRG2RGB, dst=dst)
 
     # Visualize the results if desired
     if(visualize_results is True):
@@ -68,7 +75,7 @@ def debayer_image(image: np.ndarray, visualize_results: bool=False) -> np.ndarra
 
         # Middle axis will be the after but without 
         # color correction 
-        axes[1].imshow(debayered_image)
+        axes[1].imshow( (debayered_image if dst is None else dst) )
         axes[1].set_title("After")
 
         # Show the plot 
@@ -76,7 +83,7 @@ def debayer_image(image: np.ndarray, visualize_results: bool=False) -> np.ndarra
 
         return debayered_image, fig
         
-    return debayered_image 
+    return debayered_image if dst is None else None
 
 
 """Apply the fielding function to a frame"""
@@ -196,7 +203,7 @@ def generate_RGB_mask(original_frame: np.ndarray, visualize_results: bool=False)
    pixels of a frame 
 """
 def apply_color_correction(original_frame: np.ndarray, 
-                           visualize_results: bool=False
+                           visualize_results: bool=False,
                            ) -> tuple[np.ndarray, object] | np.ndarray:
     # Initialize a variable for the figure handle that 
     # will be used to visualize (if desired)
@@ -204,9 +211,11 @@ def apply_color_correction(original_frame: np.ndarray,
     
     # First, we must cast the original frame to a float array 
     # to apply float scalars 
+    # If it is already in float form, then no need to copy
     frame_as_float: np.ndarray = original_frame.astype(np.float64)
 
     # Next, we need to generate a bayer pattern for this size of image 
+    # if the pixel locations have not been passed in
     is_grayscale: bool = not (len(original_frame.shape) == 3)
     mask: np.ndarray | None = None
     if(is_grayscale is True):
@@ -224,6 +233,7 @@ def apply_color_correction(original_frame: np.ndarray,
             # Apply the weight to the specified pixels 
             frame_as_float[rows, cols] *= weight
 
+        # If debayered image, just apply to the channel number
         else:
             frame_as_float[:, :, channel_idx] *= weight    
 

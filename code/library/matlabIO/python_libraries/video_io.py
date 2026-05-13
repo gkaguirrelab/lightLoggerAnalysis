@@ -608,7 +608,7 @@ def world_chunks_to_video(recording_path: str,
         
         # Then, we will read in the timestamps and frame buffer for this chunk 
         # World timestamps are in nanoseconds and thus must be converted to seconds 
-        t_vector: np.ndarray = np.ascontiguousarray(metadata[:, 0], dtype=np.float64) / ( (10 ** 9) if convert_to_seconds is True else 1)
+        t_vector: np.ndarray = np.ascontiguousarray(metadata[:, 0], dtype=np.float64) if convert_to_seconds is False else np.ascontiguousarray(metadata[:, 0], dtype=np.float64) / (10 ** 9) 
         frame_buffer: np.ndarray = np.load(frame_buffer_path)
         
         # Let's keep track of the current colorspace the video is in 
@@ -644,45 +644,66 @@ def world_chunks_to_video(recording_path: str,
             continue
 
         # Now, we will apply the requested transformations to the frames 
-        frame_buffer = frame_buffer.astype(np.float64) # First, convert to float for float multiplications 
+        # First, convert to float for float multiplications
+        # if not in float already
+        frame_buffer = frame_buffer.astype(np.float64, copy=False) # copy = False means reuse the same memory if possible (e.g. if it is already float)  
                 
         # Apply Dgain if requested
         if(apply_digital_gain is True):
-            frame_buffer = frame_buffer.astype(np.float64)
+            assert frame_buffer.dtype == np.float64, f"Frame buffer dtype must be float64 to apply dgain. Current dtype is {frame_buffer.dtype}"
 
+            # Extract the dgains of the buffers 
             buffer_dgains: np.ndarray = metadata[:, 2]
 
+            # Multiply the frames by the dgains 
             if(frame_buffer.ndim == 3):
                 buffer_dgains = buffer_dgains[:, np.newaxis, np.newaxis]
             else:
-                  buffer_dgains = buffer_dgains[:, np.newaxis, np.newaxis, np.newaxis]
-
+                buffer_dgains = buffer_dgains[:, np.newaxis, np.newaxis, np.newaxis]
             frame_buffer *= buffer_dgains
 
-            frame_buffer = np.clip(np.round(frame_buffer), 0, 255).astype(np.uint8)
-
         if(apply_color_weights is True):
-            assert frame_buffer.ndim == 3
+            assert frame_buffer.ndim == 3 and frame_buffer.dtype == np.float64, f"To apply color weights, buffer must be in bayer form np.float64."
 
             # Apply the radiometric correction
-            frame_buffer = np.array([ world_util.apply_color_correction(frame) 
-                                     for frame in frame_buffer], dtype=np.uint8
-                                    )
-            
+            # pre-compute the RGB bayer mask once to save time 
+            bayer_RGB_mask: np.ndarray = world_util.generate_RGB_mask(np.squeeze(frame_buffer[0]))
+            assert bayer_RGB_mask.shape == frame_buffer.shape[1:], f"Bayer RGB mask shape: {bayer_RGB_mask.shape} not equal to frame shape: {frame_buffer.shape[1:]}" 
+
+            bayer_RGB_pixel_locations: list[np.ndarray] = [np.argwhere(bayer_RGB_mask == color) for color in "RGB"]
+
+            # Apply the color corrections IN-PLACE and vectorized (uglier than using our helper function and copying logic, but faster)
+            assert len(bayer_RGB_pixel_locations) == len(world_util.WORLD_RGB_SCALARS)
+            for (pixels, weight) in zip(bayer_RGB_pixel_locations, world_util.WORLD_RGB_SCALARS):
+                rows: np.ndarray = pixels[:, 0]
+                cols: np.ndarray = pixels[:, 1]
+
+                # Apply the weight to the specified pixels 
+                frame_buffer[:, rows, cols] *= weight
+
         # If we want to debayer the image
         if(debayer_images is True):
-            assert current_color_space == "BAYER"
-            frame_buffer = np.array([world_util.debayer_image( 
-                                                                ( frame if frame.dtype == np.uint8 else np.clip(np.round(frame), 0, 255).astype(np.uint8) ) 
-                                                            ) 
-                                     for frame in frame_buffer 
-                                    ],
-                                    dtype=np.uint8
-                                   )
+            # Convert the buffer to uint8 if it has not already been done 
+            # clipping and rounding as needed 
+            if(frame_buffer.dtype != np.uint8):
+                frame_buffer = np.clip(np.round(frame_buffer), 0, 255).astype(np.uint8)
+            assert current_color_space == "BAYER" and frame_buffer.dtype == np.uint8, f"Frame buffer must be in BAYER space and uint8 to debayer. Current format is: {current_color_space} | {frame_buffer.dtype}"
+            
+            # Allocate the output buffer 
+            # for the debayering. This is the same shame as the 
+            # input buffer, but with RGB channels dimension        
+            new_frame_buffer: np.ndarray = np.empty( tuple( list(frame_buffer.shape) + [3] ), dtype=np.uint8)
+            
+            # Debayer the frames into the output buffer 
+            for frame_num, (input_frame, output_buffer) in enumerate(zip(frame_buffer, new_frame_buffer)):
+                world_util.debayer_image(input_frame, dst=output_buffer)
             current_color_space = 'RGB'
             
+            # reassign frame buffer to the output buffer 
+            frame_buffer = new_frame_buffer
+            
         # If we want to apply floor ceiling (16, 255) in any channel implies 
-        # that entire pixel is whit 
+        # that entire pixel is white or black
         if(apply_floor_ceiling is True):
             assert frame_buffer.ndim == 4, f"Frames must be debayered before applying floor/ceiling"
             
@@ -693,18 +714,13 @@ def world_chunks_to_video(recording_path: str,
             # Therefore, we first turn any pixel that has any channel maxed out 
             # into a maxed out (white pixel)
             # this should make pixels who have channel values (e.g. [ceiling - 5, ceiling -5, ceiling] = [ceiling, ceiling, ceiling])
-            frame_buffer = np.where((frame_buffer >= ceiling).any(axis=3, keepdims=True),
-                                     ceiling,
-                                     frame_buffer
-                                    )
+            saturated_mask: np.ndarray = (frame_buffer >= ceiling).any(axis=3)
+            frame_buffer[saturated_mask] = ceiling
             
             # We also do this for the dark noise we have calculated 
             # this should make pixels who have channel values (e.g. [floor -5, floor +5, floor] = [floor, floor, floor])
-            frame_buffer = np.where((frame_buffer <= floor).any(axis=3, keepdims=True),
-                                                   floor,
-                                                   frame_buffer
-                                                )
-        
+            dark_mask: np.ndarray = (frame_buffer <= floor).any(axis=3)
+            frame_buffer[dark_mask] = floor
 
         # Now, if we want to REMOVE the dark noise (darknoise = 0)
         # let's do that now to 
@@ -727,11 +743,11 @@ def world_chunks_to_video(recording_path: str,
         # WE NEED TO CONVERT TO BGR TO WRITE FRAMES WITH CV2
         if(frame_buffer.ndim > 3 and current_color_space != 'BGR'):
             if(current_color_space == 'RGB'):
-                frame_buffer = np.array([cv2.cvtColor(frame, cv2.COLOR_RGB2BGR) for frame in frame_buffer])
+                frame_buffer = np.array([cv2.cvtColor(frame, cv2.COLOR_RGB2BGR) for frame in frame_buffer], dtype=np.uint8)
             else:
                 raise RuntimeError(f"Unsupported colorspace conversion: {current_color_space} -> RBG")
 
-        assert frame_buffer.dtype == np.uint8
+        assert frame_buffer.dtype == np.uint8, f"Frame buffer of type: {frame_buffer.dtype} must be of dtype np.uint8 before writing."
 
         # Retrieve the current chunk start time 
         current_chunk_start_time = t_vector[0]
