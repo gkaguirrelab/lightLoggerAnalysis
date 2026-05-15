@@ -549,6 +549,10 @@ def world_chunks_to_video(recording_path: str,
     if(fill_missing_frames and not convert_to_seconds):
         raise Exception("Haven't handled this case. This will generate millions of extra frames")
 
+    if(apply_floor_ceiling):
+        assert debayer_images is True, f"To apply floor ceiling, currently only works with debayered images due to our algorithm."
+
+
     assert output_path.endswith(".avi"), f"Output path: {output_path} must end in .avi"
 
     # Make the directories to the output path if they do not exist already 
@@ -600,6 +604,14 @@ def world_chunks_to_video(recording_path: str,
     start_chunk: int = start_end[0]
     end_chunk: int = start_end[1] if start_end[1] != float("inf") else len(chunks_paths)
     chunk_iterator: Iterable = range(start_chunk, end_chunk) if verbose is False else tqdm(range(start_chunk, end_chunk), desc="Processing chunks", leave=True)
+    
+    # Declare some global video pieces of knowledge that we 
+    # will fill in from the first chunk, 
+    # such as the provenance map of debayered pixels to their contributing pixels in the RAW image 
+    # and the RGB bayer pixel locations
+    bayer_RGB_mask: np.ndarray | None = None
+    bayer_RGB_pixel_locations: list[np.ndarray] | None = None
+    debayered_provenance_map: np.ndarray[np.array] | None = None
     for chunk_num in chunk_iterator:
         metadata_matrix_path, frame_buffer_path = chunks_paths[chunk_num]
 
@@ -667,10 +679,12 @@ def world_chunks_to_video(recording_path: str,
 
             # Apply the radiometric correction
             # pre-compute the RGB bayer mask once to save time 
-            bayer_RGB_mask: np.ndarray = world_util.generate_RGB_mask(np.squeeze(frame_buffer[0]))
+            if(bayer_RGB_mask is None):
+                bayer_RGB_mask = world_util.generate_RGB_mask(frame_buffer[0])
             assert bayer_RGB_mask.shape == frame_buffer.shape[1:], f"Bayer RGB mask shape: {bayer_RGB_mask.shape} not equal to frame shape: {frame_buffer.shape[1:]}" 
 
-            bayer_RGB_pixel_locations: list[np.ndarray] = [np.argwhere(bayer_RGB_mask == color) for color in "RGB"]
+            if(bayer_RGB_pixel_locations is None):
+                bayer_RGB_pixel_locations = [ np.argwhere(bayer_RGB_mask == color) for color in "RGB" ]
 
             # Apply the color corrections IN-PLACE and vectorized (uglier than using our helper function and copying logic, but faster)
             assert len(bayer_RGB_pixel_locations) == len(world_util.WORLD_RGB_SCALARS)
@@ -683,44 +697,66 @@ def world_chunks_to_video(recording_path: str,
 
         # If we want to debayer the image
         if(debayer_images is True):
-            # Convert the buffer to uint8 if it has not already been done 
+            # Convert the buffer to float32 if it has not already been done 
             # clipping and rounding as needed 
             if(frame_buffer.dtype != np.uint8):
-                frame_buffer = np.clip(np.round(frame_buffer), 0, 255).astype(np.uint8)
-            assert current_color_space == "BAYER" and frame_buffer.dtype == np.uint8, f"Frame buffer must be in BAYER space and uint8 to debayer. Current format is: {current_color_space} | {frame_buffer.dtype}"
-            
+                frame_buffer = np.clip(np.round(frame_buffer), 0, 2**16 - 1).astype(np.uint16)
+            assert current_color_space == "BAYER" and frame_buffer.dtype == np.uint16, f"Frame buffer must be in BAYER space and uint8 to debayer. Current format is: {current_color_space} | {frame_buffer.dtype}"
+
             # Allocate the output buffer 
             # for the debayering. This is the same shame as the 
             # input buffer, but with RGB channels dimension        
-            new_frame_buffer: np.ndarray = np.empty( tuple( list(frame_buffer.shape) + [3] ), dtype=np.uint8)
+            debayered_frame_buffer: np.ndarray = np.empty( tuple( list(frame_buffer.shape) + [3] ), dtype=np.uint16)
             
             # Debayer the frames into the output buffer 
-            for frame_num, (input_frame, output_buffer) in enumerate(zip(frame_buffer, new_frame_buffer)):
+            for frame_num, (input_frame, output_buffer) in enumerate(zip(frame_buffer, debayered_frame_buffer)):
                 world_util.debayer_image(input_frame, dst=output_buffer)
             current_color_space = 'RGB'
             
-            # reassign frame buffer to the output buffer 
-            frame_buffer = new_frame_buffer
+            # reassign frame buffer to the output buffer, crucially
+            # let's keep track of the raw bayered frame buffer too. 
+            # We will need this to apply floor and ceiling operations 
+            raw_frame_buffer = frame_buffer
+            frame_buffer = debayered_frame_buffer
             
         # If we want to apply floor ceiling (16, 255) in any channel implies 
         # that entire pixel is white or black
         if(apply_floor_ceiling is True):
             assert frame_buffer.ndim == 4, f"Frames must be debayered before applying floor/ceiling"
             
-            # Because of our weights, if a pixel is [255, 255, 255]
-            # before correction, our weights would induce a weird 
-            # hueing effect once applied 
-            
-            # Therefore, we first turn any pixel that has any channel maxed out 
-            # into a maxed out (white pixel)
-            # this should make pixels who have channel values (e.g. [ceiling - 5, ceiling -5, ceiling] = [ceiling, ceiling, ceiling])
-            saturated_mask: np.ndarray = (frame_buffer >= ceiling).any(axis=3)
-            frame_buffer[saturated_mask] = ceiling
-            
-            # We also do this for the dark noise we have calculated 
-            # this should make pixels who have channel values (e.g. [floor -5, floor +5, floor] = [floor, floor, floor])
-            dark_mask: np.ndarray = (frame_buffer <= floor).any(axis=3)
-            frame_buffer[dark_mask] = floor
+            # First, let's generate the provenance map so we know what pixels in the bayered RAW 
+            # image contributed to those in the debayered output 
+            if(debayered_provenance_map is None):
+                debayered_provenance_map = world_util.generate_debayered_provenance_map(frame_buffer[0])
+
+            # Next, let's allocate the masks 
+            # that will represented the overly saturated and overly dark pixels
+            # We will only allocate them if they have not been allocated before
+            n_frames, i_rows, j_cols, k_channels = frame_buffer.shape
+            contributor_saturated_mask: np.ndarray = np.zeros((n_frames, i_rows, j_cols), dtype=bool)
+            contributor_dark_mask: np.ndarray = np.zeros((n_frames, i_rows, j_cols), dtype=bool)
+
+            # Iterate over the single frame shape of the provenance map 
+            for r in range(i_rows):
+                for c in range(j_cols):
+                    # Find the locations that contribute to this debayered pixel 
+                    # for all of the frames. This is a numpy matrix with 2 dimensions (row, col)
+                    contributor_locations: np.ndarray = debayered_provenance_map[r, c]
+
+                    # Extract the rows and cols that contributed to this location 
+                    contributor_rows: np.ndarray = contributor_locations[:, 0]
+                    contributor_cols: np.ndarray = contributor_locations[:, 1]
+
+                    # Extract the values that contributed to this location 
+                    contributor_values: np.ndarray = raw_frame_buffer[:, contributor_rows, contributor_cols]
+                
+                    # for every frame, determine if the pixel on that frame is either dark or saturated 
+                    contributor_saturated_mask[:, r, c] = (contributor_values >= ceiling).any(axis=1)
+                    contributor_dark_mask[:, r, c] = (contributor_values <= floor).any(axis=1)     
+
+            # Apply the floor and ceiling masks
+            frame_buffer[contributor_saturated_mask] = ceiling
+            frame_buffer[contributor_dark_mask] = floor
 
         # Now, if we want to REMOVE the dark noise (darknoise = 0)
         # let's do that now to 
@@ -757,6 +793,7 @@ def world_chunks_to_video(recording_path: str,
         
         # Find the total elapsed time in seconds between the two chunks 
         time_between_chunks: float = current_chunk_start_time - previous_chunk_end_time
+        assert time_between_chunks >= 0, f"Time btween chunks is somehow negative, Chunk 1: {previous_chunk_end_time}, Chunk 2: {current_chunk_start_time}"
 
         # Calculate the number of missed frames as the elapsed time divided 
         # by the seconds per frame, minus one frame as we have to count the current frame 
@@ -792,6 +829,7 @@ def world_chunks_to_video(recording_path: str,
 
             # Otherwise, let's calculate the time delta between the current timestamp and the previous timestamp 
             time_between_frames: float = timestamp - previous_timestamp
+            assert time_between_frames >= 0, f"Time between frames is somehow negative. Frame 1: {previous_timestamp}, Frame 2: {timestmap}"
 
             # Calculate the number of missed frames as the elapsed time divided 
             # by the seconds per frame, minus one frame as we have to count the current frame 

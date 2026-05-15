@@ -113,9 +113,17 @@ def convert_avi_to_mp4(input_path: str, output_path: str) -> None:
         "-b:a", "192k",
         output_path
     ]
-
-    subprocess.run(cmd, check=True)
-
+    
+    try:
+        result: str = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as e:
+        print("FFMPEG FAILED")
+        print("STDOUT:")
+        print(e.stdout)
+        print("STDERR:")
+        print(e.stderr)
+        
+        raise Exception
 
 """
 Wrapper function for the Pupil Labs Egocentric Video Mapper 
@@ -143,8 +151,8 @@ def run_egocentric_video_mapper(neon_timeseries_dir: str,
 
     # First, we need to convert our video to .mp4 if it is not already in 
     # that format due to the pupil labs code requiring a .avi video 
-    alternate_vid_dir: str = os.path.dirname(alternative_vid_path)
-    temp_output_path: str = os.path.join(alternate_vid_dir, "temp.mp4")
+    temp_output_path: str = os.path.join(output_dir, "temp.mp4")
+    os.makedirs(os.path.dirname(temp_output_path), exist_ok=True)
     convert_avi_to_mp4(alternative_vid_path, temp_output_path)
 
     # Package the args for the egocentric video mapper 

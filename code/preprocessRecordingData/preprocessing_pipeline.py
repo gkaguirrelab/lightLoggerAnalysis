@@ -211,6 +211,8 @@ def generate_egocentric_mapper_results(src_dir: str="/Volumes/FLIC_raw/NEWscript
 
             # Define the output directory 
             neon_output_dir: str = os.path.join(dst_dir, subject_id, activity_name, "Neon", "egocentric_mapper_results")
+            temp_output_dir: str = os.path.join(os.path.expanduser('~/Desktop'), "egocentric_mapper_temp")
+            os.makedirs(temp_output_dir, exist_ok=True)
 
             # If the output already exsits adn we do not want to overwrite, then just skip 
             if(os.path.exists(neon_output_dir) and overwrite_existing is False):
@@ -221,11 +223,12 @@ def generate_egocentric_mapper_results(src_dir: str="/Volumes/FLIC_raw/NEWscript
                 print(f"Input:")
                 print(f"\tNeon: {neon_video_path}")
                 print(f"\tWorld: {world_video_path}")
+                print(f"Temp: {temp_output_dir}")
                 print(f"Output: {neon_output_dir}")
-
+        
             virtual_foveation.run_egocentric_video_mapper(neon_timeseries_dir=neon_video_path, 
                                                           alternative_vid_path=world_video_path, 
-                                                          output_dir=neon_output_dir,
+                                                          output_dir=temp_output_dir,
                                                           mapping_choice=mapping_choice, 
                                                           refresh_time_threshold_sec=refresh_time_threshold_sec, 
                                                           render_video=render_video,
@@ -234,6 +237,11 @@ def generate_egocentric_mapper_results(src_dir: str="/Volumes/FLIC_raw/NEWscript
                                                           image_matcher=image_matcher, 
                                                           show_video_preview=show_video_preview
                                                         )
+
+            # Move the temp output to the destination output 
+            os.makedirs(neon_output_dir, exist_ok=True)
+            shutil.copytree(temp_output_dir, neon_output_dir, dirs_exist_ok=True)
+            shutil.rmtree(temp_output_dir)
 
     return 
 
