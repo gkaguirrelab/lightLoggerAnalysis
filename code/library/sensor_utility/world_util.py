@@ -43,8 +43,19 @@ WORLD_FIELDING_FUNCTIONS: dict[tuple[int], np.ndarray] = {(480, 640): np.ones((4
 # and this was the result. This is 
 WORLD_DARK_NOISE: float = 16
 
-"""Generate a provenance map given a debayered frame of what pixels in the RAW, bayered frame 
-   contributed to the production of that pixel 
+"""Generate a provenance map for a debayered frame.
+
+Returns an array of shape ``(rows, cols, 9, 2)`` whose last two dimensions
+store the raw Bayer-frame ``(row, col)`` coordinates that contributed to each
+debayered output pixel. Red and blue sites use the full 3x3 bilinear support.
+Green sites only have five unique contributors, so the center pixel is repeated
+to keep every provenance list at a fixed length of 9.
+
+For ``pattern="RGGB"``, this function intentionally matches the measured layout
+used elsewhere in this module (`generate_RGB_mask`):
+    - blue  at ``(even row, even col)``
+    - green at mixed parity coordinates
+    - red   at ``(odd row, odd col)``
 """
 def generate_debayered_provenance_map(debayered_image: np.ndarray,
                                       pattern: Literal["RGGB"] = "RGGB"
@@ -56,71 +67,35 @@ def generate_debayered_provenance_map(debayered_image: np.ndarray,
         row_even = (r % 2 == 0)
         col_even = (c % 2 == 0)
 
-        if pattern == "RGGB":
+        # Match the measured layout used by generate_RGB_mask and by
+        if row_even and col_even:
+            return "B"
 
-            if row_even and col_even:
-                return "R"
+        elif row_even and not col_even:
+            return "G_B"
 
-            elif row_even and not col_even:
-                return "G_R"
-
-            elif not row_even and col_even:
-                return "G_B"
-
-            else:
-                return "B"
-
-        elif pattern == "BGGR":
-
-            if row_even and col_even:
-                return "B"
-
-            elif row_even and not col_even:
-                return "G_B"
-
-            elif not row_even and col_even:
-                return "G_R"
-
-            else:
-                return "R"
-
-        elif pattern == "GRBG":
-
-            if row_even and col_even:
-                return "G_R"
-
-            elif row_even and not col_even:
-                return "R"
-
-            elif not row_even and col_even:
-                return "B"
-
-            else:
-                return "G_B"
-
-        elif pattern == "GBRG":
-
-            if row_even and col_even:
-                return "G_B"
-
-            elif row_even and not col_even:
-                return "B"
-
-            elif not row_even and col_even:
-                return "R"
-
-            else:
-                return "G_R"
+        elif not row_even and col_even:
+            return "G_R"
 
         else:
-            raise ValueError(f"Unsupported Bayer pattern: {pattern}")
+            return "R"
 
+
+    if(pattern != "RGGB"):
+        raise ValueError(f"Unsupported Bayer pattern for provenance mapping: {pattern}")
 
     # Get the image size 
     rows, cols = debayered_image.shape[:2]
 
-    # Allocate the provenance map 
-    provenance_map: np.ndarray = np.empty((rows, cols), dtype=object)
+    # Every debayered output pixel stores exactly 9 (row, col) contributor
+    # coordinates so downstream code can use a regular integer array.
+    provenance_map: np.ndarray = np.empty((rows, cols, 9, 2), dtype=np.uint16)
+
+    def clamp_coord(y: int, x: int) -> tuple[int, int]:
+        return (
+            min(max(y, 0), rows - 1),
+            min(max(x, 0), cols - 1),
+        )
 
     # Iterate over the debayered image, 
     # now we will construct the list of contributor pixel 
@@ -141,18 +116,16 @@ def generate_debayered_provenance_map(debayered_image: np.ndarray,
             # ----------------------------------------------------------
 
             if pixel_type == "R":
-                contributors: list[tuple[int]] = [
-                    (r, c),
-
-                    (r - 1, c),
-                    (r + 1, c),
-                    (r, c - 1),
-                    (r, c + 1),
-
-                    (r - 1, c - 1),
-                    (r - 1, c + 1),
-                    (r + 1, c - 1),
-                    (r + 1, c + 1),
+                contributor_offsets: list[tuple[int, int]] = [
+                    (0, 0),
+                    (-1, 0),
+                    (1, 0),
+                    (0, -1),
+                    (0, 1),
+                    (-1, -1),
+                    (-1, 1),
+                    (1, -1),
+                    (1, 1),
                 ]
 
             # ----------------------------------------------------------
@@ -161,19 +134,16 @@ def generate_debayered_provenance_map(debayered_image: np.ndarray,
             # ----------------------------------------------------------
 
             elif pixel_type == "B":
-
-                contributors: list[tuple[int]] = [
-                    (r, c),
-
-                    (r - 1, c),
-                    (r + 1, c),
-                    (r, c - 1),
-                    (r, c + 1),
-
-                    (r - 1, c - 1),
-                    (r - 1, c + 1),
-                    (r + 1, c - 1),
-                    (r + 1, c + 1),
+                contributor_offsets = [
+                    (0, 0),
+                    (-1, 0),
+                    (1, 0),
+                    (0, -1),
+                    (0, 1),
+                    (-1, -1),
+                    (-1, 1),
+                    (1, -1),
+                    (1, 1),
                 ]
 
             # ----------------------------------------------------------
@@ -187,31 +157,25 @@ def generate_debayered_provenance_map(debayered_image: np.ndarray,
             # ----------------------------------------------------------
 
             elif pixel_type in ("G_R", "G_B"):
-
-                contributors: list[tuple[int]] = [
-                    (r, c),
-
-                    (r - 1, c),
-                    (r + 1, c),
-
-                    (r, c - 1),
-                    (r, c + 1),
+                contributor_offsets = [
+                    (0, 0),
+                    (-1, 0),
+                    (1, 0),
+                    (0, -1),
+                    (0, 1),
+                    (0, 0),
+                    (0, 0),
+                    (0, 0),
+                    (0, 0),
                 ]
 
             else:
                 raise RuntimeError(f"Unexpected pixel type: {pixel_type}")
 
-            # ----------------------------------------------------------
-            # Remove out-of-bounds neighbors
-            # ----------------------------------------------------------
-            contributors: list[tuple[int]] = [
-                (yy, xx)
-                for yy, xx in contributors
-                if 0 <= yy < rows and 0 <= xx < cols
-            ]
+            contributors: np.ndarray = np.array([clamp_coord(r + dr, c + dc) for dr, dc in contributor_offsets], dtype=np.uint16,)
 
-            # Store provenance list
-            provenance_map[r, c] = np.array(contributors)
+            # Store fixed-size provenance list
+            provenance_map[r, c] = contributors
 
     return provenance_map
 
@@ -225,7 +189,7 @@ def debayer_image(image: np.ndarray,
     fig: object | None = None
 
     # Ensure the image is correctly rounded 
-    guarded_image: np.ndarray = image if image.dtype == np.uint16 else np.clip(np.round(image), 0, 2**16 - 1).astype(np.uint16)
+    guarded_image: np.ndarray = image if image.dtype == np.uint8 else np.clip(np.round(image), 0, 255).astype(np.uint8)
 
     # Debayer the image according to the sensor's bayer pattern
     # either in place, or not in place depending on input args

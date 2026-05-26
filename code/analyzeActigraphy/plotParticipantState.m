@@ -70,6 +70,8 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
 
     % Convert MS counts to absolute illuminance
     MS2illum_lux = msCounts2Illuminance(ms_v);
+    meanLux = mean(MS2illum_lux, 'omitnan');
+    fprintf('%.6f\n', meanLux);
     
     % Classify outdoor/indoor based on this 
     outdoor_threshold = options.outdoor_threshold; 
