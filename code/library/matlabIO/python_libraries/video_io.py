@@ -19,6 +19,7 @@ import re
 import subprocess
 import multiprocessing as mp
 from multiprocessing import shared_memory
+from numba import njit, prange
 
 # Import utility libraries
 light_logger_analysis_dir_path: str = os.path.expanduser("~/Documents/MATLAB/projects/lightLoggerAnalysis")
@@ -47,7 +48,6 @@ def group_sensors_files(recording_path: str) -> dict[str, list[tuple]]:
     return {sensor[0].upper(): group_sensor_files(sensor) # n chunks = [ (metadata_path, frame_buffer_path), ...  ]
             for sensor in ("world", "pupil", "ms")
            }
-
 
 """Given a directory of frames, read them in and convert to video"""
 def dir_to_video(dir_path: str, output_path: str, fps: float=30) -> None:
@@ -531,8 +531,146 @@ def video_to_hdf5(video_path: str, output_path: str,
 
     return 
 
-def _parallel_chunk_loader(output_queue: object):
-    pass 
+def _load_world_chunk_shared_memory(chunk_paths: list[tuple[str, str]],
+                                    chunk_indices: list[int],
+                                    metadata_shape: tuple[int, ...],
+                                    metadata_dtype: np.dtype,
+                                    frame_shape: tuple[int, ...],
+                                    frame_dtype: np.dtype,
+                                    metadata_shm_names: list[str],
+                                    frame_shm_names: list[str],
+                                    free_buffer_queue: mp.Queue,
+                                   ready_buffer_queue: mp.Queue,
+                                   stop_event: object
+                                   ) -> None:
+    # First, let's access the shared memory that we allocated by the main processs 
+    # This is cheap: we are only attaching this process to named shared-memory blocks,
+    # not copying any chunk data yet. These SharedMemory objects are just handles that
+    # let this process see the same byte buffers as the main process.
+    metadata_shms: list[shared_memory.SharedMemory] = [shared_memory.SharedMemory(name=name) for name in metadata_shm_names]
+    frame_shms: list[shared_memory.SharedMemory] = [shared_memory.SharedMemory(name=name) for name in frame_shm_names]
+
+    try:
+        # Next, load in the metadata and frame buffers
+        # These NumPy arrays are views onto the shared-memory byte regions.
+        # Constructing them is cheap: NumPy is not allocating another full chunk
+        # here, it is only wrapping the existing shared-memory allocation with shape
+        # and dtype information so we can index and assign into it normally.
+        metadata_buffers: list[np.ndarray] = [np.ndarray(metadata_shape, dtype=metadata_dtype, buffer=shm.buf) for shm in metadata_shms]
+        frame_buffers: list[np.ndarray] = [np.ndarray(frame_shape, dtype=frame_dtype, buffer=shm.buf) for shm in frame_shms]
+
+        # Stop processing chunks if desired 
+        for chunk_num in chunk_indices:
+            if(stop_event.is_set()):
+                break
+            
+            # Wait until the main process tells us that one of the 2 shared-memory
+            # slots is free to be overwritten. This blocking wait bounds memory usage
+            # to exactly the 2 preallocated chunk buffers instead of allowing an
+            # unbounded number of chunks to accumulate in RAM.
+            buffer_num: int = free_buffer_queue.get()
+            metadata_matrix_path, frame_buffer_path = chunk_paths[chunk_num]
+
+            # Open the chunk files as read-only memmaps instead of immediately reading
+            # the whole arrays into ordinary process RAM. This is fast to create and
+            # cheap on memory because NumPy only reads file headers up front, while
+            # the OS pages chunk data in lazily as the copy below touches it.
+            # The tradeoff is that these memmaps are file-backed sources only; the
+            # consumer still cannot use them directly across processes, so we still
+            # need one explicit copy into shared memory.
+            metadata: np.ndarray = np.load(metadata_matrix_path, mmap_mode='r')
+            frame_buffer: np.ndarray = np.load(frame_buffer_path, mmap_mode='r')
+
+            # Copy the finalized chunk data into the chosen shared-memory slot.
+            # This is the main unavoidable full-data copy in the pipeline:
+            #     disk-backed memmap -> shared-memory buffer
+            # Once this copy finishes, the main process can read the chunk without
+            # doing another disk load and without receiving a large pickled object
+            # through a multiprocessing queue.
+            metadata_buffers[buffer_num][:len(metadata)] = metadata
+            frame_buffers[buffer_num][:len(frame_buffer)] = frame_buffer
+
+            # Tell the main process that this buffer slot is ready immediately after
+            # the copy completes. Importantly, the queue message contains only small
+            # bookkeeping data: which buffer is ready and how much of it is valid.
+            # We do not send the arrays themselves through the queue, which avoids a
+            # very expensive serialization/copy step.
+            ready_buffer_queue.put((buffer_num, chunk_num, len(metadata), len(frame_buffer)))
+
+        # Signal stop of reading 
+        # `None` is a sentinel meaning there will be no further ready buffers.
+        ready_buffer_queue.put(None)
+
+    # Release the memory
+    finally:
+        # Close this process's handles to the shared-memory blocks.
+        # This does not free the underlying shared memory itself; the parent process
+        # still owns that lifecycle and later unlinks the blocks after processing.
+        for shm in metadata_shms + frame_shms:
+            shm.close()
+
+# We parallleize this and just in time compile it. 
+# this ends up being faster than using vectorized boolean 
+# arrays due to memory allocations
+@njit(parallel=True)
+def _clip_buffer_compiled(raw_frame_buffer: np.ndarray,
+                          debayered_frame_buffer: np.ndarray,
+                          debayered_provenance_map: np.ndarray,
+                          floor: int,
+                          ceiling: int,
+                        ) -> None:
+
+    debayered_height: int = debayered_provenance_map.shape[0]
+    debayered_width: int = debayered_provenance_map.shape[1]
+
+    n_frames: int = raw_frame_buffer.shape[0]
+    n_contributors: int = debayered_provenance_map.shape[2]
+
+    # Parallelize over rows since rows are independent
+    for output_row in prange(debayered_height):
+        for output_col in range(debayered_width):
+
+            # Iterate over every frame for this output pixel
+            for frame_index in range(n_frames):
+
+                contains_saturated_contributor: bool = False
+                contains_dark_contributor: bool = False
+
+                # Iterate over RAW Bayer contributors for this debayered pixel
+                for contributor_index in range(n_contributors):
+
+                    contributor_row: int = debayered_provenance_map[output_row, output_col, contributor_index, 0]
+                    contributor_col: int = debayered_provenance_map[output_row, output_col, contributor_index, 1]
+
+                    # Directly read RAW Bayer value without advanced indexing allocation
+                    raw_value = raw_frame_buffer[frame_index, contributor_row, contributor_col]
+
+                    # Track whether any contributor is saturated/dark
+                    if(raw_value >= ceiling):
+                        contains_saturated_contributor = True
+
+                    if(raw_value <= floor):
+                        contains_dark_contributor = True
+
+                # This ended up faster than the previous NumPy vectorization approach
+                # because it avoids repeatedly allocating temporary arrays from:
+                #
+                # raw_frame_buffer[:, contributor_rows, contributor_cols]
+                #
+                # which uses advanced indexing and therefore creates copies.
+
+                # Dark clipping takes precedence over saturation clipping
+                if(contains_dark_contributor):
+                    debayered_frame_buffer[frame_index, output_row, output_col, 0] = floor
+                    debayered_frame_buffer[frame_index, output_row, output_col, 1] = floor
+                    debayered_frame_buffer[frame_index, output_row, output_col, 2] = floor
+
+                elif(contains_saturated_contributor):
+                    debayered_frame_buffer[frame_index, output_row, output_col, 0] = ceiling
+                    debayered_frame_buffer[frame_index, output_row, output_col, 1] = ceiling
+                    debayered_frame_buffer[frame_index, output_row, output_col, 2] = ceiling
+
+    return
 
 
 """Convert the world chunks of a recording into a playable video"""
@@ -548,7 +686,7 @@ def world_chunks_to_video(recording_path: str,
                           embed_timestamps: bool=False,
                           verbose: bool=False,
                           start_end: tuple[int | float] = (0, float("inf")),
-                          ceiling: int=255, 
+                          ceiling: int=200, 
                           floor: int=world_util.WORLD_DARK_NOISE
                          ) -> None:
     
@@ -616,6 +754,60 @@ def world_chunks_to_video(recording_path: str,
     end_chunk: int = start_end[1] if start_end[1] != float("inf") else len(chunks_paths)
     chunk_iterator: Iterable = range(start_chunk, end_chunk) if verbose is False else tqdm(range(start_chunk, end_chunk), desc="Processing chunks", leave=True)
 
+    # We should gather some information about the chunk sizes here. 
+    # We know that all chunks before the last chunk will be the same size, 
+    # with the last chunk potentially being smaller than the others. 
+    # Therefore, we can allocate arrays based on the size of the first chunk, 
+    # then just access slices of this if we need to for other things 
+    # For instance, we can do this with the final 
+    # Use read-only memmaps here because we only need lightweight metadata about the
+    # first chunk: shape, dtype, and total byte size. This avoids eagerly loading an
+    # entire first chunk into normal process RAM just to size the shared-memory
+    # buffers. The memmap object is cheap to create and does not read the full array
+    # contents unless they are actually accessed.
+    first_metadata_matrix_path, first_frame_buffer_path = chunks_paths[start_chunk]
+    first_metadata: np.ndarray = np.load(first_metadata_matrix_path, mmap_mode='r')
+    first_frame_buffer: np.ndarray = np.load(first_frame_buffer_path, mmap_mode='r')
+    
+
+    # Next, we should allocate some shared memory buffers. 
+    # We will use this to read in chunks while another chunk is being processed 
+    # We should have 2 buffers, one to be currently processed and another to hold 
+    # the data queued to be processed next. 
+    # This is the main fixed memory cost of the overlap strategy: enough shared memory
+    # for 2 full metadata chunks and 2 full frame chunks. In exchange, the loader can
+    # read the next chunk while the main process transforms/writes the current one.
+    metadata_shms: list[shared_memory.SharedMemory] = [shared_memory.SharedMemory(create=True, size=first_metadata.nbytes) for _ in range(2)]
+    frame_shms: list[shared_memory.SharedMemory] = [shared_memory.SharedMemory(create=True, size=first_frame_buffer.nbytes) for _ in range(2)]
+    free_buffer_queue: mp.Queue = mp.Queue()
+    ready_buffer_queue: mp.Queue = mp.Queue()
+    stop_event: object = mp.Event()
+    for buffer_num in range(2):
+        # Initially both buffer slots are free, so seed the loader with both ids.
+        # This lets it start filling the first available slot immediately.
+        free_buffer_queue.put(buffer_num)
+
+    # Launch the background loader process. After this starts, disk I/O for later
+    # chunks can overlap with CPU work in the main process. The extra process has
+    # some overhead, but it is much smaller than repeatedly blocking the main loop on
+    # chunk reads or shipping large arrays through multiprocessing queues.
+    loader_process: mp.Process = mp.Process(target=_load_world_chunk_shared_memory,
+                                            args=(chunks_paths,
+                                                  list(range(start_chunk, end_chunk)),
+                                                  first_metadata.shape,
+                                                  first_metadata.dtype,
+                                                  first_frame_buffer.shape,
+                                                  first_frame_buffer.dtype,
+                                                  [shm.name for shm in metadata_shms],
+                                                  [shm.name for shm in frame_shms],
+                                                  free_buffer_queue,
+                                                  ready_buffer_queue,
+                                                  stop_event
+                                                 )
+                                           )
+    loader_process.start()
+
+
     # Declare some global video pieces of knowledge that we 
     # will fill in from the first chunk, 
     # such as the provenance map of debayered pixels to their contributing pixels in the RAW image 
@@ -623,264 +815,279 @@ def world_chunks_to_video(recording_path: str,
     bayer_RGB_mask: np.ndarray | None = None
     bayer_RGB_pixel_locations: list[np.ndarray] | None = None
     debayered_provenance_map: np.ndarray | None = None
-    for chunk_num in chunk_iterator:        
-        ###########################
+    try:
+        for _ in chunk_iterator:        
+            ###########################
 
-        # LOADING AND TRANSFORMATION
+            # LOADING AND TRANSFORMATION
 
-        ##########################
+            ##########################
 
-        metadata_matrix_path, frame_buffer_path = chunks_paths[chunk_num]
+            # Here, we should instead receive a processed chunk from the shared memory 
+            # that is populated from the other process reading in the chunks. 
+            #       
+            # Wait for the next finalized shared-memory slot from the loader process.
+            # This queue receive is cheap because only a tiny tuple is transferred,
+            # not the chunk arrays themselves.
+            ready_chunk: None = ready_buffer_queue.get()
+            if(ready_chunk is None):
+                break
+            buffer_num, chunk_num, metadata_len, frame_buffer_len = ready_chunk
 
-        # First, we will retrieve the metadata for this buffer 
-        metadata: np.ndarray = np.load(metadata_matrix_path)
-        
-        # Then, we will read in the timestamps and frame buffer for this chunk 
-        # World timestamps are in nanoseconds and thus must be converted to seconds 
-        t_vector: np.ndarray = np.ascontiguousarray(metadata[:, 0], dtype=np.float64) if convert_to_seconds is False else np.ascontiguousarray(metadata[:, 0], dtype=np.float64) / (10 ** 9) 
-        frame_buffer: np.ndarray = np.load(frame_buffer_path)
-        
-        # Let's keep track of the current colorspace the video is in 
-        current_color_space: Literal['BAYER', 'RGB', 'BGR'] = 'BAYER'
-
-        # Assert the t vector and frame vector are the same size 
-        try:
-            assert(len(t_vector) == len(frame_buffer))
-        except Exception as e:
-            print(e)
-            video_writer.release()
-            return 
-
-        # Ensure the frame size is consistent 
-        buffer_frame_shape: tuple[int] = tuple(frame_buffer.shape[1:3])
-        try:
-            assert buffer_frame_shape == (frame_height, frame_width), f"Frame shape unequal after initialization: {(frame_height, frame_width)}"
-        except Exception as e:
-            print(e)
-            video_writer.release() 
-            return
-
-        # Assert the frames are of appropriate dtype 
-        try:
-            assert(frame_buffer.dtype == np.uint8)
-        except Exception as e:
-            print(e)
-            video_writer.release()
-            return 
-
-        # If we somehow got an empty chunk, skip it 
-        if(len(t_vector) == 0): 
-            continue
-
-        # Now, we will apply the requested transformations to the frames 
-        # First, convert to float for float multiplications
-        # if not in float already
-        frame_buffer = frame_buffer.astype(np.float64, copy=False) # copy = False means reuse the same memory if possible (e.g. if it is already float, which it should be)  
-                
-        # Apply Dgain if requested
-        if(apply_digital_gain is True):
-            assert frame_buffer.dtype == np.float64, f"Frame buffer dtype must be float64 to apply dgain. Current dtype is {frame_buffer.dtype}"
-
-            # Extract the dgains of the buffers 
-            buffer_dgains: np.ndarray = metadata[:, 2]
-
-            # Multiply the frames by the dgains 
-            # (Note: this does not do any allocation, so all of this stuff is very fast)
-            if(frame_buffer.ndim == 3):
-                buffer_dgains = buffer_dgains[:, np.newaxis, np.newaxis]
-            else:
-                buffer_dgains = buffer_dgains[:, np.newaxis, np.newaxis, np.newaxis]
-            frame_buffer *= buffer_dgains
-
-        if(apply_color_weights is True):
-            assert frame_buffer.ndim == 3 and frame_buffer.dtype == np.float64, f"To apply color weights, buffer must be in bayer form np.float64."
-
-            # Apply the radiometric correction
-            # pre-compute the RGB bayer mask once to save time 
-            if(bayer_RGB_mask is None):
-                bayer_RGB_mask = world_util.generate_RGB_mask(frame_buffer[0])
-                bayer_RGB_pixel_locations = [ np.argwhere(bayer_RGB_mask == color) for color in "RGB" ]
-            assert bayer_RGB_mask.shape == frame_buffer.shape[1:], f"Bayer RGB mask shape: {bayer_RGB_mask.shape} not equal to frame shape: {frame_buffer.shape[1:]}" 
-
-            # Apply the color corrections IN-PLACE and vectorized (uglier than using our helper function and copying logic, but faster)
-            assert len(bayer_RGB_pixel_locations) == len(world_util.WORLD_RGB_SCALARS)
-            for (pixels, weight) in zip(bayer_RGB_pixel_locations, world_util.WORLD_RGB_SCALARS):
-                rows: np.ndarray = pixels[:, 0]
-                cols: np.ndarray = pixels[:, 1]
-
-                # Apply the weight to the specified pixels 
-                frame_buffer[:, rows, cols] *= weight
-
-        # If we want to debayer the image
-        if(debayer_images is True):
-            # Convert the buffer to uint8 if it has not already been done 
-            # clipping and rounding as needed 
-            if(frame_buffer.dtype != np.uint8):
-                frame_buffer = np.round(np.clip(frame_buffer, 0, 255)).astype(np.uint8)
-            assert current_color_space == "BAYER" and frame_buffer.dtype == np.uint8, f"Frame buffer must be in BAYER space and uint8 to debayer. Current format is: {current_color_space} | {frame_buffer.dtype}"
-
-            # Allocate the output buffer 
-            # for the debayering. This is the same shame as the 
-            # input buffer, but with RGB channels dimension        
-            debayered_frame_buffer: np.ndarray = np.empty( tuple( list(frame_buffer.shape) + [3] ), dtype=np.uint8)
+            # First, we will retrieve the metadata for this buffer 
+            # Reconstruct a NumPy array view directly over the shared-memory bytes and
+            # slice down to the valid region for this chunk. This is effectively
+            # zero-copy at retrieval time: we are not duplicating the shared-memory
+            # contents, only creating a local ndarray wrapper around them.
+            metadata: np.ndarray = np.ndarray(first_metadata.shape, dtype=first_metadata.dtype, buffer=metadata_shms[buffer_num].buf)[:metadata_len]
             
-            # Debayer the frames into the output buffer 
-            for frame_num, (input_frame, output_buffer) in enumerate(zip(frame_buffer, debayered_frame_buffer)):
-                world_util.debayer_image(input_frame, dst=output_buffer)
-            current_color_space = 'RGB'
+            # Then, we will read in the timestamps and frame buffer for this chunk 
+            # World timestamps are in nanoseconds and thus must be converted to seconds 
+            # This line does allocate a fresh contiguous float64 timestamp vector,
+            # because we are converting units and standardizing dtype for downstream
+            # math. That cost is usually small compared with the frame-buffer copy and
+            # frame processing work.
+            t_vector: np.ndarray = np.ascontiguousarray(metadata[:, 0], dtype=np.float64) if convert_to_seconds is False else np.ascontiguousarray(metadata[:, 0], dtype=np.float64) / (10 ** 9) 
+            # Like `metadata`, this is a direct view into the ready shared-memory slot.
+            # No disk I/O occurs here and no additional full chunk copy is made yet.
+            frame_buffer: np.ndarray = np.ndarray(first_frame_buffer.shape, dtype=first_frame_buffer.dtype, buffer=frame_shms[buffer_num].buf)[:frame_buffer_len]
             
-            # reassign frame buffer to the output buffer, debayered buffer 
-            # We will need this to apply floor and ceiling operations 
-            raw_frame_buffer = frame_buffer
-            frame_buffer = debayered_frame_buffer
-            
-        # If we want to apply floor ceiling (16, 255) in any channel implies 
-        # that entire pixel is white or black
-        if(apply_floor_ceiling is True):
-            assert frame_buffer.ndim == 4, f"Frames must be debayered before applying floor/ceiling"
+            # Let's keep track of the current colorspace the video is in 
+            current_color_space: Literal['BAYER', 'RGB', 'BGR'] = 'BAYER'
 
-            # First, we define a provenance map. This is so that we can understand 
-            # for every pixel, what pixels in the bayer image contributed to constructing it
-            if(debayered_provenance_map is None):
-                debayered_provenance_map = world_util.generate_debayered_provenance_map(frame_buffer[0])
-
-            # Iterate over a sample frame from the debayered provedence map
-            for r in range(debayered_provenance_map.shape[0]):
-                for c in range(debayered_provenance_map.shape[1]):
-                    # Let's find the contributor pixel locations to this 
-                    # pixel 
-                    contributor_pixel_locations: np.ndarray = debayered_provenance_map[r, c]
-                    contributor_rows: np.ndarray = contributor_pixel_locations[:, 0]
-                    contributor_cols: np.ndarray = contributor_pixel_locations[:, 1]
-                    
-                    # Now, let's find the contributor values for this pixel for every frame in the 
-                    # RAW frame buffer
-                    # Shape: nFrames, nContributors
-                    contributor_values: np.ndarray = raw_frame_buffer[:, contributor_rows, contributor_cols]
-                    
-                    # Construct the mask for saturated or dark pixels 
-                    saturated_mask: np.ndarray = np.any(contributor_values >= ceiling, axis=1)
-                    dark_mask: np.ndarray = np.any(contributor_values <= floor, axis=1)
-                    
-                    # Assign these to 0 
-                    frame_buffer[saturated_mask] = ceiling
-                    frame_buffer[dark_mask] = floor
-
-        # Now, if we want to REMOVE the dark noise (darknoise = 0)
-        # let's do that now to 
-        if(remove_dark_noise is True):
-            assert apply_floor_ceiling is True, f"Current implementation requires all pixels <= dark noise to be clipped"
-            dark_noise_mask = frame_buffer <= world_util.WORLD_DARK_NOISE
-            frame_buffer[dark_noise_mask] = 0 
-
-        # Convert the frame buffer back into uint8 format
-        # TODO: akalsdklasdkdklasdlkaskld 
-        if(frame_buffer.dtype != np.uint8): 
-            frame_buffer = np.clip(np.round(frame_buffer), 0, 255).astype(np.uint8)
-
-        # ALL TRANSFORMATIONS ARE DONE AT THIS POINT. 
-        # WE NEED TO CONVERT TO BGR TO WRITE FRAMES WITH CV2
-        if(frame_buffer.ndim > 3 and current_color_space != 'BGR'):
-            if(current_color_space == 'RGB'):
-                # Allocate a new frame buffer to hold the BGR frames 
-                new_buffer: np.ndarray = np.empty_like(frame_buffer)
-                for frame_idx in range(len(frame_buffer)):
-                    cv2.cvtColor(frame_buffer[frame_idx], cv2.COLOR_RGB2BGR, dst=new_buffer[frame_idx])
-                frame_buffer = new_buffer
-            
-            else:
-                raise RuntimeError(f"Unsupported colorspace conversion: {current_color_space} -> RBG")
-
-        assert frame_buffer.dtype == np.uint8, f"Frame buffer of type: {frame_buffer.dtype} must be of dtype np.uint8 before writing."
-
-
-
-
-
-        """
-            WRITING SECTION    
-        """
-
-
-        # If we want to embed the timestamps in the frame buffer, do that now
-        if(embed_timestamps is True):
-            raise NotImplementedError()
-
-        # Retrieve the current chunk start time 
-        current_chunk_start_time = t_vector[0]
-
-        # Before we write the frames for this chunk, we must write the dummy frame (if desired)
-        # for those frames between the previous chunk and the current chunk 
-        
-        # Find the total elapsed time in seconds between the two chunks 
-        time_between_chunks: float = current_chunk_start_time - previous_chunk_end_time
-        assert time_between_chunks >= 0, f"Time btween chunks is somehow negative, Chunk 1: {previous_chunk_end_time}, Chunk 2: {current_chunk_start_time}"
-
-        # Calculate the number of missed frames as the elapsed time divided 
-        # by the seconds per frame, minus one frame as we have to count the current frame 
-        # as captured during this interval 
-        missed_frames: int = 0 if chunk_num == start_end[0] or fill_missing_frames is False else int( (time_between_chunks / (1/FPS ) ) -  1) 
-        if(missed_frames > 5 * FPS):
-            warnings.warn(f"Missed {missed_frames} between chunks. This may be unnaturally large")
-        missing_timestamps: np.ndarray = np.linspace(previous_chunk_end_time + (1/FPS), current_chunk_start_time, missed_frames, endpoint=False)
-
-        # Write the number of missing frames in between as the previous frame 
-        for missing_timestamp in missing_timestamps:
-            missing_frame: np.ndarray = world_util.embed_timestamp(dummy_frame, missing_timestamp) if embed_timestamps is True else dummy_frame
-            assert missing_frame.dtype == np.uint8 and ( len(missing_frame.shape) == 3 if debayer_images is True else len(missing_frame.shape) == 2 ) 
-            video_writer.write(missing_frame)
-
-        # Initialize variables to track the previous timestamp 
-        # We will use this delta with the current timestamp 
-        # to track dropped frames and add dummy frames in the meantime
-        previous_timestamp: float = t_vector[0]
-
-        # Write frames to the video 
-        frame_iterator: Iterable = range(len(frame_buffer)) if verbose is False else tqdm(range(len(frame_buffer)), desc="Processing frames", leave=False)
-        for frame_num in frame_iterator:
-            timestamp, frame = t_vector[frame_num], frame_buffer[frame_num]
-
-            # Assert the frame is of the appropriate type after transformation 
+            # Assert the t vector and frame vector are the same size 
             try:
-                assert(frame.dtype == np.uint8 and dummy_frame.dtype == np.uint8)
+                assert(len(t_vector) == len(frame_buffer))
             except Exception as e:
                 print(e)
                 video_writer.release()
                 return 
 
-            # Otherwise, let's calculate the time delta between the current timestamp and the previous timestamp 
-            time_between_frames: float = timestamp - previous_timestamp
-            assert time_between_frames >= 0, f"Time between frames is somehow negative. Frame 1: {previous_timestamp}, Frame 2: {timestmap}"
+            # Ensure the frame size is consistent 
+            buffer_frame_shape: tuple[int] = tuple(frame_buffer.shape[1:3])
+            try:
+                assert buffer_frame_shape == (frame_height, frame_width), f"Frame shape unequal after initialization: {(frame_height, frame_width)}"
+            except Exception as e:
+                print(e)
+                video_writer.release() 
+                return
+
+            # Assert the frames are of appropriate dtype 
+            try:
+                assert(frame_buffer.dtype == np.uint8)
+            except Exception as e:
+                print(e)
+                video_writer.release()
+                return 
+
+            # If we somehow got an empty chunk, skip it 
+            if(len(t_vector) == 0): 
+                free_buffer_queue.put(buffer_num)
+                continue
+
+            # Now, we will apply the requested transformations to the frames 
+            # First, convert to float for float multiplications
+            # if not in float already
+            frame_buffer = frame_buffer.astype(np.float64, copy=False) # copy = False means reuse the same memory if possible (e.g. if it is already float, which it should be)  
+
+            # Apply Dgain if requested
+            if(apply_digital_gain is True):
+                assert frame_buffer.dtype == np.float64, f"Frame buffer dtype must be float64 to apply dgain. Current dtype is {frame_buffer.dtype}"
+
+                # Extract the dgains of the buffers 
+                buffer_dgains: np.ndarray = metadata[:, 2]
+
+                # Multiply the frames by the dgains 
+                # (Note: this does not do any allocation, so all of this stuff is very fast)
+                if(frame_buffer.ndim == 3):
+                    buffer_dgains = buffer_dgains[:, np.newaxis, np.newaxis]
+                else:
+                    buffer_dgains = buffer_dgains[:, np.newaxis, np.newaxis, np.newaxis]
+                frame_buffer *= buffer_dgains
+
+            if(apply_color_weights is True):
+                assert frame_buffer.ndim == 3 and frame_buffer.dtype == np.float64, f"To apply color weights, buffer must be in bayer form np.float64."
+
+                # Apply the radiometric correction
+                # pre-compute the RGB bayer mask once to save time 
+                if(bayer_RGB_mask is None):
+                    bayer_RGB_mask = world_util.generate_RGB_mask(frame_buffer[0])
+                    bayer_RGB_pixel_locations = [ np.argwhere(bayer_RGB_mask == color) for color in "RGB" ]
+                assert bayer_RGB_mask.shape == frame_buffer.shape[1:], f"Bayer RGB mask shape: {bayer_RGB_mask.shape} not equal to frame shape: {frame_buffer.shape[1:]}" 
+
+                # Apply the color corrections IN-PLACE and vectorized (uglier than using our helper function and copying logic, but faster)
+                assert len(bayer_RGB_pixel_locations) == len(world_util.WORLD_RGB_SCALARS)
+                for (pixels, weight) in zip(bayer_RGB_pixel_locations, world_util.WORLD_RGB_SCALARS):
+                    rows: np.ndarray = pixels[:, 0]
+                    cols: np.ndarray = pixels[:, 1]
+
+                    # Apply the weight to the specified pixels 
+                    frame_buffer[:, rows, cols] *= weight
+
+            # If we want to debayer the image
+            if(debayer_images is True):
+                # Convert the buffer to uint8 if it has not already been done 
+                # clipping and rounding as needed 
+                if(frame_buffer.dtype != np.uint8):
+                    frame_buffer = np.round(np.clip(frame_buffer, 0, 255)).astype(np.uint8)
+                assert current_color_space == "BAYER" and frame_buffer.dtype == np.uint8, f"Frame buffer must be in BAYER space and uint8 to debayer. Current format is: {current_color_space} | {frame_buffer.dtype}"
+
+                # Allocate the output buffer 
+                # for the debayering. This is the same shame as the 
+                # input buffer, but with RGB channels dimension        
+                debayered_frame_buffer: np.ndarray = np.empty( tuple( list(frame_buffer.shape) + [3] ), dtype=np.uint8)
+                
+                # Debayer the frames into the output buffer 
+                for frame_num, (input_frame, output_buffer) in enumerate(zip(frame_buffer, debayered_frame_buffer)):
+                    world_util.debayer_image(input_frame, dst=output_buffer)
+                current_color_space = 'RGB'
+                
+                # reassign frame buffer to the output buffer, debayered buffer 
+                # We will need this to apply floor and ceiling operations 
+                raw_frame_buffer = frame_buffer
+                frame_buffer = debayered_frame_buffer
+            
+            # If we want to apply floor ceiling (16, 255) in any channel implies 
+            # that entire pixel is white or black
+            if(apply_floor_ceiling is True):
+                assert frame_buffer.ndim == 4, f"Frames must be debayered before applying floor/ceiling"
+
+                if(debayered_provenance_map is None):
+                    debayered_provenance_map = world_util.generate_debayered_provenance_map(frame_buffer[0])
+
+                _clip_buffer_compiled(raw_frame_buffer, frame_buffer, debayered_provenance_map, floor, ceiling)
+
+            # Now, if we want to REMOVE the dark noise (darknoise = 0)
+            # let's do that now to 
+            if(remove_dark_noise is True):
+                assert apply_floor_ceiling is True, f"Current implementation requires all pixels <= dark noise to be clipped"
+                dark_noise_mask = frame_buffer <= world_util.WORLD_DARK_NOISE
+                frame_buffer[dark_noise_mask] = 0 
+
+            # Convert the frame buffer back into uint8 format
+            # TODO: akalsdklasdkdklasdlkaskld 
+            if(frame_buffer.dtype != np.uint8): 
+                frame_buffer = np.clip(np.round(frame_buffer), 0, 255).astype(np.uint8)
+
+            # ALL TRANSFORMATIONS ARE DONE AT THIS POINT. 
+            # WE NEED TO CONVERT TO BGR TO WRITE FRAMES WITH CV2
+            if(frame_buffer.ndim > 3 and current_color_space != 'BGR'):
+                if(current_color_space == 'RGB'):
+                    # Allocate a new frame buffer to hold the BGR frames 
+                    new_buffer: np.ndarray = np.empty_like(frame_buffer)
+                    for frame_idx in range(len(frame_buffer)):
+                        cv2.cvtColor(frame_buffer[frame_idx], cv2.COLOR_RGB2BGR, dst=new_buffer[frame_idx])
+                    frame_buffer = new_buffer
+                
+                else:
+                    raise RuntimeError(f"Unsupported colorspace conversion: {current_color_space} -> RBG")
+
+            assert frame_buffer.dtype == np.uint8, f"Frame buffer of type: {frame_buffer.dtype} must be of dtype np.uint8 before writing."
+
+
+            ###############
+            #    WRITING SECTION    
+            ##############
+            # If we want to embed the timestamps in the frame buffer, do that now
+            if(embed_timestamps is True):
+                raise NotImplementedError()
+
+            # Retrieve the current chunk start time 
+            current_chunk_start_time = t_vector[0]
+
+            # Before we write the frames for this chunk, we must write the dummy frame (if desired)
+            # for those frames between the previous chunk and the current chunk 
+            
+            # Find the total elapsed time in seconds between the two chunks 
+            time_between_chunks: float = current_chunk_start_time - previous_chunk_end_time
+            assert time_between_chunks >= 0, f"Time btween chunks is somehow negative, Chunk 1: {previous_chunk_end_time}, Chunk 2: {current_chunk_start_time}"
 
             # Calculate the number of missed frames as the elapsed time divided 
             # by the seconds per frame, minus one frame as we have to count the current frame 
             # as captured during this interval 
-            missed_frames: int = 0 if frame_num == 0 or fill_missing_frames is False else int( (time_between_frames / (1/FPS ) ) -  1) 
+            missed_frames: int = 0 if chunk_num == start_end[0] or fill_missing_frames is False else int( (time_between_chunks / (1/FPS ) ) -  1) 
             if(missed_frames > 5 * FPS):
-                warnings.warn(f"Missed {missed_frames} frames between frames. This may be unaturally large")
-            missing_timestamps: np.ndarray = np.linspace(previous_timestamp + (1/FPS), timestamp, missed_frames, endpoint=False)
+                warnings.warn(f"Missed {missed_frames} between chunks. This may be unnaturally large")
+            missing_timestamps: np.ndarray = np.linspace(previous_chunk_end_time + (1/FPS), current_chunk_start_time, missed_frames, endpoint=False)
 
             # Write the number of missing frames in between as the previous frame 
             for missing_timestamp in missing_timestamps:
                 missing_frame: np.ndarray = world_util.embed_timestamp(dummy_frame, missing_timestamp) if embed_timestamps is True else dummy_frame
-                
-                assert missing_frame.dtype == np.uint8 and ( len(missing_frame.shape) == 3 if debayer_images is True else len(missing_frame.shape) == 2 )
+                assert missing_frame.dtype == np.uint8 and ( len(missing_frame.shape) == 3 if debayer_images is True else len(missing_frame.shape) == 2 ) 
                 video_writer.write(missing_frame)
+
+            # Initialize variables to track the previous timestamp 
+            # We will use this delta with the current timestamp 
+            # to track dropped frames and add dummy frames in the meantime
+            previous_timestamp: float = t_vector[0]
+
+            # Write frames to the video 
+            frame_iterator: Iterable = range(len(frame_buffer)) if verbose is False else tqdm(range(len(frame_buffer)), desc="Processing frames", leave=False)
+            for frame_num in frame_iterator:
+                timestamp, frame = t_vector[frame_num], frame_buffer[frame_num]
+
+                # Assert the frame is of the appropriate type after transformation 
+                try:
+                    assert(frame.dtype == np.uint8 and dummy_frame.dtype == np.uint8)
+                except Exception as e:
+                    print(e)
+                    video_writer.release()
+                    return 
+
+                # Otherwise, let's calculate the time delta between the current timestamp and the previous timestamp 
+                time_between_frames: float = timestamp - previous_timestamp
+                assert time_between_frames >= 0, f"Time between frames is somehow negative. Frame 1: {previous_timestamp}, Frame 2: {timestmap}"
+
+                # Calculate the number of missed frames as the elapsed time divided 
+                # by the seconds per frame, minus one frame as we have to count the current frame 
+                # as captured during this interval 
+                missed_frames: int = 0 if frame_num == 0 or fill_missing_frames is False else int( (time_between_frames / (1/FPS ) ) -  1) 
+                if(missed_frames > 5 * FPS):
+                    warnings.warn(f"Missed {missed_frames} frames between frames. This may be unaturally large")
+                missing_timestamps: np.ndarray = np.linspace(previous_timestamp + (1/FPS), timestamp, missed_frames, endpoint=False)
+
+                # Write the number of missing frames in between as the previous frame 
+                for missing_timestamp in missing_timestamps:
+                    missing_frame: np.ndarray = world_util.embed_timestamp(dummy_frame, missing_timestamp) if embed_timestamps is True else dummy_frame
+                    
+                    assert missing_frame.dtype == np.uint8 and ( len(missing_frame.shape) == 3 if debayer_images is True else len(missing_frame.shape) == 2 )
+                    video_writer.write(missing_frame)
+                
+                # Write the current frame 
+                assert frame.dtype == np.uint8 and ( len(frame.shape) == 3 if debayer_images is True else len(frame.shape) == 2 )
+                video_writer.write(frame)
+
+                # Save the current timestamp as the previous timestamp
+                # so we can reference it for the next frame 
+                previous_timestamp = timestamp 
             
-            # Write the current frame 
-            assert frame.dtype == np.uint8 and ( len(frame.shape) == 3 if debayer_images is True else len(frame.shape) == 2 )
-            video_writer.write(frame)
+            # Save the end time of this chunk 
+            previous_chunk_end_time = t_vector[-1]
 
-            # Save the current timestamp as the previous timestamp
-            # so we can reference it for the next frame 
-            previous_timestamp = timestamp 
+            # Now that we are done processing this buffer, we can 
+            # send it back to load another chunk 
+            # This handoff point is what prevents the loader from overwriting a buffer
+            # while the main process is still reading from it.
+            free_buffer_queue.put(buffer_num)
+
+    # In any case of the function, 
+    # we want to close the subprocess 
+    # and clear the memory we allocated 
+    finally:
+        stop_event.set()
         
-        # Save the end time of this chunk 
-        previous_chunk_end_time = t_vector[-1]
+        if(loader_process.is_alive()):
+            loader_process.join(timeout=1)
+        if(loader_process.is_alive()):
+            loader_process.terminate()
+            loader_process.join()
+        
+        for shm in metadata_shms + frame_shms:
+            shm.close()
+            shm.unlink()
 
-
-    # Close the video writer 
-    video_writer.release()
+        # Close the video writer 
+        video_writer.release()
 
     return 
 

@@ -8,10 +8,11 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
 %   Perform serveral calibration operations between the light logger,
 %   connected remotely via Bluetooth, as well as the CombiLED, 
 %   connected over the serial port. They are 1. measure the 
-%   linearity of the light sensing chips of the MS, and 
-%   2. measure the temporal sensitivity of all sensors.
-%   3. Measure the offset between sensors in phase/time of all sensors 
-%   4. Measure the contrast gamma of the sensors of the world camera. 
+%   linearity of the light sensing chips of the MS, 
+%   2. measure the linearity of the world camera,
+%   3. measure the temporal sensitivity of all sensors,
+%   4. measure the offset between sensors in phase/time of all sensors, and
+%   5. measure the contrast gamma of the sensors of the world camera. 
 %   Upload these either to DropBox or an external SSD. 
 %
 % Inputs:
@@ -48,6 +49,7 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
     device_num = 1; 
     sensor_ids = [1, 1, 1]; 
     NDFs.ms_linearity = [0, 1, 2, 3, 4, 5, 6]; 
+    NDFs.world_linearity = [];
     NDFs.temporal_sensitivity = [];
     NDFs.phase_fitting = [];
     NDFs.contrast_gamma = [];
@@ -169,7 +171,28 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
 
     tbUseProject('lightLogger');
 
-    % B. Calibrate the temporal sensitivity of the different sensors 
+    % B. Calculate the world camera linearity at all NDF levels
+    disp("Calibration | Collecting world camera linearity with struct:");
+    disp(calibration_metadata.world_linearity)
+
+    addpath(genpath("/Users/zacharykelly/Documents/MATLAB/projects/lightLoggerAnalysis/code/collectRadCal/matlabCode/collectMeasurements"));
+    [success, world_linearity_calibration_metadata] = collect_world_linearity_data(device_num,...
+                                                                                   calibration_metadata.world_linearity,...
+                                                                                   bluetooth_central,...
+                                                                                   "",...
+                                                                                   cloud_output_dir,...
+                                                                                   external_output_dir...
+                                                                                  );
+    calibration_metadata.world_linearity = world_linearity_calibration_metadata;
+    upload_calibration_data(calibration_metadata, dropbox_savedir, upload_mode); % Upload how far we got on this recording
+
+    if(~success)
+        error("ERROR: world camera linearity calibration quit early due to an unknown error on the light logger");
+    end
+
+    tbUseProject('lightLogger');
+
+    % C. Calibrate the temporal sensitivity of the different sensors 
     %    Only collect this measurement at NDF [0, 5) 
     disp("Calibration | Collecting Temporal Sensitivity with struct: ");
     disp(calibration_metadata.temporal_sensitivity) ;
@@ -193,7 +216,7 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
 
     tbUseProject('lightLogger');
 
-    % C. Characterize the phase offset between the pairs of sensors 
+    % D. Characterize the phase offset between the pairs of sensors 
     %    Only collect this measurement at the 1 NDF level 
     disp("Calibration | Collecting Phase Fitting with struct: ");
     disp(calibration_metadata.phase_fitting);
@@ -215,7 +238,7 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
         error("ERROR: phase fitting calibration quit early due to an unknown error on the light logger");
     end 
 
-    % D. Calculate the contrast gamma function
+    % E. Calculate the contrast gamma function
     % Only collect this measurement at the 1 NDF level
     disp("Calibration | Collecting Contrast Gamma with struct: ");
     disp(calibration_metadata.contrast_gamma);
@@ -260,6 +283,7 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
 
     % A. Set up the substructs we will use for each of the Calibration measures 
     CalibrationData.ms_linearity = struct; 
+    CalibrationData.world_linearity = struct;
     CalibrationData.temporal_sensitivity = struct; 
     CalibrationData.phase_fitting = struct; 
     CalibrationData.contrast_gamma = struct;
@@ -299,6 +323,51 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
     CalibrationData.ms_linearity.n_measures = n_measures;
     CalibrationData.ms_linearity.recording_seconds = recording_seconds;  
     CalibrationData.ms_linearity.completed_measurements = completed_measurements; 
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+    % { WORLD CAMERA LINEARITY } - We will collect this between NDFs 0-6
+    k_settings_levels = 10; % Define the number of settings levels to record
+    n_measures = 3; % The number of measurements to make at a given settings level
+    settings_scalars = linspace(0.05, 0.95, k_settings_levels); % Define the settings values we will explore
+    settings_levels_orders = randomize_settings_orders(numel(NDFs.world_linearity), settings_scalars, n_measures); % The order we will set the settings in, randomized per measure
+    recording_seconds = 12; % Define how long a given recording will be per setting
+    completed_measurements = false(numel(NDFs.world_linearity), k_settings_levels, n_measures); % Define a boolean matrix of completed measurements. We will use this to resume recording on failure
+
+    % Build the sensors and settings per NDF
+    clear sensors_and_settings;
+    sensors_and_settings = {};
+    for ii = 1:numel(NDFs.world_linearity)
+        % Retrieve the given NDF
+        NDF = NDFs.world_linearity(ii);
+
+        % Build the world camera settings for this NDF level
+        fixed_settings = double(world_util.WORLD_NDF_LEVEL_SETTINGS{NDF});
+        sensors.W.Again = fixed_settings(1);
+        sensors.W.Dgain = fixed_settings(2);
+        sensors.W.exposure = int32(fixed_settings(3));
+        sensors.W.agc = false;
+        sensors.W.save_agc_metadata = true;
+        sensors.W.sensor_mode = sensor_mode;
+        sensors.W.awb = false;
+        sensors.W.noise_mode = false;
+
+        % Save this struct
+        sensors_and_settings{ii} = sensors;
+    end
+    clear NDF;
+    clear sensors;
+
+    % Save the metadata for this calibration measurement
+    CalibrationData.world_linearity.NDFs = NDFs.world_linearity;
+    CalibrationData.world_linearity.cal_files = cell(numel(NDFs.world_linearity), 1);
+    CalibrationData.world_linearity.sensors_and_settings = sensors_and_settings;
+    CalibrationData.world_linearity.background = background;
+    CalibrationData.world_linearity.background_scalars = settings_scalars;
+    CalibrationData.world_linearity.background_scalars_orders = settings_levels_orders;
+    CalibrationData.world_linearity.n_measures = n_measures;
+    CalibrationData.world_linearity.recording_seconds = recording_seconds;
+    CalibrationData.world_linearity.completed_measurements = completed_measurements;
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 
@@ -544,4 +613,3 @@ function upload_calibration_data(CalibrationData, dropbox_savedir, upload_mode)
     upload_mode.upload_file(py.bytes(getByteStreamFromArray(CalibrationData)), caldata_dropbox_path);
 
 end 
-

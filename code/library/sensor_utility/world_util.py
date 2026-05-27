@@ -11,6 +11,15 @@ from tqdm.auto import tqdm
 import matlab
 from typing import Iterable
 import dill
+try:
+    from numba import njit, prange
+except ImportError:
+    def njit(*args, **kwargs):
+        def decorator(func):
+            return func
+        return decorator
+
+    prange = range
 
 # Store the scalar multipliers for all of the different colors of pixel's in an image 
 # We calculated this by making a measurement with the light logger device 
@@ -43,16 +52,134 @@ WORLD_FIELDING_FUNCTIONS: dict[tuple[int], np.ndarray] = {(480, 640): np.ones((4
 # and this was the result. This is 
 WORLD_DARK_NOISE: float = 16
 
+@njit(parallel=True)
+def _generate_debayered_provenance_map_numba(rows: int, cols: int) -> np.ndarray:
+    # Initialize the provenance map. We store a fixed-size list of 9 (row, col)
+    # locations per debayered output pixel so downstream code can index the result
+    # with a regular dense NumPy array.
+    provenance_map: np.ndarray = np.empty((rows, cols, 9, 2), dtype=np.uint16)
+
+    def clamp_row(row_num: int) -> int:
+        return min(max(row_num, 0), rows - 1)
+
+    def clamp_col(col_num: int) -> int:
+        return min(max(col_num, 0), cols - 1)
+
+    for r in prange(rows):
+        for c in range(cols):
+            # OpenCV's bilinear Bayer path computes interior pixels and then fills the
+            # image borders by copying adjacent output pixels. To match that behavior,
+            # map border output pixels back onto the interior output pixel whose
+            # already-debayered value OpenCV would copy from.
+            source_r: int = r
+            source_c: int = c
+
+            if(rows > 1):
+                if(source_r == 0):
+                    source_r = 1
+                elif(source_r == rows - 1):
+                    source_r = rows - 2
+
+            if(cols > 1):
+                if(source_c == 0):
+                    source_c = 1
+                elif(source_c == cols - 1):
+                    source_c = cols - 2
+
+            # Determine the Bayer site type according to the measured layout used
+            # throughout this module:
+            #   blue  at (even row, even col)
+            #   green at mixed parity coordinates
+            #   red   at (odd row, odd col)
+            row_even: bool = (source_r % 2 == 0)
+            col_even: bool = (source_c % 2 == 0)
+            is_green_site: bool = row_even != col_even
+
+            # For red and blue sites, OpenCV bilinear demosaicing draws from the full
+            # local 3x3 support when considering the union of all raw contributors to
+            # that output pixel's RGB value.
+            #
+            # For green sites, the exact OpenCV interpolation is channel-dependent:
+            # one missing color comes from the horizontal pair and the other missing
+            # color comes from the vertical pair. The union of contributors is thus
+            # the 5-pixel cross centered on the site. We repeat the center pixel to
+            # keep the fixed output size of 9 coordinates.
+            if(is_green_site):
+                provenance_map[r, c, 0, 0] = clamp_row(source_r)
+                provenance_map[r, c, 0, 1] = clamp_col(source_c)
+
+                provenance_map[r, c, 1, 0] = clamp_row(source_r - 1)
+                provenance_map[r, c, 1, 1] = clamp_col(source_c)
+
+                provenance_map[r, c, 2, 0] = clamp_row(source_r + 1)
+                provenance_map[r, c, 2, 1] = clamp_col(source_c)
+
+                provenance_map[r, c, 3, 0] = clamp_row(source_r)
+                provenance_map[r, c, 3, 1] = clamp_col(source_c - 1)
+
+                provenance_map[r, c, 4, 0] = clamp_row(source_r)
+                provenance_map[r, c, 4, 1] = clamp_col(source_c + 1)
+
+                provenance_map[r, c, 5, 0] = clamp_row(source_r)
+                provenance_map[r, c, 5, 1] = clamp_col(source_c)
+
+                provenance_map[r, c, 6, 0] = clamp_row(source_r)
+                provenance_map[r, c, 6, 1] = clamp_col(source_c)
+
+                provenance_map[r, c, 7, 0] = clamp_row(source_r)
+                provenance_map[r, c, 7, 1] = clamp_col(source_c)
+
+                provenance_map[r, c, 8, 0] = clamp_row(source_r)
+                provenance_map[r, c, 8, 1] = clamp_col(source_c)
+
+            else:
+                provenance_map[r, c, 0, 0] = clamp_row(source_r)
+                provenance_map[r, c, 0, 1] = clamp_col(source_c)
+
+                provenance_map[r, c, 1, 0] = clamp_row(source_r - 1)
+                provenance_map[r, c, 1, 1] = clamp_col(source_c)
+
+                provenance_map[r, c, 2, 0] = clamp_row(source_r + 1)
+                provenance_map[r, c, 2, 1] = clamp_col(source_c)
+
+                provenance_map[r, c, 3, 0] = clamp_row(source_r)
+                provenance_map[r, c, 3, 1] = clamp_col(source_c - 1)
+
+                provenance_map[r, c, 4, 0] = clamp_row(source_r)
+                provenance_map[r, c, 4, 1] = clamp_col(source_c + 1)
+
+                provenance_map[r, c, 5, 0] = clamp_row(source_r - 1)
+                provenance_map[r, c, 5, 1] = clamp_col(source_c - 1)
+
+                provenance_map[r, c, 6, 0] = clamp_row(source_r - 1)
+                provenance_map[r, c, 6, 1] = clamp_col(source_c + 1)
+
+                provenance_map[r, c, 7, 0] = clamp_row(source_r + 1)
+                provenance_map[r, c, 7, 1] = clamp_col(source_c - 1)
+
+                provenance_map[r, c, 8, 0] = clamp_row(source_r + 1)
+                provenance_map[r, c, 8, 1] = clamp_col(source_c + 1)
+
+    return provenance_map
+
+
 """Generate a provenance map for a debayered frame.
 
 Returns an array of shape ``(rows, cols, 9, 2)`` whose last two dimensions
 store the raw Bayer-frame ``(row, col)`` coordinates that contributed to each
-debayered output pixel. Red and blue sites use the full 3x3 bilinear support.
-Green sites only have five unique contributors, so the center pixel is repeated
-to keep every provenance list at a fixed length of 9.
+debayered output pixel.
 
-For ``pattern="RGGB"``, this function intentionally matches the measured layout
-used elsewhere in this module (`generate_RGB_mask`):
+This implementation is designed to match the contributor layout implied by
+``cv2.cvtColor(..., cv2.COLOR_BayerRG2RGB)`` more closely than a simple clamped
+3x3 neighborhood model:
+    - border output pixels are mapped to the adjacent interior output pixel whose
+      debayered value OpenCV copies onto the border
+    - red and blue sites use the full 3x3 bilinear support
+    - green sites use the 5-pixel cross that is the union of the horizontal and
+      vertical bilinear contributors used for the two missing color channels
+
+For ``pattern="RGGB"``, this function intentionally follows the measured layout
+used elsewhere in this module:
     - blue  at ``(even row, even col)``
     - green at mixed parity coordinates
     - red   at ``(odd row, odd col)``
@@ -60,124 +187,18 @@ used elsewhere in this module (`generate_RGB_mask`):
 def generate_debayered_provenance_map(debayered_image: np.ndarray,
                                       pattern: Literal["RGGB"] = "RGGB"
                                     ) -> np.ndarray:
-   
-    # Helper function to get the pixel type 
-    # for a given coordinate pair
-    def get_pixel_type(r: int, c: int) -> Literal["R", "G_R", "G_B", "B"]:
-        row_even = (r % 2 == 0)
-        col_even = (c % 2 == 0)
-
-        # Match the measured layout used by generate_RGB_mask and by
-        if row_even and col_even:
-            return "B"
-
-        elif row_even and not col_even:
-            return "G_B"
-
-        elif not row_even and col_even:
-            return "G_R"
-
-        else:
-            return "R"
-
-
     if(pattern != "RGGB"):
         raise ValueError(f"Unsupported Bayer pattern for provenance mapping: {pattern}")
 
     # Get the image size 
     rows, cols = debayered_image.shape[:2]
 
-    # Every debayered output pixel stores exactly 9 (row, col) contributor
-    # coordinates so downstream code can use a regular integer array.
-    provenance_map: np.ndarray = np.empty((rows, cols, 9, 2), dtype=np.uint16)
+    # Generate the contributor map with a compiled helper. We cast to uint16 at the
+    # boundary to preserve the previous compact storage format for typical world
+    # camera frame sizes.
+    provenance_map: np.ndarray = _generate_debayered_provenance_map_numba(rows, cols)
 
-    def clamp_coord(y: int, x: int) -> tuple[int, int]:
-        return (
-            min(max(y, 0), rows - 1),
-            min(max(x, 0), cols - 1),
-        )
-
-    # Iterate over the debayered image, 
-    # now we will construct the list of contributor pixel 
-    # locations from the input image in the output image 
-    for r in range(rows):
-        for c in range(cols):
-            pixel_type: Literal["R", "G_R", "G_B", "B"] = get_pixel_type(r, c)
-
-            # ----------------------------------------------------------
-            # Red site
-            # Contributors:
-            #
-            #   B G B
-            #   G R G
-            #   B G B
-            #
-            # Entire 3x3 neighborhood contributes
-            # ----------------------------------------------------------
-
-            if pixel_type == "R":
-                contributor_offsets: list[tuple[int, int]] = [
-                    (0, 0),
-                    (-1, 0),
-                    (1, 0),
-                    (0, -1),
-                    (0, 1),
-                    (-1, -1),
-                    (-1, 1),
-                    (1, -1),
-                    (1, 1),
-                ]
-
-            # ----------------------------------------------------------
-            # Blue site
-            # Same contributor structure as red site
-            # ----------------------------------------------------------
-
-            elif pixel_type == "B":
-                contributor_offsets = [
-                    (0, 0),
-                    (-1, 0),
-                    (1, 0),
-                    (0, -1),
-                    (0, 1),
-                    (-1, -1),
-                    (-1, 1),
-                    (1, -1),
-                    (1, 1),
-                ]
-
-            # ----------------------------------------------------------
-            # Green site
-            #
-            # Contributors form a cross:
-            #
-            #     X
-            #   X C X
-            #     X
-            # ----------------------------------------------------------
-
-            elif pixel_type in ("G_R", "G_B"):
-                contributor_offsets = [
-                    (0, 0),
-                    (-1, 0),
-                    (1, 0),
-                    (0, -1),
-                    (0, 1),
-                    (0, 0),
-                    (0, 0),
-                    (0, 0),
-                    (0, 0),
-                ]
-
-            else:
-                raise RuntimeError(f"Unexpected pixel type: {pixel_type}")
-
-            contributors: np.ndarray = np.array([clamp_coord(r + dr, c + dc) for dr, dc in contributor_offsets], dtype=np.uint16,)
-
-            # Store fixed-size provenance list
-            provenance_map[r, c] = contributors
-
-    return provenance_map
+    return provenance_map.astype(np.uint16, copy=False)
 
 """Debayer a world camera image into an RGB image"""
 def debayer_image(image: np.ndarray, 

@@ -61,13 +61,17 @@ def generate_world_videos(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
                           overwrite_existing: bool=False,
                           apply_color_weights: bool=True, 
                           apply_floor_ceiling: bool=True,
+                          apply_fielding_function: bool=True, 
                           remove_dark_noise: bool=True, 
                           debayer_images: bool=True, 
                           apply_digital_gain: bool=True, 
                           fill_missing_frames: bool=True, 
                           verbose: bool=False
                          ) -> None:
-    
+    if(apply_fielding_function is True): 
+        raise NotImplementedError()
+
+
     # First, let's find all of the subjects in this experiment 
     subject_paths: list[str] = natsorted([
         subject_path
