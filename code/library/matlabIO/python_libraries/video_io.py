@@ -681,6 +681,7 @@ def world_chunks_to_video(recording_path: str,
                           remove_dark_noise: bool=False, 
                           debayer_images: bool=False, 
                           apply_digital_gain: bool=False,
+                          apply_fielding_function: bool=False, 
                           fill_missing_frames: bool=False,
                           convert_to_seconds: bool=True,
                           embed_timestamps: bool=False,
@@ -904,6 +905,16 @@ def world_chunks_to_video(recording_path: str,
                 else:
                     buffer_dgains = buffer_dgains[:, np.newaxis, np.newaxis, np.newaxis]
                 frame_buffer *= buffer_dgains
+
+            if(apply_fielding_function is True):
+                assert frame_buffer.dtype == np.float64 and frame_buffer.ndim == 3, f"Frame buffer dtype must be float64 and in bayer format to apply fielding function. Current dtype is {frame_buffer.dtype}, current ndim: {frame_buffer.ndim}"
+                
+                # Get the fielding function for this frame size
+                fielding_function: np.ndarray = world_util.WORLD_FIELDING_FUNCTIONS[frame_buffer.shape[1:3]]
+
+                # Apply fielding function
+                frame_buffer *= fielding_function
+
 
             if(apply_color_weights is True):
                 assert frame_buffer.ndim == 3 and frame_buffer.dtype == np.float64, f"To apply color weights, buffer must be in bayer form np.float64."

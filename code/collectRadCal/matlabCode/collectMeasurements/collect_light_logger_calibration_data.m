@@ -325,8 +325,7 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
     CalibrationData.ms_linearity.completed_measurements = completed_measurements; 
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-
-    % { WORLD CAMERA LINEARITY } - We will collect this between NDFs 0-6
+    % { WORLD CAMERA LINEARITY } - We will collect this between NDFs 0-4
     k_settings_levels = 10; % Define the number of settings levels to record
     n_measures = 3; % The number of measurements to make at a given settings level
     settings_scalars = linspace(0.05, 0.95, k_settings_levels); % Define the settings values we will explore
