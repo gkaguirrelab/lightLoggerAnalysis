@@ -330,7 +330,7 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
     n_measures = 3; % The number of measurements to make at a given settings level
     settings_scalars = linspace(0.05, 0.95, k_settings_levels); % Define the settings values we will explore
     settings_levels_orders = randomize_settings_orders(numel(NDFs.world_linearity), settings_scalars, n_measures); % The order we will set the settings in, randomized per measure
-    recording_seconds = 12; % Define how long a given recording will be per setting
+    recording_seconds = 30; % Define how long a given recording will be per setting
     completed_measurements = false(numel(NDFs.world_linearity), numel(contrast_agc_targets), k_settings_levels, n_measures); % Define a boolean matrix of completed measurements. We will use this to resume recording on failure
 
     % Build the sensors and settings per NDF
