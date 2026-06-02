@@ -88,8 +88,13 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
     end
     sensor_ids = strjoin(sensor_id_parts, "");
 
+    % This is a hacky workaround because the project dependencies are not
+    % properly sorted out and tbUseProject can drop this folder from path.
+    current_dir = fileparts(mfilename('fullpath'));
+
     disp("Calibration | Importing libraries...");
-    tbUseProject('lightLogger'); 
+    tbUseProject('lightLogger');
+    addpath(current_dir);
 
     % Import the Python library used to communicate 
     % via Bluetooth with the peripheral 
@@ -99,9 +104,17 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
     upload_mode = import_pyfile(getpref("lightLogger", "upload_mode_path"));
 
     % Import the utility files of the world and pupil cameras 
-    world_util = import_pyfile(getpref("lightLogger", "world_util_path"));
-    pupil_util = import_pyfile(getpref("lightLogger", "pupil_util_path"));
-    Pi_util = import_pyfile(getpref("lightLogger", "Pi_util_path")); 
+    disp("Importing utility files"); 
+    world_util_path = getpref("lightLogger", "world_util_path"); 
+    pupil_util_path = getpref("lightLogger", "pupil_util_path"); 
+    Pi_util_path = getpref("lightLogger", "Pi_util_path"); 
+    fprintf("\t world_util from path %s\n", world_util_path); 
+    fprintf("\t pupil_util from path %s\n", pupil_util_path); 
+    fprintf("\t Pi_util form path %s\n",  Pi_util_path); 
+
+    world_util = import_pyfile(world_util_path);
+    pupil_util = import_pyfile(pupil_util_path);
+    Pi_util = import_pyfile(Pi_util_path); 
 
     % Verify that the devices can be found 
     disp("Calibration | Initializing devices...");
@@ -109,12 +122,8 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
     % Set up and initialize the CombiLED 
     % Save the combiExperiments path and add CombiLED Toolbox to the path 
     % Return to the lightLogger project
-    tbUseProject('lightLogger'); 
-
-    % Then, make sure the bluetooth device is available to connected 
-    %if(~bluetooth_central.peripheral_is_available_matlab_wrapper(device_num)) 
-    %    error("ERROR: Light logger bluetooth probe failed");
-    %end 
+    tbUseProject('lightLogger');
+    addpath(current_dir);
 
     % Define the background we will use for the CombiLED 
     CombiLED_background = ones([1, 8]); 
@@ -172,6 +181,7 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
     
 
     tbUseProject('lightLogger');
+    addpath(current_dir);
 
     % B. Calculate the world camera linearity at all NDF levels
     disp("Calibration | Collecting world camera linearity with struct:");
@@ -193,6 +203,7 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
     end
 
     tbUseProject('lightLogger');
+    addpath(current_dir);
 
     % C. Calibrate the temporal sensitivity of the different sensors 
     %    Only collect this measurement at NDF [0, 5) 
@@ -216,6 +227,7 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
     end
 
     tbUseProject('lightLogger');
+    addpath(current_dir);
 
     % D. Characterize the phase offset between the pairs of sensors 
     %    Only collect this measurement at the 1 NDF level 
@@ -330,7 +342,7 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
     n_measures = 3; % The number of measurements to make at a given settings level
     settings_scalars = linspace(0.05, 0.95, k_settings_levels); % Define the settings values we will explore
     settings_levels_orders = randomize_settings_orders(numel(NDFs.world_linearity), settings_scalars, n_measures); % The order we will set the settings in, randomized per measure
-    recording_seconds = 30; % Define how long a given recording will be per setting
+    recording_seconds = 15; % Define how long a given recording will be per setting
     completed_measurements = false(numel(NDFs.world_linearity), numel(contrast_agc_targets), k_settings_levels, n_measures); % Define a boolean matrix of completed measurements. We will use this to resume recording on failure
 
     % Build the sensors and settings per NDF
@@ -343,17 +355,17 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
 
         switch(contrast_target)
             case 0.25 
-                settings_constants_dict = world_util.WORLD_NDF_LEVEL_SETTINGS_0x25_CONTRAST
+                settings_constants_dict = world_util.WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x25;
             case 0.5 
-                settings_constants_dict = world_util.WORLD_NDF_LEVEL_SETTINGS_0x5_CONTRAST
+                settings_constants_dict = world_util.WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x5;
             case 0.75 
-                settings_constants_dict = world_util.WORLD_NDF_LEVEL_SETTINGS_0x75_CONTRAST
+                settings_constants_dict = world_util.WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x75;
             otherwise 
                 error("Unsupported contrast target %f", contrast_target); 
         end 
 
         % Initialize the container for the settings per NDF for this contrast target 
-        contrast_target_fieldname = strrep(string(contrast_target), ".", "x"); 
+        contrast_target_fieldname = "x" + strrep(string(contrast_target), ".", "x"); 
         agc_target_sensors_and_settings = {}; 
 
         for ii = 1:numel(NDFs.world_linearity)

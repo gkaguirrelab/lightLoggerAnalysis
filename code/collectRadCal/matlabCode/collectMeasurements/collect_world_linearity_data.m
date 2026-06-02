@@ -95,7 +95,7 @@ function [success, world_linearity_calibration_metadata] = collect_world_lineari
         for cc = 1:numel(contrast_agc_targets)
             % Retrieve the current contrast AGC target
             contrast_agc_target = contrast_agc_targets(cc); 
-            contrast_target_fieldname = strrep(string(contrast_agc_target), ".", "x"); 
+            contrast_target_fieldname = "x" + strrep(string(contrast_agc_target), ".", "x"); 
             contrast_target_sensors = world_linearity_calibration_metadata.sensors_and_settings.(contrast_target_fieldname); 
 
             % Retrieve the sensors and settings for this NDF level
@@ -114,7 +114,7 @@ function [success, world_linearity_calibration_metadata] = collect_world_lineari
                     settings_scalar_idx = settings_scalars_order(setting_order_idx);
                     fprintf("World Camera Linearity | NDF (%d/%d) Contrast AGC target (%d/%d) Setting (%d/%d) Scalar: %.3f M: (%d/%d)\n", ...
                             nn, numel(NDFs), cc, numel(contrast_agc_targets),...
-                            settings_scalar_idx, numel(settings_scalars_shuffled), settings_scalars_shuffled(setting_order_idx),...
+                            setting_order_idx, numel(settings_scalars_shuffled), settings_scalars_shuffled(setting_order_idx),...
                             mm, n_measures...
                         );
 

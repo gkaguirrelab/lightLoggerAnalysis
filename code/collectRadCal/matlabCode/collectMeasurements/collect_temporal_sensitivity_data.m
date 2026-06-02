@@ -180,8 +180,8 @@ function [success, temporal_sensitivity_calibration_metadata] = collect_temporal
                     CombiLED.setFrequency(freq);
                     pause(0.5);
 
-                    fprintf("Temporal Sensitivity | NDF #: (%d/%d) Contrast #: (%d/%d) / Freq #: (%d/%d) C: %.3f F: %.3f | Measurement #(%d/%d)\n", ... 
-                        nn, numel(NDFs), contrast_idx, numel(contrast_levels), freq_idx, numel(frequencies), contrast, freq, mm, n_measures);
+                    fprintf("Temporal Sensitivity | NDF #: (%d/%d) Contrast #: (%d/%d) / Freq #: (%d/%d) C: %.3f F: %.3f | Measurement #(%d/%d)\n", ...
+                        nn, numel(NDFs), cc, numel(contrast_levels), ff, numel(frequencies), contrast, freq, mm, n_measures);
                     
                     % If we have already performed this combination of contrast frequency 
                     % and measure, skip it 
