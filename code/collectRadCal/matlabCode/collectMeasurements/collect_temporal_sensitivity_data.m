@@ -92,7 +92,7 @@ function [success, temporal_sensitivity_calibration_metadata] = collect_temporal
 
         % Determine if there are any measurements to be collected 
         % If there are not, we can simply skip this NDF 
-        completed_measurements_NDF = temporal_sensitivity_calibration_metadata.completed_measurements(nn, :, :);
+        completed_measurements_NDF = temporal_sensitivity_calibration_metadata.completed_measurements(nn, :, :, :);
         if(all(completed_measurements_NDF(:) == true))
             continue 
         end 
@@ -108,7 +108,6 @@ function [success, temporal_sensitivity_calibration_metadata] = collect_temporal
         temporal_sensitivity_calibration_metadata.cal_files = cal_files; 
 
         % Construct the modulation to dispaly
-        recording_seconds = 12; % The duration to record for
         observerAgeInYears = 30; % Build general information about the modulation on the CombiLED 
         pupilDiameterMm = 3; 
 
@@ -120,7 +119,7 @@ function [success, temporal_sensitivity_calibration_metadata] = collect_temporal
 
         % Save the modulation for this NDF
         modulations = temporal_sensitivity_calibration_metadata.modulations;
-        modulations{nn} = cal; 
+        modulations{nn} = modResult; 
         temporal_sensitivity_calibration_metadata.modulations = modulations; 
 
         % Prepare the CombiLED for the modulation 
@@ -151,10 +150,11 @@ function [success, temporal_sensitivity_calibration_metadata] = collect_temporal
             for cc = 1:numel(shuffled_contrasts)
                 % Retrieve the contrast level that we will expose 
                 contrast = shuffled_contrasts(cc); 
+                contrast_idx = contrast_order(cc);
                 
                 % For each contrast level, 
                 % randomize the frequency order  
-                frequencies_order = squeeze(frequencies_orders(nn, mm, cc, :));
+                frequencies_order = squeeze(frequencies_orders(nn, mm, contrast_idx, :));
 
                 % Put the frequencies in this order 
                 shuffled_frequencies = frequencies(frequencies_order);    
@@ -165,6 +165,7 @@ function [success, temporal_sensitivity_calibration_metadata] = collect_temporal
                 for ff = 1:numel(shuffled_frequencies)
                     % Retrieve the frequency we will expose 
                     freq = shuffled_frequencies(ff); 
+                    freq_idx = frequencies_order(ff);
 
                     % Note that the CombiLED has a roll-off in modulation depth
                     % with temporal frequency. We do not correct for this here,
@@ -180,11 +181,11 @@ function [success, temporal_sensitivity_calibration_metadata] = collect_temporal
                     pause(0.5);
 
                     fprintf("Temporal Sensitivity | NDF #: (%d/%d) Contrast #: (%d/%d) / Freq #: (%d/%d) C: %.3f F: %.3f | Measurement #(%d/%d)\n", ... 
-                        nn, numel(NDFs), cc, numel(contrast_levels), ff, numel(frequencies), contrast, freq, mm, n_measures);
+                        nn, numel(NDFs), contrast_idx, numel(contrast_levels), freq_idx, numel(frequencies), contrast, freq, mm, n_measures);
                     
                     % If we have already performed this combination of contrast frequency 
                     % and measure, skip it 
-                    if(temporal_sensitivity_calibration_metadata.completed_measurements(nn, cc, ff, mm))
+                    if(temporal_sensitivity_calibration_metadata.completed_measurements(nn, contrast_idx, freq_idx, mm))
                         pause(0.5);
                         continue ; 
                     end 
@@ -196,7 +197,7 @@ function [success, temporal_sensitivity_calibration_metadata] = collect_temporal
                     % Generate a message to send to the RPi
                     update_message = bluetooth_central.initialize_update_message(); % Initialize the message dict 
                     
-                    filename = label + sprintf("TemporalSensitivity_%dcontrastIdx_%dfreqIdx_%dmeasurementIdx", cc, ff, mm); % Define the filename for the recording (replace. in floats with x)
+                    filename = label + sprintf("TemporalSensitivity_%dcontrastIdx_%dfreqIdx_%dmeasurementIdx", contrast_idx, freq_idx, mm); % Define the filename for the recording (replace. in floats with x)
 
                     % Compose the target output dir for this NDF level
                     cloud_output_dir = ""; 
@@ -223,7 +224,7 @@ function [success, temporal_sensitivity_calibration_metadata] = collect_temporal
                     if(freq * recording_seconds < 1)
                         fprintf("ERROR: Recording seconds: %d is not enough to see a single modulation at %.2f\n", recording_seconds, freq);
 
-                        sucess = 0; 
+                        success = 0; 
                         return; 
                     end 
 
@@ -265,7 +266,7 @@ function [success, temporal_sensitivity_calibration_metadata] = collect_temporal
                     pause(0.5);
 
                     % Otherwise, mark this measurement as completed
-                    temporal_sensitivity_calibration_metadata.completed_measurements(nn, cc, ff, mm) = true; 
+                    temporal_sensitivity_calibration_metadata.completed_measurements(nn, contrast_idx, freq_idx, mm) = true; 
 
                 end % Frequencies 
 

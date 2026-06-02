@@ -11,15 +11,44 @@ from tqdm.auto import tqdm
 import matlab
 from typing import Iterable
 import dill
-try:
-    from numba import njit, prange
-except ImportError:
-    def njit(*args, **kwargs):
-        def decorator(func):
-            return func
-        return decorator
+import pandas as pd
+from numba import njit, prange
 
-    prange = range
+
+# This is assuming a contrast of 0.75 is the target of 127 at each NDF level
+WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x75: dict[int, tuple[int, int]] = {NDF_level:  # Define the fixed settings for this camera per integer NDF filter
+                                                                        (1.0, 1.0, 508.0) if NDF_level == 0 
+                                                                        else (1.000e+00, 1.000e+00, 5.537e+03) if NDF_level == 1 
+                                                                        else (8.82758617e+00, 1.00000000e+00, 8333) if NDF_level == 2
+                                                                        else (10.666, 3.89023162e+00, 8333) if NDF_level == 3
+                                                                        else (10.666, 7.62447626e+00, 8333) if NDF_level == 4  
+                                                                        else (10.666, 10.0, 8333) 
+                                                                        for NDF_level in range(7)
+                                                                    }
+
+# This is assuming a contrast of 0.5 is the target of 127 at each NDF level TODO: Check this but pretty sure i am correct
+WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x5: dict[int, tuple[int, int]] = {NDF_level:  # Define the fixed settings for this camera per integer NDF filter
+                                                                    (1.0, 1.0, 747) if NDF_level == 0 
+                                                                    else (1.0, 1.0, 7085) if NDF_level == 1 
+                                                                    else (10.666, 1.14, 8333) if NDF_level == 2
+                                                                    else (10.666, 4.297, 8333) if NDF_level == 3
+                                                                    else (10.666, 10.0, 8333)  
+                                                                    for NDF_level in range(7)
+                                                                }
+
+# This is assuming a contrast of 0.25 is the target of 127 at each NDF level
+WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x25: dict[int, tuple[int, int]] = {NDF_level:  # Define the fixed settings for this camera per integer NDF filter
+                                                                     (1.000e+00, 1.000e+00, 1.466e+03) if NDF_level == 0 # TODO: Fill this in 
+                                                                    else (1.80281687, 1.0, 8333) if NDF_level == 1 
+                                                                    else (10.666, 1.58156674e+00, 8333) if NDF_level == 2
+                                                                    else (10.666, 5.96331605e+00, 8333) if NDF_level == 3
+                                                                    else (10.666, 7.97561560e+00, 8333) if NDF_level == 4
+                                                                    else (10.666, 10.0, 8333) 
+                                                                    for NDF_level in range(7)
+                                                                }
+
+
+
 
 # Store the scalar multipliers for all of the different colors of pixel's in an image 
 # We calculated this by making a measurement with the light logger device 
@@ -833,6 +862,15 @@ def world_timestamps_from_chunks(recording_path: str,
                                  convert_to_seconds: bool=True,
                                  verbose: bool=False
                                 ) -> np.ndarray:
+    return world_metadata_from_chunks(recording_path, convert_to_seconds, verbose)["timestamp"].to_numpy()
+
+"""Given a recording path, return all of the metadata (timestamps, AGC settings, etc) 
+   of the frames
+"""
+def world_metadata_from_chunks(recording_path: str, 
+                                 convert_to_seconds: bool=True,
+                                 verbose: bool=False
+                                ) -> pd.DataFrame:
     # Find the config file 
     # of the recording. This will tell us about the FPS 
     # and how to interpolate between chunks 
@@ -865,19 +903,18 @@ def world_timestamps_from_chunks(recording_path: str,
         # Retrieve the path to this chunk 
         metadata_chunk_path: str = world_metadata_chunks[chunk_num]
 
-        # Load in the metadata and extract only the T column 
-        world_metadata: np.ndarray = np.load(metadata_chunk_path)[:, 0].flatten()
+        # Load in the metadata
+        world_metadata: np.ndarray = np.load(metadata_chunk_path)
         # Sometimes the last chunk is empty. If this is true, skip it
         if(len(world_metadata) == 0):
             break
 
-
-        current_chunk_start = world_metadata[0]
+        current_chunk_start = world_metadata[0, 0]
 
         # If this is the first chunk, we can save both the previous end
         # and current start from it 
         if(chunk_num == 0):
-            previous_chunk_end = world_metadata[-1]    
+            previous_chunk_end = world_metadata[-1, 0]    
 
         # Otherwise, we need to interpolate 
         # the timestamps in between the chunks 
@@ -894,21 +931,28 @@ def world_timestamps_from_chunks(recording_path: str,
                 # Calculate the timestamps for this downtime
                 downtime_timestamps: np.ndarray = (previous_chunk_end + frame_period_ns * np.arange(1, num_missing_frames + 1))
 
-                # Combine them into the world timestamps 
-                world_metadata = np.concatenate([downtime_timestamps, world_metadata])
+                # Allocate an array for the downtime metadata, which will be filled with NaNs except for the timestamps 
+                downtime_metadata: np.ndarray = np.full( (len(downtime_timestamps), world_metadata.shape[1]), np.nan, dtype=world_metadata.dtype )
+                downtime_metadata[:, 0] = downtime_timestamps
+
+                # Combine them into the world metadata BEFORE the existing world metadata
+                world_metadata = np.concatenate([downtime_metadata, world_metadata])
 
             # Now, the previous chunk end is the last timestamp in this buffer
-            previous_chunk_end = world_metadata[-1]
+            previous_chunk_end = world_metadata[-1, 0]
 
         # Save it to the running list 
-        metadata.extend(world_metadata)
+        metadata.append(world_metadata)
 
     # convert to standardized np array 
-    metadata = np.array(metadata).flatten()
+    metadata = np.vstack(metadata)
 
     # World timestamps are in nanoseconds by default,
     # so convert to seconds if desired
     if(convert_to_seconds is True):
-        metadata /= ( 10 ** 9) 
+        metadata[:, 0] /= ( 10 ** 9) 
+
+    # Make a dataframe so that the columns are clearly labeled
+    metadata: pd.DataFrame = pd.DataFrame(metadata, columns=["timestamp", "Again", "Dgain", "exposure"])
 
     return metadata

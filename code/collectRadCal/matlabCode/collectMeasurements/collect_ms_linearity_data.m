@@ -107,27 +107,28 @@ function [success, ms_linearity_calibration_metadata] = collect_ms_linearity_dat
         for mm = 1:n_measures
             % Retrieve the randomized order of the settings 
             % for this measure 
-            settings_scalars_order = settings_scalars_orders(nn, mm, :); 
+            settings_scalars_order = squeeze(settings_scalars_orders(nn, mm, :)); 
 
             % Shuffle the array 
             settings_scalars_shuffled = settings_scalars(settings_scalars_order); 
 
             % Iterate over the setting scalars for the CombiLED 
-            for setting_idx = 1:numel(settings_scalars_shuffled)
+            for setting_order_idx = 1:numel(settings_scalars_shuffled)
+                settings_scalar_idx = settings_scalars_order(setting_order_idx);
                 fprintf("MS Linearity | NDF (%d/%d) Setting (%d/%d) Scalar: %.3f M: (%d/%d)\n", ...
                         nn, numel(NDFs),...
-                        setting_idx, numel(settings_scalars_shuffled), settings_scalars_shuffled(setting_idx),... 
+                        settings_scalar_idx, numel(settings_scalars_shuffled), settings_scalars_shuffled(setting_order_idx),... 
                         mm, n_measures...
                     );
                 
                 % Determine if we already visited this combination of settings and measurement. If we did 
                 % skip it
-                if(ms_linearity_calibration_metadata.completed_measurements(nn, setting_idx, mm))
+                if(ms_linearity_calibration_metadata.completed_measurements(nn, settings_scalar_idx, mm))
                     continue; 
                 end 
 
                 % Retrieve the scalar for this settings level 
-                settings_scalar = settings_scalars_shuffled(setting_idx);
+                settings_scalar = settings_scalars_shuffled(setting_order_idx);
                 
                 % Calculate the settings by applying the scalar to 
                 % the background state
@@ -139,7 +140,7 @@ function [success, ms_linearity_calibration_metadata] = collect_ms_linearity_dat
                 % Generate a message to send to the RPi
                 update_message = bluetooth_central.initialize_update_message();
 
-                filename = label + sprintf("MSlinearity_%dsettingsIdx_%dmeasurementIdx", setting_idx, mm);
+                filename = label + sprintf("MSlinearity_%dsettingsIdx_%dmeasurementIdx", settings_scalar_idx, mm);
                 
                 % Compose the target output dir for this NDF level
                 cloud_output_dir = ""; 
@@ -189,7 +190,7 @@ function [success, ms_linearity_calibration_metadata] = collect_ms_linearity_dat
 
                 % Otherwise, we succesfully completed and we will mark this 
                 % measurement as done 
-                ms_linearity_calibration_metadata.completed_measurements(nn, setting_idx, mm) = true; 
+                ms_linearity_calibration_metadata.completed_measurements(nn, settings_scalar_idx, mm) = true; 
             
             end % Settings  
 

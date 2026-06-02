@@ -81,7 +81,12 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
 
     % Build the experiment name from the sensor ids by interveaving 
     % the sensor id number after the sensor initial
-    sensor_ids = reshape( [ 'WPM' ; num2str(sensor_ids)' ], 1 , []); 
+    sensor_labels = {'W', 'P', 'M'};
+    sensor_id_parts = strings(1, numel(sensor_ids));
+    for ii = 1:numel(sensor_ids)
+        sensor_id_parts(ii) = sensor_labels{ii} + string(sensor_ids(ii));
+    end
+    sensor_ids = strjoin(sensor_id_parts, "");
 
     disp("Calibration | Importing libraries...");
     tbUseProject('lightLogger'); 
@@ -103,8 +108,6 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
     
     % Set up and initialize the CombiLED 
     % Save the combiExperiments path and add CombiLED Toolbox to the path 
-    combiExperiments_path = "~/Documents/MATLAB/combiExperiments/";
-
     % Return to the lightLogger project
     tbUseProject('lightLogger'); 
 
@@ -220,7 +223,7 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
     disp(calibration_metadata.phase_fitting);
 
     % Attempt to collect this measurement 
-    [succces, phase_fitting_calibration_metadata] = collect_temporal_sensitivity_data(device_num,...
+    [success, phase_fitting_calibration_metadata] = collect_temporal_sensitivity_data(device_num,...
                                                                                       calibration_metadata.phase_fitting,...
                                                                                       bluetooth_central,...
                                                                                       "PhaseFitting_",...
@@ -231,7 +234,7 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
     upload_calibration_data(calibration_metadata, dropbox_savedir, upload_mode); % Upload how far we got on this recording
 
     % If an error occured error cleanly                                                                                   
-    if(~succces) 
+    if(~success) 
         error("ERROR: phase fitting calibration quit early due to an unknown error on the light logger");
     end 
 
@@ -253,7 +256,7 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
 
     % If an error occured error cleanly                                                                                      
     if(~success)                                                                                    
-        error("ERROR: phase fitting calibration quit early due to an unknown error on the light logger");
+        error("ERROR: contrast gamma calibration quit early due to an unknown error on the light logger");
     end
 
     % Step 4: Save object with all of the parameters to the folder on DropBox
@@ -322,41 +325,69 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
     % { WORLD CAMERA LINEARITY } - We will collect this between NDFs 0-4
+    contrast_agc_targets = [0.25, 0.5, 0.75]; 
     k_settings_levels = 10; % Define the number of settings levels to record
     n_measures = 3; % The number of measurements to make at a given settings level
     settings_scalars = linspace(0.05, 0.95, k_settings_levels); % Define the settings values we will explore
     settings_levels_orders = randomize_settings_orders(numel(NDFs.world_linearity), settings_scalars, n_measures); % The order we will set the settings in, randomized per measure
     recording_seconds = 12; % Define how long a given recording will be per setting
-    completed_measurements = false(numel(NDFs.world_linearity), k_settings_levels, n_measures); % Define a boolean matrix of completed measurements. We will use this to resume recording on failure
+    completed_measurements = false(numel(NDFs.world_linearity), numel(contrast_agc_targets), k_settings_levels, n_measures); % Define a boolean matrix of completed measurements. We will use this to resume recording on failure
 
     % Build the sensors and settings per NDF
     clear sensors_and_settings;
-    sensors_and_settings = {};
-    for ii = 1:numel(NDFs.world_linearity)
-        % Retrieve the given NDF
-        NDF = NDFs.world_linearity(ii);
+    sensors_and_settings = struct();
 
-        % Build the world camera settings for this NDF level
-        fixed_settings = double(world_util.WORLD_NDF_LEVEL_SETTINGS{NDF});
-        sensors.W.Again = fixed_settings(1);
-        sensors.W.Dgain = fixed_settings(2);
-        sensors.W.exposure = int32(fixed_settings(3));
-        sensors.W.agc = false;
-        sensors.W.save_agc_metadata = true;
-        sensors.W.sensor_mode = sensor_mode;
-        sensors.W.awb = false;
-        sensors.W.noise_mode = false;
+    % For each of the AGC contrast targets, we will buold the settings 
+    for tt = 1:numel(contrast_agc_targets)
+        contrast_target = contrast_agc_targets(tt); 
 
-        % Save this struct
-        sensors_and_settings{ii} = sensors;
-    end
-    clear NDF;
-    clear sensors;
+        switch(contrast_target)
+            case 0.25 
+                settings_constants_dict = world_util.WORLD_NDF_LEVEL_SETTINGS_0x25_CONTRAST
+            case 0.5 
+                settings_constants_dict = world_util.WORLD_NDF_LEVEL_SETTINGS_0x5_CONTRAST
+            case 0.75 
+                settings_constants_dict = world_util.WORLD_NDF_LEVEL_SETTINGS_0x75_CONTRAST
+            otherwise 
+                error("Unsupported contrast target %f", contrast_target); 
+        end 
+
+        % Initialize the container for the settings per NDF for this contrast target 
+        contrast_target_fieldname = strrep(string(contrast_target), ".", "x"); 
+        agc_target_sensors_and_settings = {}; 
+
+        for ii = 1:numel(NDFs.world_linearity)
+            % Retrieve the given NDF
+            NDF = NDFs.world_linearity(ii);
+            
+            % Build the world camera settings for this NDF level
+            fixed_settings = double(settings_constants_dict{NDF});
+            sensors.W.Again = fixed_settings(1);
+            sensors.W.Dgain = fixed_settings(2);
+            sensors.W.exposure = int32(fixed_settings(3));
+            sensors.W.agc = false;
+            sensors.W.save_agc_metadata = true;
+            sensors.W.sensor_mode = sensor_mode;
+            sensors.W.awb = false;
+            sensors.W.noise_mode = false;
+
+            % Save this struct
+            agc_target_sensors_and_settings{ii} = sensors;
+        end
+        sensors_and_settings.(contrast_target_fieldname) = agc_target_sensors_and_settings; 
+    
+        clear NDF;
+        clear sensors;
+    end 
 
     % Save the metadata for this calibration measurement
     CalibrationData.world_linearity.NDFs = NDFs.world_linearity;
+    CalibrationData.world_linearity.contrast_agc_targets = contrast_agc_targets; 
     CalibrationData.world_linearity.cal_files = cell(numel(NDFs.world_linearity), 1);
+    
     CalibrationData.world_linearity.sensors_and_settings = sensors_and_settings;
+    
+    
     CalibrationData.world_linearity.background = background;
     CalibrationData.world_linearity.background_scalars = settings_scalars;
     CalibrationData.world_linearity.background_scalars_orders = settings_levels_orders;
@@ -482,9 +513,9 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
     k_contrast_levels = 10; % Define the number of contrast levels to measure
     contrast_levels = linspace(0.05, 0.95, k_contrast_levels); % Define the contrast levels we will measure at 
     frequencies = [10]; % Define the frequencies per contrast level 
+    n_measures = 3; % Define the number of measurements to make at each combination of contrast + frequency 
     contrast_levels_orders = randomize_contrast_orders(numel(NDFs.contrast_gamma), numel(contrast_levels), n_measures); % The order we will expose contrasts in, randomized per measure 
     frequencies_orders = randomize_frequency_orders(numel(NDFs.contrast_gamma), n_measures, numel(contrast_levels), numel(frequencies)); % The orders in which we will expose the frequencies at a given contrast, randomized per contrast
-    n_measures = 3; % Define the number of measurements to make at each combination of contrast + frequency 
     completed_measurements = false(numel(NDFs.contrast_gamma), numel(contrast_levels), numel(frequencies), n_measures); % Define a boolean matrix of completed measurements. We will use this to resume recording on failure
 
     % Initailize the sensors for this measurement. Use only world and turn agc OFF 

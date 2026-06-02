@@ -2171,15 +2171,19 @@ def plot_mean_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbo
 # -----------------------------------------------------------------------------
 def unpack_neon_recordings(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026",
                            overwrite_existing: bool=False,
-                           verbose: bool=False
+                           verbose: bool=False, 
+                           subjects_to_skip: Iterable=set(),
+                           subjects_to_process: Iterable=set(),  
+                           activities_to_skip: Iterable=set(), 
+                           activities_to_process: Iterable=set()
                           ) -> None:
-    # First, let's find all of the subjects in this experiment 
-    subject_paths: list[str] = natsorted([os.path.join(src_dir, subject_name) 
-                                          for subject_name in os.listdir(src_dir) 
-                                          if re.fullmatch(r"FLIC_\d+", subject_name) 
-                                          and os.path.isdir(os.path.join(src_dir, subject_name))
-                                         ]
-                                        ) 
+    subject_paths: list[str] = natsorted([
+        subject_path
+        for subject_name in os.listdir(src_dir)
+        if re.fullmatch(r"FLIC_\d+", subject_name)
+        and os.path.isdir( (subject_path := os.path.join(src_dir, subject_name) ) )
+        and _is_desired_item(_extract_num_from_id(subject_name), subjects_to_process, subjects_to_skip)
+    ]) 
     assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
 
 
@@ -2189,11 +2193,14 @@ def unpack_neon_recordings(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutd
         # Retrieve the subject path and subject name
         subject_path: str = subject_paths[subject_num]
         subject_id: str = os.path.basename(subject_path)
-
+        
         # Iterate over the activites for this subject 
-        activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in natsorted(os.listdir(subject_path))
-                                      if os.path.isdir(os.path.join(subject_path, filename))
-                                     ]
+        activites_paths: list[str] = [
+            activity_path
+            for filename in natsorted(os.listdir(subject_path))
+            if os.path.isdir(  ( activity_path := os.path.join(subject_path, filename)  ))
+            and _is_desired_item(filename, activities_to_process, activities_to_skip)
+        ]
         activities_iterator: Iterable = range(len(activites_paths)) if verbose is False else tqdm(range(len(activites_paths)), desc="Processing Activities", leave=False)
         for activity_num in activities_iterator:
             # Retrieve the activity path and activity name
@@ -2917,7 +2924,11 @@ def download_pupil_cloud_recordings(api_key: str,
     # here 
     unpack_neon_recordings(dst_dir, 
                            overwrite_existing=overwrite_existing,
-                           verbose=verbose
+                           verbose=verbose, 
+                           subjects_to_process=subjects_to_process, 
+                           subjects_to_skip=subjects_to_skip, 
+                           activities_to_process=activities_to_process, 
+                           activities_to_skip=activities_to_skip
                           )
 
 
