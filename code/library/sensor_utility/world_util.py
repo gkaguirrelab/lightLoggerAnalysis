@@ -16,7 +16,7 @@ from numba import njit, prange
  
 
 # World temporal offset relative to other sensors. The world is the target, 
-# so this is 0 
+# so this is 0 (ms)
 WORLD_TIME_OFFSET: float = 0
 
 # This is assuming a contrast of 0.75 is the target of 127 at each NDF level
@@ -53,6 +53,10 @@ WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x25: dict[int, tuple[int, int]] = {NDF_level:
 
 
 
+# The labels of the cols of the world AGC metdata 
+# The world metadata files contain these columns with a 
+# timestamp column before it
+WORLD_AGC_METADATA_COLS: tuple = ("Again", "Dgain", "exposure")
 
 # Store the scalar multipliers for all of the different colors of pixel's in an image 
 # We calculated this by making a measurement with the light logger device 

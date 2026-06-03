@@ -2,6 +2,18 @@ import re
 import os
 from natsort import natsorted
 import copy
+import pathlib
+import sys
+from typing import Iterable
+from tqdm.auto import tqdm
+
+light_logger_analysis_path: str = pathlib.Path(__file__).parents[2]
+chunk_io_path: str = os.path.join(light_logger_analysis_path, "library", "matlabIO", "python_libraries")
+
+for path in (chunk_io_path,):
+    sys.path.append(path)
+
+import chunk_io
 
 """Define a subfunction to sort MS linearity measurements
    first by the setting idx of the recording and then
@@ -135,16 +147,19 @@ def _parse_ms_linearity_readings(folders: list[list[str]],
                                  use_mean_frame: bool=False,
                                  convert_time_units: bool=False,
                                  convert_to_float: bool=False,
-                                 mean_axes: dict[str, tuple]= {'W': (1, 2), 'P': (1, 2), 'M': (0,)}
+                                 mean_axes: dict[str, tuple]= {'W': (1, 2), 'P': (1, 2), 'M': (0,)},
+                                 verbose: bool = False
                                  ) -> list[list[dict]]:
     # Initialize a return list
     parsed_folders = copy.deepcopy(folders)
 
     # Iterate over the settings levels (the rows)
+    settings_iterator: Iterable = range(len(folders)) if verbose is False else tqdm(range(len(folders)), desc="Parsing MS linearity settings levels", leave=False)
     for settings_level in range(len(folders)):
         # Iterate over the cols (measurement number)
-        for measurement_number in range(len(folders[settings_level])):
-            parsed_folders[settings_level][measurement_number] = parse_chunks(folders[settings_level][measurement_number],
+        measurement_iterator: Iterable = range(len(folders[settings_level])) if verbose is False else tqdm(range(len(folders)), desc="Parsing measurements", leave=False)
+        for measurement_number in measurement_iterator:
+            parsed_folders[settings_level][measurement_number] = chunk_io.parse_chunks(folders[settings_level][measurement_number],
                                                                               apply_digital_gain=apply_digital_gain,
                                                                               use_mean_frame=use_mean_frame,
                                                                               convert_time_units=convert_time_units,
@@ -161,14 +176,14 @@ def _sort_by_contrast_target_settings_measurement(folders: list[str]) -> list[li
     sorted_folders: list[list[list]] = []
 
     # Let's first find the dimensions of the measurement
-    agc_contrast_target_pattern: str = r"(\d+\.\d+)contrastTarget"
-    num_contrast_targets: int = max([int(re.search(agc_contrast_target_pattern, foldername).group(0)) for foldername in folders]) 
+    agc_contrast_target_pattern: str = r"(\d+)contrastTargetIdx"
+    num_contrast_targets: int = max([int(re.search(agc_contrast_target_pattern, foldername).group(1)) for foldername in folders]) 
 
     settings_idx_pattern: str = r"_(\d+)settingsIdx"
-    num_settings_idx: int = max([int(re.search(settings_idx_pattern, foldername).group(0)) for foldername in folders]) 
+    num_settings_idx: int = max([int(re.search(settings_idx_pattern, foldername).group(1)) for foldername in folders]) 
 
     measurement_idx_pattern: str = r"_(\d+)measurementIdx"
-    num_measurements: int = max([int(re.search(measurement_idx_pattern, foldername).group(0)) for foldername in folders]) 
+    num_measurements: int = max([int(re.search(measurement_idx_pattern, foldername).group(1)) for foldername in folders]) 
 
     # Iterate over the measurements 
     for contrast_target_num in range(1, num_contrast_targets + 1):
@@ -194,15 +209,23 @@ def _sort_by_contrast_target_settings_measurement(folders: list[str]) -> list[li
     return sorted_folders
 
 """Define a subfunction to parse the camera linearity readings into Python from their folder paths"""
-def _parse_camera_linearity_readings(folders: list[list[list[str]]]) -> None:
+def _parse_camera_linearity_readings(folders: list[list[list[str]]],
+                                     verbose: bool = False
+                                    ) -> None:
     # Deifne the output 
     parsed_folders: list[list[list[str]]] | list[list[list[dict]]] = copy.deepcopy(folders)
 
     # Now, let's iterate over the folders 
-    for contrast_target_idx, contrast_target_matrix in enumerate(parsed_folders): 
-        for settings_idx, settings_row in enumerate(contrast_target_matrix):
-            for measurement_num, measurement_path in enumerate(settings_row):
-                parsed_folders[contrast_target_idx][settings_idx][measurement_num] = parse_chunks(measurement_path)
+    contrast_target_iterator: Iterable = range(len(parsed_folders)) if verbose is False else tqdm(range(len(parsed_folders)), desc="Parsing camera linearity contrast targets", leave=False)
+    for contrast_target_idx in contrast_target_iterator:
+        contrast_target_matrix = parsed_folders[contrast_target_idx]
+        settings_iterator: Iterable = range(len(contrast_target_matrix)) if verbose is False else tqdm(range(len(contrast_target_matrix)), desc="Parsing camera linearity settings levels", leave=False)
+        for settings_idx in settings_iterator:
+            settings_row = contrast_target_matrix[settings_idx]
+            measurement_iterator: Iterable = range(len(settings_row)) if verbose is False else tqdm(range(len(settings_row)), desc="Parsing measurements", leave=False)
+            for measurement_num in measurement_iterator:
+                measurement_path = settings_row[measurement_num]
+                parsed_folders[contrast_target_idx][settings_idx][measurement_num] = chunk_io.parse_chunks(measurement_path)
 
     return parsed_folders
 
@@ -215,15 +238,18 @@ def _parse_temporal_sensitivity_readings(folders: list[list[str]],
                                          convert_time_units: bool=False,
                                          convert_to_float: bool=False,
                                          mean_axes: dict[str, tuple]= {'W': (1, 2), 'P': (1, 2), 'M': (0,)},
-                                         contains_agc_metadata_dict: dict[str, bool]={'W': True, 'P': False, 'M': False}
+                                         contains_agc_metadata_dict: dict[str, bool]={'W': True, 'P': False, 'M': False},
+                                         verbose: bool = False
                                         ) -> list[list[dict]]:
     # Initialize a return list
     parsed_folders: list[list[str]] | list[list[dict]] = copy.deepcopy(folders)
 
     # Iterate over the folders and load them in
-    for contrast_level in range(len(folders)):
-        for frequency_level in range(len(folders[contrast_level])):
-            parsed_folders[contrast_level][frequency_level] = [ parse_chunks(folders[contrast_level][frequency_level][measurement_num],
+    contrast_iterator: Iterable = range(len(folders)) if verbose is False else tqdm(range(len(folders)), desc="Parsing contrast levels", leave=False)
+    for contrast_level in contrast_iterator:
+        frequency_iterator: Iterable = range(len(folders[contrast_level])) if verbose is False else tqdm(range(len(folders[contrast_level])), desc="Parsing frequency levels", leave=False)
+        for frequency_level in frequency_iterator:
+            parsed_folders[contrast_level][frequency_level] = [ chunk_io.parse_chunks(folders[contrast_level][frequency_level][measurement_num],
                                                                            apply_digital_gain=apply_digital_gain,
                                                                            use_mean_frame=use_mean_frame,
                                                                            convert_time_units=convert_time_units,
@@ -249,7 +275,8 @@ def load_sorted_calibration_files(experiment_path: str,
                                   use_mean_frame: bool=False, 
                                   convert_time_units: bool=False, 
                                   convert_to_float: bool=False, 
-                                  mean_axes: dict[str, tuple]= {'W': (1, 2), 'P': (1, 2), 'M': (0,)}
+                                  mean_axes: dict[str, tuple]= {'W': (1, 2), 'P': (1, 2), 'M': (0,)},
+                                  verbose: bool = False
                                   ) -> dict[str, list[dict] | list[list[dict]]]:    
     
     # First, let's find the NDFs for this experiment 
@@ -292,7 +319,8 @@ def load_sorted_calibration_files(experiment_path: str,
                                                                               use_mean_frame=use_mean_frame,
                                                                               convert_time_units=convert_time_units,
                                                                               convert_to_float=convert_to_float,
-                                                                              mean_axes=mean_axes
+                                                                              mean_axes=mean_axes,
+                                                                              verbose=verbose
                                                                              )
                                                 if len(NDF_measurement) > 0 
                                                 else 
@@ -311,18 +339,22 @@ def load_sorted_calibration_files(experiment_path: str,
     # for this type of calibration
     camera_linearity_folders: list[str] = [ [os.path.join(NDF_folder, folder)
                                              for folder in os.listdir(NDF_folder)
-                                             if folder.startswith("worldcameralinearity")
+                                             if folder.lower().startswith("worldcameralinearity")
                                             ]
                                             for NDF_folder in NDF_folders
                                           ]
 
     # Next, we will sort these measurements per NDF into contrastAGCTarget, settingsIdx, measurementNum 
-    camera_linearity_folders_sorted: list[list[list[str]]] = [_sort_by_contrast_target_settings_measurement(NDF_folders)
+    camera_linearity_folders_sorted: list[list[list[str]]] = [_sort_by_contrast_target_settings_measurement(NDF_folder)
+                                                              if len(NDF_folder) > 0 
+                                                              else []
                                                               for NDF_folder in camera_linearity_folders
                                                             ] 
 
     # Next, parse the readings 
-    camera_linearity_readings: list[list[list[dict]]] = [_parse_camera_linearity_readings(NDF_folder)
+    camera_linearity_readings: list[list[list[dict]]] = [_parse_camera_linearity_readings(NDF_folder,
+                                                                                           verbose=verbose
+                                                                                          )
                                                          for NDF_folder in camera_linearity_folders_sorted
                                                         ]
 
@@ -359,7 +391,8 @@ def load_sorted_calibration_files(experiment_path: str,
                                                                                                      convert_time_units=convert_time_units,
                                                                                                      convert_to_float=convert_to_float,
                                                                                                      mean_axes=mean_axes,
-                                                                                                     contains_agc_metadata_dict={'W': True, 'P': False, 'M': False}
+                                                                                                     contains_agc_metadata_dict={'W': True, 'P': False, 'M': False},
+                                                                                                     verbose=verbose
                                                                                                     )
                                                               if len(NDF_measurement) > 0 
                                                               else 
@@ -399,7 +432,8 @@ def load_sorted_calibration_files(experiment_path: str,
                                                                                              convert_time_units=convert_time_units,
                                                                                              convert_to_float=convert_to_float,
                                                                                              mean_axes=mean_axes,
-                                                                                             contains_agc_metadata_dict={'W': True, 'P': False, 'M': False}
+                                                                                             contains_agc_metadata_dict={'W': True, 'P': False, 'M': False},
+                                                                                             verbose=verbose
                                                                                             )
                                                        if len(NDF_measurement) > 0
                                                        else 
@@ -438,7 +472,8 @@ def load_sorted_calibration_files(experiment_path: str,
                                                                                               convert_time_units=convert_time_units,
                                                                                               convert_to_float=convert_to_float,
                                                                                               mean_axes=mean_axes,
-                                                                                              contains_agc_metadata_dict={'W': True, 'P': False, 'M': False}
+                                                                                              contains_agc_metadata_dict={'W': True, 'P': False, 'M': False},
+                                                                                              verbose=verbose
                                                                                              )
                                                         if len(NDF_measurement) > 0 
                                                         else 
@@ -459,7 +494,12 @@ def load_sorted_calibration_files(experiment_path: str,
                                                                             "temporal_sensitivity": temporal_sensitivity_readings, 
                                                                             "phase_fitting": phase_fitting_readings,
                                                                             "contrast_gamma": contrast_gamma_readings, 
-                                                                            "camera_linearity": camera_linearity_readings
+                                                                            "world_linearity": camera_linearity_readings
                                                                            }
     
     return parsed_readings_dict
+
+
+if(__name__ == "__main__"):
+    experiment_path: str = "/Volumes/T7 Shield/5cameraLinearity" 
+    results = load_sorted_calibration_files(experiment_path, apply_digital_gain=True, use_mean_frame=True, convert_time_units=True, convert_to_float=True, verbose=True)

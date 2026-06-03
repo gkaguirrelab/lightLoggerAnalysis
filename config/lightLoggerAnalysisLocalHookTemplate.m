@@ -97,10 +97,19 @@ setpref(projectName, 'ms_util_path', ms_util_path);
 video_io_util_path = fullfile(light_logger_analysis_path, "code", "library", "matlabIO", "python_libraries", "video_io.py");
 setpref(projectName, "video_io_util_path", video_io_util_path); 
 
+% Save the path to the chunk I/O Python library helper 
+chunk_io_path = fullfile(light_logger_analysis_path, "code", "library", "matlabIO", "python_libraries", "chunk_io.py"); 
+setpref(projectName, "chunk_io_path", chunk_io_path); 
+
+% Save the path to the radiometric calibration util file 
+calibration_util_path = fullfile(light_logger_analysis_path, "code", "analyzeRadCal", "pythonCode", "calibration_util.py"); 
+setpref(projectName, "calibration_util_path", calibration_util_path); 
+
 % Save the path to the virtual foveation python helper file
 virtual_foveation_util_path = fullfile(light_logger_analysis_path, "code", "applyVirtualFoveation", "pythonCode", "virtual_foveation.py");
 setpref(projectName, "virtual_foveation_util_path", virtual_foveation_util_path); 
 
+% Save the path to the SPD helper file
 spd_util_path = fullfile(light_logger_analysis_path, "code", "analyzeSPD", "pythonCode", "spd_util.py"); 
 setpref("lightLoggerAnalysis", "spd_util_path", spd_util_path)
 

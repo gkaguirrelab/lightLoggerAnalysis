@@ -137,7 +137,7 @@ def pupil_chunk_parser(chunk_paths: tuple[str],
     # Read the numpy arrays in and extract the t from the metadata 
     metadata: np.ndarray = np.load(t_path) 
     t: np.ndarray = metadata.flatten() if len(metadata.shape) == 1 or metadata.shape[1] == 1 else np.ascontiguousarray(metadata[:, 0])
-    v: np.ndarray = np.load(v_path) if os.path.splitext(v_path)[1]
+    v: np.ndarray = np.load(v_path) 
     assert(len(t) == len(v))
 
     # Extract the AGC metadata (if it exists). 
@@ -398,10 +398,10 @@ def parse_chunks(recording_path: str,
                  apply_fielding_function: bool=False,
                  debayer_images: bool=False, 
                  time_ranges: tuple[float | None] | None={sensor_name: (None, None)
-                                                          for sensor_name in SENSOR_NAMES
+                                                          for sensor_name in "WPM"
                                                          }, 
                  chunk_ranges: tuple[int] | None={sensor_name: (0, None)
-                                                  for sensor_name in SENSOR_NAMES
+                                                  for sensor_name in "WPM"
                                                  }, 
                  mean_axes: dict[str, int] = {'W': (1, 2), 'P': (1, 2), 'M': (0,)},
                  contains_agc_metadata_dict: dict[str, bool] = {'W': True, 'P': False, 'M': False},
@@ -440,7 +440,7 @@ def parse_chunks(recording_path: str,
     selected_sensor_ranges: dict[str, tuple[int]] = chunk_ranges.copy() 
 
     # Now, let's iterate over the sensors 
-    for sensor_name in SENSOR_NAMES:
+    for sensor_name in "WPM":
         # Let's retrieve the chunks for this sensor 
         sensor_chunks: list[tuple] = sensors_chunks_paths[sensor_name]
 
@@ -472,7 +472,7 @@ def parse_chunks(recording_path: str,
     # Define a dictionary for the sensors and their associated parsers 
     parsers: dict = {sensor_name: parser 
                      for sensor_name, parser 
-                     in zip(SENSOR_NAMES, (world_chunk_parser,
+                     in zip("WPM", (world_chunk_parser,
                                            pupil_chunk_parser,
                                            minispect_and_sunglasses_chunk_parser
                                           )

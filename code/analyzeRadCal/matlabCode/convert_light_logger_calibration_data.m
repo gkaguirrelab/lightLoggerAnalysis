@@ -3,7 +3,8 @@
                                                                                 convert_time_units,...
                                                                                 convert_to_floats,...
                                                                                 use_mean_frame,...
-                                                                                mean_axes...
+                                                                                mean_axes,...
+                                                                                verbose...
                                                                             )
     arguments 
         experiment_folder {mustBeText}; 
@@ -12,6 +13,7 @@
         convert_to_floats = false; 
         use_mean_frame {mustBeNumericOrLogical} = false; 
         mean_axes = false; 
+        verbose = true; 
     end     
 
     % If we have not been passed in specific axis to mean, use the default
@@ -23,21 +25,19 @@
         mean_axes.M = [];
     end 
 
-    disp("Conversion | Importing libraries...");
-    tbUseProject('lightLoggerAnalysis');
-
     % Import the Python library used for downloading from Dropbox 
-    Pi_util = import_pyfile(getpref("lightLoggerAnalysis", "Pi_util_path"));
+    calibration_util = import_pyfile(getpref("lightLoggerAnalysis", "calibration_util_path"));
 
     % Next, we will load in the recordings and rudimentarily convert the Py.dict to a struct. 
     % Further nested conversion will be needed for each reading method
     disp("Conversion | Parsing recordings...")
-    parsed_readings = struct(Pi_util.load_sorted_calibration_files(experiment_folder,...
+    parsed_readings = struct(calibration_util.load_sorted_calibration_files(experiment_folder,...
                                                                    apply_digital_gain,...
                                                                    use_mean_frame,...
                                                                    convert_time_units,...
                                                                    convert_to_floats,...
-                                                                   mean_axes...
+                                                                   mean_axes,...
+                                                                   verbose...
                                                                   )...
                             ); 
 
@@ -57,6 +57,7 @@
     parsed_readings.temporal_sensitivity = convert_temporal_sensitivity_to_matlab(calibration_metadata.temporal_sensitivity, parsed_readings.temporal_sensitivity);
     parsed_readings.phase_fitting = convert_temporal_sensitivity_to_matlab(calibration_metadata.phase_fitting, parsed_readings.phase_fitting);
     parsed_readings.contrast_gamma = convert_temporal_sensitivity_to_matlab(calibration_metadata.contrast_gamma, parsed_readings.contrast_gamma);
+    parsed_readings.camera_linearity = convert_camera_linearity_to_matlab(calibration_metadata.world_linearity, parsed_readings.world_linearity); 
 
     % Initialize a return struct 
     LightLoggerCalibrationData.metadata = calibration_metadata;
@@ -65,6 +66,7 @@
     return ; 
 
 end 
+
 
 % Local function to convert the ms linearity field of the readings dict to pure 
 % MATLAB types. Note: the CalibrationData referenced here is the substruct of CalibrationData
@@ -194,3 +196,62 @@ function converted_temporal_sensitivity = convert_temporal_sensitivity_to_matlab
     return ; 
 
 end
+
+% Local function to convert the ms linearity field of the readings dict to pure 
+% MATLAB types. Note: the CalibrationData referenced here is the substruct of CalibrationData
+% specifically for ms_linearity
+function converted_linearity = convert_camera_linearity_to_matlab(linearity_calibration_metadata, ms_linearity_readings)
+    converted_linearity = []
+    return ; 
+    
+    % First, let's extract some information about what we intended 
+    num_NDF_levels = numel(linearity_calibration_metadata.NDFs);
+    num_contrast_targets = (linearity_calibration_metadata.agc_contrast_targets);
+    num_settings_levels = numel(linearity_calibration_metadata.background_scalars);
+    n_measures = linearity_calibration_metadata.n_measures; 
+    
+    % Now, we will allocate an output array 
+    converted_linearity = cell(num_NDF_levels, num_contrast_targets, num_settings_levels, n_measures);
+
+    % Then, we will convert the outer Python list, representing the NDF levels, 
+    % to cell array 
+    ms_linearity_readings = cell(ms_linearity_readings); 
+
+    % Next, we will convert each inner 1xY py.list to a cell array. 
+    % These lists represent the lists of recordings at different contrast target levels 
+    ms_linearity_readings = cellfun(@(x) cell(x), ms_linearity_readings, 'UniformOutput', false);
+
+    % Next, we need to go in all of those contrast target cells and convert the inner py.list of 
+    % settings to a cell 
+    for nn = 1:num_NDF_levels
+        % Convert all the repeated measurements at this settings level to cell 
+        NDF_cell = cellfun(@(x) cell(x), ms_linearity_readings{nn}, 'UniformOutput', false);   
+
+        % Then, convert those 1x1 py.lists representing chunks of recordings for each measurement 
+        % to cell 
+        for ss = 1:num_settings_levels
+            % Retrieve the settings level cell 
+            settings_cell = cell(NDF_cell{ss}); 
+            
+            % Iterate over the measures at this settings level 
+            for mm = 1:n_measures
+                % Find the index of the setting that was used for this combination 
+                % of measurement and settings number 
+                settings_idx = linearity_calibration_metadata.background_scalars_orders(nn, mm, ss); 
+                setting = linearity_calibration_metadata.background_scalars(settings_idx);
+
+                % Retrieve the measurement cell 
+                measurement_cell = cell(settings_cell{mm}); 
+                
+                % Convert the chunks in the cell to MATLAB struct type 
+                measurement_cell = cellfun(@(x) chunk_dict_to_matlab(x), measurement_cell, 'UniformOutput', false); 
+                
+                % Save the updated measurement cell into the settings cell 
+                converted_linearity{nn, settings_idx, mm} = measurement_cell{:}; 
+            end 
+
+        end 
+
+    end 
+
+end 
