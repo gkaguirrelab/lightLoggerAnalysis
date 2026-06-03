@@ -57,11 +57,14 @@
     parsed_readings.temporal_sensitivity = convert_temporal_sensitivity_to_matlab(calibration_metadata.temporal_sensitivity, parsed_readings.temporal_sensitivity);
     parsed_readings.phase_fitting = convert_temporal_sensitivity_to_matlab(calibration_metadata.phase_fitting, parsed_readings.phase_fitting);
     parsed_readings.contrast_gamma = convert_temporal_sensitivity_to_matlab(calibration_metadata.contrast_gamma, parsed_readings.contrast_gamma);
-    parsed_readings.camera_linearity = convert_camera_linearity_to_matlab(calibration_metadata.world_linearity, parsed_readings.world_linearity); 
+    parsed_readings.world_linearity = convert_camera_linearity_to_matlab(calibration_metadata.world_linearity, parsed_readings.world_linearity); 
 
     % Initialize a return struct 
     LightLoggerCalibrationData.metadata = calibration_metadata;
     LightLoggerCalibrationData.readings = parsed_readings; 
+
+    % Clear any python memory 
+    py.gc.collect(); 
 
     return ; 
 
@@ -200,13 +203,10 @@ end
 % Local function to convert the ms linearity field of the readings dict to pure 
 % MATLAB types. Note: the CalibrationData referenced here is the substruct of CalibrationData
 % specifically for ms_linearity
-function converted_linearity = convert_camera_linearity_to_matlab(linearity_calibration_metadata, ms_linearity_readings)
-    converted_linearity = []
-    return ; 
-    
+function converted_linearity = convert_camera_linearity_to_matlab(linearity_calibration_metadata, world_linearity_readings)
     % First, let's extract some information about what we intended 
     num_NDF_levels = numel(linearity_calibration_metadata.NDFs);
-    num_contrast_targets = (linearity_calibration_metadata.agc_contrast_targets);
+    num_contrast_targets = numel(linearity_calibration_metadata.contrast_agc_targets);
     num_settings_levels = numel(linearity_calibration_metadata.background_scalars);
     n_measures = linearity_calibration_metadata.n_measures; 
     
@@ -215,39 +215,46 @@ function converted_linearity = convert_camera_linearity_to_matlab(linearity_cali
 
     % Then, we will convert the outer Python list, representing the NDF levels, 
     % to cell array 
-    ms_linearity_readings = cell(ms_linearity_readings); 
+    world_linearity_readings = cell(world_linearity_readings); 
 
     % Next, we will convert each inner 1xY py.list to a cell array. 
     % These lists represent the lists of recordings at different contrast target levels 
-    ms_linearity_readings = cellfun(@(x) cell(x), ms_linearity_readings, 'UniformOutput', false);
+    world_linearity_readings = cellfun(@(x) cell(x), world_linearity_readings, 'UniformOutput', false);
 
-    % Next, we need to go in all of those contrast target cells and convert the inner py.list of 
-    % settings to a cell 
+    % Next, we need to go in all of those recording cells and convert the inner py.list of 
+    % measurements at a given settings level to cell 
     for nn = 1:num_NDF_levels
-        % Convert all the repeated measurements at this settings level to cell 
-        NDF_cell = cellfun(@(x) cell(x), ms_linearity_readings{nn}, 'UniformOutput', false);   
+       % Convert all of those contrast target levels to cell arrays
+        NDF_cell = cellfun(@(x) cell(x), world_linearity_readings{nn}, 'UniformOutput', false);   
 
-        % Then, convert those 1x1 py.lists representing chunks of recordings for each measurement 
-        % to cell 
-        for ss = 1:num_settings_levels
-            % Retrieve the settings level cell 
-            settings_cell = cell(NDF_cell{ss}); 
-            
-            % Iterate over the measures at this settings level 
-            for mm = 1:n_measures
-                % Find the index of the setting that was used for this combination 
-                % of measurement and settings number 
-                settings_idx = linearity_calibration_metadata.background_scalars_orders(nn, mm, ss); 
-                setting = linearity_calibration_metadata.background_scalars(settings_idx);
+        % Then, let's iterate over the contrast target levels 
+        for cc = 1:num_contrast_targets
+            % Now, let's get the settings as cells at this NDF 
+            contrast_agc_target_cell = cellfun(@(x) cell(x), NDF_cell{cc}, 'UniformOutput', false); 
 
-                % Retrieve the measurement cell 
-                measurement_cell = cell(settings_cell{mm}); 
+            % Then, convert those 1x1 py.lists representing chunks of recordings for each measurement 
+            % to cell 
+            for ss = 1:num_settings_levels
+                % Retrieve the settings level cell 
+                settings_cell = cell(contrast_agc_target_cell{ss}); 
                 
-                % Convert the chunks in the cell to MATLAB struct type 
-                measurement_cell = cellfun(@(x) chunk_dict_to_matlab(x), measurement_cell, 'UniformOutput', false); 
-                
-                % Save the updated measurement cell into the settings cell 
-                converted_linearity{nn, settings_idx, mm} = measurement_cell{:}; 
+                % Iterate over the measures at this settings level 
+                for mm = 1:n_measures
+                    % Find the index of the setting that was used for this combination 
+                    % of measurement and settings number 
+                    settings_idx = linearity_calibration_metadata.background_scalars_orders(nn, mm, ss); 
+                    setting = linearity_calibration_metadata.background_scalars(settings_idx);
+
+                    % Retrieve the measurement cell 
+                    measurement_cell = cell(settings_cell{mm}); 
+                    
+                    % Convert the chunks in the cell to MATLAB struct type 
+                    measurement_cell = cellfun(@(x) chunk_dict_to_matlab(x), measurement_cell, 'UniformOutput', false); 
+                    
+                    % Save the updated measurement cell into the settings cell 
+                    converted_linearity{nn, cc, settings_idx, mm} = measurement_cell{:}; 
+                end 
+
             end 
 
         end 
