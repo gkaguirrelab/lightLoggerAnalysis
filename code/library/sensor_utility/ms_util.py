@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 """Define Characteristics of the minispectrometer device"""
-MS_FPS: int = 1 # Capture at APPROXIMATELY 1 FPS. The MS is more variable than others and does not maintain as tight of an FPS
+MS_FPS: int = 2 # Capture at APPROXIMATELY 2 FPS. The MS is more variable than others and does not maintain as tight of an FPS
 MS_COMPRESSED_FRAME_SHAPE: np.ndarray = np.array([1552], dtype=np.uint16) # MS data is read in packets of 148 bytes 
 MS_COM_PORT: str = '/dev/ttyACM0' if sys.platform.startswith('linux') else '/dev/tty.usbmodem142201' # Port nomenclature changes between operating systems 
 MS_BAUDRATE: int = 115200 # Baudrate for communication with the on-board Arduino 

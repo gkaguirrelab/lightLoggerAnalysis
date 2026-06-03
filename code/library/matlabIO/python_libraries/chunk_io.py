@@ -51,10 +51,10 @@ def minispect_and_sunglasses_chunk_parser(chunk_paths: tuple[str],
     
     # Otherwise, we must process the chunks, so first retrieve the desired chunk 
     (t_path, v_path) = chunk_paths
-
-    # Determine if we must decompress + decrypt these files
-    t: np.ndarray = np.load(t_path) if ".blosc" not in t_path else decompress_and_decrypt(t_path, password=password) 
-    v: np.ndarray = np.load(v_path) if ".blosc" not in v_path else decompress_and_decrypt(v_path, password=password) 
+    
+    # Load in the metadata and the values vector for this chunk
+    t: np.ndarray = np.load(t_path) 
+    v: np.ndarray = np.load(v_path) 
 
     # Next, generate the accelerometer specific t vector from this t vector 
     accelerometer_t: np.ndarray = ms_util.generate_accelerometer_t(t)
@@ -76,7 +76,7 @@ def minispect_and_sunglasses_chunk_parser(chunk_paths: tuple[str],
     
     # Apply the time offset correction if desired 
     if(apply_phase_offset is True):
-        t += MS_TIME_OFFSET
+        t += ms_util.MS_TIME_OFFSET
 
     # No use for converting mean frame as these data are not in the shape of frames 
     # but individual sensor readings 
@@ -135,12 +135,9 @@ def pupil_chunk_parser(chunk_paths: tuple[str],
     # Determine if we must decompress + decrypt these files
 
     # Read the numpy arrays in and extract the t from the metadata 
-    metadata: np.ndarray = np.load(t_path) if os.path.splitext(t_path)[1] != ".blosc" else decompress_and_decrypt(t_path, 
-                                                                                                                    password=password, 
-                                                                                                                    contains_agc_metadata=contains_AGC_metadata
-                                                                                                                    ) 
+    metadata: np.ndarray = np.load(t_path) 
     t: np.ndarray = metadata.flatten() if len(metadata.shape) == 1 or metadata.shape[1] == 1 else np.ascontiguousarray(metadata[:, 0])
-    v: np.ndarray = np.load(v_path) if os.path.splitext(v_path)[1] != ".blosc" else decompress_and_decrypt(v_path, password=password) 
+    v: np.ndarray = np.load(v_path) if os.path.splitext(v_path)[1]
     assert(len(t) == len(v))
 
     # Extract the AGC metadata (if it exists). 
@@ -155,7 +152,7 @@ def pupil_chunk_parser(chunk_paths: tuple[str],
 
     # Apply the time offset if desired (calculated in seconds)
     if(apply_phase_offset is True):
-        t += PUPIL_TIME_OFFSET 
+        t += pupil_util.PUPIL_TIME_OFFSET 
 
     if(apply_digital_gain is True):
         # Retrieve the digital gain scalars per frame 
@@ -214,13 +211,9 @@ def world_chunk_parser(chunk_paths: tuple[str],
     (t_path, v_path) = chunk_paths
     
     # Retrieve the metadata, the t specifically and the frame buffer (v)
-    metadata: np.ndarray = np.load(t_path) if ".blosc" not in t_path else decompress_and_decrypt(t_path, 
-                                                                                                    password=password, 
-                                                                                                    contains_agc_metadata=contains_AGC_metadata
-                                                                                                ) 
-
+    metadata: np.ndarray = np.load(t_path)
     t: np.ndarray = metadata.flatten() if len(metadata.shape) == 1 or metadata.shape[1] == 1 else np.ascontiguousarray(metadata[:, 0])
-    v: np.ndarray = np.load(v_path) if ".blosc" not in v_path else decompress_and_decrypt(v_path, password=password) 
+    v: np.ndarray = np.load(v_path)
 
     # Assert we have metadata for every frame   
     assert len(t) == len(v), "Length of metadata vector must match length of value vector"
@@ -240,7 +233,7 @@ def world_chunk_parser(chunk_paths: tuple[str],
         # Calculated in seconds, so only can be applied 
         # when convert time units is True
         if(apply_phase_offset is True):
-            t += WORLD_TIME_OFFSET
+            t += world_util.WORLD_TIME_OFFSET
 
     # Apply digital gain as calculated from the AGC 
     if(apply_digital_gain is True):
