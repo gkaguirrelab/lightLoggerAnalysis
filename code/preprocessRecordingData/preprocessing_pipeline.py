@@ -2925,9 +2925,9 @@ def download_pupil_cloud_recordings(api_key: str,
     unpack_neon_recordings(dst_dir, 
                            overwrite_existing=overwrite_existing,
                            verbose=verbose, 
-                           subjects_to_process=subjects_to_process, 
+                           subjects_to_process=subjects_to_download, 
                            subjects_to_skip=subjects_to_skip, 
-                           activities_to_process=activities_to_process, 
+                           activities_to_process=activities_to_download, 
                            activities_to_skip=activities_to_skip
                           )
 
