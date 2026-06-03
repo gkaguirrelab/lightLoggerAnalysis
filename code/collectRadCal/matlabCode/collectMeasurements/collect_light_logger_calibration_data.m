@@ -74,6 +74,9 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
         
     end     
 
+    % Terminate pyenv to get it out of bad states and force a restart 
+    terminate(pyenv);
+
     % Ensure the sensor ids is a vector with at most 3 elements 
     % [W_id, P_id, M_id]
     sensor_ids = sensor_ids(:); % Flatten the id vector 
