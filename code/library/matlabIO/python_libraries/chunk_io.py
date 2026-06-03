@@ -227,7 +227,7 @@ def world_chunk_parser(chunk_paths: tuple[str],
     # Convert time units to seconds 
     if(convert_time_units is True): 
         # World Timestamps are expressed in nanoseconds since system boot. Convert to seconds 
-        t /= (10**9) # 1 sec = 10^9 nanoseconds
+        t = np.ascontiguousarray(t, dtype=np.float64) / (10**9) # 1 sec = 10^9 nanoseconds
 
         # Apply the time offset if so desired
         # Calculated in seconds, so only can be applied 
@@ -235,57 +235,64 @@ def world_chunk_parser(chunk_paths: tuple[str],
         if(apply_phase_offset is True):
             t += world_util.WORLD_TIME_OFFSET
 
+    # First, convert to float for float multiplications
+    # if not in float already
+    v = v.astype(np.float64, copy=False)
+
     # Apply digital gain as calculated from the AGC 
     if(apply_digital_gain is True):
+        assert v.dtype == np.float64, f"Frame buffer dtype must be float64 to apply dgain. Current dtype is {v.dtype}"
+
         # Retrieve the digital gain scalars per frame 
         digital_gain_scalars: np.ndarray = chunk_dict['W']['settings']['Dgain'] if len(chunk_dict['W']['settings']['Dgain']) > 0 else np.full((len(t),), 1) 
 
-        # Apply these scalars elementwise to the value vector (frame buffer)
-        v = np.clip(np.round(v.astype(np.float64) * digital_gain_scalars[:, np.newaxis, np.newaxis]), 0, 255).astype(np.uint8)
-
-    # Apply correction scalars for each of the RGB channels
-    if(apply_RGB_correction is True):
-        # First, convert v to float64, so we can apply the scaling 
-        v = v if v.dtype == np.float64 else v.astype(np.float64)
-
-        # Apply the scaling per RGB channel 
-        for (scalar, channel_pixels) in zip(world_util.WORLD_RGB_SCALARS, (world_util.WORLD_R_PIXELS, world_util.WORLD_G_PIXELS, world_util.WORLD_B_PIXELS)):
-            # Retrieve the rows and cols of the color's pixels 
-            color_rows: np.ndarray = channel_pixels[:, 0]
-            color_cols: np.ndarray = channel_pixels[:, 1]
-            
-            # Apply the scalar
-            v[:, color_rows, color_cols] *= scalar
+        # Multiply the frames by the dgains
+        v *= digital_gain_scalars[:, np.newaxis, np.newaxis]
 
     # Apply the fielding function to each color plane 
     if(apply_fielding_function is True):
-        # First, convert v to float64, so we can apply the scaling 
-        v = v if v.dtype == np.float64 else v.astype(np.float64)
+        assert v.dtype == np.float64 and v.ndim == 3, f"Frame buffer dtype must be float64 and in bayer format to apply fielding function. Current dtype is {v.dtype}, current ndim: {v.ndim}"
+        
+        # Get the fielding function for this frame size
+        fielding_function: np.ndarray = world_util.WORLD_FIELDING_FUNCTIONS[v.shape[1:3]]
 
-        # Apply the scaling per RGB channel 
-        for channel_pixels in ((world_util.WORLD_R_PIXELS, world_util.WORLD_G_PIXELS, world_util.WORLD_B_PIXELS)):
-            # Retrieve the rows and cols of the color's pixels 
-            color_rows: np.ndarray = channel_pixels[:, 0]
-            color_cols: np.ndarray = channel_pixels[:, 1]
+        # Apply fielding function
+        v *= fielding_function
 
-            # Apply the fielding function 
-            v[:, color_rows, color_cols] *= world_util.WORLD_FIELDING_FUNCTION[color_rows, color_cols]
+    # Apply correction scalars for each of the RGB channels
+    if(apply_RGB_correction is True):
+        assert v.ndim == 3 and v.dtype == np.float64, f"To apply color weights, buffer must be in bayer form np.float64."
 
-    # TODO: In the future we will move to using 16 bit ints for everything (including floats, so in the future I will need to remove this)
+        # Apply the radiometric correction
+        bayer_RGB_mask: np.ndarray = world_util.generate_RGB_mask(v[0])
+        bayer_RGB_pixel_locations: list[np.ndarray] = [ np.argwhere(bayer_RGB_mask == color) for color in "RGB" ]
+        assert bayer_RGB_mask.shape == v.shape[1:], f"Bayer RGB mask shape: {bayer_RGB_mask.shape} not equal to frame shape: {v.shape[1:]}" 
+
+        # Apply the color corrections IN-PLACE and vectorized
+        assert len(bayer_RGB_pixel_locations) == len(world_util.WORLD_RGB_SCALARS)
+        for (pixels, weight) in zip(bayer_RGB_pixel_locations, world_util.WORLD_RGB_SCALARS):
+            rows: np.ndarray = pixels[:, 0]
+            cols: np.ndarray = pixels[:, 1]
+
+            # Apply the weight to the specified pixels 
+            v[:, rows, cols] *= weight
+
+    # Convert back to np.uint8 to debayer images
     if(v.dtype != np.uint8):
-        v = np.clip(v, 0, 255).astype(np.uint8)
+        v = np.round(np.clip(v, 0, 255)).astype(np.uint8)
+
+    #  Debayer images if desired 
+    if(debayer_images is True):
+        debayered_v: np.ndarray = np.empty(list(v.shape) + [3], dtype=np.uint8)
+        for frame_num, frame in v:
+            debayered_v[frame_num] = world_util.debayer_image(frame)
+
+        # Replace v with the debayered version
+        v = debayered_v
 
     # Just return the mean frame 
     if(use_mean_frame is True):
         v = np.mean(v, axis=mean_axes)
-
-    #  Debayer images if desired 
-    if(debayer_images is True):
-        v = np.array([  world_util.debayer_images( world_util.apply_color_weights(frame)) 
-                        for frame in v
-                     ],
-                     dtype=np.uint8
-                    )
 
     # Convert result to float or not 
     if(convert_to_float is True):

@@ -7,6 +7,11 @@ import sys
 import matplotlib.pyplot as plt
 import pandas as pd
 
+
+# World temporal offset relative to other sensors. The world is the target and is 0 
+# (ms)
+MS_TIME_OFFSET: float = -139.354 
+
 """Define Characteristics of the minispectrometer device"""
 MS_FPS: int = 2 # Capture at APPROXIMATELY 2 FPS. The MS is more variable than others and does not maintain as tight of an FPS
 MS_COMPRESSED_FRAME_SHAPE: np.ndarray = np.array([1552], dtype=np.uint16) # MS data is read in packets of 148 bytes 

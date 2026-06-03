@@ -13,7 +13,11 @@ from typing import Iterable
 import dill
 import pandas as pd
 from numba import njit, prange
+ 
 
+# World temporal offset relative to other sensors. The world is the target, 
+# so this is 0 
+WORLD_TIME_OFFSET: float = 0
 
 # This is assuming a contrast of 0.75 is the target of 127 at each NDF level
 WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x75: dict[int, tuple[int, int]] = {NDF_level:  # Define the fixed settings for this camera per integer NDF filter
