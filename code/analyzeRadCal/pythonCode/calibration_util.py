@@ -144,6 +144,7 @@ def _sort_by_contrast_frequency_measurement(flattened_readings: list[str]) -> li
 """
 def _parse_ms_linearity_readings(folders: list[list[str]],
                                  apply_digital_gain: bool=False,
+                                 apply_radiometric_correction: bool=False,
                                  use_mean_frame: bool=False,
                                  convert_time_units: bool=False,
                                  convert_to_float: bool=False,
@@ -160,6 +161,7 @@ def _parse_ms_linearity_readings(folders: list[list[str]],
         measurement_iterator: Iterable = range(len(folders[settings_level])) if verbose is False else tqdm(range(len(folders)), desc="Parsing measurements", leave=False)
         for measurement_number in measurement_iterator:
             parsed_folders[settings_level][measurement_number] = chunk_io.parse_chunks(folders[settings_level][measurement_number],
+                                                                              apply_RGB_correction=apply_radiometric_correction,
                                                                               apply_digital_gain=apply_digital_gain,
                                                                               use_mean_frame=use_mean_frame,
                                                                               convert_time_units=convert_time_units,
@@ -210,7 +212,10 @@ def _sort_by_contrast_target_settings_measurement(folders: list[str]) -> list[li
 
 """Define a subfunction to parse the camera linearity readings into Python from their folder paths"""
 def _parse_camera_linearity_readings(folders: list[list[list[str]]],
-                                     verbose: bool = False
+                                     verbose: bool = False, 
+                                     apply_radiometric_correction: bool=False,
+                                     apply_digital_gain: bool=False, 
+                                     convert_time_units: bool=False
                                     ) -> None:
     # Deifne the output 
     parsed_folders: list[list[list[str]]] | list[list[list[dict]]] = copy.deepcopy(folders)
@@ -225,7 +230,11 @@ def _parse_camera_linearity_readings(folders: list[list[list[str]]],
             measurement_iterator: Iterable = range(len(settings_row)) if verbose is False else tqdm(range(len(settings_row)), desc="Parsing measurements", leave=False)
             for measurement_num in measurement_iterator:
                 measurement_path = settings_row[measurement_num]
-                parsed_folders[contrast_target_idx][settings_idx][measurement_num] = chunk_io.parse_chunks(measurement_path)
+                parsed_folders[contrast_target_idx][settings_idx][measurement_num] = chunk_io.parse_chunks(measurement_path, 
+                                                                                                           apply_RGB_correction=apply_radiometric_correction, 
+                                                                                                           apply_digital_gain=apply_digital_gain,
+                                                                                                           convert_time_units=convert_time_units
+                                                                                                        )
 
     return parsed_folders
 
@@ -234,6 +243,7 @@ def _parse_camera_linearity_readings(folders: list[list[list[str]]],
 """
 def _parse_temporal_sensitivity_readings(folders: list[list[str]],
                                          apply_digital_gain: bool=False,
+                                         apply_radiometric_correction: bool=False,
                                          use_mean_frame: bool=False,
                                          convert_time_units: bool=False,
                                          convert_to_float: bool=False,
@@ -250,6 +260,7 @@ def _parse_temporal_sensitivity_readings(folders: list[list[str]],
         frequency_iterator: Iterable = range(len(folders[contrast_level])) if verbose is False else tqdm(range(len(folders[contrast_level])), desc="Parsing frequency levels", leave=False)
         for frequency_level in frequency_iterator:
             parsed_folders[contrast_level][frequency_level] = [ chunk_io.parse_chunks(folders[contrast_level][frequency_level][measurement_num],
+                                                                           apply_RGB_correction=apply_radiometric_correction,
                                                                            apply_digital_gain=apply_digital_gain,
                                                                            use_mean_frame=use_mean_frame,
                                                                            convert_time_units=convert_time_units,
@@ -273,6 +284,7 @@ def _parse_temporal_sensitivity_readings(folders: list[list[str]],
 def load_sorted_calibration_files(experiment_path: str, 
                                   apply_digital_gain: bool=False, 
                                   use_mean_frame: bool=False, 
+                                  apply_radiometric_correction: bool=False,
                                   convert_time_units: bool=False, 
                                   convert_to_float: bool=False, 
                                   mean_axes: dict[str, tuple]= {'W': (1, 2), 'P': (1, 2), 'M': (0,)},
@@ -316,6 +328,7 @@ def load_sorted_calibration_files(experiment_path: str,
     # Parse the MS linearity readings
     ms_linearity_readings: list[list[dict]] = [ _parse_ms_linearity_readings(NDF_measurement,
                                                                               apply_digital_gain=apply_digital_gain,
+                                                                              apply_radiometric_correction=apply_radiometric_correction,
                                                                               use_mean_frame=use_mean_frame,
                                                                               convert_time_units=convert_time_units,
                                                                               convert_to_float=convert_to_float,
@@ -353,7 +366,10 @@ def load_sorted_calibration_files(experiment_path: str,
 
     # Next, parse the readings 
     camera_linearity_readings: list[list[list[dict]]] = [_parse_camera_linearity_readings(NDF_folder,
-                                                                                           verbose=verbose
+                                                                                           verbose=verbose,
+                                                                                           apply_radiometric_correction=apply_radiometric_correction, 
+                                                                                           apply_digital_gain=apply_digital_gain,
+                                                                                           convert_time_units=convert_time_units
                                                                                           )
                                                          for NDF_folder in camera_linearity_folders_sorted
                                                         ]
@@ -387,6 +403,7 @@ def load_sorted_calibration_files(experiment_path: str,
     # Parse the readings
     temporal_sensitivity_readings: list[list[list[dict]]] = [ _parse_temporal_sensitivity_readings(NDF_measurement,
                                                                                                      apply_digital_gain=apply_digital_gain,
+                                                                                                     apply_radiometric_correction=apply_radiometric_correction,
                                                                                                      use_mean_frame=use_mean_frame,
                                                                                                      convert_time_units=convert_time_units,
                                                                                                      convert_to_float=convert_to_float,
@@ -428,6 +445,7 @@ def load_sorted_calibration_files(experiment_path: str,
     # TODO: check the types of these are correct
     phase_fitting_readings: list[list[list[dict]]] = [ _parse_temporal_sensitivity_readings(NDF_measurement,
                                                                                              apply_digital_gain=apply_digital_gain,
+                                                                                             apply_radiometric_correction=apply_radiometric_correction,
                                                                                              use_mean_frame=use_mean_frame,
                                                                                              convert_time_units=convert_time_units,
                                                                                              convert_to_float=convert_to_float,
@@ -468,6 +486,7 @@ def load_sorted_calibration_files(experiment_path: str,
     # Parse the contrast gamma readings
     contrast_gamma_readings: list[list[list[dict]]] = [ _parse_temporal_sensitivity_readings(NDF_measurement,
                                                                                               apply_digital_gain=apply_digital_gain,
+                                                                                              apply_radiometric_correction=apply_radiometric_correction,
                                                                                               use_mean_frame=use_mean_frame,
                                                                                               convert_time_units=convert_time_units,
                                                                                               convert_to_float=convert_to_float,

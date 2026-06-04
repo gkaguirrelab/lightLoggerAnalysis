@@ -1,20 +1,16 @@
-    function LightLoggerCalibrationData = convert_light_logger_calibration_data(experiment_folder,...
-                                                                                apply_digital_gain,...
-                                                                                convert_time_units,...
-                                                                                convert_to_floats,...
-                                                                                use_mean_frame,...
-                                                                                mean_axes,...
-                                                                                verbose...
-                                                                            )
+    function LightLoggerCalibrationData = convert_light_logger_calibration_data(experiment_folder, options)
     arguments 
         experiment_folder {mustBeText}; 
-        apply_digital_gain = false;  
-        convert_time_units = false; 
-        convert_to_floats = false; 
-        use_mean_frame {mustBeNumericOrLogical} = false; 
-        mean_axes = false; 
-        verbose = true; 
+        options.apply_digital_gain = false;  
+        options.apply_radiometric_correction = false; 
+        options.convert_time_units = false; 
+        options.convert_to_floats = false; 
+        options.use_mean_frame {mustBeNumericOrLogical} = false; 
+        options.mean_axes = false; 
+        options.verbose = true; 
     end     
+
+    mean_axes = options.mean_axes; 
 
     % If we have not been passed in specific axis to mean, use the default
     % which is to mean each frame
@@ -32,12 +28,13 @@
     % Further nested conversion will be needed for each reading method
     disp("Conversion | Parsing recordings...")
     parsed_readings = struct(calibration_util.load_sorted_calibration_files(experiment_folder,...
-                                                                   apply_digital_gain,...
-                                                                   use_mean_frame,...
-                                                                   convert_time_units,...
-                                                                   convert_to_floats,...
+                                                                   options.apply_digital_gain,...
+                                                                   options.use_mean_frame,...
+                                                                   options.apply_radiometric_correction,...
+                                                                   options.convert_time_units,...
+                                                                   options.convert_to_floats,...
                                                                    mean_axes,...
-                                                                   verbose...
+                                                                   options.verbose...
                                                                   )...
                             ); 
 
@@ -105,19 +102,15 @@ function converted_linearity = convert_ms_linearity_to_matlab(linearity_calibrat
             
             % Iterate over the measures at this settings level 
             for mm = 1:n_measures
-                % Find the index of the setting that was used for this combination 
-                % of measurement and settings number 
-                settings_idx = linearity_calibration_metadata.background_scalars_orders(nn, mm, ss); 
-                setting = linearity_calibration_metadata.background_scalars(settings_idx);
-
                 % Retrieve the measurement cell 
                 measurement_cell = cell(settings_cell{mm}); 
                 
                 % Convert the chunks in the cell to MATLAB struct type 
                 measurement_cell = cellfun(@(x) chunk_dict_to_matlab(x), measurement_cell, 'UniformOutput', false); 
                 
-                % Save the updated measurement cell into the settings cell 
-                converted_linearity{nn, settings_idx, mm} = measurement_cell{:}; 
+                % The Python loader already sorted these readings by
+                % settingsIdx, so preserve that order directly here.
+                converted_linearity{nn, ss, mm} = measurement_cell{:}; 
             end 
 
         end 
@@ -240,19 +233,16 @@ function converted_linearity = convert_camera_linearity_to_matlab(linearity_cali
                 
                 % Iterate over the measures at this settings level 
                 for mm = 1:n_measures
-                    % Find the index of the setting that was used for this combination 
-                    % of measurement and settings number 
-                    settings_idx = linearity_calibration_metadata.background_scalars_orders(nn, mm, ss); 
-                    setting = linearity_calibration_metadata.background_scalars(settings_idx);
-
                     % Retrieve the measurement cell 
                     measurement_cell = cell(settings_cell{mm}); 
                     
                     % Convert the chunks in the cell to MATLAB struct type 
                     measurement_cell = cellfun(@(x) chunk_dict_to_matlab(x), measurement_cell, 'UniformOutput', false); 
                     
-                    % Save the updated measurement cell into the settings cell 
-                    converted_linearity{nn, cc, settings_idx, mm} = measurement_cell{:}; 
+                    % The Python loader already sorted these readings by
+                    % contrastTargetIdx and settingsIdx, so preserve that
+                    % order directly here.
+                    converted_linearity{nn, cc, ss, mm} = measurement_cell{:}; 
                 end 
 
             end 

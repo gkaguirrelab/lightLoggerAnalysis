@@ -319,7 +319,7 @@ def apply_fielding_function(original_frame: np.ndarray, visualize_results: bool=
 """Generate an RGB mask of the bayer pattern 
    for an arbitrary frame size
 """
-def generate_RGB_mask(original_frame: np.ndarray, visualize_results: bool=False) -> tuple[np.ndarray, object] | np.ndarray:
+def generate_RGB_mask(original_frame: np.ndarray, marker: Literal["str", "num"]="str", visualize_results: bool=False) -> tuple[np.ndarray, object] | np.ndarray:
     # Initialize a variable for the figure handle that 
     # will be used to visualize (if desired)
     fig: object | None = None
@@ -327,7 +327,7 @@ def generate_RGB_mask(original_frame: np.ndarray, visualize_results: bool=False)
     # Initialize an array of characters. RGB will represent 
     # the indices where there are the respective colors in 
     # bayer pattern 
-    mask: np.ndarray = np.full(original_frame.shape[:2], 'x', dtype='<U1')
+    mask: np.ndarray = np.full(original_frame.shape[:2], 'x', dtype='<U1') if marker == "str" else np.full(original_frame.shape[:2], -1, dtype=np.float64)
     
     # Extract the dimensions of the frame 
     height, width = original_frame.shape[:2]
@@ -361,11 +361,11 @@ def generate_RGB_mask(original_frame: np.ndarray, visualize_results: bool=False)
                                         )
     
     # Set the values in the mask 
-    for color, pixel_coords in zip("RGB", (world_r_pixels, world_g_pixels, world_b_pixels)):
+    for idx, (color, pixel_coords) in enumerate(zip("RGB", (world_r_pixels, world_g_pixels, world_b_pixels))):
         rows: np.ndarray = pixel_coords[:, 0]
         cols: np.ndarray = pixel_coords[:, 1]
 
-        mask[rows, cols] = color
+        mask[rows, cols] = color if marker == "str" else idx
 
     # Visualize the results if desired
     if(visualize_results is True):
