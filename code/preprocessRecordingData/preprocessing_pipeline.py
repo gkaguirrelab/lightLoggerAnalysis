@@ -34,24 +34,23 @@ import video_io
 import virtual_foveation
 import spd_util
 
-# -----------------------------------------------------------------------------
-# generate_world_videos
-#
-# Build playable world-camera videos from raw chunk recordings.
-# Iterates over all subjects and activities, combines chunk files from the
-# GKA directory, optionally applies preprocessing (debayer, color weights,
-# digital gain, frame filling), and writes a single W.avi per recording.
-#
-# Inputs:
-#   src_dir            root directory containing raw FLIC recordings
-#   dst_dir            destination directory for processed videos
-#   overwrite_existing regenerate videos even if output exists
-#   apply_color_weights apply camera color calibration
-#   debayer_images     perform Bayer demosaicing
-#   apply_digital_gain apply gain correction
-#   fill_missing_frames interpolate missing frames
-#   verbose            print progress information
-# -----------------------------------------------------------------------------
+def get_all_subject_ids() -> set[int]:
+    """
+    Function to load in the excel sheet recording
+    subjects we processed and return their IDs
+    for differernt experiments
+    """
+    return set()
+
+
+def get_all_activity_names() -> set[int]:
+    """
+    Function to load in the activities that
+    were run for different experiments
+    """
+    return set()
+
+
 def generate_world_videos(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026", 
                           dst_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoorVideos2026", 
                           subjects_to_skip: Iterable=set(), 
@@ -68,6 +67,22 @@ def generate_world_videos(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
                           fill_missing_frames: bool=True, 
                           verbose: bool=False
                          ) -> None:
+    """
+    Build playable world-camera videos from raw chunk recordings.
+    Iterates over all subjects and activities, combines chunk files from the
+    GKA directory, optionally applies preprocessing (debayer, color weights,
+    digital gain, frame filling), and writes a single W.avi per recording.
+
+    Inputs:
+      src_dir            root directory containing raw FLIC recordings
+      dst_dir            destination directory for processed videos
+      overwrite_existing regenerate videos even if output exists
+      apply_color_weights apply camera color calibration
+      debayer_images     perform Bayer demosaicing
+      apply_digital_gain apply gain correction
+      fill_missing_frames interpolate missing frames
+      verbose            print progress information
+    """
 
     # First, let's find all of the subjects in this experiment 
     subject_paths: list[str] = natsorted([
@@ -135,26 +150,6 @@ def generate_world_videos(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
             
     return 
 
-# -----------------------------------------------------------------------------
-# generate_egocentric_mapper_results
-#
-# Runs the egocentric video mapper to align Neon gaze data with the world
-# camera video. Produces gaze/fixation mappings and optional visualization
-# outputs for each subject/activity recording.
-#
-# Inputs:
-#   src_dir                    raw dataset directory
-#   dst_dir                    processing output directory
-#   mapping_choice             Fixations / Gaze / Both
-#   refresh_time_threshold_sec mapping refresh threshold
-#   render_video               render mapping visualization
-#   render_video_comparison    render comparison video
-#   optic_flow_algorithm       optical flow algorithm
-#   image_matcher              feature matcher used for alignment
-#   show_video_preview         show live preview
-#   overwrite_existing         overwrite existing results
-#   verbose                    print progress
-# -----------------------------------------------------------------------------
 def generate_egocentric_mapper_results(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026", 
                                        dst_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoorVideos2026",
                                        mapping_choice: Literal["Fixations", "Gaze", "Both"]='Both',
@@ -171,6 +166,24 @@ def generate_egocentric_mapper_results(src_dir: str="/Volumes/FLIC_raw/NEWscript
                                        activities_to_process: Iterable=set(), 
                                        verbose: bool=False
                                       ) -> None:
+    """
+    Runs the egocentric video mapper to align Neon gaze data with the world
+    camera video. Produces gaze/fixation mappings and optional visualization
+    outputs for each subject/activity recording.
+
+    Inputs:
+      src_dir                    raw dataset directory
+      dst_dir                    processing output directory
+      mapping_choice             Fixations / Gaze / Both
+      refresh_time_threshold_sec mapping refresh threshold
+      render_video               render mapping visualization
+      render_video_comparison    render comparison video
+      optic_flow_algorithm       optical flow algorithm
+      image_matcher              feature matcher used for alignment
+      show_video_preview         show live preview
+      overwrite_existing         overwrite existing results
+      verbose                    print progress
+    """
     # First, let's find all of the subjects in this experiment 
     subject_paths: list[str] = natsorted([
         subject_path 
@@ -247,20 +260,6 @@ def generate_egocentric_mapper_results(src_dir: str="/Volumes/FLIC_raw/NEWscript
 
     return 
 
-# -----------------------------------------------------------------------------
-# generate_virtually_foveated_videos
-#
-# Generates retinally-centered (virtually foveated) videos using MATLAB
-# routines. For each subject/activity, launches MATLAB, runs the virtual
-# foveation pipeline, and moves the resulting video into the processing
-# directory.
-#
-# Inputs:
-#   src_dir            raw dataset directory
-#   dst_dir            processed dataset directory
-#   overwrite_existing regenerate existing outputs
-#   verbose            print progress
-# -----------------------------------------------------------------------------
 def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026", 
                                        dst_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoorVideos2026",
                                        overwrite_existing: bool=False,
@@ -272,6 +271,18 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/NEWscript
                                        activities_to_process: Iterable=set(), 
                                        projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = set(["virtuallyFoveated", "justProjection"])
                                       ) -> None:
+    """
+    Generates retinally-centered (virtually foveated) videos using MATLAB
+    routines. For each subject/activity, launches MATLAB, runs the virtual
+    foveation pipeline, and moves the resulting video into the processing
+    directory.
+
+    Inputs:
+      src_dir            raw dataset directory
+      dst_dir            processed dataset directory
+      overwrite_existing regenerate existing outputs
+      verbose            print progress
+    """
     
     import matlab.engine
 
@@ -381,20 +392,6 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/NEWscript
     
     return 
 
-# -----------------------------------------------------------------------------
-# generate_spds
-#
-# Computes temporal spatial power spectra (SPD) statistics from processed
-# videos using MATLAB analysis functions. Generates exponent maps, variance
-# maps, and spectral summaries for each subject/activity.
-#
-# Inputs:
-#   src_dir             directory containing processed videos
-#   dst_dir             directory for SPD outputs and figures
-#   overwrite_existing  recompute existing results
-#   activities_to_skip  set of activity names to ignore
-#   verbose             print progress
-# -----------------------------------------------------------------------------
 def generate_spds(src_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoorVideos2026", 
                   dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026",
                   overwrite_existing: bool=False,
@@ -407,6 +404,18 @@ def generate_spds(src_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoo
                   color_mode: Literal["L+M+S", "L-M", "GRAY", "a", "c_lm", "c_s"] = "L+M+S",
                   common_axes: bool=False, 
                   verbose: bool=False) -> None:
+    """
+    Computes temporal spatial power spectra (SPD) statistics from processed
+    videos using MATLAB analysis functions. Generates exponent maps, variance
+    maps, and spectral summaries for each subject/activity.
+
+    Inputs:
+      src_dir             directory containing processed videos
+      dst_dir             directory for SPD outputs and figures
+      overwrite_existing  recompute existing results
+      activities_to_skip  set of activity names to ignore
+      verbose             print progress
+    """
     
     import matlab.engine
 
@@ -1840,11 +1849,6 @@ def generate_mean_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dr
 
 
 
-"""Give an iterable of desired color modes 
-   and desired subjects/activites, 
-   generate a plot for each subject/activity 
-   with them all on it 
-"""
 def combine_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026", 
                  dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026", 
                  overwrite_existing: bool=False,
@@ -1857,6 +1861,12 @@ def combine_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/
                  color_modes_to_skip: Iterable[Literal["a", "c_lm", "c_s", "L-M", "L+M+S"]] = set(),
                  color_modes_to_process: Iterable[Literal["a", "c_lm", "c_s", "L-M", "L+M+S"]] = set()
                 ) -> None:
+    """
+    Give an iterable of desired color modes
+       and desired subjects/activites,
+       generate a plot for each subject/activity
+       with them all on it
+    """
     import matlab.engine
     
     # Initialize the MATLAB engine to utilize the MATLAB function we have developed for this purpose 
@@ -2157,18 +2167,6 @@ def plot_mean_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbo
 
 
 
-# -----------------------------------------------------------------------------
-# unpack_neon_recordings
-#
-# Extracts Neon eye-tracking recordings from zipped archives inside each
-# activity folder and places them into a "Neon" directory. The original
-# zip archive is removed after extraction.
-#
-# Inputs:
-#   src_dir            raw dataset directory
-#   overwrite_existing re-extract if Neon folder already exists
-#   verbose            print progress
-# -----------------------------------------------------------------------------
 def unpack_neon_recordings(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026",
                            overwrite_existing: bool=False,
                            verbose: bool=False, 
@@ -2177,6 +2175,16 @@ def unpack_neon_recordings(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutd
                            activities_to_skip: Iterable=set(), 
                            activities_to_process: Iterable=set()
                           ) -> None:
+    """
+    Extracts Neon eye-tracking recordings from zipped archives inside each
+    activity folder and places them into a "Neon" directory. The original
+    zip archive is removed after extraction.
+
+    Inputs:
+      src_dir            raw dataset directory
+      overwrite_existing re-extract if Neon folder already exists
+      verbose            print progress
+    """
     subject_paths: list[str] = natsorted([
         subject_path
         for subject_name in os.listdir(src_dir)
@@ -2243,22 +2251,20 @@ def unpack_neon_recordings(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutd
     return 
 
 
-# -----------------------------------------------------------------------------
-# rename_world_recordings
-#
-# Normalizes naming of raw world-camera recordings by renaming the original
-# recording directory to "GKA". Ensures the dataset follows the expected
-# structure used by downstream processing scripts.
-#
-# Inputs:
-#   src_dir            raw dataset directory
-#   overwrite_existing rename even if destination exists
-#   verbose            print progress
-# -----------------------------------------------------------------------------
 def rename_world_recordings(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026",
                             overwrite_existing: bool=False,
                             verbose: bool=False
                            ) -> None:
+    """
+    Normalizes naming of raw world-camera recordings by renaming the original
+    recording directory to "GKA". Ensures the dataset follows the expected
+    structure used by downstream processing scripts.
+
+    Inputs:
+      src_dir            raw dataset directory
+      overwrite_existing rename even if destination exists
+      verbose            print progress
+    """
     
     # First, let's find all of the subjects in this experiment 
     subject_paths: list[str] = natsorted([os.path.join(src_dir, subject_name) 
@@ -2307,21 +2313,168 @@ def rename_world_recordings(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOut
 
     return 
 
-# -----------------------------------------------------------------------------
-# verify_neon_integrity
-#
-# Performs sanity checks on extracted Neon eye-tracking recordings. Ensures
-# required files exist (gaze, blink, fixation, timestamps, etc.) and that
-# the recording directory contains the expected video and metadata files.
-# Missing items generate warnings.
-#
-# Inputs:
-#   src_dir   raw dataset directory
-#   verbose   print additional diagnostics
-# -----------------------------------------------------------------------------
+def verify_data_integrity(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026",
+                          subjects_to_skip: Iterable=set(),
+                          subjects_to_process: Iterable=set(),
+                          activities_to_skip: Iterable=set(),
+                          activities_to_process: Iterable=set(),
+                          verbose: bool=False
+                         ) -> dict[int, dict[str, dict[str, list[str]]]]:
+    """
+    Performs sanity checks on raw recording folders to ensure that both GKA and
+    Neon data exist for each requested subject/activity. The function checks that
+    the expected directories are present and non-empty and, for Neon recordings,
+    verifies that the required metadata, CSVs, and scene video exist.
+
+    Inputs:
+      src_dir                raw dataset directory
+      subjects_to_skip       subject numbers to ignore
+      subjects_to_process    subject numbers to exclusively process
+      activities_to_skip     activity names to ignore
+      activities_to_process  activity names to exclusively process
+      verbose                print additional diagnostics
+    """
+    
+    # First, let's find all of the subjects in this experiment 
+    subject_paths: list[str] = natsorted([
+        subject_path
+        for subject_name in os.listdir(src_dir)
+        if re.fullmatch(r"FLIC_\d+", subject_name)
+        and os.path.isdir((subject_path := os.path.join(src_dir, subject_name)))
+        and _is_desired_item(_extract_num_from_id(subject_name), subjects_to_process, subjects_to_skip)
+    ]) 
+    assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
+
+    # Initialize a dictionary that stores integrity issues for each recording
+    integrity_issues: dict[int, dict[str, dict[str, list[str]]]] = {}
+
+    # Convert activity filters to sets so we can compare against each subject's
+    # available activity directories when explicit activity requests are given.
+    activities_to_process = set(activities_to_process)
+    activities_to_skip = set(activities_to_skip)
+
+    # Now, let's iterate over all the subject paths 
+    subject_iterator: Iterable = range(len(subject_paths)) if verbose is False else tqdm(range(len(subject_paths)), desc="Processing Subjects", leave=True)
+    for subject_num in subject_iterator:
+        # Retrieve the subject path and subject name
+        subject_path: str = subject_paths[subject_num]
+        subject_id: str = os.path.basename(subject_path)
+        subject_id_number: int = int(re.search("\d+", subject_id).group())
+
+        integrity_issues[subject_id_number] = {}
+
+        # Determine which activities should be examined for this subject. If an
+        # explicit activity list was requested, include missing activity names
+        # too so they can be reported as integrity issues.
+        available_activity_names: list[str] = [
+            filename
+            for filename in natsorted(os.listdir(subject_path))
+            if os.path.isdir(os.path.join(subject_path, filename))
+        ]
+        if(len(activities_to_process) > 0):
+            activities_to_check: list[str] = natsorted(list(activities_to_process))
+        else:
+            activities_to_check = [
+                activity_name
+                for activity_name in available_activity_names
+                if activity_name not in activities_to_skip
+            ]
+
+        activities_iterator: Iterable = range(len(activities_to_check)) if verbose is False else tqdm(range(len(activities_to_check)), desc="Processing Activities", leave=False)
+        for activity_num in activities_iterator:
+            # Retrieve the activity path and activity name
+            activity_name: str = activities_to_check[activity_num]
+            activity_path: str = os.path.join(subject_path, activity_name)
+
+            integrity_issues[subject_id_number][activity_name] = {"GKA": [], "Neon": []}
+
+            if(activity_name not in available_activity_names):
+                missing_activity_message: str = f"{activity_path} does not exist"
+                integrity_issues[subject_id_number][activity_name]["GKA"].append(missing_activity_message)
+                integrity_issues[subject_id_number][activity_name]["Neon"].append(missing_activity_message)
+
+                for issue in dict.fromkeys(
+                    integrity_issues[subject_id_number][activity_name]["GKA"]
+                    + integrity_issues[subject_id_number][activity_name]["Neon"]
+                ):
+                    warnings.warn(issue)
+                continue
+
+            # Construct the path to the GKA folder
+            gka_folder_path: str = os.path.join(activity_path, "GKA")
+            if(not os.path.exists(gka_folder_path)):
+                integrity_issues[subject_id_number][activity_name]["GKA"].append(f"{gka_folder_path} does not exist")
+            elif(not os.path.isdir(gka_folder_path)):
+                integrity_issues[subject_id_number][activity_name]["GKA"].append(f"{gka_folder_path} is not a directory")
+            elif(len(os.listdir(gka_folder_path)) == 0):
+                integrity_issues[subject_id_number][activity_name]["GKA"].append(f"{gka_folder_path} is empty")
+
+            # Construct the path to the Neon folder
+            neon_folder_path: str = os.path.join(activity_path, "Neon")
+            if(not os.path.exists(neon_folder_path)):
+                integrity_issues[subject_id_number][activity_name]["Neon"].append(f"{neon_folder_path} does not exist")
+            elif(not os.path.isdir(neon_folder_path)):
+                integrity_issues[subject_id_number][activity_name]["Neon"].append(f"{neon_folder_path} is not a directory")
+            elif(len(os.listdir(neon_folder_path)) == 0):
+                integrity_issues[subject_id_number][activity_name]["Neon"].append(f"{neon_folder_path} is empty")
+            else:
+                # If the folder exists, ensure it has the desired content 
+                for filename in ("enrichment_info.txt", "sections.csv"):
+                    filepath: str = os.path.join(neon_folder_path, filename)
+                    if(not os.path.exists(filepath)):
+                        integrity_issues[subject_id_number][activity_name]["Neon"].append(f"{filepath} does not exist")
+
+                # There should be a single recording subdirectory in this folder
+                neon_recording_folders: list[str] = [
+                    os.path.join(neon_folder_path, filename)
+                    for filename in os.listdir(neon_folder_path)
+                    if os.path.isdir(os.path.join(neon_folder_path, filename))
+                ]
+                if(len(neon_recording_folders) == 0):
+                    integrity_issues[subject_id_number][activity_name]["Neon"].append(f"Subfolder does not exist in {neon_folder_path}")
+                else:
+                    neon_recording_folder: str = neon_recording_folders[0]
+
+                    # Next, make sure the required files exist in this folder 
+                    for filename in ("3d_eye_states.csv", "blinks.csv", "events.csv", "fixations.csv", "gaze.csv", "world_timestamps.csv", "saccades.csv", "template.csv"):
+                        filepath: str = os.path.join(neon_recording_folder, filename)
+                        if(not os.path.exists(filepath)):
+                            integrity_issues[subject_id_number][activity_name]["Neon"].append(f"{filepath} does not exist")
+
+                    # Make sure there is a .mp4 video in this folder 
+                    mp4_videos: list[str] = [
+                        filename
+                        for filename in os.listdir(neon_recording_folder)
+                        if filename.endswith(".mp4")
+                    ]
+                    if(len(mp4_videos) == 0):
+                        integrity_issues[subject_id_number][activity_name]["Neon"].append(f"{neon_recording_folder} does not have an .mp4 video")
+
+            # Emit warnings for any issues we found
+            for issue in dict.fromkeys(
+                integrity_issues[subject_id_number][activity_name]["GKA"]
+                + integrity_issues[subject_id_number][activity_name]["Neon"]
+            ):
+                warnings.warn(issue)
+
+            if(verbose is True and len(integrity_issues[subject_id_number][activity_name]["GKA"]) == 0 and len(integrity_issues[subject_id_number][activity_name]["Neon"]) == 0):
+                print(f"{subject_id} | {activity_name}: OK")
+
+    return integrity_issues
+
 def verify_neon_integrity(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026",
                           verbose: bool=False
                          ) -> None:
+    """
+    Performs sanity checks on extracted Neon eye-tracking recordings. Ensures
+    required files exist (gaze, blink, fixation, timestamps, etc.) and that
+    the recording directory contains the expected video and metadata files.
+    Missing items generate warnings.
+
+    Inputs:
+      src_dir   raw dataset directory
+      verbose   print additional diagnostics
+    """
     
     # First, let's find all of the subjects in this experiment 
     subject_paths: list[str] = natsorted([os.path.join(src_dir, subject_name) 
