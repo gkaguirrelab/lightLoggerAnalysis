@@ -2354,9 +2354,9 @@ def verify_data_integrity(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
                          ) -> dict[int, dict[str, dict[str, list[str]]]]:
     """
     Performs sanity checks on raw recording folders to ensure that both GKA and
-    Neon data exist for each requested subject/activity. The function checks that
-    the expected directories are present and non-empty and, for Neon recordings,
-    verifies that the required metadata, CSVs, and scene video exist.
+    Neon data exist for each requested subject/activity. By default, subjects
+    and activities are taken from the FLIC subject spreadsheets; explicit
+    process filters override those defaults.
 
     Inputs:
       src_dir                raw dataset directory
@@ -2367,129 +2367,80 @@ def verify_data_integrity(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
       verbose                print additional diagnostics
     """
     
-    # First, let's find all of the subjects in this experiment 
-    subject_paths: list[str] = natsorted([
-        subject_path
-        for subject_name in os.listdir(src_dir)
-        if re.fullmatch(r"FLIC_\d+", subject_name)
-        and os.path.isdir((subject_path := os.path.join(src_dir, subject_name)))
-        and _is_desired_item(_extract_num_from_id(subject_name), subjects_to_process, subjects_to_skip)
-    ]) 
-    assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
-
-    # Initialize a dictionary that stores integrity issues for each recording
-    integrity_issues: dict[int, dict[str, dict[str, list[str]]]] = {}
-
-    # Convert activity filters to sets so we can compare against each subject's
-    # available activity directories when explicit activity requests are given.
+    subjects_to_process = set(subjects_to_process)
+    subjects_to_skip = set(subjects_to_skip)
     activities_to_process = set(activities_to_process)
     activities_to_skip = set(activities_to_skip)
 
+    subject_ids_to_check: list[int] = sorted([
+        subject_id
+        for subject_id in (subjects_to_process if len(subjects_to_process) > 0 else get_subject_ids())
+        if subject_id not in subjects_to_skip
+    ])
+    assert len(subject_ids_to_check) > 0, "No subject IDs selected for verification"
+
+    activity_names_to_check: list[str] = natsorted([
+        activity_name
+        for activity_name in (activities_to_process if len(activities_to_process) > 0 else get_activity_names())
+        if activity_name not in activities_to_skip
+    ])
+    assert len(activity_names_to_check) > 0, "No activity names selected for verification"
+
+    integrity_issues: dict[int, dict[str, dict[str, list[str]]]] = {}
+
     # Now, let's iterate over all the subject paths 
-    subject_iterator: Iterable = range(len(subject_paths)) if verbose is False else tqdm(range(len(subject_paths)), desc="Processing Subjects", leave=True)
-    for subject_num in subject_iterator:
-        # Retrieve the subject path and subject name
-        subject_path: str = subject_paths[subject_num]
-        subject_id: str = os.path.basename(subject_path)
-        subject_id_number: int = int(re.search("\d+", subject_id).group())
+    subject_iterator: Iterable = subject_ids_to_check if verbose is False else tqdm(subject_ids_to_check, desc="Processing Subjects", leave=True)
+    for subject_id_number in subject_iterator:
+        subject_id: str = f"FLIC_{subject_id_number}"
+        subject_path: str = os.path.join(src_dir, subject_id)
+        assert os.path.exists(subject_path), f"{subject_path} does not exist"
+        assert os.path.isdir(subject_path), f"{subject_path} is not a directory"
 
         integrity_issues[subject_id_number] = {}
 
-        # Determine which activities should be examined for this subject. If an
-        # explicit activity list was requested, include missing activity names
-        # too so they can be reported as integrity issues.
-        available_activity_names: list[str] = [
-            filename
-            for filename in natsorted(os.listdir(subject_path))
-            if os.path.isdir(os.path.join(subject_path, filename))
-        ]
-        if(len(activities_to_process) > 0):
-            activities_to_check: list[str] = natsorted(list(activities_to_process))
-        else:
-            activities_to_check = [
-                activity_name
-                for activity_name in available_activity_names
-                if activity_name not in activities_to_skip
-            ]
-
-        activities_iterator: Iterable = range(len(activities_to_check)) if verbose is False else tqdm(range(len(activities_to_check)), desc="Processing Activities", leave=False)
-        for activity_num in activities_iterator:
-            # Retrieve the activity path and activity name
-            activity_name: str = activities_to_check[activity_num]
+        activities_iterator: Iterable = activity_names_to_check if verbose is False else tqdm(activity_names_to_check, desc="Processing Activities", leave=False)
+        for activity_name in activities_iterator:
             activity_path: str = os.path.join(subject_path, activity_name)
-
             integrity_issues[subject_id_number][activity_name] = {"GKA": [], "Neon": []}
-
-            if(activity_name not in available_activity_names):
-                missing_activity_message: str = f"{activity_path} does not exist"
-                integrity_issues[subject_id_number][activity_name]["GKA"].append(missing_activity_message)
-                integrity_issues[subject_id_number][activity_name]["Neon"].append(missing_activity_message)
-
-                for issue in dict.fromkeys(
-                    integrity_issues[subject_id_number][activity_name]["GKA"]
-                    + integrity_issues[subject_id_number][activity_name]["Neon"]
-                ):
-                    warnings.warn(issue)
-                continue
+            assert os.path.exists(activity_path), f"{activity_path} does not exist"
+            assert os.path.isdir(activity_path), f"{activity_path} is not a directory"
 
             # Construct the path to the GKA folder
             gka_folder_path: str = os.path.join(activity_path, "GKA")
-            if(not os.path.exists(gka_folder_path)):
-                integrity_issues[subject_id_number][activity_name]["GKA"].append(f"{gka_folder_path} does not exist")
-            elif(not os.path.isdir(gka_folder_path)):
-                integrity_issues[subject_id_number][activity_name]["GKA"].append(f"{gka_folder_path} is not a directory")
-            elif(len(os.listdir(gka_folder_path)) == 0):
-                integrity_issues[subject_id_number][activity_name]["GKA"].append(f"{gka_folder_path} is empty")
+            assert os.path.exists(gka_folder_path), f"{gka_folder_path} does not exist"
+            assert os.path.isdir(gka_folder_path), f"{gka_folder_path} is not a directory"
+            assert len(os.listdir(gka_folder_path)) > 0, f"{gka_folder_path} is empty"
 
             # Construct the path to the Neon folder
             neon_folder_path: str = os.path.join(activity_path, "Neon")
-            if(not os.path.exists(neon_folder_path)):
-                integrity_issues[subject_id_number][activity_name]["Neon"].append(f"{neon_folder_path} does not exist")
-            elif(not os.path.isdir(neon_folder_path)):
-                integrity_issues[subject_id_number][activity_name]["Neon"].append(f"{neon_folder_path} is not a directory")
-            elif(len(os.listdir(neon_folder_path)) == 0):
-                integrity_issues[subject_id_number][activity_name]["Neon"].append(f"{neon_folder_path} is empty")
-            else:
-                # If the folder exists, ensure it has the desired content 
-                for filename in ("enrichment_info.txt", "sections.csv"):
-                    filepath: str = os.path.join(neon_folder_path, filename)
-                    if(not os.path.exists(filepath)):
-                        integrity_issues[subject_id_number][activity_name]["Neon"].append(f"{filepath} does not exist")
+            assert os.path.exists(neon_folder_path), f"{neon_folder_path} does not exist"
+            assert os.path.isdir(neon_folder_path), f"{neon_folder_path} is not a directory"
+            assert len(os.listdir(neon_folder_path)) > 0, f"{neon_folder_path} is empty"
 
-                # There should be a single recording subdirectory in this folder
-                neon_recording_folders: list[str] = [
-                    os.path.join(neon_folder_path, filename)
-                    for filename in os.listdir(neon_folder_path)
-                    if os.path.isdir(os.path.join(neon_folder_path, filename))
-                ]
-                if(len(neon_recording_folders) == 0):
-                    integrity_issues[subject_id_number][activity_name]["Neon"].append(f"Subfolder does not exist in {neon_folder_path}")
-                else:
-                    neon_recording_folder: str = neon_recording_folders[0]
+            for filename in ("enrichment_info.txt", "sections.csv"):
+                filepath: str = os.path.join(neon_folder_path, filename)
+                assert os.path.exists(filepath), f"{filepath} does not exist"
 
-                    # Next, make sure the required files exist in this folder 
-                    for filename in ("3d_eye_states.csv", "blinks.csv", "events.csv", "fixations.csv", "gaze.csv", "world_timestamps.csv", "saccades.csv", "template.csv"):
-                        filepath: str = os.path.join(neon_recording_folder, filename)
-                        if(not os.path.exists(filepath)):
-                            integrity_issues[subject_id_number][activity_name]["Neon"].append(f"{filepath} does not exist")
+            neon_recording_folders: list[str] = [
+                os.path.join(neon_folder_path, filename)
+                for filename in os.listdir(neon_folder_path)
+                if os.path.isdir(os.path.join(neon_folder_path, filename))
+            ]
+            assert len(neon_recording_folders) > 0, f"Subfolder does not exist in {neon_folder_path}"
+            neon_recording_folder: str = neon_recording_folders[0]
 
-                    # Make sure there is a .mp4 video in this folder 
-                    mp4_videos: list[str] = [
-                        filename
-                        for filename in os.listdir(neon_recording_folder)
-                        if filename.endswith(".mp4")
-                    ]
-                    if(len(mp4_videos) == 0):
-                        integrity_issues[subject_id_number][activity_name]["Neon"].append(f"{neon_recording_folder} does not have an .mp4 video")
+            for filename in ("3d_eye_states.csv", "blinks.csv", "events.csv", "fixations.csv", "gaze.csv", "world_timestamps.csv", "saccades.csv", "template.csv"):
+                filepath: str = os.path.join(neon_recording_folder, filename)
+                assert os.path.exists(filepath), f"{filepath} does not exist"
 
-            # Emit warnings for any issues we found
-            for issue in dict.fromkeys(
-                integrity_issues[subject_id_number][activity_name]["GKA"]
-                + integrity_issues[subject_id_number][activity_name]["Neon"]
-            ):
-                warnings.warn(issue)
+            mp4_videos: list[str] = [
+                filename
+                for filename in os.listdir(neon_recording_folder)
+                if filename.endswith(".mp4")
+            ]
+            assert len(mp4_videos) > 0, f"{neon_recording_folder} does not have an .mp4 video"
 
-            if(verbose is True and len(integrity_issues[subject_id_number][activity_name]["GKA"]) == 0 and len(integrity_issues[subject_id_number][activity_name]["Neon"]) == 0):
+            if(verbose is True):
                 print(f"{subject_id} | {activity_name}: OK")
 
     return integrity_issues
@@ -2862,7 +2813,6 @@ def transfer_light_logger_recordings(src_dir: str="/Volumes/T7 Shield",
                                      overwrite_existing: bool=False, 
                                      verbose: bool=False
                                     ) -> None:
-
     # First, let's get all the recording names from the src dir 
     r_result: list[str] = [filename for filename in os.listdir(src_dir)
                            if os.path.isdir(os.path.join(src_dir, filename))
@@ -2917,6 +2867,7 @@ def transfer_light_logger_recordings(src_dir: str="/Volumes/T7 Shield",
     subjects_to_download: list[int] = [subject for subject in parsed_recording_map 
                                        if _is_desired_item(subject, subjects_to_transfer, subjects_to_skip)
                                       ]
+    assert len(subjects_to_download) > 0, f"No subjects to transfer found on the SSD after filtering skip/process"
     subject_iterator: Iterable = range(len(subjects_to_download)) if verbose is False else tqdm(range(len(subjects_to_download)), desc="Processing Subjects", leave=True)
     for subject_num in subject_iterator:
         # Retrieve the subject path and subject name
