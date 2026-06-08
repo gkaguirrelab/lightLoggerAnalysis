@@ -15,7 +15,7 @@ import scipy.io
 import numpy as np
 import copy
 import requests
-
+import pandas as pd
 
 # Construct the paths to our custom utility libraries 
 light_loger_analysis_dir: str = str(pathlib.Path(__file__).parents[2]) 
@@ -34,22 +34,54 @@ import video_io
 import virtual_foveation
 import spd_util
 
-def get_all_subject_ids() -> set[int]:
+def get_subject_ids(FLIC_subject_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_subject/NEWscriptedIndoorOutdoorVideos2026") -> set[int]:
     """
     Function to load in the excel sheet recording
     subjects we processed and return their IDs
     for differernt experiments
     """
-    return set()
+    
+    # Load in the excel file containing the subjectIDs 
+    subject_summary_filename: str = [ filename for filename in os.listdir(FLIC_subject_dir) 
+                                      if "subjectsummarymigraine" if filename.lower() 
+                                    ][0]
+    subject_summary_filepath: str = os.path.join(FLIC_subject_dir, subject_summary_filename)
+    df: pd.DataFrame = pd.read_excel(subject_summary_filepath, header=0)
 
+    return set([ _extract_num_from_id(subject_id) for subject_id in df["Subject ID"]])
 
-def get_all_activity_names() -> set[int]:
-    """
-    Function to load in the activities that
-    were run for different experiments
-    """
-    return set()
+def get_activity_names(FLIC_subject_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_subject/NEWscriptedIndoorOutdoorVideos2026", 
+                       group_by: list[str] | None=["Activity Name"]
+                      ) -> set[str] | dict[tuple, str]:
+    # Load in the excel file containing the activity names
+    activities_filename: str = [filename for filename in os.listdir(FLIC_subject_dir)
+                                if "activitiesmigraine" in filename.lower() 
+                               ][0]
+    activities_filepath: str = os.path.join(FLIC_subject_dir, activities_filename)
+    df: pd.DataFrame = pd.read_excel(activities_filepath, header=0)
 
+    # Convert the Y/N columns to bool 
+    for col in df.columns[1:]:
+        df[col] = df[col] == 'Y'
+
+    # If we just want to return activity names, no need to do complex operations 
+    if(tuple(group_by) == ("Activity Name",)):
+        return set(df["Activity Name"]) 
+
+    # Group by the desired columns, default is activity name
+    # (primary key)
+    df = df.groupby(by=group_by[0] if len(group_by) == 1 else group_by)
+
+    groups: dict[tuple, list[str]] = {group: list(members["Activity Name"])
+                                      for group, members in df
+                                     }
+
+    return groups
+
+def get_pupil_cloud_apikey() -> str:
+    api_key_path: str = os.path.join(light_loger_analysis_dir, "code", "apiTokens", "pupil_cloud.txt")
+    with open(api_key_path, "r") as f:
+        return f.readline().strip()
 
 def generate_world_videos(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026", 
                           dst_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoorVideos2026", 

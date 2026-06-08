@@ -1,4 +1,9 @@
 analysis_env
 .DS_Store
 *.asv
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+API-tokens/
 /code/library/matlabIO/python_libraries/__pycache__/video_io.cpython-311.pyc
