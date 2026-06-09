@@ -356,16 +356,8 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
     for tt = 1:numel(contrast_agc_targets)
         contrast_target = contrast_agc_targets(tt); 
 
-        switch(contrast_target)
-            case 0.25 
-                settings_constants_dict = world_util.WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x25;
-            case 0.5 
-                settings_constants_dict = world_util.WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x5;
-            case 0.75 
-                settings_constants_dict = world_util.WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x75;
-            otherwise 
-                error("Unsupported contrast target %f", contrast_target); 
-        end 
+        % Let's get the NDF settings for this contrast level 
+        settings_contrast_dict = world_util.WORLD_CONTRAST_LEVEL_NDF_SETTINGS{contrast_target}; 
 
         % Initialize the container for the settings per NDF for this contrast target 
         contrast_target_fieldname = "x" + strrep(string(contrast_target), ".", "x"); 
