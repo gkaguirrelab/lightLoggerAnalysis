@@ -279,6 +279,10 @@ def debayer_image(image: np.ndarray,
         
     return debayered_image if dst is None else None
 
+def generate_fielding_function(image: np.ndarray) -> np.ndarray:
+    "TODO: Fill in everything here"    
+
+    return np.zeros_like(image)
 
 """Apply the fielding function to a frame"""
 def apply_fielding_function(original_frame: np.ndarray, visualize_results: bool=False) -> tuple[np.ndarray, object] | np.ndarray:
