@@ -19,39 +19,67 @@ from numba import njit, prange
 # so this is 0 (ms)
 WORLD_TIME_OFFSET: float = 0
 
+# This is assuming a contrast of 0.9 is the target of 127 at each NDF level
+WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x9: dict[int, tuple[float, float, float]] = {NDF_level:  # Define the fixed settings for this camera per integer NDF filter
+                                                                                  (1.0, 1.0, 468.0) if NDF_level == 0
+                                                                                  else (1.0, 1.0, 4599.0) if NDF_level == 1
+                                                                                  else (7.757575988769531, 1.0, 8290.0) if NDF_level == 2
+                                                                                  else (10.239999771118164, 3.5039764011458963, 8290.0) if NDF_level == 3
+                                                                                  else (10.239999771118164, 7.2417770421497565, 8290.0) if NDF_level == 4
+                                                                                  else (10.666, 10.0, 8333)
+                                                                                  for NDF_level in range(7)
+                                                                              }
+
 # This is assuming a contrast of 0.75 is the target of 127 at each NDF level
-WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x75: dict[int, tuple[int, int]] = {NDF_level:  # Define the fixed settings for this camera per integer NDF filter
-                                                                        (1.0, 1.0, 508.0) if NDF_level == 0 
-                                                                        else (1.000e+00, 1.000e+00, 5.537e+03) if NDF_level == 1 
-                                                                        else (8.82758617e+00, 1.00000000e+00, 8333) if NDF_level == 2
-                                                                        else (10.666, 3.89023162e+00, 8333) if NDF_level == 3
-                                                                        else (10.666, 7.62447626e+00, 8333) if NDF_level == 4  
-                                                                        else (10.666, 10.0, 8333) 
-                                                                        for NDF_level in range(7)
-                                                                    }
+WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x75: dict[int, tuple[float, float, float]] = {NDF_level:  # Define the fixed settings for this camera per integer NDF filter
+                                                                                   (1.0, 1.0, 508.0) if NDF_level == 0
+                                                                                   else (1.000e+00, 1.000e+00, 5.537e+03) if NDF_level == 1
+                                                                                   else (8.82758617e+00, 1.00000000e+00, 8333) if NDF_level == 2
+                                                                                   else (10.666, 3.89023162e+00, 8333) if NDF_level == 3
+                                                                                   else (10.666, 7.62447626e+00, 8333) if NDF_level == 4
+                                                                                   else (10.666, 10.0, 8333)
+                                                                                   for NDF_level in range(7)
+                                                                               }
 
 # This is assuming a contrast of 0.5 is the target of 127 at each NDF level TODO: Check this but pretty sure i am correct
-WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x5: dict[int, tuple[int, int]] = {NDF_level:  # Define the fixed settings for this camera per integer NDF filter
-                                                                    (1.0, 1.0, 747) if NDF_level == 0 
-                                                                    else (1.0, 1.0, 7085) if NDF_level == 1 
-                                                                    else (10.666, 1.14, 8333) if NDF_level == 2
-                                                                    else (10.666, 4.297, 8333) if NDF_level == 3
-                                                                    else (10.666, 10.0, 8333)  
-                                                                    for NDF_level in range(7)
-                                                                }
+WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x5: dict[int, tuple[float, float, float]] = {NDF_level:  # Define the fixed settings for this camera per integer NDF filter
+                                                                                  (1.0, 1.0, 747.0) if NDF_level == 0
+                                                                                  else (1.0, 1.0, 7085.0) if NDF_level == 1
+                                                                                  else (10.666, 1.14, 8333) if NDF_level == 2
+                                                                                  else (10.666, 4.297, 8333) if NDF_level == 3
+                                                                                  else (10.666, 10.0, 8333)
+                                                                                  for NDF_level in range(7)
+                                                                              }
 
 # This is assuming a contrast of 0.25 is the target of 127 at each NDF level
-WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x25: dict[int, tuple[int, int]] = {NDF_level:  # Define the fixed settings for this camera per integer NDF filter
-                                                                     (1.000e+00, 1.000e+00, 1.466e+03) if NDF_level == 0 # TODO: Fill this in 
-                                                                    else (1.80281687, 1.0, 8333) if NDF_level == 1 
-                                                                    else (10.666, 1.58156674e+00, 8333) if NDF_level == 2
-                                                                    else (10.666, 5.96331605e+00, 8333) if NDF_level == 3
-                                                                    else (10.666, 7.97561560e+00, 8333) if NDF_level == 4
-                                                                    else (10.666, 10.0, 8333) 
-                                                                    for NDF_level in range(7)
-                                                                }
+WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x25: dict[int, tuple[float, float, float]] = {NDF_level:  # Define the fixed settings for this camera per integer NDF filter
+                                                                                   (1.000e+00, 1.000e+00, 1.466e+03) if NDF_level == 0  # TODO: Fill this in
+                                                                                   else (1.80281687, 1.0, 8333) if NDF_level == 1
+                                                                                   else (10.666, 1.58156674e+00, 8333) if NDF_level == 2
+                                                                                   else (10.666, 5.96331605e+00, 8333) if NDF_level == 3
+                                                                                   else (10.666, 7.97561560e+00, 8333) if NDF_level == 4
+                                                                                   else (10.666, 10.0, 8333)
+                                                                                   for NDF_level in range(7)
+                                                                               }
 
+# This is assuming a contrast of 0.1 is the target of 127 at each NDF level
+WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x1: dict[int, tuple[float, float, float]] = {NDF_level:  # Define the fixed settings for this camera per integer NDF filter
+                                                                                  (1.0, 1.0, 3711.0) if NDF_level == 0
+                                                                                  else (4.338983058929443, 1.0, 8290.0) if NDF_level == 1
+                                                                                  else (10.239999771118164, 2.9977685360728445, 8290.0) if NDF_level == 2
+                                                                                  else (10.239999771118164, 7.119079983538314, 8290.0) if NDF_level == 3
+                                                                                  else (10.239999771118164, 8.039178161297238, 8290.0) if NDF_level == 4
+                                                                                  else (10.666, 10.0, 8333)
+                                                                                  for NDF_level in range(7)
+                                                                              }
 
+WORLD_CONTRAST_LEVEL_NDF_SETTINGS: dict[float, dict[int, tuple[float, float, float]]] = {
+    0.1: WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x1,
+    0.25: WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x25,
+    0.5: WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x5,
+    0.75: WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x75,
+    0.9: WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x9,
+}
 
 # The labels of the cols of the world AGC metdata 
 # The world metadata files contain these columns with a 
@@ -280,7 +308,9 @@ def debayer_image(image: np.ndarray,
     return debayered_image if dst is None else None
 
 def generate_fielding_function(image: np.ndarray) -> np.ndarray:
-    "TODO: Fill in everything here"    
+    """
+    TODO: Everything here
+    """
 
     return np.zeros_like(image)
 
