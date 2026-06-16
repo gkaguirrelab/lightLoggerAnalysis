@@ -1,10 +1,11 @@
-import re 
+import gc
+import re
 import os
 from natsort import natsorted
 import copy
 import pathlib
 import sys
-from typing import Iterable
+from typing import Iterable, Literal
 from tqdm.auto import tqdm
 
 light_logger_analysis_path: str = pathlib.Path(__file__).parents[2]
@@ -149,25 +150,36 @@ def _parse_ms_linearity_readings(folders: list[list[str]],
                                  convert_time_units: bool=False,
                                  convert_to_float: bool=False,
                                  mean_axes: dict[str, tuple]= {'W': (1, 2), 'P': (1, 2), 'M': (0,)},
-                                 verbose: bool = False
+                                 verbose: Literal["tqdm", "text", "off"] = "off",
+                                 differentiate_color: bool=False
                                  ) -> list[list[dict]]:
     # Initialize a return list
     parsed_folders = copy.deepcopy(folders)
 
+    n_settings: int = len(folders)
+
     # Iterate over the settings levels (the rows)
-    settings_iterator: Iterable = range(len(folders)) if verbose is False else tqdm(range(len(folders)), desc="Parsing MS linearity settings levels", leave=False)
-    for settings_level in range(len(folders)):
+    settings_iterator: Iterable = tqdm(range(n_settings), desc="Parsing MS linearity settings levels", leave=False) if verbose == "tqdm" else range(n_settings)
+    for settings_level in settings_iterator:
+        if verbose == "text":
+            print(f"  Settings level {settings_level + 1}/{n_settings}")
+
+        n_measurements: int = len(folders[settings_level])
         # Iterate over the cols (measurement number)
-        measurement_iterator: Iterable = range(len(folders[settings_level])) if verbose is False else tqdm(range(len(folders)), desc="Parsing measurements", leave=False)
+        measurement_iterator: Iterable = tqdm(range(n_measurements), desc="Parsing measurements", leave=False) if verbose == "tqdm" else range(n_measurements)
         for measurement_number in measurement_iterator:
+            if verbose == "text":
+                print(f"    Measurement {measurement_number + 1}/{n_measurements}")
             parsed_folders[settings_level][measurement_number] = chunk_io.parse_chunks(folders[settings_level][measurement_number],
                                                                               apply_RGB_correction=apply_radiometric_correction,
                                                                               apply_digital_gain=apply_digital_gain,
                                                                               use_mean_frame=use_mean_frame,
                                                                               convert_time_units=convert_time_units,
                                                                               convert_to_float=convert_to_float,
-                                                                              mean_axes=mean_axes
+                                                                              mean_axes=mean_axes,
+                                                                              differentiate_color=differentiate_color
                                                                              )
+            gc.collect()
 
     return parsed_folders
 
@@ -212,29 +224,44 @@ def _sort_by_contrast_target_settings_measurement(folders: list[str]) -> list[li
 
 """Define a subfunction to parse the camera linearity readings into Python from their folder paths"""
 def _parse_camera_linearity_readings(folders: list[list[list[str]]],
-                                     verbose: bool = False, 
+                                     verbose: Literal["tqdm", "text", "off"] = "off",
                                      apply_radiometric_correction: bool=False,
-                                     apply_digital_gain: bool=False, 
-                                     convert_time_units: bool=False
+                                     apply_digital_gain: bool=False,
+                                     convert_time_units: bool=False,
+                                     differentiate_color: bool=False
                                     ) -> None:
-    # Deifne the output 
+    # Deifne the output
     parsed_folders: list[list[list[str]]] | list[list[list[dict]]] = copy.deepcopy(folders)
 
-    # Now, let's iterate over the folders 
-    contrast_target_iterator: Iterable = range(len(parsed_folders)) if verbose is False else tqdm(range(len(parsed_folders)), desc="Parsing camera linearity contrast targets", leave=False)
+    n_contrast_targets: int = len(parsed_folders)
+
+    # Now, let's iterate over the folders
+    contrast_target_iterator: Iterable = tqdm(range(n_contrast_targets), desc="Parsing camera linearity contrast targets", leave=False) if verbose == "tqdm" else range(n_contrast_targets)
     for contrast_target_idx in contrast_target_iterator:
+        if verbose == "text":
+            print(f"  Contrast target {contrast_target_idx + 1}/{n_contrast_targets}")
+
         contrast_target_matrix = parsed_folders[contrast_target_idx]
-        settings_iterator: Iterable = range(len(contrast_target_matrix)) if verbose is False else tqdm(range(len(contrast_target_matrix)), desc="Parsing camera linearity settings levels", leave=False)
+        n_settings: int = len(contrast_target_matrix)
+        settings_iterator: Iterable = tqdm(range(n_settings), desc="Parsing camera linearity settings levels", leave=False) if verbose == "tqdm" else range(n_settings)
         for settings_idx in settings_iterator:
+            if verbose == "text":
+                print(f"    Settings level {settings_idx + 1}/{n_settings}")
+
             settings_row = contrast_target_matrix[settings_idx]
-            measurement_iterator: Iterable = range(len(settings_row)) if verbose is False else tqdm(range(len(settings_row)), desc="Parsing measurements", leave=False)
+            n_measurements: int = len(settings_row)
+            measurement_iterator: Iterable = tqdm(range(n_measurements), desc="Parsing measurements", leave=False) if verbose == "tqdm" else range(n_measurements)
             for measurement_num in measurement_iterator:
+                if verbose == "text":
+                    print(f"      Measurement {measurement_num + 1}/{n_measurements}")
                 measurement_path = settings_row[measurement_num]
-                parsed_folders[contrast_target_idx][settings_idx][measurement_num] = chunk_io.parse_chunks(measurement_path, 
-                                                                                                           apply_RGB_correction=apply_radiometric_correction, 
+                parsed_folders[contrast_target_idx][settings_idx][measurement_num] = chunk_io.parse_chunks(measurement_path,
+                                                                                                           apply_RGB_correction=apply_radiometric_correction,
                                                                                                            apply_digital_gain=apply_digital_gain,
-                                                                                                           convert_time_units=convert_time_units
+                                                                                                           convert_time_units=convert_time_units,
+                                                                                                           differentiate_color=differentiate_color
                                                                                                         )
+                gc.collect()
 
     return parsed_folders
 
@@ -249,27 +276,45 @@ def _parse_temporal_sensitivity_readings(folders: list[list[str]],
                                          convert_to_float: bool=False,
                                          mean_axes: dict[str, tuple]= {'W': (1, 2), 'P': (1, 2), 'M': (0,)},
                                          contains_agc_metadata_dict: dict[str, bool]={'W': True, 'P': False, 'M': False},
-                                         verbose: bool = False
+                                         verbose: Literal["tqdm", "text", "off"] = "off",
+                                         differentiate_color: bool=False
                                         ) -> list[list[dict]]:
     # Initialize a return list
     parsed_folders: list[list[str]] | list[list[dict]] = copy.deepcopy(folders)
 
+    n_contrasts: int = len(folders)
+
     # Iterate over the folders and load them in
-    contrast_iterator: Iterable = range(len(folders)) if verbose is False else tqdm(range(len(folders)), desc="Parsing contrast levels", leave=False)
+    contrast_iterator: Iterable = tqdm(range(n_contrasts), desc="Parsing contrast levels", leave=False) if verbose == "tqdm" else range(n_contrasts)
     for contrast_level in contrast_iterator:
-        frequency_iterator: Iterable = range(len(folders[contrast_level])) if verbose is False else tqdm(range(len(folders[contrast_level])), desc="Parsing frequency levels", leave=False)
+        if verbose == "text":
+            print(f"  Contrast level {contrast_level + 1}/{n_contrasts}")
+
+        n_frequencies: int = len(folders[contrast_level])
+        frequency_iterator: Iterable = tqdm(range(n_frequencies), desc="Parsing frequency levels", leave=False) if verbose == "tqdm" else range(n_frequencies)
         for frequency_level in frequency_iterator:
-            parsed_folders[contrast_level][frequency_level] = [ chunk_io.parse_chunks(folders[contrast_level][frequency_level][measurement_num],
-                                                                           apply_RGB_correction=apply_radiometric_correction,
-                                                                           apply_digital_gain=apply_digital_gain,
-                                                                           use_mean_frame=use_mean_frame,
-                                                                           convert_time_units=convert_time_units,
-                                                                           convert_to_float=convert_to_float,
-                                                                           mean_axes=mean_axes,
-                                                                           contains_agc_metadata_dict=contains_agc_metadata_dict
-                                                                          )
-                                                                for measurement_num in range(len(parsed_folders[contrast_level][frequency_level]))
-                                                              ]
+            if verbose == "text":
+                print(f"    Frequency level {frequency_level + 1}/{n_frequencies}")
+
+            n_measurements: int = len(parsed_folders[contrast_level][frequency_level])
+            measurement_results: list = []
+            for measurement_num in range(n_measurements):
+                if verbose == "text":
+                    print(f"      Measurement {measurement_num + 1}/{n_measurements}")
+                measurement_results.append(
+                    chunk_io.parse_chunks(folders[contrast_level][frequency_level][measurement_num],
+                                          apply_RGB_correction=apply_radiometric_correction,
+                                          apply_digital_gain=apply_digital_gain,
+                                          use_mean_frame=use_mean_frame,
+                                          convert_time_units=convert_time_units,
+                                          convert_to_float=convert_to_float,
+                                          mean_axes=mean_axes,
+                                          contains_agc_metadata_dict=contains_agc_metadata_dict,
+                                          differentiate_color=differentiate_color
+                                         )
+                )
+                gc.collect()
+            parsed_folders[contrast_level][frequency_level] = measurement_results
 
     return parsed_folders
 
@@ -281,15 +326,17 @@ def _parse_temporal_sensitivity_readings(folders: list[list[str]],
    exposed in the same order per measurement for instance, 
    the frequency and corresponding contrast will not be the same
 """
-def load_sorted_calibration_files(experiment_path: str, 
-                                  apply_digital_gain: bool=False, 
-                                  use_mean_frame: bool=False, 
+def load_sorted_calibration_files(experiment_path: str,
+                                  apply_digital_gain: bool=False,
+                                  use_mean_frame: bool=False,
                                   apply_radiometric_correction: bool=False,
-                                  convert_time_units: bool=False, 
-                                  convert_to_float: bool=False, 
+                                  convert_time_units: bool=False,
+                                  convert_to_float: bool=False,
                                   mean_axes: dict[str, tuple]= {'W': (1, 2), 'P': (1, 2), 'M': (0,)},
-                                  verbose: bool = False
-                                  ) -> dict[str, list[dict] | list[list[dict]]]:    
+                                  verbose: Literal["tqdm", "text", "off"] = "off",
+                                  differentiate_color: bool=False,
+                                  parse_files: bool=True
+                                  ) -> dict[str, list]:    
     
     # First, let's find the NDFs for this experiment 
     NDF_folders: list[str] = [os.path.join(experiment_path, folder) 
@@ -299,57 +346,33 @@ def load_sorted_calibration_files(experiment_path: str,
 
     assert len(NDF_folders) > 0, "Must be at least a single NDF folder"
 
+    n_NDFs: int = len(NDF_folders)
 
-    # First, we will group folders together by the calibration operation and the NDF level it occured at 
+    # First, we will group folders together by the calibration operation and the NDF level it occured at,
+    # then sort them into their proper dimensional structure
 
     ##################
-
     # MS LINEARITY
-
     ##################
 
-    # First, we will group the folders together by the calibration 
-    # operation that was done to create them, then parse 
-    ms_linearity_folders: list[str] = [ [os.path.join(NDF_folder, folder)  
+    ms_linearity_folders: list[str] = [ [os.path.join(NDF_folder, folder)
                                          for folder in os.listdir(NDF_folder)
                                          if "mslinearity" in folder.lower()
                                         ]
                                         for NDF_folder in NDF_folders
                                       ]
 
-    # We will sort the MS linearity folders into a matrix of the settings level and the measurement numbers per NDF
     ms_linearity_folders_sorted: list[list[str]] = [ _sort_by_setting_measurement(NDF_measurement)
-                                                     if len(NDF_measurement) > 0 
-                                                     else 
+                                                     if len(NDF_measurement) > 0
+                                                     else
                                                      []
                                                      for NDF_measurement in ms_linearity_folders
                                                    ]
 
-    # Parse the MS linearity readings
-    ms_linearity_readings: list[list[dict]] = [ _parse_ms_linearity_readings(NDF_measurement,
-                                                                              apply_digital_gain=apply_digital_gain,
-                                                                              apply_radiometric_correction=apply_radiometric_correction,
-                                                                              use_mean_frame=use_mean_frame,
-                                                                              convert_time_units=convert_time_units,
-                                                                              convert_to_float=convert_to_float,
-                                                                              mean_axes=mean_axes,
-                                                                              verbose=verbose
-                                                                             )
-                                                if len(NDF_measurement) > 0 
-                                                else 
-                                                []
-                                                for NDF_measurement in ms_linearity_folders_sorted
-                                              ] 
-    
-
-
     ##################
-
     # WORLD CAMERA LINEARITY
-
     ##################
-    # First, gather all of the calibration measurements
-    # for this type of calibration
+
     camera_linearity_folders: list[str] = [ [os.path.join(NDF_folder, folder)
                                              for folder in os.listdir(NDF_folder)
                                              if folder.lower().startswith("worldcameralinearity")
@@ -357,168 +380,207 @@ def load_sorted_calibration_files(experiment_path: str,
                                             for NDF_folder in NDF_folders
                                           ]
 
-    # Next, we will sort these measurements per NDF into contrastAGCTarget, settingsIdx, measurementNum 
     camera_linearity_folders_sorted: list[list[list[str]]] = [_sort_by_contrast_target_settings_measurement(NDF_folder)
-                                                              if len(NDF_folder) > 0 
+                                                              if len(NDF_folder) > 0
                                                               else []
                                                               for NDF_folder in camera_linearity_folders
-                                                            ] 
-
-    # Next, parse the readings 
-    camera_linearity_readings: list[list[list[dict]]] = [_parse_camera_linearity_readings(NDF_folder,
-                                                                                           verbose=verbose,
-                                                                                           apply_radiometric_correction=apply_radiometric_correction, 
-                                                                                           apply_digital_gain=apply_digital_gain,
-                                                                                           convert_time_units=convert_time_units
-                                                                                          )
-                                                         for NDF_folder in camera_linearity_folders_sorted
-                                                        ]
-
+                                                            ]
 
     ##################
-
     # TEMPORAL SENSITIVITY
-
     ##################
 
-    # Gather the paths to the temporal sensitivity measurements
     temporal_sensitivity_folders: list[str] = [ [os.path.join(NDF_folder, folder)
                                                  for folder in os.listdir(NDF_folder)
                                                  if "temporalsensitivity" in folder.lower()
                                                  and "phasefitting" not in folder.lower()
-                                                 and "contrastgamma" not in folder.lower() 
-                                                ] 
+                                                 and "contrastgamma" not in folder.lower()
+                                                ]
                                                 for NDF_folder in NDF_folders
                                               ]
 
-    # Sort each NDF measurment into a matrix of Contrast, Frequency, and Measurement for each NDF level 
-    temporal_sensitivity_folders_sorted: list[list[list[str]]] =  [ _sort_by_contrast_frequency_measurement(NDF_measurement)
-                                                                    if len(NDF_measurement) > 0 
-                                                                    else 
-                                                                    []
-                                                                    for NDF_measurement in temporal_sensitivity_folders
-                                                                  ] 
-    
-
-    # Parse the readings
-    temporal_sensitivity_readings: list[list[list[dict]]] = [ _parse_temporal_sensitivity_readings(NDF_measurement,
-                                                                                                     apply_digital_gain=apply_digital_gain,
-                                                                                                     apply_radiometric_correction=apply_radiometric_correction,
-                                                                                                     use_mean_frame=use_mean_frame,
-                                                                                                     convert_time_units=convert_time_units,
-                                                                                                     convert_to_float=convert_to_float,
-                                                                                                     mean_axes=mean_axes,
-                                                                                                     contains_agc_metadata_dict={'W': True, 'P': False, 'M': False},
-                                                                                                     verbose=verbose
-                                                                                                    )
-                                                              if len(NDF_measurement) > 0 
-                                                              else 
-                                                              []
-                                                              for NDF_measurement in temporal_sensitivity_folders_sorted
-                                                            ]
-    
-
+    temporal_sensitivity_folders_sorted: list[list[list[str]]] = [ _sort_by_contrast_frequency_measurement(NDF_measurement)
+                                                                   if len(NDF_measurement) > 0
+                                                                   else
+                                                                   []
+                                                                   for NDF_measurement in temporal_sensitivity_folders
+                                                                 ]
 
     ##################
-
     # PHASE FITTING
-
     ##################
 
-    # Find the phase fitting folders
     phase_fitting_folders: list[str] = [ [ os.path.join(NDF_folder, folder)
                                            for folder in os.listdir(NDF_folder)
                                            if "phasefitting" in folder.lower()
-                                         ] 
+                                         ]
                                          for NDF_folder in NDF_folders
                                        ]
-    
-    # Sort the folders per NDF level 
+
     phase_fitting_folders_sorted: list[list[list[str]]] = [ _sort_by_contrast_frequency_measurement(NDF_measurement)
-                                                            if len(NDF_measurement) > 0 
-                                                            else 
+                                                            if len(NDF_measurement) > 0
+                                                            else
                                                             []
                                                             for NDF_measurement in phase_fitting_folders
                                                           ]
 
-    # Parse the the phase fitting readings
-    # TODO: check the types of these are correct
-    phase_fitting_readings: list[list[list[dict]]] = [ _parse_temporal_sensitivity_readings(NDF_measurement,
-                                                                                             apply_digital_gain=apply_digital_gain,
-                                                                                             apply_radiometric_correction=apply_radiometric_correction,
-                                                                                             use_mean_frame=use_mean_frame,
-                                                                                             convert_time_units=convert_time_units,
-                                                                                             convert_to_float=convert_to_float,
-                                                                                             mean_axes=mean_axes,
-                                                                                             contains_agc_metadata_dict={'W': True, 'P': False, 'M': False},
-                                                                                             verbose=verbose
-                                                                                            )
-                                                       if len(NDF_measurement) > 0
-                                                       else 
-                                                       []
-                                                       for NDF_measurement in phase_fitting_folders_sorted
-                                                    ]
-
-
     ##################
-
     # CONTRAST GAMMA
-
     ##################
 
+    contrast_gamma_folders: list[str] = [ [os.path.join(NDF_folder, folder)
+                                           for folder in os.listdir(NDF_folder)
+                                           if "contrastgamma" in folder.lower()
+                                          ]
+                                          for NDF_folder in NDF_folders
+                                        ]
 
-    # Find the contrast gamma folders                                                                                
-    contrast_gamma_folders: list[str] =  [ [os.path.join(NDF_folder, folder)
-                                            for folder in os.listdir(NDF_folder)
-                                            if "contrastgamma" in folder.lower()
-                                           ] 
-                                            for NDF_folder in NDF_folders
-                                         ] 
-
-    # Sort the folder paths per NDF level
     contrast_gamma_folders_sorted: list[list[list[str]]] = [ _sort_by_contrast_frequency_measurement(NDF_measurement)
                                                              if len(NDF_measurement) > 0
-                                                             else 
+                                                             else
                                                              []
-                                                             for NDF_measurement in contrast_gamma_folders 
+                                                             for NDF_measurement in contrast_gamma_folders
                                                            ]
-    
-    # Parse the contrast gamma readings
-    contrast_gamma_readings: list[list[list[dict]]] = [ _parse_temporal_sensitivity_readings(NDF_measurement,
-                                                                                              apply_digital_gain=apply_digital_gain,
-                                                                                              apply_radiometric_correction=apply_radiometric_correction,
-                                                                                              use_mean_frame=use_mean_frame,
-                                                                                              convert_time_units=convert_time_units,
-                                                                                              convert_to_float=convert_to_float,
-                                                                                              mean_axes=mean_axes,
-                                                                                              contains_agc_metadata_dict={'W': True, 'P': False, 'M': False},
-                                                                                              verbose=verbose
-                                                                                             )
-                                                        if len(NDF_measurement) > 0 
-                                                        else 
-                                                        []
-                                                        for NDF_measurement in contrast_gamma_folders_sorted
-                                                      ]
-
-
 
     ##################
-
-    # ASSEMBLE RETURN VALUE
-
+    # RETURN SORTED PATHS OR PARSED DATA
     ##################
 
-    # Package the readings together into a dictionary
-    parsed_readings_dict: dict[str, list[dict] | list[list[list[dict]]]] = {"ms_linearity": ms_linearity_readings, 
-                                                                            "temporal_sensitivity": temporal_sensitivity_readings, 
-                                                                            "phase_fitting": phase_fitting_readings,
-                                                                            "contrast_gamma": contrast_gamma_readings, 
-                                                                            "world_linearity": camera_linearity_readings
-                                                                           }
-    
-    return parsed_readings_dict
+    if not parse_files:
+        return {"ms_linearity": ms_linearity_folders_sorted,
+                "temporal_sensitivity": temporal_sensitivity_folders_sorted,
+                "phase_fitting": phase_fitting_folders_sorted,
+                "contrast_gamma": contrast_gamma_folders_sorted,
+                "world_linearity": camera_linearity_folders_sorted
+               }
+
+    # If parse_files is True, parse all the data in Python and return the parsed readings
+
+    if verbose == "text":
+        print(f"[MS Linearity]")
+
+    ms_linearity_readings: list[list[dict]] = []
+    for ndf_idx, NDF_measurement in enumerate(ms_linearity_folders_sorted):
+        if verbose == "text":
+            print(f"NDF {ndf_idx + 1}/{n_NDFs}")
+        if len(NDF_measurement) > 0:
+            ms_linearity_readings.append(
+                _parse_ms_linearity_readings(NDF_measurement,
+                                             apply_digital_gain=apply_digital_gain,
+                                             apply_radiometric_correction=apply_radiometric_correction,
+                                             use_mean_frame=use_mean_frame,
+                                             convert_time_units=convert_time_units,
+                                             convert_to_float=convert_to_float,
+                                             mean_axes=mean_axes,
+                                             verbose=verbose,
+                                             differentiate_color=differentiate_color
+                                            )
+            )
+        else:
+            ms_linearity_readings.append([])
+    gc.collect()
+
+    if verbose == "text":
+        print(f"[World Camera Linearity]")
+
+    camera_linearity_readings: list[list[list[dict]]] = []
+    for ndf_idx, NDF_folder in enumerate(camera_linearity_folders_sorted):
+        if verbose == "text":
+            print(f"NDF {ndf_idx + 1}/{n_NDFs}")
+        camera_linearity_readings.append(
+            _parse_camera_linearity_readings(NDF_folder,
+                                             verbose=verbose,
+                                             apply_radiometric_correction=apply_radiometric_correction,
+                                             apply_digital_gain=apply_digital_gain,
+                                             convert_time_units=convert_time_units,
+                                             differentiate_color=differentiate_color
+                                            )
+        )
+    gc.collect()
+
+    if verbose == "text":
+        print(f"[Temporal Sensitivity]")
+
+    temporal_sensitivity_readings: list[list[list[dict]]] = []
+    for ndf_idx, NDF_measurement in enumerate(temporal_sensitivity_folders_sorted):
+        if verbose == "text":
+            print(f"NDF {ndf_idx + 1}/{n_NDFs}")
+        if len(NDF_measurement) > 0:
+            temporal_sensitivity_readings.append(
+                _parse_temporal_sensitivity_readings(NDF_measurement,
+                                                     apply_digital_gain=apply_digital_gain,
+                                                     apply_radiometric_correction=apply_radiometric_correction,
+                                                     use_mean_frame=use_mean_frame,
+                                                     convert_time_units=convert_time_units,
+                                                     convert_to_float=convert_to_float,
+                                                     mean_axes=mean_axes,
+                                                     contains_agc_metadata_dict={'W': True, 'P': False, 'M': False},
+                                                     verbose=verbose,
+                                                     differentiate_color=differentiate_color
+                                                    )
+            )
+        else:
+            temporal_sensitivity_readings.append([])
+    gc.collect()
+
+    if verbose == "text":
+        print(f"[Phase Fitting]")
+
+    phase_fitting_readings: list[list[list[dict]]] = []
+    for ndf_idx, NDF_measurement in enumerate(phase_fitting_folders_sorted):
+        if verbose == "text":
+            print(f"NDF {ndf_idx + 1}/{n_NDFs}")
+        if len(NDF_measurement) > 0:
+            phase_fitting_readings.append(
+                _parse_temporal_sensitivity_readings(NDF_measurement,
+                                                     apply_digital_gain=apply_digital_gain,
+                                                     apply_radiometric_correction=apply_radiometric_correction,
+                                                     use_mean_frame=use_mean_frame,
+                                                     convert_time_units=convert_time_units,
+                                                     convert_to_float=convert_to_float,
+                                                     mean_axes=mean_axes,
+                                                     contains_agc_metadata_dict={'W': True, 'P': False, 'M': False},
+                                                     verbose=verbose,
+                                                     differentiate_color=differentiate_color
+                                                    )
+            )
+        else:
+            phase_fitting_readings.append([])
+    gc.collect()
+
+    if verbose == "text":
+        print(f"[Contrast Gamma]")
+
+    contrast_gamma_readings: list[list[list[dict]]] = []
+    for ndf_idx, NDF_measurement in enumerate(contrast_gamma_folders_sorted):
+        if verbose == "text":
+            print(f"NDF {ndf_idx + 1}/{n_NDFs}")
+        if len(NDF_measurement) > 0:
+            contrast_gamma_readings.append(
+                _parse_temporal_sensitivity_readings(NDF_measurement,
+                                                     apply_digital_gain=apply_digital_gain,
+                                                     apply_radiometric_correction=apply_radiometric_correction,
+                                                     use_mean_frame=use_mean_frame,
+                                                     convert_time_units=convert_time_units,
+                                                     convert_to_float=convert_to_float,
+                                                     mean_axes=mean_axes,
+                                                     contains_agc_metadata_dict={'W': True, 'P': False, 'M': False},
+                                                     verbose=verbose,
+                                                     differentiate_color=differentiate_color
+                                                    )
+            )
+        else:
+            contrast_gamma_readings.append([])
+    gc.collect()
+
+    return {"ms_linearity": ms_linearity_readings,
+            "temporal_sensitivity": temporal_sensitivity_readings,
+            "phase_fitting": phase_fitting_readings,
+            "contrast_gamma": contrast_gamma_readings,
+            "world_linearity": camera_linearity_readings
+           }
 
 
 if(__name__ == "__main__"):
     experiment_path: str = "/Volumes/T7 Shield/5cameraLinearity" 
-    results = load_sorted_calibration_files(experiment_path, apply_digital_gain=True, use_mean_frame=True, convert_time_units=True, convert_to_float=True, verbose=True)
+    results = load_sorted_calibration_files(experiment_path, apply_digital_gain=True, use_mean_frame=True, convert_time_units=True, convert_to_float=True, verbose="tqdm")

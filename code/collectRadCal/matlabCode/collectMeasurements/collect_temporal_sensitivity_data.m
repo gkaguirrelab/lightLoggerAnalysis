@@ -1,6 +1,7 @@
 function [success, temporal_sensitivity_calibration_metadata] = collect_temporal_sensitivity_data(device_num, ...
                                                                                                   temporal_sensitivity_calibration_metadata,...
                                                                                                   bluetooth_central,...
+                                                                                                  bluetooth_client,...
                                                                                                   label,...
                                                                                                   dropbox_savedir,...
                                                                                                   local_savedir...
@@ -66,16 +67,18 @@ function [success, temporal_sensitivity_calibration_metadata] = collect_temporal
 %}
 
     % Validate the arguments 
-    arguments 
-        device_num; 
-        temporal_sensitivity_calibration_metadata; 
-        bluetooth_central; 
-        label = ""; 
-        dropbox_savedir = ""; 
-        local_savedir = ""; 
+    arguments
+        device_num;
+        temporal_sensitivity_calibration_metadata;
+        bluetooth_central;
+        bluetooth_client;
+        label = "";
+        dropbox_savedir = "";
+        local_savedir = "";
     end 
 
     % First, extract some information from the calibration struct 
+    temporal_sensitivity_calibration_metadata.last_error_message = "";
     NDFs = temporal_sensitivity_calibration_metadata.NDFs; 
     background = temporal_sensitivity_calibration_metadata.background; 
     contrast_levels = temporal_sensitivity_calibration_metadata.contrast_levels; 
@@ -194,72 +197,86 @@ function [success, temporal_sensitivity_calibration_metadata] = collect_temporal
                     CombiLED.startModulation();
                     pause(0.5);
 
-                    % Generate a message to send to the RPi
-                    update_message = bluetooth_central.initialize_update_message(); % Initialize the message dict 
-                    
-                    filename = label + sprintf("TemporalSensitivity_%dcontrastIdx_%dfreqIdx_%dmeasurementIdx", contrast_idx, freq_idx, mm); % Define the filename for the recording (replace. in floats with x)
+                    try
+                        % Generate a message to send to the RPi
+                        update_message = py_call_module_attr(bluetooth_central, "initialize_update_message"); % Initialize the message dict 
+                        
+                        filename = label + sprintf("TemporalSensitivity_%dcontrastIdx_%dfreqIdx_%dmeasurementIdx", contrast_idx, freq_idx, mm); % Define the filename for the recording (replace. in floats with x)
 
-                    % Compose the target output dir for this NDF level
-                    cloud_output_dir = ""; 
-                    if(dropbox_savedir ~= "")
-                        cloud_output_dir = fullfile(dropbox_savedir, sprintf("NDF%f", NDF));
-                    end 
-                    
-                    local_output_dir = "";
-                    if(local_savedir ~= "")
-                        local_output_dir = fullfile(local_savedir, sprintf("NDF%f", NDF));
-                    end 
-
-
-                    % If the desired recording seconds is not long enough to see a full modulation, 
-                    % we will edit it to be the max single chunk length 
-                    recording_seconds = n_seconds; 
-                    if(freq * recording_seconds < 1)
-                        warning(sprintf("Recording seconds: %d not enough to see a single modulation at %.2f, defaulting to max length (29)", recording_seconds, freq));
-
-                        recording_seconds = 29; 
-                    end 
-
-                    % Then, let's check if this is enough to see 1 modulation. If not, we error 
-                    if(freq * recording_seconds < 1)
-                        fprintf("ERROR: Recording seconds: %d is not enough to see a single modulation at %.2f\n", recording_seconds, freq);
-
-                        success = 0; 
-                        return; 
-                    end 
-
-                    bluetooth_central.generate_calibration_state(update_message, py.str(filename),... % Put it all together in the dict 
-                                                                 cloud_output_dir, local_output_dir,...
-                                                                 true, py.int(recording_seconds),... 
-                                                                 py.int(30), sensors);
-
-                    % Send a message to the RPi to make a recording 
-                    bluetooth_central.message_peripheral_matlab_wrapper(device_num, update_message);
-
-                    % Read the state from the light logger, and pause until it is changed 
-                    % from calibration to wait 
-                    % if it changes to error, then throw an error
-                    while(true)
-                        % Read the current state from the light logger 
-                        lightlogger_state = struct(bluetooth_central.read_peripheral_matlab_wrapper(device_num));
-                        state_name = string(char(lightlogger_state.state));     
-
-                        % If the state is error, raise an error on this machine 
-                        % as well 
-                        if(state_name == "error") 
-                            success = 0 ; 
-                            return ; 
+                        % Compose the target output dir for this NDF level
+                        cloud_output_dir = ""; 
+                        if(dropbox_savedir ~= "")
+                            cloud_output_dir = fullfile(dropbox_savedir, sprintf("NDF%f", NDF));
+                        end 
+                        
+                        local_output_dir = "";
+                        if(local_savedir ~= "")
+                            local_output_dir = fullfile(local_savedir, sprintf("NDF%f", NDF));
                         end 
 
-                        % If the light logger is done recording + uploading 
-                        % break from the loop
-                        if(state_name == "wait")
-                            break 
+
+                        % If the desired recording seconds is not long enough to see a full modulation, 
+                        % we will edit it to be the max single chunk length 
+                        recording_seconds = n_seconds; 
+                        if(freq * recording_seconds < 1)
+                            warning(sprintf("Recording seconds: %d not enough to see a single modulation at %.2f, defaulting to max length (29)", recording_seconds, freq));
+
+                            recording_seconds = 29; 
+                        end 
+
+                        % Then, let's check if this is enough to see 1 modulation. If not, we error 
+                        if(freq * recording_seconds < 1)
+                            fprintf("ERROR: Recording seconds: %d is not enough to see a single modulation at %.2f\n", recording_seconds, freq);
+
+                            success = 0; 
+                            return; 
+                        end 
+
+                        py_call_module_attr(bluetooth_central, "generate_calibration_state", update_message, py.str(filename),... % Put it all together in the dict 
+                                            cloud_output_dir, local_output_dir,...
+                                            true, py.int(recording_seconds),... 
+                                            py.int(30), sensors);
+
+                        % Send a message to the RPi to make a recording 
+                        py_call_module_attr(bluetooth_central, "message_peripheral_matlab_wrapper", device_num, update_message, bluetooth_client);
+
+                        % Read the state from the light logger, and pause until it is changed 
+                        % from calibration to wait 
+                        % if it changes to error, then throw an error
+                        while(true)
+                            % Read the current state from the light logger 
+                            lightlogger_state = struct(py_call_module_attr(bluetooth_central, "read_peripheral_matlab_wrapper", device_num, bluetooth_client));
+                            state_name = string(char(lightlogger_state.state));     
+
+                            % If the state is error, raise an error on this machine 
+                            % as well 
+                            if(state_name == "error") 
+                                temporal_sensitivity_calibration_metadata.last_error_message = describe_lightlogger_error(lightlogger_state);
+                                success = 0 ; 
+                                return ; 
+                            end 
+
+                            % If the light logger is done recording + uploading 
+                            % break from the loop
+                            if(state_name == "wait")
+                                break 
+                            end
+                            
+                            % Pause for some time between reads
+                            pause(0.5); 
                         end
-                        
-                        % Pause for some time between reads
-                        pause(2); 
-                    end 
+                    catch ME
+                        try
+                            CombiLED.stopModulation();
+                        catch
+                        end
+                        report_bluetooth_failure("Temporal sensitivity", NDF, contrast_idx, freq_idx, mm, ME);
+                        temporal_sensitivity_calibration_metadata.last_error_message = ...
+                            sprintf("Temporal sensitivity bluetooth failure at NDF %.3f contrast %d frequency %d measurement %d.\n%s", ...
+                                    NDF, contrast_idx, freq_idx, mm, getReport(ME, "extended", "hyperlinks", "off"));
+                        success = 0;
+                        return;
+                    end
 
                     % End the modulation 
                     CombiLED.stopModulation(); 
@@ -285,3 +302,136 @@ function [success, temporal_sensitivity_calibration_metadata] = collect_temporal
     return ; 
 
 end 
+
+function value = py_module_attr(module, attr_name)
+    value = py.getattr(module, attr_name);
+end
+
+function value = py_call_module_attr(module, attr_name, varargin)
+    callable = py_module_attr(module, attr_name);
+    value = callable(varargin{:});
+end
+
+function report_bluetooth_failure(measurement_name, NDF, contrast_idx, freq_idx, measurement_num, ME)
+    fprintf(2, "%s bluetooth failure at NDF %.3f contrast %d frequency %d measurement %d.\n", measurement_name, NDF, contrast_idx, freq_idx, measurement_num);
+    fprintf(2, "%s\n", getReport(ME, "extended", "hyperlinks", "off"));
+end
+
+function message = describe_lightlogger_error(lightlogger_state)
+    message_parts = strings(0, 1);
+    message_parts(end + 1) = "Light logger entered error state.";
+    if(isfield(lightlogger_state, "state"))
+        message_parts(end + 1) = "state: " + string(lightlogger_state.state);
+    end
+
+    if(isfield(lightlogger_state, "error_message"))
+        error_message = string(lightlogger_state.error_message);
+        if(strlength(strtrim(error_message)) > 0)
+            message_parts(end + 1) = "error_message: " + error_message;
+        end
+    end
+
+    if(isfield(lightlogger_state, "info"))
+        info_struct = to_plain_struct(lightlogger_state.info);
+        if(isstruct(info_struct) && isfield(info_struct, "write_error"))
+            write_error = to_plain_struct(info_struct.write_error);
+            if(isstruct(write_error))
+                if(isfield(write_error, "message"))
+                    value = string(write_error.message);
+                    if(strlength(strtrim(value)) > 0)
+                        message_parts(end + 1) = "write_error.message: " + value;
+                    end
+                end
+                if(isfield(write_error, "exception_type"))
+                    value = string(write_error.exception_type);
+                    if(strlength(strtrim(value)) > 0)
+                        message_parts(end + 1) = "write_error.exception_type: " + value;
+                    end
+                end
+                if(isfield(write_error, "exception_message"))
+                    value = string(write_error.exception_message);
+                    if(strlength(strtrim(value)) > 0)
+                        message_parts(end + 1) = "write_error.exception_message: " + value;
+                    end
+                end
+                if(isfield(write_error, "traceback"))
+                    value = string(write_error.traceback);
+                    if(strlength(strtrim(value)) > 0)
+                        message_parts(end + 1) = "write_error.traceback: " + value;
+                    end
+                end
+                if(isfield(write_error, "header"))
+                    header_struct = to_plain_struct(write_error.header);
+                    header_lines = flatten_struct_fields(header_struct, "write_error.header");
+                    if(~isempty(header_lines))
+                        message_parts = [message_parts; header_lines(:)];
+                    end
+                end
+            end
+        end
+    end
+
+    raw_state_dump = strtrim(string(evalc("disp(lightlogger_state)")));
+    if(strlength(raw_state_dump) > 0)
+        message_parts(end + 1) = "raw_state_dump:";
+        message_parts(end + 1) = raw_state_dump;
+    end
+
+    message = strjoin(message_parts, newline);
+end
+
+function value = to_plain_struct(value)
+    if(isstruct(value))
+        return;
+    end
+
+    if(isa(value, "py.dict"))
+        value = struct(value);
+        return;
+    end
+
+    if(isa(value, "py.NoneType"))
+        value = struct;
+    end
+end
+
+function lines = flatten_struct_fields(input_struct, prefix)
+    lines = strings(0, 1);
+    if(~isstruct(input_struct))
+        return;
+    end
+
+    field_names = fieldnames(input_struct);
+    for idx = 1:numel(field_names)
+        field_name = field_names{idx};
+        field_value = input_struct.(field_name);
+        field_prefix = prefix + "." + string(field_name);
+
+        if(isstruct(field_value))
+            nested_lines = flatten_struct_fields(field_value, field_prefix);
+            if(~isempty(nested_lines))
+                lines = [lines; nested_lines(:)];
+            end
+        else
+            lines(end + 1) = field_prefix + ": " + string(local_value_to_text(field_value));
+        end
+    end
+end
+
+function text = local_value_to_text(value)
+    if(isstring(value) || ischar(value))
+        text = string(value);
+        return;
+    end
+
+    if(islogical(value) || isnumeric(value))
+        if(isscalar(value))
+            text = string(value);
+        else
+            text = strtrim(string(mat2str(value)));
+        end
+        return;
+    end
+
+    text = strtrim(string(evalc("disp(value)")));
+end

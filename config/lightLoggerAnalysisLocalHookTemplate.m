@@ -66,11 +66,6 @@ setpref(projectName, "bluetooth_central_path", bluetooth_central_path);
 Pi_util_path = fullfile(light_logger_path, "raspberry_pi_firmware", "utility", "Pi_util.py");
 setpref(projectName, 'Pi_util_path', Pi_util_path); 
 
-% BELIEVE TO BE DEPRECATED
-pupil_util_path = fullfile(light_logger_path, "pupil", "pupil_util.py"); 
-setpref(projectName, 'pupil_util_path', pupil_util_path); 
-ms_util_path = fullfile(light_logger_path, "ms", "ms_util.py"); 
-setpref(projectName, 'ms_util_path', ms_util_path); 
 
 % Add all functions in the current directory to the path and save the path to lightLogger analysis 
 light_logger_analysis_path = tbLocateProject('lightLoggerAnalysis');
@@ -88,6 +83,9 @@ setpref(projectName, "calfile_dir_path", calfile_dir_path);
 % Add the path to the world information and functions 
 world_util_path = fullfile(light_logger_analysis_path, "code", "library", "sensor_utility", "world_util.py"); 
 setpref(projectName, 'world_util_path', world_util_path); 
+
+pupil_util_path = fullfile(light_logger_analysis_path, "code", "library", "sensor_utility", "pupil_util.py"); 
+setpref(projectName, 'pupil_util_path', pupil_util_path);
 
 % Save the path to the ms utility information and functions 
 ms_util_path = fullfile(light_logger_analysis_path, "code", "library", "sensor_utility", "ms_util.py"); 

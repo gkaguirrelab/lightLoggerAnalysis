@@ -101,15 +101,16 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
 
     % Import the Python library used to communicate 
     % via Bluetooth with the peripheral 
-    bluetooth_central = import_pyfile(getpref("lightLogger", "bluetooth_central_path"));
+    bluetooth_central = import_pyfile_light_logger(getpref("lightLogger", "bluetooth_central_path"));
 
     % Import the Python library used for uploading to Dropbox 
-    upload_mode = import_pyfile(getpref("lightLogger", "upload_mode_path"));
+    upload_mode = import_pyfile_light_logger(getpref("lightLogger", "upload_mode_path"));
 
     % Import the utility files of the world and pupil cameras 
+    tbUseProject('lightLoggerAnalysis'); 
     disp("Importing utility files"); 
-    world_util_path = getpref("lightLogger", "world_util_path"); 
-    pupil_util_path = getpref("lightLogger", "pupil_util_path"); 
+    world_util_path = getpref("lightLoggerAnalysis", "world_util_path"); 
+    pupil_util_path = getpref("lightLoggerAnalysis", "pupil_util_path"); 
     Pi_util_path = getpref("lightLogger", "Pi_util_path"); 
     fprintf("\t world_util from path %s\n", world_util_path); 
     fprintf("\t pupil_util from path %s\n", pupil_util_path); 
@@ -119,11 +120,24 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
     pupil_util = import_pyfile(pupil_util_path);
     Pi_util = import_pyfile(Pi_util_path); 
 
-    % Verify that the devices can be found 
+    fprintf("\t world_util actual path %s\n", char(py.str(py.getattr(world_util, '__file__'))));
+    fprintf("\t pupil_util actual path %s\n", char(py.str(py.getattr(pupil_util, '__file__'))));
+    fprintf("\t Pi_util actual path %s\n", char(py.str(py.getattr(Pi_util, '__file__'))));
+
+
+
+    % Verify that the devices can be found
     disp("Calibration | Initializing devices...");
-    
-    % Set up and initialize the CombiLED 
-    % Save the combiExperiments path and add CombiLED Toolbox to the path 
+
+    % Establish a persistent BLE connection to the device so we do not
+    % re-discover on every message
+    disp("Calibration | Connecting to device over BLE...");
+    bluetooth_client = py_call_module_attr(bluetooth_central, "connect_peripheral_matlab_wrapper", device_num);
+    ble_cleanup = onCleanup(@() py_call_module_attr(bluetooth_central, "disconnect_peripheral_matlab_wrapper", bluetooth_client));
+    disp("Calibration | BLE connection established.");
+
+    % Set up and initialize the CombiLED
+    % Save the combiExperiments path and add CombiLED Toolbox to the path
     % Return to the lightLogger project
     tbUseProject('lightLogger');
     addpath(current_dir);
@@ -140,6 +154,8 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
                                                            world_util,...
                                                            pupil_util...
                                                           ); 
+    else
+        calibration_metadata = rebuild_calibration_metadata(calibration_metadata, world_util);
     end 
 
     disp("THIS IS CALIBRATION METADATA")
@@ -170,6 +186,7 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
     [success, ms_linearity_calibration_metadata] = collect_ms_linearity_data(device_num,...
                                                                              calibration_metadata.ms_linearity,...
                                                                              bluetooth_central,...
+                                                                             bluetooth_client,...
                                                                              "",...
                                                                              cloud_output_dir,...
                                                                              external_output_dir...
@@ -179,7 +196,7 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
 
     % If an error occured, error cleanly
     if(~success)
-        error("ERROR: MS linearity calibration quit early due to an unknown error on the light logger");
+        raise_calibration_failure("MS linearity calibration quit early on the light logger.", calibration_metadata.ms_linearity);
     end 
     
 
@@ -194,6 +211,7 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
     [success, world_linearity_calibration_metadata] = collect_world_linearity_data(device_num,...
                                                                                    calibration_metadata.world_linearity,...
                                                                                    bluetooth_central,...
+                                                                                   bluetooth_client,...
                                                                                    "",...
                                                                                    cloud_output_dir,...
                                                                                    external_output_dir...
@@ -202,7 +220,7 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
     upload_calibration_data(calibration_metadata, dropbox_savedir, upload_mode); % Upload how far we got on this recording
 
     if(~success)
-        error("ERROR: world camera linearity calibration quit early due to an unknown error on the light logger");
+        raise_calibration_failure("World camera linearity calibration quit early on the light logger.", calibration_metadata.world_linearity);
     end
 
     tbUseProject('lightLogger');
@@ -217,6 +235,7 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
     [success, temporal_sensitivity_calibration_metadata] = collect_temporal_sensitivity_data(device_num,...
                                                                                              calibration_metadata.temporal_sensitivity,...
                                                                                              bluetooth_central,...
+                                                                                             bluetooth_client,...
                                                                                              "",...
                                                                                              cloud_output_dir,...
                                                                                              external_output_dir...
@@ -226,7 +245,7 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
 
     % If an error occured error cleanly                                                                                         
     if(~success)       
-        error("ERROR: temporal sensitivity calibration quit early due to an unknown error on the light logger");
+        raise_calibration_failure("Temporal sensitivity calibration quit early on the light logger.", calibration_metadata.temporal_sensitivity);
     end
 
     tbUseProject('lightLogger');
@@ -241,6 +260,7 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
     [success, phase_fitting_calibration_metadata] = collect_temporal_sensitivity_data(device_num,...
                                                                                       calibration_metadata.phase_fitting,...
                                                                                       bluetooth_central,...
+                                                                                      bluetooth_client,...
                                                                                       "PhaseFitting_",...
                                                                                       cloud_output_dir,...
                                                                                       external_output_dir...
@@ -250,7 +270,7 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
 
     % If an error occured error cleanly                                                                                   
     if(~success) 
-        error("ERROR: phase fitting calibration quit early due to an unknown error on the light logger");
+        raise_calibration_failure("Phase fitting calibration quit early on the light logger.", calibration_metadata.phase_fitting);
     end 
 
     % E. Calculate the contrast gamma function
@@ -262,6 +282,7 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
     [success, contrast_gamma_calibration_metadata] = collect_temporal_sensitivity_data(device_num,...
                                                                                        calibration_metadata.contrast_gamma,...
                                                                                        bluetooth_central,...
+                                                                                       bluetooth_client,...
                                                                                        "ContrastGamma_",...
                                                                                        cloud_output_dir,...
                                                                                        external_output_dir...
@@ -271,7 +292,7 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
 
     % If an error occured error cleanly                                                                                      
     if(~success)                                                                                    
-        error("ERROR: contrast gamma calibration quit early due to an unknown error on the light logger");
+        raise_calibration_failure("Contrast gamma calibration quit early on the light logger.", calibration_metadata.contrast_gamma);
     end
 
     % Step 4: Save object with all of the parameters to the folder on DropBox
@@ -292,7 +313,7 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
     CalibrationData = struct; 
 
     % Extract the world camera sensor mode 
-    sensor_mode = world_util.WORLD_CAMERA_CUSTOM_MODES{1}; 
+    sensor_mode_idx = 0; 
 
 
     % A. Set up the substructs we will use for each of the Calibration measures 
@@ -356,8 +377,8 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
     for tt = 1:numel(contrast_agc_targets)
         contrast_target = contrast_agc_targets(tt); 
 
-        % Let's get the NDF settings for this contrast level 
-        settings_contrast_dict = world_util.WORLD_CONTRAST_LEVEL_NDF_SETTINGS{contrast_target}; 
+        % Let's get the NDF settings for this contrast level    
+        settings_contrast_dict = py_call_module_attr(world_util, "get_world_contrast_level_ndf_settings", contrast_target); 
 
         % Initialize the container for the settings per NDF for this contrast target 
         contrast_target_fieldname = "x" + strrep(string(contrast_target), ".", "x"); 
@@ -368,13 +389,13 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
             NDF = NDFs.world_linearity(ii);
             
             % Build the world camera settings for this NDF level
-            fixed_settings = double(settings_constants_dict{NDF});
+            fixed_settings = double(py_getitem(settings_contrast_dict, int32(NDF)));
             sensors.W.Again = fixed_settings(1);
             sensors.W.Dgain = fixed_settings(2);
             sensors.W.exposure = int32(fixed_settings(3));
             sensors.W.agc = false;
             sensors.W.save_agc_metadata = true;
-            sensors.W.sensor_mode = sensor_mode;
+            sensors.W.sensor_mode_idx = sensor_mode_idx;
             sensors.W.awb = false;
             sensors.W.noise_mode = false;
 
@@ -427,13 +448,14 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
         % Create some mapping for the gain and exposure of the world 
         % per NDF level so it behaves properly at the start of the recording 
         % (no warmup needed)
-        fixed_settings = double(world_util.WORLD_NDF_LEVEL_SETTINGS{NDF});
+        world_ndf_level_settings = py_module_attr(world_util, "WORLD_NDF_LEVEL_SETTINGS");
+        fixed_settings = double(py_getitem(world_ndf_level_settings, int32(NDF)));
         sensors.W.Again = fixed_settings(1);
         sensors.W.Dgain = fixed_settings(2);
         sensors.W.exposure = int32(fixed_settings(3)); 
         sensors.W.agc = false;  % TODO: Turn this back on 
         sensors.W.save_agc_metadata = true; 
-        sensors.W.sensor_mode = sensor_mode;
+        sensors.W.sensor_mode_idx = sensor_mode_idx;
         sensors.W.awb = false; 
         sensors.W.noise_mode = false; 
 
@@ -484,13 +506,14 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
         sensors.M.use_LED = false; % Turn off indicator light for calibration (so the light doesn't illuminate the sphere)
 
         % Build the settings for the W at this NDF level 
-        fixed_settings = double(world_util.WORLD_NDF_LEVEL_SETTINGS{NDF});
+        world_ndf_level_settings = py_module_attr(world_util, "WORLD_NDF_LEVEL_SETTINGS");
+        fixed_settings = double(py_getitem(world_ndf_level_settings, int32(NDF)));
         sensors.W.Again = fixed_settings(1);
         sensors.W.Dgain = fixed_settings(2); 
         sensors.W.exposure = int32(fixed_settings(3)); 
         sensors.W.agc = false;  
         sensors.W.save_agc_metadata = true;
-        sensors.W.sensor_mode = sensor_mode;
+        sensors.W.sensor_mode_idx = sensor_mode_idx;
         sensors.W.awb = false; 
         sensors.W.noise_mode = false; 
         
@@ -535,13 +558,14 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
         NDF = NDFs.contrast_gamma(ii); 
 
         % Build the settings for this NDF level 
-        fixed_settings = double(world_util.WORLD_NDF_LEVEL_SETTINGS{NDF});
+        world_ndf_level_settings = py_module_attr(world_util, "WORLD_NDF_LEVEL_SETTINGS");
+        fixed_settings = double(py_getitem(world_ndf_level_settings, int32(NDF)));
         sensors.W.Again = fixed_settings(1);
         sensors.W.Dgain = fixed_settings(2);
         sensors.W.exposure = int32(fixed_settings(3)); 
         sensors.W.agc = false;  
         sensors.W.save_agc_metadata = true; 
-        sensors.W.sensor_mode = sensor_mode;
+        sensors.W.sensor_mode_idx = sensor_mode_idx;
         sensors.W.awb = false; 
         sensors.W.noise_mode = false; 
         
@@ -573,6 +597,170 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
     return ; 
 
 end 
+
+function calibration_metadata = rebuild_calibration_metadata(loaded_calibration_metadata, world_util)
+    % Rebuild a fresh calibration metadata struct while preserving prior
+    % progress and outputs. The main thing we need to refresh is the
+    % world-camera sensor settings payload so resumed runs don't carry stale
+    % sensor_mode structs or embedded Python-derived state.
+    calibration_metadata = loaded_calibration_metadata;
+
+    calibration_fields = {"world_linearity", "temporal_sensitivity", "phase_fitting", "contrast_gamma"};
+    for field_idx = 1:numel(calibration_fields)
+        calibration_field = calibration_fields{field_idx};
+        if(~isfield(calibration_metadata, calibration_field))
+            continue;
+        end
+
+        if(~isfield(calibration_metadata.(calibration_field), "sensors_and_settings"))
+            continue;
+        end
+
+        calibration_metadata.(calibration_field).sensors_and_settings = ...
+            rebuild_sensor_settings_collection( ...
+                loaded_calibration_metadata.(calibration_field).sensors_and_settings, ...
+                world_util ...
+            );
+    end
+end
+
+function rebuilt_collection = rebuild_sensor_settings_collection(loaded_collection, world_util)
+    if(iscell(loaded_collection))
+        rebuilt_collection = cell(size(loaded_collection));
+        for idx = 1:numel(loaded_collection)
+            rebuilt_collection{idx} = rebuild_single_sensor_settings_entry(loaded_collection{idx}, world_util);
+        end
+        return;
+    end
+
+    if(isstruct(loaded_collection))
+        rebuilt_collection = struct;
+        field_names = fieldnames(loaded_collection);
+        for idx = 1:numel(field_names)
+            field_name = field_names{idx};
+            rebuilt_collection.(field_name) = rebuild_sensor_settings_collection(loaded_collection.(field_name), world_util);
+        end
+        return;
+    end
+
+    rebuilt_collection = loaded_collection;
+end
+
+function sensors = rebuild_single_sensor_settings_entry(loaded_sensors, world_util)
+    sensors = loaded_sensors;
+    if(~isstruct(sensors))
+        return;
+    end
+
+    if(isfield(sensors, "W"))
+        if(~isstruct(sensors.W))
+            sensors.W = struct;
+        end
+        sensors.W = rebuild_world_sensor_settings(sensors.W, world_util);
+    end
+end
+
+function world_sensor_settings = rebuild_world_sensor_settings(world_sensor_settings, world_util)
+    default_sensor_mode_idx = 0;
+    resolved_sensor_mode_idx = default_sensor_mode_idx;
+
+    if(isfield(world_sensor_settings, "sensor_mode_idx"))
+        candidate_idx = world_sensor_settings.sensor_mode_idx;
+        if(isnumeric(candidate_idx) && isscalar(candidate_idx) && ~isnan(candidate_idx))
+            resolved_sensor_mode_idx = double(candidate_idx);
+        end
+    elseif(isfield(world_sensor_settings, "sensor_mode"))
+        resolved_sensor_mode_idx = resolve_world_sensor_mode_idx(world_sensor_settings.sensor_mode, world_util, default_sensor_mode_idx);
+    end
+
+    if(isfield(world_sensor_settings, "sensor_mode"))
+        world_sensor_settings = rmfield(world_sensor_settings, "sensor_mode");
+    end
+    world_sensor_settings.sensor_mode_idx = resolved_sensor_mode_idx;
+end
+
+function sensor_mode_idx = resolve_world_sensor_mode_idx(sensor_mode, world_util, fallback_idx)
+    sensor_mode_idx = fallback_idx;
+
+    if(~isstruct(sensor_mode))
+        return;
+    end
+
+    world_camera_custom_modes = py_module_attr(world_util, "WORLD_CAMERA_CUSTOM_MODES");
+    n_modes = int64(py.len(world_camera_custom_modes));
+    for mode_idx = 0:(n_modes - 1)
+        candidate_mode = py_getitem(world_camera_custom_modes, int32(mode_idx));
+        if(world_sensor_modes_match(sensor_mode, candidate_mode))
+            sensor_mode_idx = double(mode_idx);
+            return;
+        end
+    end
+end
+
+function tf = world_sensor_modes_match(matlab_sensor_mode, py_sensor_mode)
+    tf = strings_match(fetch_struct_string(matlab_sensor_mode, "format"), fetch_py_string(py_sensor_mode, "format")) && ...
+         strings_match(fetch_struct_string(matlab_sensor_mode, "unpacked"), fetch_py_string(py_sensor_mode, "unpacked")) && ...
+         scalars_match(fetch_struct_scalar(matlab_sensor_mode, "bit_depth"), fetch_py_scalar(py_sensor_mode, "bit_depth")) && ...
+         scalars_match(fetch_struct_scalar(matlab_sensor_mode, "fps"), fetch_py_scalar(py_sensor_mode, "fps")) && ...
+         vectors_match(fetch_struct_vector(matlab_sensor_mode, "size"), fetch_py_vector(py_sensor_mode, "size")) && ...
+         vectors_match(fetch_struct_vector(matlab_sensor_mode, "crop_limits"), fetch_py_vector(py_sensor_mode, "crop_limits"));
+end
+
+function value = fetch_struct_string(input_struct, field_name)
+    value = "";
+    if(isfield(input_struct, field_name))
+        value = string(input_struct.(field_name));
+    end
+end
+
+function value = fetch_py_string(py_mapping, key_name)
+    value = string(py.str(py_getitem(py_mapping, key_name)));
+end
+
+function value = fetch_struct_scalar(input_struct, field_name)
+    value = NaN;
+    if(isfield(input_struct, field_name))
+        field_value = input_struct.(field_name);
+        if(isnumeric(field_value) && isscalar(field_value))
+            value = double(field_value);
+        end
+    end
+end
+
+function value = fetch_py_scalar(py_mapping, key_name)
+    value = double(py_getitem(py_mapping, key_name));
+end
+
+function value = fetch_struct_vector(input_struct, field_name)
+    value = [];
+    if(isfield(input_struct, field_name))
+        field_value = input_struct.(field_name);
+        if(isnumeric(field_value))
+            value = double(field_value(:).');
+        end
+    end
+end
+
+function value = fetch_py_vector(py_mapping, key_name)
+    py_vector = py_getitem(py_mapping, key_name);
+    n_vals = int64(py.len(py_vector));
+    value = zeros(1, n_vals);
+    for idx = 1:n_vals
+        value(idx) = double(py_getitem(py_vector, int32(idx - 1)));
+    end
+end
+
+function tf = strings_match(lhs, rhs)
+    tf = strlength(lhs) > 0 && strlength(rhs) > 0 && lhs == rhs;
+end
+
+function tf = scalars_match(lhs, rhs)
+    tf = ~isnan(lhs) && ~isnan(rhs) && abs(lhs - rhs) < 1e-9;
+end
+
+function tf = vectors_match(lhs, rhs)
+    tf = ~isempty(lhs) && isequal(size(lhs), size(rhs)) && all(abs(lhs - rhs) < 1e-9);
+end
 
 % Local function to generate a matrix of randomized orders of settings scalars 
 function order_mat = randomize_settings_orders(n_NDFs, settings_scalars, n_measures)
@@ -639,10 +827,37 @@ function order_mat = randomize_frequency_orders(n_NDFs, n_measures, n_contrast_l
     return ; 
 end 
 
+function value = py_module_attr(module, attr_name)
+    value = py.getattr(module, attr_name);
+end
+
+function value = py_call_module_attr(module, attr_name, varargin)
+    callable = py_module_attr(module, attr_name);
+    value = callable(varargin{:});
+end
+
+function value = py_getitem(py_obj, key)
+    getitem = py.getattr(py_obj, "__getitem__");
+    value = getitem(key);
+end
+
 % Local function to upload the CalibrationData struct. Used on error 
 % and at the end of the script 
 function upload_calibration_data(CalibrationData, dropbox_savedir, upload_mode)
     caldata_dropbox_path = fullfile(dropbox_savedir, "calibration_metadata.mat.bytes"); 
-    upload_mode.upload_file(py.bytes(getByteStreamFromArray(CalibrationData)), caldata_dropbox_path);
+    py_call_module_attr(upload_mode, "upload_file", py.bytes(getByteStreamFromArray(CalibrationData)), caldata_dropbox_path);
 
 end 
+
+function raise_calibration_failure(prefix, calibration_substruct)
+    detailed_message = "";
+    if(isstruct(calibration_substruct) && isfield(calibration_substruct, "last_error_message"))
+        detailed_message = string(calibration_substruct.last_error_message);
+    end
+
+    if(strlength(strtrim(detailed_message)) > 0)
+        error("ERROR: %s\n%s", prefix, detailed_message);
+    end
+
+    error("ERROR: %s", prefix);
+end

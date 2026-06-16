@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import cv2
 import os 
 import sys
+import pathlib
 from typing import Literal
 import pandas as pd
 import mat73
@@ -14,10 +15,48 @@ import dill
 import pandas as pd
 from numba import njit, prange
  
+def _load_pyagc():
+    candidate_dirs = (
+        pathlib.Path(__file__).resolve().parents[1] / "libraries_python" / "AGC_lib",
+        pathlib.Path(__file__).resolve().parents[4] / "lightLogger" / "libraries_python" / "AGC_lib",
+    )
+    for candidate_dir in candidate_dirs:
+        candidate_dir_str = str(candidate_dir)
+        if candidate_dir.exists() and candidate_dir_str not in sys.path:
+            sys.path.append(candidate_dir_str)
+        try:
+            import PyAGC  # type: ignore
+            return PyAGC
+        except ImportError:
+            continue
+    return None
+
+
+PyAGC = _load_pyagc()
+
 
 # World temporal offset relative to other sensors. The world is the target, 
 # so this is 0 (ms)
 WORLD_TIME_OFFSET: float = 0
+
+WORLD_CAMERA_DEFAULT_MODES: list[dict] = [
+    {'format': "SRGGB10_CSI2P", 'unpacked': 'SRGGB10', 'bit_depth': 10, 'size': (640, 480), 'fps': 195.77, 'crop_limits': (360, 272, 2560, 1920), 'exposure_limits': (39, 6210271, None)},
+    {'format': "SRGGB10_CSI2P", 'unpacked': 'SRGGB10', 'bit_depth': 10, 'size': (1600, 1200), 'fps': 42.94, 'crop_limits': (0, 0, 3200, 2400), 'exposure_limits': (75, 11766829, None)},
+    {'format': "SRGGB10_CSI2P", 'unpacked': 'SRGGB10', 'bit_depth': 10, 'size': (1640, 1232), 'fps': 41.85, 'crop_limits': (0, 0, 3280, 2464), 'exposure_limits': (75, 11766829, None)},
+    {'format': "SRGGB10_CSI2P", 'unpacked': 'SRGGB10', 'bit_depth': 10, 'size': (1920, 1080), 'fps': 47.57, 'crop_limits': (680, 692, 1920, 1080), 'exposure_limits': (75, 11766829, None)},
+    {'format': "SRGGB10_CSI2P", 'unpacked': 'SRGGB10', 'bit_depth': 10, 'size': (3280, 2464), 'fps': 21.19, 'crop_limits': (0, 0, 3280, 2464), 'exposure_limits': (75, 11766829, None)},
+    {'format': "SRGGB8", 'unpacked': 'SRGGB8', 'bit_depth': 8, 'size': (640, 480), 'fps': 195.77, 'crop_limits': (360, 272, 2560, 1920), 'exposure_limits': (39, 6210271, None)},
+    {'format': "SRGGB8", 'unpacked': 'SRGGB8', 'bit_depth': 8, 'size': (1600, 1200), 'fps': 85.88, 'crop_limits': (0, 0, 3200, 2400), 'exposure_limits': (37, 5883414, None)},
+    {'format': "SRGGB8", 'unpacked': 'SRGGB8', 'bit_depth': 8, 'size': (1640, 1232), 'fps': 83.7, 'crop_limits': (0, 0, 3280, 2464), 'exposure_limits': (37, 5883414, None)},
+    {'format': "SRGGB8", 'unpacked': 'SRGGB8', 'bit_depth': 8, 'size': (1920, 1080), 'fps': 47.57, 'crop_limits': (680, 692, 1920, 1080), 'exposure_limits': (75, 11766829, None)},
+    {'format': "SRGGB8", 'unpacked': 'SRGGB8', 'bit_depth': 8, 'size': (3296, 2464), 'fps': 21.19, 'crop_limits': (0, 0, 3280, 2464), 'exposure_limits': (75, 11766829, None)},
+]
+
+WORLD_CAMERA_CUSTOM_MODES: list[dict] = [
+    {'format': "SRGGB8", 'unpacked': 'SRGGB8', 'bit_depth': 8, 'size': (640, 480), 'fps': 120, 'crop_limits': (360, 272, 2560, 1920), 'exposure_limits': (39, 6210271, None)},
+    {'format': "SRGGB8", 'unpacked': 'SRGGB8', 'bit_depth': 8, 'size': (640, 480), 'fps': 180, 'crop_limits': (360, 272, 2560, 1920), 'exposure_limits': (39, 6210271, None)},
+    {'format': "SRGGB8", 'unpacked': 'SRGGB8', 'bit_depth': 8, 'size': (3296, 2464), 'fps': 20, 'crop_limits': (0, 0, 3280, 2464), 'exposure_limits': (75, 11766829, None)},
+]
 
 # This is assuming a contrast of 0.9 is the target of 127 at each NDF level
 WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x9: dict[int, tuple[float, float, float]] = {NDF_level:  # Define the fixed settings for this camera per integer NDF filter
@@ -81,6 +120,23 @@ WORLD_CONTRAST_LEVEL_NDF_SETTINGS: dict[float, dict[int, tuple[float, float, flo
     0.9: WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x9,
 }
 
+# Maintain the historical default settings table used elsewhere in the MATLAB
+# calibration pipeline. The 0.5 contrast table is the legacy baseline.
+WORLD_NDF_LEVEL_SETTINGS: dict[int, tuple[float, float, float]] = WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x5
+WORLD_CAM_FPS: int = 120
+WORLD_FRAME_SHAPE: np.ndarray = np.array([480, 640], dtype=np.uint16)
+WORLD_FRAME_DTYPE: object = np.uint8
+WORLD_METADATA_DTYPE: object = np.float64
+WORLD_USE_AGC: int = 1
+WORLD_AGC_MODES_INT_STR: dict[int, str] = {0: "off", 1: "custom", 2: "built-in"}
+WORLD_AGC_MODES_STR_INT: dict[str, int] = {val: key for key, val in WORLD_AGC_MODES_INT_STR.items()}
+WORLD_SAVE_AGC_METADATA: bool = True
+WORLD_AGC_CHANGE_INTERVAL: float = 0.250
+WORLD_AGC_SPEED_SETTING: float = 0.95
+WORLD_AGC_SETTINGS_RANGES: dict[str, np.ndarray] = PyAGC.retrieve_settings_ranges('W') if PyAGC is not None else {}
+WORLD_AGC_DISCRETE_STATES: dict[str, dict[str, int | float]] = PyAGC.retrieve_discrete_states('W') if PyAGC is not None else {}
+
+
 # The labels of the cols of the world AGC metdata 
 # The world metadata files contain these columns with a 
 # timestamp column before it
@@ -111,11 +167,50 @@ WORLD_RGB_SCALARS: np.ndarray = np.array([1.032, 0.803, 1.164], dtype=np.float64
 
 # Define a mapping between frame sizes and fielding functions of the camera
 WORLD_FIELDING_FUNCTIONS: dict[tuple[int], np.ndarray] = {(480, 640): np.ones((480, 640), dtype=np.float64)}
+WORLD_FIELDING_FUNCTION: np.ndarray = WORLD_FIELDING_FUNCTIONS[(480, 640)]
+WORLD_RGB_MASK: np.ndarray = np.zeros(WORLD_FRAME_SHAPE, dtype=np.uint8)
+WORLD_R_PIXELS: np.ndarray = np.array([(r, c)
+                                       for r in range(WORLD_FRAME_SHAPE[0])
+                                       for c in range(WORLD_FRAME_SHAPE[1])
+                                       if(r % 2 != 0 and c % 2 != 0)],
+                                      dtype=np.uint64)
+WORLD_G_PIXELS: np.ndarray = np.array([(r, c)
+                                       for r in range(WORLD_FRAME_SHAPE[0])
+                                       for c in range(WORLD_FRAME_SHAPE[1])
+                                       if((r % 2 == 0 and c % 2 != 0) or (r % 2 != 0 and c % 2 == 0))],
+                                      dtype=np.uint64)
+WORLD_B_PIXELS: np.ndarray = np.array([(r, c)
+                                       for r in range(WORLD_FRAME_SHAPE[0])
+                                       for c in range(WORLD_FRAME_SHAPE[1])
+                                       if(r % 2 == 0 and c % 2 == 0)],
+                                      dtype=np.uint64)
+for idx, pixel_indices in enumerate((WORLD_R_PIXELS, WORLD_G_PIXELS, WORLD_B_PIXELS)):
+    WORLD_RGB_MASK[pixel_indices[:, 0], pixel_indices[:, 1]] = idx
 
 # This the dark noise of the camera. That is, we measured a recording 
 # from the camera when it is entirely wrapped in black cloth 
 # and this was the result. This is 
 WORLD_DARK_NOISE: float = 16
+
+
+def get_world_contrast_level_ndf_settings(contrast_level: float) -> dict[int, tuple[float, float, float]]:
+    contrast_level = float(contrast_level)
+    if contrast_level not in WORLD_CONTRAST_LEVEL_NDF_SETTINGS:
+        raise ValueError(
+            f"Unsupported world-camera contrast target {contrast_level}. "
+            f"Expected one of {tuple(WORLD_CONTRAST_LEVEL_NDF_SETTINGS.keys())}."
+        )
+    return WORLD_CONTRAST_LEVEL_NDF_SETTINGS[contrast_level]
+
+
+def restore_settings_dict_types(sensor_mode: dict) -> None:
+    sensor_mode['format'] = str(sensor_mode['format'])
+    sensor_mode['unpacked'] = str(sensor_mode['unpacked'])
+    sensor_mode['bit_depth'] = int(sensor_mode['bit_depth'])
+    for field in ('size', 'crop_limits'):
+        sensor_mode[field] = tuple(int(val) for val in sensor_mode[field])
+    sensor_mode['fps'] = float(sensor_mode['fps'])
+    sensor_mode['exposure_limits'] = tuple([int(val) for val in sensor_mode['exposure_limits'][:2]] + [None])
 
 @njit(parallel=True)
 def _generate_debayered_provenance_map_numba(rows: int, cols: int) -> np.ndarray:
@@ -491,6 +586,12 @@ def apply_color_correction(original_frame: np.ndarray,
 
     # Return the modified frame
     return modified_frame
+
+
+def apply_color_weights(original_frame: np.ndarray,
+                        visualize_results: bool=False,
+                        ) -> tuple[np.ndarray, object] | np.ndarray:
+    return apply_color_correction(original_frame, visualize_results=visualize_results)
 
 """Embed a world frame's timestamp into the 8 bit image itself"""
 def embed_timestamp(original_frame: np.ndarray, timestamp: np.float64, visualize_results: bool=False) -> tuple[np.ndarray, object] | np.ndarray:
@@ -998,3 +1099,11 @@ def world_metadata_from_chunks(recording_path: str,
     metadata: pd.DataFrame = pd.DataFrame(metadata, columns=["timestamp", "Again", "Dgain", "exposure"])
 
     return metadata
+
+
+def main():
+    pass
+
+
+if(__name__ == '__main__'):
+    pass

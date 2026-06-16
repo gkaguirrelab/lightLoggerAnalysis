@@ -1,4 +1,5 @@
-import os 
+import gc
+import os
 from natsort import natsorted
 import numpy as np
 import pathlib
@@ -162,31 +163,35 @@ def pupil_chunk_parser(chunk_paths: tuple[str],
         v = np.clip(np.round(v.astype(np.float64) * digital_gain_scalars[:, np.newaxis, np.newaxis]), 0, 255).astype(np.uint8)
     
     if(use_mean_frame is True):
-        v = np.mean(v, axis=mean_axes)
+        v_mean = np.mean(v, axis=mean_axes)
+        del v
+        v = v_mean
+        del v_mean
 
     if(convert_to_float is True):
         t = t.astype(np.float64)
-        v = v.astype(np.float64) 
+        v = v.astype(np.float64)
 
-    # Save the finalized values 
-    chunk_dict['P']['t'] = t 
+    # Save the finalized values
+    chunk_dict['P']['t'] = t
     chunk_dict['P']['v'] = v
 
     return chunk_dict
 
 """Define the individual per chunk parser for the world camera data"""
 def world_chunk_parser(chunk_paths: tuple[str],
-                       apply_digital_gain: bool=False, 
+                       apply_digital_gain: bool=False,
                        convert_time_units: bool=False,
-                       use_mean_frame: bool=False, 
-                       convert_to_float: bool=False, 
+                       use_mean_frame: bool=False,
+                       convert_to_float: bool=False,
                        apply_phase_offset: bool=False,
-                       apply_RGB_correction: bool=False, 
+                       apply_RGB_correction: bool=False,
                        apply_fielding_function: bool=False,
-                       debayer_images: bool=False, 
+                       debayer_images: bool=False,
                        mean_axes: tuple[int] = (1, 2),
                        contains_AGC_metadata: bool=False,
-                       password="1234"
+                       password="1234",
+                       differentiate_color: bool=False
                        ) -> dict[str, dict]:
     # Initialize a return value 
     chunk_dict: dict = {'W': {}} 
@@ -235,72 +240,90 @@ def world_chunk_parser(chunk_paths: tuple[str],
         if(apply_phase_offset is True):
             t += world_util.WORLD_TIME_OFFSET
 
-    # First, convert to float for float multiplications
-    # if not in float already
-    v = v.astype(np.float64, copy=False)
+    needs_float_corrections: bool = apply_digital_gain or apply_fielding_function or apply_RGB_correction
 
-    # Apply digital gain as calculated from the AGC 
-    if(apply_digital_gain is True):
-        assert v.dtype == np.float64, f"Frame buffer dtype must be float64 to apply dgain. Current dtype is {v.dtype}"
+    # Only promote to float64 when corrections actually need it
+    if(needs_float_corrections):
+        v = v.astype(np.float64, copy=False)
 
-        # Retrieve the digital gain scalars per frame 
-        digital_gain_scalars: np.ndarray = chunk_dict['W']['settings']['Dgain'] if len(chunk_dict['W']['settings']['Dgain']) > 0 else np.full((len(t),), 1) 
+        # Apply digital gain as calculated from the AGC
+        if(apply_digital_gain is True):
+            digital_gain_scalars: np.ndarray = chunk_dict['W']['settings']['Dgain'] if len(chunk_dict['W']['settings']['Dgain']) > 0 else np.full((len(t),), 1)
+            v *= digital_gain_scalars[:, np.newaxis, np.newaxis]
 
-        # Multiply the frames by the dgains
-        v *= digital_gain_scalars[:, np.newaxis, np.newaxis]
+        # Apply the fielding function to each color plane
+        if(apply_fielding_function is True):
+            fielding_function: np.ndarray = world_util.WORLD_FIELDING_FUNCTIONS[v.shape[1:3]]
+            v *= fielding_function
 
-    # Apply the fielding function to each color plane 
-    if(apply_fielding_function is True):
-        assert v.dtype == np.float64 and v.ndim == 3, f"Frame buffer dtype must be float64 and in bayer format to apply fielding function. Current dtype is {v.dtype}, current ndim: {v.ndim}"
-        
-        # Get the fielding function for this frame size
-        fielding_function: np.ndarray = world_util.WORLD_FIELDING_FUNCTIONS[v.shape[1:3]]
+        # Apply correction scalars for each of the RGB channels
+        if(apply_RGB_correction is True):
+            bayer_RGB_mask: np.ndarray = world_util.generate_RGB_mask(v[0])
+            bayer_RGB_pixel_locations: list[np.ndarray] = [ np.argwhere(bayer_RGB_mask == color) for color in "RGB" ]
+            assert bayer_RGB_mask.shape == v.shape[1:], f"Bayer RGB mask shape: {bayer_RGB_mask.shape} not equal to frame shape: {v.shape[1:]}"
 
-        # Apply fielding function
-        v *= fielding_function
+            assert len(bayer_RGB_pixel_locations) == len(world_util.WORLD_RGB_SCALARS)
+            for (pixels, weight) in zip(bayer_RGB_pixel_locations, world_util.WORLD_RGB_SCALARS):
+                rows: np.ndarray = pixels[:, 0]
+                cols: np.ndarray = pixels[:, 1]
+                v[:, rows, cols] *= weight
 
-    # Apply correction scalars for each of the RGB channels
-    if(apply_RGB_correction is True):
-        assert v.ndim == 3 and v.dtype == np.float64, f"To apply color weights, buffer must be in bayer form np.float64."
+    # When differentiate_color + use_mean_frame, skip the uint8 roundtrip
+    # and go straight to the color-separated mean while data is still in memory
+    if(use_mean_frame is True and differentiate_color is True):
+        assert all(ax in mean_axes for ax in (1, 2)), \
+            "differentiate_color requires both spatial axes (1, 2) to be in mean_axes"
 
-        # Apply the radiometric correction
-        bayer_RGB_mask: np.ndarray = world_util.generate_RGB_mask(v[0])
-        bayer_RGB_pixel_locations: list[np.ndarray] = [ np.argwhere(bayer_RGB_mask == color) for color in "RGB" ]
-        assert bayer_RGB_mask.shape == v.shape[1:], f"Bayer RGB mask shape: {bayer_RGB_mask.shape} not equal to frame shape: {v.shape[1:]}" 
+        # Build the Bayer mask from the frame shape (works on any dtype)
+        frame_shape: tuple = v.shape[1:3]
+        bayer_mask: np.ndarray = world_util.generate_RGB_mask(
+            np.zeros(frame_shape, dtype=np.uint8), marker="num"
+        )
+        r_mask: np.ndarray = bayer_mask == 0
+        g_mask: np.ndarray = bayer_mask == 1
+        b_mask: np.ndarray = bayer_mask == 2
+        del bayer_mask
 
-        # Apply the color corrections IN-PLACE and vectorized
-        assert len(bayer_RGB_pixel_locations) == len(world_util.WORLD_RGB_SCALARS)
-        for (pixels, weight) in zip(bayer_RGB_pixel_locations, world_util.WORLD_RGB_SCALARS):
-            rows: np.ndarray = pixels[:, 0]
-            cols: np.ndarray = pixels[:, 1]
+        # Compute per-color and frame means one at a time to avoid
+        # materializing large intermediate slices simultaneously
+        r_means: np.ndarray = v[:, r_mask].mean(axis=1, dtype=np.float64)
+        g_means: np.ndarray = v[:, g_mask].mean(axis=1, dtype=np.float64)
+        b_means: np.ndarray = v[:, b_mask].mean(axis=1, dtype=np.float64)
+        frame_means: np.ndarray = v.mean(axis=(1, 2), dtype=np.float64)
 
-            # Apply the weight to the specified pixels 
-            v[:, rows, cols] *= weight
+        # Release the large buffer immediately
+        del v
+        gc.collect()
 
-    # Convert back to np.uint8 to debayer images
-    if(v.dtype != np.uint8):
-        v = np.round(np.clip(v, 0, 255)).astype(np.uint8)
+        v = np.stack([r_means, g_means, b_means, frame_means], axis=1)
+        del r_means, g_means, b_means, frame_means
 
-    #  Debayer images if desired 
-    if(debayer_images is True):
-        debayered_v: np.ndarray = np.empty(list(v.shape) + [3], dtype=np.uint8)
-        for frame_num, frame in v:
-            debayered_v[frame_num] = world_util.debayer_image(frame)
+        if 0 in mean_axes:
+            v = v.mean(axis=0)
 
-        # Replace v with the debayered version
-        v = debayered_v
+    else:
+        # Standard path: convert back to uint8 if corrections promoted to float
+        if(v.dtype != np.uint8):
+            v = np.round(np.clip(v, 0, 255)).astype(np.uint8)
 
-    # Just return the mean frame 
-    if(use_mean_frame is True):
-        v = np.mean(v, axis=mean_axes)
+        # Debayer images if desired
+        if(debayer_images is True):
+            debayered_v: np.ndarray = np.empty(list(v.shape) + [3], dtype=np.uint8)
+            for frame_num, frame in v:
+                debayered_v[frame_num] = world_util.debayer_image(frame)
+            v = debayered_v
 
-    # Convert result to float or not 
-    if(convert_to_float is True):
+        # Reduce frames by averaging
+        if(use_mean_frame is True):
+            v = np.mean(v, axis=mean_axes)
+
+    # Convert result to float or not
+    if(convert_to_float is True or differentiate_color is True):
         t = t.astype(np.float64)
-        v = v.astype(np.float64) 
+        v = v.astype(np.float64)
 
-    # Save the finalized values 
-    chunk_dict['W']['t'] = t 
+    # Save the finalized values
+    chunk_dict['W']['t'] = t
     chunk_dict['W']['v'] = v
 
     return chunk_dict
@@ -389,23 +412,24 @@ def find_chunks_by_timestamp(recording_path: str,
     return tuple(chunk_range) 
 
 def parse_chunks(recording_path: str,
-                 apply_digital_gain: bool=False, 
-                 use_mean_frame: bool=False, 
-                 convert_time_units: bool=False, 
-                 convert_to_float: bool=False, 
-                 apply_phase_correction: bool=False, 
-                 apply_RGB_correction: bool=False, 
+                 apply_digital_gain: bool=False,
+                 use_mean_frame: bool=False,
+                 convert_time_units: bool=False,
+                 convert_to_float: bool=False,
+                 apply_phase_correction: bool=False,
+                 apply_RGB_correction: bool=False,
                  apply_fielding_function: bool=False,
-                 debayer_images: bool=False, 
+                 debayer_images: bool=False,
                  time_ranges: tuple[float | None] | None={sensor_name: (None, None)
                                                           for sensor_name in "WPM"
-                                                         }, 
+                                                         },
                  chunk_ranges: tuple[int] | None={sensor_name: (0, None)
                                                   for sensor_name in "WPM"
-                                                 }, 
+                                                 },
                  mean_axes: dict[str, int] = {'W': (1, 2), 'P': (1, 2), 'M': (0,)},
                  contains_agc_metadata_dict: dict[str, bool] = {'W': True, 'P': False, 'M': False},
-                 password: str="1234"
+                 password: str="1234",
+                 differentiate_color: bool=False
                 ) -> list[dict[str, dict]]:
 
     # Ensure the time_ranges and chunk ranges are tuples of ints 
@@ -498,23 +522,28 @@ def parse_chunks(recording_path: str,
             chunk: tuple[str] = () if start is None or chunk_num not in range(start, end) else (sensors_chunks_paths[sensor_name][chunk_num])
 
             # Parse the chunk and save it in the dictionary
-            parsed_sensor_dict: dict = parsers[sensor_name](chunk, 
-                                                            apply_digital_gain, 
-                                                            convert_time_units, 
+            sensor_kwargs: dict = {}
+            if sensor_name == "W":
+                sensor_kwargs["differentiate_color"] = differentiate_color
+
+            parsed_sensor_dict: dict = parsers[sensor_name](chunk,
+                                                            apply_digital_gain,
+                                                            convert_time_units,
                                                             use_mean_frame,
                                                             convert_to_float,
-                                                            apply_phase_correction, 
-                                                            apply_RGB_correction, 
+                                                            apply_phase_correction,
+                                                            apply_RGB_correction,
                                                             apply_fielding_function,
                                                             debayer_images,
                                                             mean_axes[sensor_name],
                                                             contains_agc_metadata_dict[sensor_name],
-                                                            password
+                                                            password,
+                                                            **sensor_kwargs
                                                            )
             chunk_dict |= parsed_sensor_dict
+            gc.collect()
 
-        # Append the parsed chunk dict 
+        # Append the parsed chunk dict
         parsed_chunks.append(chunk_dict)
-
 
     return parsed_chunks

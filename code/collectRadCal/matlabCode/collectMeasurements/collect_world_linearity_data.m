@@ -1,6 +1,7 @@
 function [success, world_linearity_calibration_metadata] = collect_world_linearity_data(device_num,...
                                                                                          world_linearity_calibration_metadata,...
                                                                                          bluetooth_central,...
+                                                                                         bluetooth_client,...
                                                                                          label,...
                                                                                          dropbox_savedir,...
                                                                                          local_savedir...
@@ -52,12 +53,14 @@ function [success, world_linearity_calibration_metadata] = collect_world_lineari
         device_num;
         world_linearity_calibration_metadata;
         bluetooth_central;
+        bluetooth_client;
         label = "";
         dropbox_savedir = "";
         local_savedir = "";
     end
 
     % Extract some information from the world_linearity calibration struct
+    world_linearity_calibration_metadata.last_error_message = "";
     NDFs = world_linearity_calibration_metadata.NDFs;
     contrast_agc_targets = world_linearity_calibration_metadata.contrast_agc_targets; 
     background = world_linearity_calibration_metadata.background;
@@ -134,55 +137,65 @@ function [success, world_linearity_calibration_metadata] = collect_world_lineari
                     % Apply the settings to the CombiLED
                     CombiLED.setPrimaries(settings);
 
-                    % Generate a message to send to the RPi
-                    update_message = bluetooth_central.initialize_update_message();
+                    try
+                        % Generate a message to send to the RPi
+                        update_message = py_call_module_attr(bluetooth_central, "initialize_update_message");
 
-                    filename = label + sprintf("WorldCameraLinearity_%dcontrastTargetIdx_%dsettingsIdx_%dmeasurementIdx", ...
-                                               cc, settings_scalar_idx, mm);
+                        filename = label + sprintf("WorldCameraLinearity_%dcontrastTargetIdx_%dsettingsIdx_%dmeasurementIdx", ...
+                                                   cc, settings_scalar_idx, mm);
 
-                    % Compose the target output dir for this NDF level
-                    cloud_output_dir = "";
-                    if(dropbox_savedir ~= "")
-                        cloud_output_dir = fullfile(dropbox_savedir, sprintf("NDF%f", NDF));
-                    end
-
-                    local_output_dir = "";
-                    if(local_savedir ~= "")
-                        local_output_dir = fullfile(local_savedir, sprintf("NDF%f", NDF));
-                    end
-
-                    bluetooth_central.generate_calibration_state(update_message, py.str(filename),...
-                                                                cloud_output_dir, local_output_dir,...
-                                                                true, py.int(n_seconds),...
-                                                                py.int(30), sensors...
-                                                                );
-
-                    % Send a message to the RPi to make a recording
-                    bluetooth_central.message_peripheral_matlab_wrapper(device_num, update_message);
-
-                    % Read the state from the light logger, and pause until it
-                    % is changed from calibration to wait. If it changes to
-                    % error, then throw an error.
-                    while(true)
-                        % Read the current state from the light logger
-                        lightlogger_state = struct(bluetooth_central.read_peripheral_matlab_wrapper(device_num));
-                        state_name = string(char(lightlogger_state.state));
-
-                        % If the state is error, raise an error on this
-                        % machine as well
-                        if(state_name == "error")
-                            success = 0;
-                            return;
+                        % Compose the target output dir for this NDF level
+                        cloud_output_dir = "";
+                        if(dropbox_savedir ~= "")
+                            cloud_output_dir = fullfile(dropbox_savedir, sprintf("NDF%f", NDF));
                         end
 
-                        % If the light logger is done recording + uploading,
-                        % break from the loop
-                        if(state_name == "wait")
-                            break
+                        local_output_dir = "";
+                        if(local_savedir ~= "")
+                            local_output_dir = fullfile(local_savedir, sprintf("NDF%f", NDF));
                         end
 
-                        % Pause for some time between reads
-                        pause(2);
+                        py_call_module_attr(bluetooth_central, "generate_calibration_state", update_message, py.str(filename),...
+                                            cloud_output_dir, local_output_dir,...
+                                            true, py.int(n_seconds),...
+                                            py.int(30), sensors...
+                                            );
+
+                        % Send a message to the RPi to make a recording
+                        py_call_module_attr(bluetooth_central, "message_peripheral_matlab_wrapper", device_num, update_message, bluetooth_client);
+
+                        % Read the state from the light logger, and pause until it
+                        % is changed from calibration to wait. If it changes to
+                        % error, then throw an error.
+                        while(true)
+                            % Read the current state from the light logger
+                            lightlogger_state = struct(py_call_module_attr(bluetooth_central, "read_peripheral_matlab_wrapper", device_num, bluetooth_client));
+                            state_name = string(char(lightlogger_state.state));
+
+                            % If the state is error, raise an error on this
+                            % machine as well
+                            if(state_name == "error")
+                                world_linearity_calibration_metadata.last_error_message = describe_lightlogger_error(lightlogger_state);
+                                success = 0;
+                                return;
+                            end
+
+                            % If the light logger is done recording + uploading,
+                            % break from the loop
+                            if(state_name == "wait")
+                                break
+                            end
+
+                            % Pause for some time between reads
+                            pause(0.5);
+                        end
+                    catch ME
+                        report_bluetooth_failure("World linearity", NDF, cc, mm, ME);
+                        world_linearity_calibration_metadata.last_error_message = ...
+                            sprintf("World linearity bluetooth failure at NDF %.3f contrast %d measurement %d.\n%s", ...
+                                    NDF, cc, mm, getReport(ME, "extended", "hyperlinks", "off"));
+                        success = 0;
+                        return;
                     end
 
                     % Otherwise, we successfully completed and we will mark
@@ -202,4 +215,137 @@ function [success, world_linearity_calibration_metadata] = collect_world_lineari
     % Set the success flag and return
     success = 1;
 
+end
+
+function value = py_module_attr(module, attr_name)
+    value = py.getattr(module, attr_name);
+end
+
+function value = py_call_module_attr(module, attr_name, varargin)
+    callable = py_module_attr(module, attr_name);
+    value = callable(varargin{:});
+end
+
+function report_bluetooth_failure(measurement_name, NDF, contrast_idx, measurement_num, ME)
+    fprintf(2, "%s bluetooth failure at NDF %.3f contrast %d measurement %d.\n", measurement_name, NDF, contrast_idx, measurement_num);
+    fprintf(2, "%s\n", getReport(ME, "extended", "hyperlinks", "off"));
+end
+
+function message = describe_lightlogger_error(lightlogger_state)
+    message_parts = strings(0, 1);
+    message_parts(end + 1) = "Light logger entered error state.";
+    if(isfield(lightlogger_state, "state"))
+        message_parts(end + 1) = "state: " + string(lightlogger_state.state);
+    end
+
+    if(isfield(lightlogger_state, "error_message"))
+        error_message = string(lightlogger_state.error_message);
+        if(strlength(strtrim(error_message)) > 0)
+            message_parts(end + 1) = "error_message: " + error_message;
+        end
+    end
+
+    if(isfield(lightlogger_state, "info"))
+        info_struct = to_plain_struct(lightlogger_state.info);
+        if(isstruct(info_struct) && isfield(info_struct, "write_error"))
+            write_error = to_plain_struct(info_struct.write_error);
+            if(isstruct(write_error))
+                if(isfield(write_error, "message"))
+                    value = string(write_error.message);
+                    if(strlength(strtrim(value)) > 0)
+                        message_parts(end + 1) = "write_error.message: " + value;
+                    end
+                end
+                if(isfield(write_error, "exception_type"))
+                    value = string(write_error.exception_type);
+                    if(strlength(strtrim(value)) > 0)
+                        message_parts(end + 1) = "write_error.exception_type: " + value;
+                    end
+                end
+                if(isfield(write_error, "exception_message"))
+                    value = string(write_error.exception_message);
+                    if(strlength(strtrim(value)) > 0)
+                        message_parts(end + 1) = "write_error.exception_message: " + value;
+                    end
+                end
+                if(isfield(write_error, "traceback"))
+                    value = string(write_error.traceback);
+                    if(strlength(strtrim(value)) > 0)
+                        message_parts(end + 1) = "write_error.traceback: " + value;
+                    end
+                end
+                if(isfield(write_error, "header"))
+                    header_struct = to_plain_struct(write_error.header);
+                    header_lines = flatten_struct_fields(header_struct, "write_error.header");
+                    if(~isempty(header_lines))
+                        message_parts = [message_parts; header_lines(:)];
+                    end
+                end
+            end
+        end
+    end
+
+    raw_state_dump = strtrim(string(evalc("disp(lightlogger_state)")));
+    if(strlength(raw_state_dump) > 0)
+        message_parts(end + 1) = "raw_state_dump:";
+        message_parts(end + 1) = raw_state_dump;
+    end
+
+    message = strjoin(message_parts, newline);
+end
+
+function value = to_plain_struct(value)
+    if(isstruct(value))
+        return;
+    end
+
+    if(isa(value, "py.dict"))
+        value = struct(value);
+        return;
+    end
+
+    if(isa(value, "py.NoneType"))
+        value = struct;
+    end
+end
+
+function lines = flatten_struct_fields(input_struct, prefix)
+    lines = strings(0, 1);
+    if(~isstruct(input_struct))
+        return;
+    end
+
+    field_names = fieldnames(input_struct);
+    for idx = 1:numel(field_names)
+        field_name = field_names{idx};
+        field_value = input_struct.(field_name);
+        field_prefix = prefix + "." + string(field_name);
+
+        if(isstruct(field_value))
+            nested_lines = flatten_struct_fields(field_value, field_prefix);
+            if(~isempty(nested_lines))
+                lines = [lines; nested_lines(:)];
+            end
+        else
+            lines(end + 1) = field_prefix + ": " + string(local_value_to_text(field_value));
+        end
+    end
+end
+
+function text = local_value_to_text(value)
+    if(isstring(value) || ischar(value))
+        text = string(value);
+        return;
+    end
+
+    if(islogical(value) || isnumeric(value))
+        if(isscalar(value))
+            text = string(value);
+        else
+            text = strtrim(string(mat2str(value)));
+        end
+        return;
+    end
+
+    text = strtrim(string(evalc("disp(value)")));
 end
