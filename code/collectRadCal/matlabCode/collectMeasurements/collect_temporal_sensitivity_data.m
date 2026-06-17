@@ -244,8 +244,12 @@ function [success, temporal_sensitivity_calibration_metadata] = collect_temporal
                         % from calibration to wait 
                         % if it changes to error, then throw an error
                         while(true)
-                            % Read the current state from the light logger 
-                            lightlogger_state = struct(py_call_module_attr(bluetooth_central, "read_peripheral_matlab_wrapper", device_num, bluetooth_client));
+                            % Read the current state from the light logger.
+                            % Transient CoreBluetooth read errors (e.g. CBATT
+                            % "Unlikely error", code 14) are retried rather than
+                            % aborting the whole calibration, since the recording
+                            % has already been triggered on the light logger.
+                            lightlogger_state = read_peripheral_state_with_retry(bluetooth_central, device_num, bluetooth_client);
                             state_name = string(char(lightlogger_state.state));     
 
                             % If the state is error, raise an error on this machine 
@@ -310,6 +314,32 @@ end
 function value = py_call_module_attr(module, attr_name, varargin)
     callable = py_module_attr(module, attr_name);
     value = callable(varargin{:});
+end
+
+function lightlogger_state = read_peripheral_state_with_retry(bluetooth_central, device_num, bluetooth_client)
+    % Read the peripheral state, retrying on transient bluetooth failures.
+    %
+    % CoreBluetooth/Bleak occasionally throws transient read errors (for
+    % example "Unlikely error", CBATTErrorDomain code 14). These are not
+    % indicative of a real failure of the calibration, so we retry the read a
+    % few times before giving up and letting the error propagate.
+    max_attempts = 5;
+    retry_pause_seconds = 1.0;
+
+    for attempt = 1:max_attempts
+        try
+            lightlogger_state = struct(py_call_module_attr(bluetooth_central, "read_peripheral_matlab_wrapper", device_num, bluetooth_client));
+            return;
+        catch ME
+            if(attempt == max_attempts)
+                rethrow(ME);
+            end
+
+            fprintf(2, "Transient bluetooth read failure (attempt %d/%d): %s\nRetrying in %.1f s...\n", ...
+                    attempt, max_attempts, ME.message, retry_pause_seconds);
+            pause(retry_pause_seconds);
+        end
+    end
 end
 
 function report_bluetooth_failure(measurement_name, NDF, contrast_idx, freq_idx, measurement_num, ME)

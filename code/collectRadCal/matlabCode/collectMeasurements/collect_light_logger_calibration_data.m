@@ -170,7 +170,7 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
     end 
         
     % Gather the target local savedir 
-    default_external_output_dir = fullfile("/media/rpiControl/T7 Shield/", experiment_name);
+    default_external_output_dir = fullfile("/media/rpiControl/EXTERNAL_1/", experiment_name);
     external_output_dir = input(sprintf("Enter a location to save the local data [Enter for default=%s" + "]: ", default_external_output_dir), 's');
     if(strtrim(external_output_dir) == "")
         external_output_dir = default_external_output_dir; 
