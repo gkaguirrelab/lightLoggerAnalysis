@@ -1047,7 +1047,7 @@ def world_chunks_to_video(recording_path: str,
 
                 # Otherwise, let's calculate the time delta between the current timestamp and the previous timestamp 
                 time_between_frames: float = timestamp - previous_timestamp
-                assert time_between_frames >= 0, f"Time between frames is somehow negative. Frame 1: {previous_timestamp}, Frame 2: {timestmap}"
+                assert time_between_frames >= 0, f"Time between frames is somehow negative. Frame 1: {previous_timestamp}, Frame 2: {timestamp}"
 
                 # Calculate the number of missed frames as the elapsed time divided 
                 # by the seconds per frame, minus one frame as we have to count the current frame 
