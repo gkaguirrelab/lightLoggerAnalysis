@@ -281,6 +281,8 @@ def extract_frames_from_video(video_path: str, frames_idx: Iterable, is_grayscal
         # convert to grayscale
         if(is_grayscale is True): 
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        else:
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
         # Save the extracted frame 
         extracted_frames.append(frame)

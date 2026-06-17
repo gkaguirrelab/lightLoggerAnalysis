@@ -196,12 +196,26 @@
     calibration_util = import_pyfile(getpref("lightLoggerAnalysis", "calibration_util_path"));
     chunk_io = import_pyfile(getpref("lightLoggerAnalysis", "chunk_io_path"));
 
+    % Show the configured calibration_util path vs. the file Python actually imported
+    fprintf("calibration_util_path pref: %s\n", getpref("lightLoggerAnalysis", "calibration_util_path"));
+    fprintf("imported calibration_util file: %s\n", string(py.getattr(calibration_util, '__file__')));
+
+    % Confirm the function is actually present in the loaded module's namespace.
+    % MATLAB's dotted attribute access on py.module can fail to surface a function
+    % that genuinely exists, so report what py.hasattr sees regardless of dot-access.
+    has_loader = logical(py.hasattr(calibration_util, 'load_sorted_calibration_files'));
+    fprintf("module hasattr load_sorted_calibration_files: %d\n", has_loader);
+
     % Retrieve sorted folder paths only (no parsing in Python)
-    if(options.verbose) 
+    if(options.verbose)
         disp(experiment_folder)
     end
 
-    sorted_paths = struct(calibration_util.load_sorted_calibration_files(experiment_folder, pyargs('parse_files', false)));
+    % Fetch the function via py.getattr instead of dot-access. This bypasses
+    % MATLAB's cached member-name resolution for the py.module type, which is the
+    % source of the spurious "Unrecognized method, property, or field" error.
+    load_sorted_calibration_files = py.getattr(calibration_util, 'load_sorted_calibration_files');
+    sorted_paths = struct(load_sorted_calibration_files(experiment_folder, pyargs('parse_files', false)));
 
     % Save the path to the current file's directory. we are going to need this when we mess around with tbUses
     path_to_file_dir = fileparts(mfilename("fullpath"));
@@ -281,7 +295,7 @@ function converted_linearity = convert_ms_linearity_to_matlab(linearity_calibrat
                 measurement_path = string(measurement_cells{mm});
 
                 % Parse this single measurement in Python
-                chunks_py = chunk_io.parse_chunks(measurement_path, ...
+                parse_chunks_fn = py.getattr(chunk_io, 'parse_chunks'); chunks_py = parse_chunks_fn(measurement_path, ...
                     pyargs( ...
                         'apply_digital_gain', opts.apply_digital_gain, ...
                         'use_mean_frame', opts.use_mean_frame, ...
@@ -356,7 +370,7 @@ function converted_temporal_sensitivity = convert_temporal_sensitivity_to_matlab
                     measurement_path = string(measurement_cells{mm});
 
                     % Parse this single measurement in Python
-                    chunks_py = chunk_io.parse_chunks(measurement_path, ...
+                    parse_chunks_fn = py.getattr(chunk_io, 'parse_chunks'); chunks_py = parse_chunks_fn(measurement_path, ...
                         pyargs( ...
                             'apply_digital_gain', opts.apply_digital_gain, ...
                             'use_mean_frame', opts.use_mean_frame, ...
@@ -434,7 +448,7 @@ function converted_linearity = convert_camera_linearity_to_matlab(linearity_cali
                     measurement_path = string(measurement_cells{mm});
 
                     % Parse this single measurement in Python
-                    chunks_py = chunk_io.parse_chunks(measurement_path, ...
+                    parse_chunks_fn = py.getattr(chunk_io, 'parse_chunks'); chunks_py = parse_chunks_fn(measurement_path, ...
                         pyargs( ...
                             'apply_digital_gain', opts.apply_digital_gain, ...
                             'use_mean_frame', opts.use_mean_frame, ...

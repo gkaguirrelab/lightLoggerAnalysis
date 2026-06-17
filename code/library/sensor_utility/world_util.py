@@ -63,8 +63,8 @@ WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x9: dict[int, tuple[float, float, float]] = {
                                                                                   (1.0, 1.0, 468.0) if NDF_level == 0
                                                                                   else (1.0, 1.0, 4599.0) if NDF_level == 1
                                                                                   else (7.757575988769531, 1.0, 8290.0) if NDF_level == 2
-                                                                                  else (10.239999771118164, 3.5039764011458963, 8290.0) if NDF_level == 3
-                                                                                  else (10.239999771118164, 7.2417770421497565, 8290.0) if NDF_level == 4
+                                                                                  else (10.666, 3.5039764011458963, 8290.0) if NDF_level == 3
+                                                                                  else (10.666, 7.2417770421497565, 8290.0) if NDF_level == 4
                                                                                   else (10.666, 10.0, 8333)
                                                                                   for NDF_level in range(7)
                                                                               }
@@ -105,9 +105,9 @@ WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x25: dict[int, tuple[float, float, float]] = 
 WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x1: dict[int, tuple[float, float, float]] = {NDF_level:  # Define the fixed settings for this camera per integer NDF filter
                                                                                   (1.0, 1.0, 3711.0) if NDF_level == 0
                                                                                   else (4.338983058929443, 1.0, 8290.0) if NDF_level == 1
-                                                                                  else (10.239999771118164, 2.9977685360728445, 8290.0) if NDF_level == 2
-                                                                                  else (10.239999771118164, 7.119079983538314, 8290.0) if NDF_level == 3
-                                                                                  else (10.239999771118164, 8.039178161297238, 8290.0) if NDF_level == 4
+                                                                                  else (10.666, 2.9977685360728445, 8290.0) if NDF_level == 2
+                                                                                  else (10.666, 7.119079983538314, 8290.0) if NDF_level == 3
+                                                                                  else (10.666, 8.039178161297238, 8290.0) if NDF_level == 4
                                                                                   else (10.666, 10.0, 8333)
                                                                                   for NDF_level in range(7)
                                                                               }
