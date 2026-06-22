@@ -4,6 +4,7 @@ from natsort import natsorted
 import numpy as np
 import pathlib
 import sys
+from tqdm.auto import tqdm
 
 # Import the sensor utility libraries 
 light_logger_analysis_path: str = str(pathlib.Path(__file__).parents[3])
@@ -429,7 +430,8 @@ def parse_chunks(recording_path: str,
                  mean_axes: dict[str, int] = {'W': (1, 2), 'P': (1, 2), 'M': (0,)},
                  contains_agc_metadata_dict: dict[str, bool] = {'W': True, 'P': False, 'M': False},
                  password: str="1234",
-                 differentiate_color: bool=False
+                 differentiate_color: bool=False,
+                 verbose: bool=False
                 ) -> list[dict[str, dict]]:
 
     # Ensure the time_ranges and chunk ranges are tuples of ints 
@@ -504,7 +506,8 @@ def parse_chunks(recording_path: str,
                     }
 
     # Populate the chunks
-    for chunk_num in range(max_num_chunks):
+    chunk_iterator = range(max_num_chunks) if verbose is False else tqdm(range(max_num_chunks), desc="Parsing chunks")
+    for chunk_num in chunk_iterator:
         # Initialize the dict for this chunk 
         chunk_dict: dict = {}
 

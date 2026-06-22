@@ -4,7 +4,8 @@ function [success, temporal_sensitivity_calibration_metadata] = collect_temporal
                                                                                                   bluetooth_client,...
                                                                                                   label,...
                                                                                                   dropbox_savedir,...
-                                                                                                  local_savedir...
+                                                                                                  local_savedir,...
+                                                                                                  cooldown_callback...
                                                                                                 ) 
 % Collect calibration data for temporal sensitivity of 
 % all of the sensors in the light logger
@@ -75,6 +76,7 @@ function [success, temporal_sensitivity_calibration_metadata] = collect_temporal
         label = "";
         dropbox_savedir = "";
         local_savedir = "";
+        cooldown_callback = [];
     end 
 
     % First, extract some information from the calibration struct 
@@ -295,6 +297,10 @@ function [success, temporal_sensitivity_calibration_metadata] = collect_temporal
 
         end % Measures 
 
+        if(should_cooldown_before_next_NDF(temporal_sensitivity_calibration_metadata.completed_measurements, nn) && ~isempty(cooldown_callback))
+            cooldown_callback(CombiLED, NDF);
+        end
+
         % Close the CombiLED for this NDF 
         CombiLED.serialClose(); 
 
@@ -306,6 +312,17 @@ function [success, temporal_sensitivity_calibration_metadata] = collect_temporal
     return ; 
 
 end 
+
+function tf = should_cooldown_before_next_NDF(completed_measurements, current_NDF_idx)
+    tf = false;
+    for idx = (current_NDF_idx + 1):size(completed_measurements, 1)
+        completed_measurements_NDF = completed_measurements(idx, :, :, :);
+        if(any(completed_measurements_NDF(:) == false))
+            tf = true;
+            return;
+        end
+    end
+end
 
 function value = py_module_attr(module, attr_name)
     value = py.getattr(module, attr_name);

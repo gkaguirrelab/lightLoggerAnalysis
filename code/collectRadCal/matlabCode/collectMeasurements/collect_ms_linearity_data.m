@@ -4,7 +4,8 @@ function [success, ms_linearity_calibration_metadata] = collect_ms_linearity_dat
                                                                              bluetooth_client,...
                                                                              label,...
                                                                              dropbox_savedir,...
-                                                                             local_savedir...
+                                                                             local_savedir,...
+                                                                             cooldown_callback...
                                                                             )        
 % Collect calibration data for the linearity of the light-sensing 
 % chips of the light logger (AS/TS) 
@@ -67,6 +68,7 @@ function [success, ms_linearity_calibration_metadata] = collect_ms_linearity_dat
         label = "";
         dropbox_savedir = "";
         local_savedir = "";
+        cooldown_callback = [];
     end 
 
     % Extract some information from the MS_linearity calibration struct 
@@ -213,6 +215,10 @@ function [success, ms_linearity_calibration_metadata] = collect_ms_linearity_dat
 
         end % Measures 
     
+        if(should_cooldown_before_next_NDF(ms_linearity_calibration_metadata.completed_measurements, nn) && ~isempty(cooldown_callback))
+            cooldown_callback(CombiLED, NDF);
+        end
+
         % Close the CombiLED for this NDF level 
         CombiLED.serialClose(); 
 
@@ -222,6 +228,17 @@ function [success, ms_linearity_calibration_metadata] = collect_ms_linearity_dat
     success = 1; 
 
 end 
+
+function tf = should_cooldown_before_next_NDF(completed_measurements, current_NDF_idx)
+    tf = false;
+    for idx = (current_NDF_idx + 1):size(completed_measurements, 1)
+        completed_measurements_NDF = completed_measurements(idx, :, :);
+        if(any(completed_measurements_NDF(:) == false))
+            tf = true;
+            return;
+        end
+    end
+end
 
 function value = py_module_attr(module, attr_name)
     value = py.getattr(module, attr_name);

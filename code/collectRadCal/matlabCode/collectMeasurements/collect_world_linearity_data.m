@@ -4,7 +4,8 @@ function [success, world_linearity_calibration_metadata] = collect_world_lineari
                                                                                          bluetooth_client,...
                                                                                          label,...
                                                                                          dropbox_savedir,...
-                                                                                         local_savedir...
+                                                                                         local_savedir,...
+                                                                                         cooldown_callback...
                                                                                         )
 % Collect calibration data for the linearity of the world camera.
 %
@@ -57,6 +58,7 @@ function [success, world_linearity_calibration_metadata] = collect_world_lineari
         label = "";
         dropbox_savedir = "";
         local_savedir = "";
+        cooldown_callback = [];
     end
 
     % Extract some information from the world_linearity calibration struct
@@ -211,6 +213,10 @@ function [success, world_linearity_calibration_metadata] = collect_world_lineari
             end % Measures
         end % Contrast AGC targets
 
+        if(should_cooldown_before_next_NDF(world_linearity_calibration_metadata.completed_measurements, nn) && ~isempty(cooldown_callback))
+            cooldown_callback(CombiLED, NDF);
+        end
+
         % Close the CombiLED for this NDF level
         CombiLED.serialClose();
 
@@ -219,6 +225,17 @@ function [success, world_linearity_calibration_metadata] = collect_world_lineari
     % Set the success flag and return
     success = 1;
 
+end
+
+function tf = should_cooldown_before_next_NDF(completed_measurements, current_NDF_idx)
+    tf = false;
+    for idx = (current_NDF_idx + 1):size(completed_measurements, 1)
+        completed_measurements_NDF = completed_measurements(idx, :, :, :);
+        if(any(completed_measurements_NDF(:) == false))
+            tf = true;
+            return;
+        end
+    end
 end
 
 function value = py_module_attr(module, attr_name)
