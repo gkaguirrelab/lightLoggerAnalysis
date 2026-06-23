@@ -27,7 +27,11 @@ function [CombiLED, cal] = initialize_combiLED(combiExperiments_path, NDF)
     baseCalsMaxSpectrum = load(baseCalsMaxSpectrum_path, "cals").cals; % Load in the corresponding max spectrum 
     baseCalMax = baseCalsMaxSpectrum{end}; 
 
-    targetCalsMaxSpectrum_path = fullfile(light_logger_analysis_dir, "cal", "Sphere", "CombiLED-A_cassette-ND" + string(NDF) + "_sphere" + "_maxSpectrum" + ".mat");
+    cal_file_NDF = round(NDF);
+    targetCalsMaxSpectrum_path = fullfile(light_logger_analysis_dir, ...
+                                          "cal", ...
+                                          "Sphere", ...
+                                          "CombiLED-A_cassette-ND" + string(cal_file_NDF) + "_sphere" + "_maxSpectrum" + ".mat");
     targetCalsMaxSpectrum = load(targetCalsMaxSpectrum_path, "cals").cals; % Load in the maxs spectrum corresponding to the target ND level
     targetCalMax = targetCalsMaxSpectrum{end}; 
 

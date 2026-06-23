@@ -25,8 +25,8 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
 %                           the sensors in the form 
 %                           [W_id, P_id, M_id]
 %
-%   NDF                   - Int. The NDF that is present for 
-%                           this calibration 
+%   NDF                   - Numeric. The NDF that is present for
+%                           this calibration.
 %   
 %   calibration_metadata  - Struct. Primarily optional, 
 %                           as a new one will be generated 
@@ -412,7 +412,7 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
             NDF = NDFs.world_linearity(ii);
             
             % Build the world camera settings for this NDF level
-            fixed_settings = double(py_getitem(settings_contrast_dict, int32(NDF)));
+            fixed_settings = double(py_getitem(settings_contrast_dict, py.float(NDF)));
             sensors.W.Again = fixed_settings(1);
             sensors.W.Dgain = fixed_settings(2);
             sensors.W.exposure = int32(fixed_settings(3));
@@ -472,7 +472,7 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
         % per NDF level so it behaves properly at the start of the recording 
         % (no warmup needed)
         world_ndf_level_settings = py_module_attr(world_util, "WORLD_NDF_LEVEL_SETTINGS");
-        fixed_settings = double(py_getitem(world_ndf_level_settings, int32(NDF)));
+        fixed_settings = double(py_getitem(world_ndf_level_settings, py.float(NDF)));
         sensors.W.Again = fixed_settings(1);
         sensors.W.Dgain = fixed_settings(2);
         sensors.W.exposure = int32(fixed_settings(3)); 
@@ -530,7 +530,7 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
 
         % Build the settings for the W at this NDF level 
         world_ndf_level_settings = py_module_attr(world_util, "WORLD_NDF_LEVEL_SETTINGS");
-        fixed_settings = double(py_getitem(world_ndf_level_settings, int32(NDF)));
+        fixed_settings = double(py_getitem(world_ndf_level_settings, py.float(NDF)));
         sensors.W.Again = fixed_settings(1);
         sensors.W.Dgain = fixed_settings(2); 
         sensors.W.exposure = int32(fixed_settings(3)); 
@@ -582,7 +582,7 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
 
         % Build the settings for this NDF level 
         world_ndf_level_settings = py_module_attr(world_util, "WORLD_NDF_LEVEL_SETTINGS");
-        fixed_settings = double(py_getitem(world_ndf_level_settings, int32(NDF)));
+        fixed_settings = double(py_getitem(world_ndf_level_settings, py.float(NDF)));
         sensors.W.Again = fixed_settings(1);
         sensors.W.Dgain = fixed_settings(2);
         sensors.W.exposure = int32(fixed_settings(3)); 
