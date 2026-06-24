@@ -105,7 +105,7 @@ function [success, temporal_sensitivity_calibration_metadata] = collect_temporal
         % Initialize the CombiLED for this NDF level 
         % Ensure we have constants from lightlogger
         tbUseProject('lightLogger'); 
-        [CombiLED, cal] = initialize_combiLED(getpref("lightLogger", "combiExperiments_path"), NDF); 
+        [CombiLED, cal] = initialize_combiLED_lightLogger(getpref("lightLogger", "combiExperiments_path"), round(NDF)); 
 
         % Save the cal file for this NDF 
         cal_files = temporal_sensitivity_calibration_metadata.cal_files;

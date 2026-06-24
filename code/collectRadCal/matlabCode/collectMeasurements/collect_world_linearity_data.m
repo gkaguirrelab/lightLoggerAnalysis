@@ -85,7 +85,7 @@ function [success, world_linearity_calibration_metadata] = collect_world_lineari
 
         % Initialize the CombiLED for this NDF level
         tbUseProject('lightLogger');
-        [CombiLED, cal] = initialize_combiLED(getpref("lightLogger", "combiExperiments_path"), NDF);
+        [CombiLED, cal] = initialize_combiLED_lightLogger(getpref("lightLogger", "combiExperiments_path"), round(NDF));
 
         % Save the cal file for this NDF
         cal_files = world_linearity_calibration_metadata.cal_files;
