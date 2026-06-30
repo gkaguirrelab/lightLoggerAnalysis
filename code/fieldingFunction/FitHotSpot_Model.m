@@ -2,148 +2,397 @@
 
 clear; close all; clc
 
-load("planetarium_average_SEC3.mat")   % avg_img, med_img, times_sec, frames_idx, fps
+%% SETTINGS
 
-% Use median or average image
-% I = double(med_img);
-I = double(avg_img);
+fitRGB = true;   % false = fit avg_img only; true = fit R/G/B Bayer channels
 
-% Get image height and width
-[H, W] = size(I);
-[X, Y] = meshgrid(1:W, 1:H);
+dataFile = "/Users/sophiamirabal/Documents/MATLAB/projects/lightLoggerAnalysis/code/fieldingFunction/framesAndSurfacePlots/section3/selected_twilight_frames_SEC3.mat";
+avgFile  = "planetarium_average_SEC3.mat";
 
-% INITIAL GUESSES FOR THE FIT:
+bayerPattern = "BGGR";
 
-% baseline = darkest approximate intensity in the image
-% amplitude = difference between the brightest and darkest parts 
-baseline0 = min(I(:));
-amp0 = max(I(:)) - min(I(:));
+%% LOAD DATA
 
-% Brightest pixel in the image (CENTER OF HOTSPOT) 
-[~, maxIdx] = max(I(:));
-[y0_guess, x0_guess] = ind2sub(size(I), maxIdx);
+if fitRGB
 
-% Potential width of hotspot
-sigma0 = min(H,W) / 3;
+    load(dataFile)   % frames, times_sec, frames_idx, fps
 
-% 2D Gaussian + baseline
-% ^^ predicted brightness = baseline + hotspot amplitude × smooth hill centered at (x0, y0)
-gauss2D = @(p, x, y) ...
-    p(1) + p(2) .* exp( ...
-    -((x - p(3)).^2 ./ (2*p(5)^2) + ...
-    (y - p(4)).^2 ./ (2*p(6)^2)) );
+    frames = double(frames);
+    nFrames = size(frames, 1);
 
-% p = [baseline, amplitude, x0, y0, sigmaX, sigmaY]
-modelFun = @(p, xy) gauss2D(p, xy(:,1), xy(:,2));
+    [avg_R, avg_G, avg_B] = makeBayerChannelAverages(frames, bayerPattern);
 
-xy = [X(:), Y(:)];
-z = I(:);
+    imageSet = {avg_R, avg_G, avg_B};
+    imageNames = {'R channel', 'G channel', 'B channel'};
+    saveName = "hotspot_fit_results_RGB.mat";
 
-p0 = [baseline0, amp0, x0_guess, y0_guess, sigma0, sigma0];
+else
 
-% Set bounds for the fit
-lb = [0, 0, 1, 1, 10, 10];
-ub = [Inf, Inf, W, H, W, H];
+    load(avgFile)
 
-opts = optimoptions('lsqcurvefit', ...
-    'Display','iter', ...
-    'MaxFunctionEvaluations', 5000);
+    imageSet = {double(avg_img)};
+    imageNames = {'Original average image'};
+    saveName = "hotspot_fit_results_average.mat";
 
-% Fitting
-pFit = lsqcurvefit(modelFun, p0, xy, z, lb, ub, opts);
+end
 
-% Use fitted parameters to generate full image-sized model of hotspot
-hotspot_fit = reshape(modelFun(pFit, xy), H, W);
+%% FIT EACH IMAGE
 
-% Subtract fitted hotspot from real image
-residual = I - hotspot_fit;
+results = struct();
 
-%% Plot original image
+for ii = 1:numel(imageSet)
 
-figure
-imagesc(I)
-axis image
-colorbar
-title('Original average image')
+    I = double(imageSet{ii});
+    imageName = imageNames{ii};
 
-%% Plot fitted hotspot
+    [pFit, hotspot_fit, residual, X, Y] = fitGaussianHotspot(I);
 
-figure
-imagesc(hotspot_fit)
-axis image
-colorbar
-title('Fitted hotspot model')
+    results(ii).imageName = imageName;
+    results(ii).I = I;
+    results(ii).pFit = pFit;
+    results(ii).hotspot_fit = hotspot_fit;
+    results(ii).residual = residual;
 
-figure
-surf(hotspot_fit, 'EdgeColor', 'none')
-view(3)
-colorbar
-zlabel('Pixel Intensity')
-title('Fitted hotspot surface')
+    fprintf('\n%s fitted parameters:\n', imageName)
+    fprintf('Baseline: %.3f\n', pFit(1))
+    fprintf('Amplitude: %.3f\n', pFit(2))
+    fprintf('x0: %.3f\n', pFit(3))
+    fprintf('y0: %.3f\n', pFit(4))
+    fprintf('sigmaX: %.3f\n', pFit(5))
+    fprintf('sigmaY: %.3f\n', pFit(6))
+    fprintf('k flattening: %.3f\n', pFit(7))
 
-%% Plot residual
+end
 
-figure
-imagesc(residual)
-axis image
-colorbar
-title('Residual after subtracting hotspot')
+%% PLOT ALL RGB PROFILES TOGETHER
 
-figure
-surf(residual, 'EdgeColor', 'none')
-view(3)
-colorbar
-zlabel('Residual Intensity')
-title('Residual surface after subtracting hotspot')
+if fitRGB
+    plotRGBProfilesAllDirections(results)
+else
+    plotSingleProfilesAllDirections(results(1))
+end
 
-%% Print fit parameters
+%% COMPARE RGB FIT PARAMETERS
 
-fprintf('\nFitted parameters:\n')
-fprintf('Baseline: %.3f\n', pFit(1))
-fprintf('Amplitude: %.3f\n', pFit(2))
-fprintf('x0: %.3f\n', pFit(3))
-fprintf('y0: %.3f\n', pFit(4))
-fprintf('sigmaX: %.3f\n', pFit(5))
-fprintf('sigmaY: %.3f\n', pFit(6))
+if fitRGB
 
-save("hotspot_fit_results.mat", ...
-    "I", "hotspot_fit", "residual", "pFit")
+    channelNames = string({results.imageName});
+    sigmaX = arrayfun(@(r) r.pFit(5), results);
+    sigmaY = arrayfun(@(r) r.pFit(6), results);
+    x0 = arrayfun(@(r) r.pFit(3), results);
+    y0 = arrayfun(@(r) r.pFit(4), results);
+    k = arrayfun(@(r) r.pFit(7), results);
 
-%% Horizontal profile through hotspot center
+    fitSummary = table(channelNames', x0', y0', sigmaX', sigmaY', k', ...
+        'VariableNames', {'Channel','x0','y0','sigmaX','sigmaY','k'});
 
-% Hotspot center from fitted parameters
-x0 = pFit(3);
-y0 = pFit(4);
+    disp(fitSummary)
 
-% Use nearest image row through hotspot center
-rowIdx = round(y0);
+end
 
-xPixels = 1:W;
+%% SAVE
 
-dataProfile = I(rowIdx, :);
-fitProfile = hotspot_fit(rowIdx, :);
-residProfile = residual(rowIdx, :);
+save(saveName, "results", "fitRGB")
 
-figure
-plot(xPixels, dataProfile, 'w-', 'LineWidth', 2)
-hold on
-plot(xPixels, fitProfile, 'r--', 'LineWidth', 2)
-plot(xPixels, residProfile, 'b-', 'LineWidth', 1)
+if fitRGB
+    save(saveName, "results", "fitRGB", "avg_R", "avg_G", "avg_B", ...
+        "times_sec", "frames_idx", "fps", "-append")
+end
 
-xlabel('X Pixel')
-ylabel('Pixel Intensity')
-title(sprintf('Horizontal profile through hotspot center, y = %d', rowIdx))
-legend('Observed average image', 'Gaussian hotspot fit', 'Residual', ...
-    'Location', 'best')
-grid on
+%% LOCAL FUNCTIONS
 
-%%
-figure
-plot(xPixels, residProfile, 'b-', 'LineWidth', 2)
+function [avg_R, avg_G, avg_B] = makeBayerChannelAverages(frames, bayerPattern)
 
-yline(0, 'k--')
+    nFrames = size(frames, 1);
 
-xlabel('X Pixel')
-ylabel('Residual Intensity')
-title(sprintf('Residual profile through hotspot center, y = %d', rowIdx))
-grid on
+    for k = 1:nFrames
+
+        rawFrame = squeeze(frames(k,:,:));
+
+        [R, G, B] = splitBayerFrame(rawFrame, bayerPattern);
+
+        if k == 1
+            sum_R = zeros(size(R));
+            sum_G = zeros(size(G));
+            sum_B = zeros(size(B));
+        end
+
+        sum_R = sum_R + R;
+        sum_G = sum_G + G;
+        sum_B = sum_B + B;
+
+    end
+
+    avg_R = sum_R ./ nFrames;
+    avg_G = sum_G ./ nFrames;
+    avg_B = sum_B ./ nFrames;
+
+end
+
+function [R, G, B] = splitBayerFrame(rawFrame, bayerPattern)
+
+    rawFrame = double(rawFrame);
+
+    switch upper(bayerPattern)
+
+        case "BGGR"
+            B  = rawFrame(1:2:end, 1:2:end);
+            G1 = rawFrame(1:2:end, 2:2:end);
+            G2 = rawFrame(2:2:end, 1:2:end);
+            R  = rawFrame(2:2:end, 2:2:end);
+
+        case "RGGB"
+            R  = rawFrame(1:2:end, 1:2:end);
+            G1 = rawFrame(1:2:end, 2:2:end);
+            G2 = rawFrame(2:2:end, 1:2:end);
+            B  = rawFrame(2:2:end, 2:2:end);
+
+        case "GRBG"
+            G1 = rawFrame(1:2:end, 1:2:end);
+            R  = rawFrame(1:2:end, 2:2:end);
+            B  = rawFrame(2:2:end, 1:2:end);
+            G2 = rawFrame(2:2:end, 2:2:end);
+
+        case "GBRG"
+            G1 = rawFrame(1:2:end, 1:2:end);
+            B  = rawFrame(1:2:end, 2:2:end);
+            R  = rawFrame(2:2:end, 1:2:end);
+            G2 = rawFrame(2:2:end, 2:2:end);
+
+        otherwise
+            error("Unknown Bayer pattern: %s", bayerPattern)
+
+    end
+
+    G = (G1 + G2) ./ 2;
+
+end
+
+function [pFit, hotspot_fit, residual, X, Y] = fitGaussianHotspot(I)
+
+    [H, W] = size(I);
+    [X, Y] = meshgrid(1:W, 1:H);
+
+    baseline0 = min(I(:));
+    amp0 = max(I(:)) - min(I(:));
+
+    [~, maxIdx] = max(I(:));
+    [y0_guess, x0_guess] = ind2sub(size(I), maxIdx);
+
+    sigma0 = min(H,W) / 3;
+    k0 = 1;
+
+    flatGauss2D = @(p, x, y) ...
+        p(1) + p(2) .* tanh( ...
+        p(7) .* exp( ...
+        -((x - p(3)).^2 ./ (2*p(5)^2) + ...
+          (y - p(4)).^2 ./ (2*p(6)^2)) ) );
+
+    modelFun = @(p, xy) flatGauss2D(p, xy(:,1), xy(:,2));
+
+    xy = [X(:), Y(:)];
+    z = I(:);
+
+    p0 = [baseline0, amp0, x0_guess, y0_guess, sigma0, sigma0, k0];
+
+    lb = [0, 0, 1, 1, 10, 10, 0.01];
+    ub = [Inf, Inf, W, H, W, H, 100];
+
+    opts = optimoptions('lsqcurvefit', ...
+        'Display','iter', ...
+        'MaxFunctionEvaluations', 5000);
+
+    pFit = lsqcurvefit(modelFun, p0, xy, z, lb, ub, opts);
+
+    hotspot_fit = reshape(modelFun(pFit, xy), H, W);
+    residual = I - hotspot_fit;
+
+end
+
+function plotRGBProfilesAllDirections(results)
+
+    colors = {'r','g','b'};
+    labels = {'R','G','B'};
+    directions = {'horizontal','vertical','diagDown','diagUp'};
+    directionTitles = {'Horizontal','Vertical','Diagonal down','Diagonal up'};
+
+    for dd = 1:numel(directions)
+
+        direction = directions{dd};
+
+        figure
+        hold on
+
+        legendEntries = {};
+
+        for ii = 1:3
+
+            I = results(ii).I;
+            hotspot_fit = results(ii).hotspot_fit;
+            pFit = results(ii).pFit;
+
+            % Normalize using min/max of fitted 2D image
+            fitMin = min(hotspot_fit(:));
+            fitMax = max(hotspot_fit(:));
+
+            I_norm = (I - fitMin) ./ (fitMax - fitMin);
+            fit_norm = (hotspot_fit - fitMin) ./ (fitMax - fitMin);
+
+            [axisVals, dataProfile] = getProfile(I_norm, pFit, direction);
+            [~, fitProfile] = getProfile(fit_norm, pFit, direction);
+
+            plot(axisVals, dataProfile, ...
+                'Color', colors{ii}, ...
+                'LineStyle', '-', ...
+                'LineWidth', 1.5)
+
+            plot(axisVals, fitProfile, ...
+                'Color', colors{ii}, ...
+                'LineStyle', '--', ...
+                'LineWidth', 2)
+
+            legendEntries{end+1} = sprintf('%s observed', labels{ii});
+            legendEntries{end+1} = sprintf('%s fit', labels{ii});
+
+        end
+
+        xlabel('Position along profile')
+        ylabel('Normalized Intensity')
+        title(sprintf('%s profile through hotspot center: normalized observed and fit', directionTitles{dd}))
+        legend(legendEntries, 'Location', 'best')
+        grid on
+
+        figure
+        hold on
+
+        for ii = 1:3
+
+            I = results(ii).I;
+            hotspot_fit = results(ii).hotspot_fit;
+            pFit = results(ii).pFit;
+
+            fitMin = min(hotspot_fit(:));
+            fitMax = max(hotspot_fit(:));
+
+            I_norm = (I - fitMin) ./ (fitMax - fitMin);
+            fit_norm = (hotspot_fit - fitMin) ./ (fitMax - fitMin);
+
+            residual_norm = I_norm - fit_norm;
+
+            [axisVals, residProfile] = getProfile(residual_norm, pFit, direction);
+
+            plot(axisVals, residProfile, ...
+                'Color', colors{ii}, ...
+                'LineStyle', '-', ...
+                'LineWidth', 2)
+
+        end
+
+        yline(0, 'k--')
+
+        xlabel('Position along profile')
+        ylabel('Normalized Residual')
+        title(sprintf('%s profile through hotspot center: normalized residuals', directionTitles{dd}))
+        legend({'R residual','G residual','B residual'}, 'Location', 'best')
+        grid on
+
+    end
+
+end
+
+function plotSingleProfilesAllDirections(result)
+
+    directions = {'horizontal','vertical','diagDown','diagUp'};
+    directionTitles = {'Horizontal','Vertical','Diagonal down','Diagonal up'};
+
+    for dd = 1:numel(directions)
+
+        direction = directions{dd};
+
+        I = result.I;
+        hotspot_fit = result.hotspot_fit;
+        residual = result.residual;
+        pFit = result.pFit;
+
+        [axisVals, dataProfile] = getProfile(I, pFit, direction);
+        [~, fitProfile] = getProfile(hotspot_fit, pFit, direction);
+        [~, residProfile] = getProfile(residual, pFit, direction);
+
+        figure
+        plot(axisVals, dataProfile, 'k-', 'LineWidth', 2)
+        hold on
+        plot(axisVals, fitProfile, 'r--', 'LineWidth', 2)
+        plot(axisVals, residProfile, 'b-', 'LineWidth', 1)
+
+        xlabel('Position along profile')
+        ylabel('Pixel Intensity')
+        title(sprintf('%s profile through hotspot center: observed, fit, residual', directionTitles{dd}))
+        legend('Observed image','Flattened Gaussian fit','Residual', 'Location','best')
+        grid on
+
+        figure
+        plot(axisVals, residProfile, 'b-', 'LineWidth', 2)
+        yline(0, 'k--')
+
+        xlabel('Position along profile')
+        ylabel('Residual Intensity')
+        title(sprintf('%s profile through hotspot center: residual', directionTitles{dd}))
+        grid on
+
+    end
+
+end
+
+function [axisVals, profile] = getProfile(I, pFit, direction)
+
+    [H, W] = size(I);
+
+    x0 = pFit(3);
+    y0 = pFit(4);
+
+    switch direction
+
+        case 'horizontal'
+
+            rowIdx = round(y0);
+            xq = 1:W;
+            yq = rowIdx .* ones(size(xq));
+            axisVals = xq;
+
+        case 'vertical'
+
+            colIdx = round(x0);
+            yq = 1:H;
+            xq = colIdx .* ones(size(yq));
+            axisVals = yq;
+
+        case 'diagDown'
+
+            tMin = ceil(max(1 - x0, 1 - y0));
+            tMax = floor(min(W - x0, H - y0));
+            t = tMin:tMax;
+
+            xq = x0 + t;
+            yq = y0 + t;
+            axisVals = t;
+
+        case 'diagUp'
+
+            tMin = ceil(max(1 - x0, y0 - H));
+            tMax = floor(min(W - x0, y0 - 1));
+            t = tMin:tMax;
+
+            xq = x0 + t;
+            yq = y0 - t;
+            axisVals = t;
+
+        otherwise
+            error('Unknown direction: %s', direction)
+
+    end
+
+    [X, Y] = meshgrid(1:W, 1:H);
+
+    profile = interp2(X, Y, I, xq, yq, 'linear');
+
+end
