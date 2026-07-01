@@ -312,6 +312,28 @@ end
 % Define location function to read in a number of frames
 % from the video 
 function frame_chunk = load_frame_chunk(video_reader, start_frame, num_frames_to_read, color_mode, verbose)
+% Internal helper to load frame chunk.
+%
+% Syntax:
+%   frame_chunk = load_frame_chunk(video_reader, start_frame, num_frames_to_read, color_mode, verbose)
+%
+% Description:
+%   This local helper function internal helper to load frame chunk within its parent workflow.
+% Inputs:
+%   video_reader             - Input used by the function.
+%   start_frame              - Input used by the function.
+%   num_frames_to_read       - Input used by the function.
+%   color_mode               - Input used by the function.
+%   verbose                  - Input used by the function.
+%
+% Outputs:
+%   frame_chunk              - Output produced by the function.
+%
+% Examples:
+%{
+    % See mapSPDs.m for usage context.
+%}
+
     if(start_frame > video_reader.NumFrames)
         error(sprintf("Start frame %d is out of bounds for video with NumFrames %d", start_frame, video_reader.NumFrames));
     end 

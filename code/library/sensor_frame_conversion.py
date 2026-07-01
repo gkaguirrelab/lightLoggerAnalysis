@@ -17,6 +17,14 @@ import video_io
 """Find the start times of each of the sensors in the recording"""
 def find_sensor_start_end_times(path_to_recording: str) -> dict[str, tuple]:
     # Group metadata files by sensor 
+    """Find sensor start end times.
+
+    Args:
+        path_to_recording: Path-like input for path to recording.
+
+    Returns:
+        Return value produced by find sensor start end times.
+    """
     sensor_files: dict[str, tuple[str]] = {sensor: [os.path.join(path_to_recording, file) 
                                                     for file in natsort.natsorted(os.listdir(path_to_recording))
                                                     if file.startswith(sensor) and "metadata" in file
@@ -64,6 +72,17 @@ def world_to_pupil(world_frame_numbers: Iterable,
                   ) -> np.ndarray:
 
     # Read in the first and last timestamp of the pupil and world cameras 
+    """World to pupil.
+
+    Args:
+        world_frame_numbers: Input value for world frame numbers.
+        path_to_recording_folder: Path-like input for path to recording folder.
+        path_to_recording_chunks: Path-like input for path to recording chunks.
+        pupil_phase_offset: Input value for pupil phase offset.
+
+    Returns:
+        Return value produced by world to pupil.
+    """
     sensor_start_ends: dict[str, tuple] = find_sensor_start_end_times(path_to_recording_chunks)
     
     # Generate timestamps for the two videos
@@ -87,10 +106,13 @@ def world_to_pupil(world_frame_numbers: Iterable,
 
 """Convert pupil camera frame number to world camera frame number"""
 def pupil_to_world() -> np.ndarray:
+    """Pupil to world.
+    """
     pass 
 
 
 def main():
+    """Run the command-line entry point."""
     pass 
 
 if(__name__ == "__main__"):

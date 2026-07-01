@@ -1,9 +1,20 @@
+"""Utility constants and configuration for the Pupil camera sensor."""
+
 import numpy as np
 import pathlib
 import sys
 
 
 def _load_pyagc():
+    """Search candidate directories for the PyAGC library and import it.
+
+    Iterates over a set of known relative paths where the PyAGC library
+    may reside, appending each to ``sys.path`` if it exists, and attempts
+    the import.
+
+    Returns:
+        module or None: The imported PyAGC module if found, None otherwise.
+    """
     candidate_dirs = (
         pathlib.Path(__file__).resolve().parents[1] / "libraries_python" / "AGC_lib",
         pathlib.Path(__file__).resolve().parents[4] / "lightLogger" / "libraries_python" / "AGC_lib",
@@ -47,6 +58,7 @@ PUPIL_FOCAL_LENGTH: float = 561.5 # Fx = 561.471804, Fy = 562.494105
 
 
 def main():
+    """Entry point placeholder."""
     pass
 
 

@@ -89,6 +89,26 @@ function figureHandles = analyze_light_logger_calibration_data(light_logger_cali
 end
 
 function export_figure_handles(figureHandles, figure_output_path, export_eps)
+% Internal helper to export figure handles.
+%
+% Syntax:
+%   export_figure_handles(figureHandles, figure_output_path, export_eps)
+%
+% Description:
+%   This local helper function internal helper to export figure handles within its parent workflow.
+% Inputs:
+%   figureHandles            - Input used by the function.
+%   figure_output_path       - Path-like input used by the function.
+%   export_eps               - Input used by the function.
+%
+% Outputs:
+%   None.
+%
+% Examples:
+%{
+    % See analyze_light_logger_calibration_data.m for usage context.
+%}
+
     if(~exist(figure_output_path, "dir"))
         mkdir(figure_output_path);
     end
@@ -166,6 +186,24 @@ function export_figure_handles(figureHandles, figure_output_path, export_eps)
 end
 
 function tf = is_figure_blank(figHandle)
+% Internal helper to is figure blank.
+%
+% Syntax:
+%   tf = is_figure_blank(figHandle)
+%
+% Description:
+%   This local helper function internal helper to is figure blank within its parent workflow.
+% Inputs:
+%   figHandle                - Input used by the function.
+%
+% Outputs:
+%   tf                       - Logical result returned by the function.
+%
+% Examples:
+%{
+    % See analyze_light_logger_calibration_data.m for usage context.
+%}
+
     tf = true;
 
     axesHandles = findall(figHandle, 'Type', 'axes');

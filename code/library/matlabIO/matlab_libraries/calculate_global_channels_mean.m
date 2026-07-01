@@ -1,4 +1,36 @@
 function global_means = calculate_global_channels_mean(video_path, options)
+% Compute channel means across an entire video or a selected frame range.
+%
+% Syntax:
+%   global_means = calculate_global_channels_mean(video_path, options)
+%
+% Description:
+%   This function streams frames from a video through `videoIOWrapper`,
+%   applies an optional per-pixel transformation such as the natural log,
+%   and accumulates channelwise sums and valid-sample counts across the
+%   requested frame interval. It is primarily used to estimate the global
+%   normalization constants needed by the LMS-derived opponent-color
+%   representations, but it also supports ordinary mean estimation in a
+%   variety of color spaces.
+%
+% Inputs:
+%   video_path               - String. Path to the video file to analyze.
+%   options                  - Name/value options controlling the color
+%                              space, transformation (`value` or `loge`),
+%                              channels to average, frame subset, and
+%                              handling of floor/ceiling values.
+%
+% Outputs:
+%   global_means             - Column vector containing the mean of each
+%                              requested channel after the specified
+%                              transformation and NaN handling.
+%
+% Examples:
+%{
+    global_means = calculate_global_channels_mean("W.avi", ...
+        "color", "LMS", "sum_of", "loge", "channels", [1 2 3]);
+%}
+
     arguments 
         video_path string;         
         options.color {mustBeMember(options.color, ["RGB","BGR","GRAY", "LMS", "L+M+S", "L-M", "a", "c_lm", "c_s"])} = "RGB"; 

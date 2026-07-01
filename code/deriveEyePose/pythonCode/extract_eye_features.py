@@ -1,4 +1,10 @@
-import sys 
+"""Eye feature extraction from pupil camera video.
+
+Provides functions for detecting and visualizing pupil and eyelid features
+from eye-tracking video using Pupil Labs and pylids backends.
+"""
+
+import sys
 import os
 import cv2
 import matplotlib.pyplot as plt
@@ -27,14 +33,28 @@ import Pi_util
 # Import pupil_util for constants 
 import pupil_util
 
-"""Visualize eye features out into a playable video"""
 def generate_playable_video(video: str | np.ndarray, eye_features: list[dict],
                             output_path: str="visualized_eyefeatures.avi",
                             is_grayscale: bool=False,
                             safe_execution: bool=True,
                             keypoint_threshold: float=0.65
                            ) -> None:
-  
+    """Visualize eye features and write them into a playable video.
+
+    Streams frames from the input video, overlays pupil and eyelid
+    visualizations, and writes the annotated frames to an output video file.
+
+    Args:
+        video: Path to the video file or numpy array of frames.
+        eye_features: Per-frame eye feature dictionaries containing 'pupil'
+            and/or 'eyelids' keys.
+        output_path: Filepath for the output visualization video.
+        is_grayscale: Whether the input video is grayscale.
+        safe_execution: When True, asserts that the video frame count matches
+            the number of analyzed frames.
+        keypoint_threshold: Minimum confidence for rendering keypoints.
+    """
+
     # Capture the actual framecount of the video. This will be used for safeguarding 
     # Silent errors when running with safe execution 
     if(isinstance(video, str)): assert os.path.exists(video), f"Invalid path: {video}"
@@ -147,12 +167,22 @@ def generate_playable_video(video: str | np.ndarray, eye_features: list[dict],
 
     return 
 
-"""Helper function to analyze a video with pupil labs for pupil features
-   given either a path to the video or a series of frames
-"""
-def pupil_labs_analyze_video(video: str | np.ndarray, 
+def pupil_labs_analyze_video(video: str | np.ndarray,
                              is_grayscale: bool=False
                              ) -> list[dict]:
+    """Analyze a video with Pupil Labs detectors for pupil features.
+
+    Runs 2D and 3D pupil detection on each frame using the Pupil Labs
+    pipeline. Supports both in-memory numpy arrays and file paths with
+    streaming via multiprocessing.
+
+    Args:
+        video: Path to the video file or numpy array of frames.
+        is_grayscale: Whether the input video is already grayscale.
+
+    Returns:
+        List of per-frame 3D pupil detection result dictionaries.
+    """
         
     # Create 2D detector from pupil labs 
     detector_2d: object = Detector2D()
@@ -236,12 +266,19 @@ def pupil_labs_analyze_video(video: str | np.ndarray,
 
     return eye_features_by_frame
 
-"""Helper function to analyze a video with pylids for pupil or eyelids
-   given a path to the video
-"""
-def pylids_analyze_video(video: str, 
+def pylids_analyze_video(video: str,
                          target: Literal["pupil", "eyelid"]
                         ) -> list[dict]:
+    """Analyze a video with pylids for pupil or eyelid features.
+
+    Args:
+        video: Path to the video file. Must be a string path.
+        target: Which feature to extract, either "pupil" or "eyelid".
+
+    Returns:
+        List of per-frame feature dictionaries with keypoint coordinates
+        and confidence values.
+    """
     # Ensure the video argument is a string
     assert isinstance(video, str), "Using pylids method, video argument must be string path to video"
     
@@ -271,12 +308,28 @@ def pylids_analyze_video(video: str,
 
     return pylid_features
 
-"""Plot detected pupil on a given frame"""
-def visualize_pupil(frame: np.ndarray, 
-                    frame_pupil_features: dict[str, object], 
-                    plot_output: bool=False, 
-                    keypoint_threshold: float = 0.65 
+def visualize_pupil(frame: np.ndarray,
+                    frame_pupil_features: dict[str, object],
+                    plot_output: bool=False,
+                    keypoint_threshold: float = 0.65
                    ) -> None | tuple:
+    """Plot detected pupil ellipse and keypoints on a given frame.
+
+    Draws the fitted pupil ellipse and, if available, DLC keypoints with
+    confidence labels onto the frame image.
+
+    Args:
+        frame: Single video frame as a numpy array.
+        frame_pupil_features: Dictionary of pupil features for this frame,
+            including 'ellipse' parameters and optionally DLC keypoints.
+        plot_output: If True, also generates a matplotlib figure.
+        keypoint_threshold: Minimum confidence to render a keypoint in green
+            rather than red.
+
+    Returns:
+        The annotated frame as a uint8 numpy array if plot_output is False,
+        otherwise a tuple of (annotated_frame, fig, ax).
+    """
     
     # Convert to color if not colored already 
     frame_colored: np.ndarray = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR) if frame.ndim == 2 else frame.copy()
@@ -335,17 +388,34 @@ def visualize_pupil(frame: np.ndarray,
     # Return the figure if generated from here
     return frame_colored if plot_output is False else (frame_colored, fig, ax)
 
-"""Given a path to a video or frames of a video, extract
-   pupil features of the eye per frame
-"""
 def extract_pupil_features(video: str | np.ndarray,
-                           is_grayscale: bool=False, 
-                           visualize_results: bool=False, 
+                           is_grayscale: bool=False,
+                           visualize_results: bool=False,
                            method: Literal["pupil-labs", "pylids"]="pupil-labs",
                            visualization_output_filepath: str="visualized_pupilfeatures.avi",
 			               safe_execution: bool=True,
                            keypoint_threshold: float=0.65
                           ) -> list[dict]:
+    """Extract pupil features from a video on a per-frame basis.
+
+    Supports two detection backends: Pupil Labs (2D/3D detector) and pylids
+    (DLC-based keypoint detector). Optionally generates a visualization video
+    and produces perimeter info formatted for MATLAB consumption.
+
+    Args:
+        video: Path to the video file or numpy array of frames.
+        is_grayscale: Whether the input video is grayscale.
+        visualize_results: If True, generates a visualization video.
+        method: Detection backend to use, "pupil-labs" or "pylids".
+        visualization_output_filepath: Output path for the visualization video.
+        safe_execution: When True, asserts frame count consistency.
+        keypoint_threshold: Minimum confidence for valid perimeter points.
+
+    Returns:
+        A tuple of (pupil_features, perimeter_info_dict) where pupil_features
+        is a list of per-frame detection dictionaries and perimeter_info_dict
+        contains MATLAB-compatible perimeter data.
+    """
 
     # Initialize eye features variable 
     pupil_features: list[dict]
@@ -402,11 +472,25 @@ def extract_pupil_features(video: str | np.ndarray,
 
     return pupil_features, perimeter_info_dict
 
-"""Plot detected eyelids on a given frame"""
-def visualize_eyelids(frame: np.ndarray, 
-                      frame_eyelid_features: dict[str, object], 
-                      plot_output: bool=False 
+def visualize_eyelids(frame: np.ndarray,
+                      frame_eyelid_features: dict[str, object],
+                      plot_output: bool=False
                      ) -> None:
+    """Plot detected upper and lower eyelid contours on a given frame.
+
+    Draws polyline overlays for the upper and lower eyelid curves onto the
+    frame image.
+
+    Args:
+        frame: Single video frame as a numpy array.
+        frame_eyelid_features: Dictionary containing 'eyelid_x',
+            'eyelid_lo_y', and 'eyelid_up_y' arrays.
+        plot_output: If True, also generates and displays a matplotlib figure.
+
+    Returns:
+        The annotated frame as a uint8 numpy array if plot_output is False,
+        otherwise a tuple of (annotated_frame, fig, ax).
+    """
     
 
     # Convert to color if not already 
@@ -441,9 +525,6 @@ def visualize_eyelids(frame: np.ndarray,
     # Return the figure if generated from here
     return frame_colored if plot_output is False else (frame_colored, fig, ax)
 
-"""Given a path to a video or frames of a video, extract
-   eyelid  features of the eye per frame
-"""
 def extract_eyelid_features(video: str | np.ndarray,
                             is_grayscale: bool=False,
                             visualize_results: bool=False,
@@ -451,6 +532,23 @@ def extract_eyelid_features(video: str | np.ndarray,
 			                safe_execution: bool=True,
                             keypoint_threshold: float=0.65
                            )-> list[dict]:
+    """Extract eyelid features from a video on a per-frame basis.
+
+    Uses the pylids backend to detect upper and lower eyelid contours.
+    Optionally generates a visualization video of the detected eyelids.
+
+    Args:
+        video: Path to the video file or numpy array of frames.
+        is_grayscale: Whether the input video is grayscale.
+        visualize_results: If True, generates a visualization video.
+        visualization_output_filepath: Output path for the visualization video.
+        safe_execution: When True, asserts frame count consistency.
+        keypoint_threshold: Minimum confidence for rendering keypoints in
+            the visualization.
+
+    Returns:
+        List of per-frame eyelid feature dictionaries.
+    """
     # Extract eyelid features with pylids
     eyelid_features: dict[str, dict] = pylids_analyze_video(video, "eyelid")
 
@@ -471,20 +569,35 @@ def extract_eyelid_features(video: str | np.ndarray,
 
     return eyelid_features
 
-"""Given a path to a pupil video or frames of a video, 
-   extract features of the eye 
-   per frame from the video using either pylids or 
-   pupil labs for pupil detection, and pylids for 
-   eyelid detection. 
-"""
-def extract_eye_features(video: str | np.ndarray, 
+def extract_eye_features(video: str | np.ndarray,
                          is_grayscale: bool=True,
                          visualize_results: bool=False,
                          visualization_output_filepath: str="visualized_eyefeatures.avi",
-			             safe_execution: bool=True, 
+			             safe_execution: bool=True,
                          pupil_feature_method: Literal["pylids", "pupil-labs"] = "pylids",
                          keypoint_threshold: float=0.65
                         ) -> list[dict]:
+    """Extract combined pupil and eyelid features from a pupil camera video.
+
+    Runs pupil detection (via pylids or Pupil Labs) and eyelid detection
+    (via pylids) on each frame, then merges the results into a single
+    per-frame feature dictionary. Optionally generates a visualization video.
+
+    Args:
+        video: Path to the video file or numpy array of frames.
+        is_grayscale: Whether the input video is grayscale.
+        visualize_results: If True, generates a visualization video.
+        visualization_output_filepath: Output path for the visualization video.
+        safe_execution: When True, asserts frame count consistency.
+        pupil_feature_method: Backend for pupil detection, "pylids" or
+            "pupil-labs".
+        keypoint_threshold: Minimum confidence for valid keypoints.
+
+    Returns:
+        A tuple of (eye_features, perimeter_info_dict) where eye_features
+        is a list of per-frame dictionaries with 'pupil' and 'eyelids' keys,
+        and perimeter_info_dict contains MATLAB-compatible perimeter data.
+    """
     
     # Retrieve the framecount of the video. We will use this for safeguarding 
     # silent errors when running with safe execution
@@ -537,7 +650,8 @@ def extract_eye_features(video: str | np.ndarray,
     return eye_features, perimeter_info_dict
 
 def main():
-    pass 
+    """Entry point for command-line execution."""
+    pass
 
 if(__name__ == "__main__"):
     main()

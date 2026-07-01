@@ -1,4 +1,29 @@
 function close(obj)
+% Finalize temporary resources associated with a video I/O session.
+%
+% Syntax:
+%   close(obj)
+%
+% Description:
+%   This method tears down the temporary files used by both read and write
+%   workflows. For readers it deletes the transient HDF5 buffer file if it
+%   was created. For writers it checks the temporary frame directory,
+%   assembles the saved image sequence into the requested AVI using the
+%   Python utility library, and then removes the temporary directory. The
+%   early-return guards let partially constructed objects shut down
+%   cleanly.
+%
+% Inputs:
+%   obj                      - `videoIOWrapper` instance.
+%
+% Outputs:
+%   None.
+%
+% Examples:
+%{
+    close(reader);
+%}
+
     arguments 
         obj 
     end 

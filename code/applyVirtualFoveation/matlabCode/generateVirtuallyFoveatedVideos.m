@@ -273,6 +273,25 @@ end
 % Gaze angles are stored in a .csv in px form, so we need to load 
 % them in and also convert to deg 
 function [pupil_t, gaze_angles] = load_gaze_angles(path, intrinsics_path)
+% Internal helper to load gaze angles.
+%
+% Syntax:
+%   pupil_t, gaze_angles = load_gaze_angles(path, intrinsics_path)
+%
+% Description:
+%   This local helper function internal helper to load gaze angles within its parent workflow.
+% Inputs:
+%   path                     - Path-like input used by the function.
+%   intrinsics_path          - Path-like input used by the function.
+%
+% Outputs:
+%   pupil_t                  - Output produced by the function.
+%   gaze_angles              - Output produced by the function.
+%
+% Examples:
+%{
+    % See generateVirtuallyFoveatedVideos.m for usage context.
+%}
 
     opts = detectImportOptions(path, 'VariableNamingRule', 'preserve');
 
@@ -294,6 +313,24 @@ end
 
 % Load in the world timestamps 
 function world_t = load_world_timestamps(path)
+% Internal helper to load world timestamps.
+%
+% Syntax:
+%   world_t = load_world_timestamps(path)
+%
+% Description:
+%   This local helper function internal helper to load world timestamps within its parent workflow.
+% Inputs:
+%   path                     - Path-like input used by the function.
+%
+% Outputs:
+%   world_t                  - Output produced by the function.
+%
+% Examples:
+%{
+    % See generateVirtuallyFoveatedVideos.m for usage context.
+%}
+
     opts = detectImportOptions(path, 'VariableNamingRule', 'preserve');
 
     % Force timestamp column to int64 (preserves ns precision)
@@ -309,6 +346,24 @@ end
 
 % Local function to load in the timestamp ranges of blinks
 function blnk_events = load_blnk_events(path)
+% Internal helper to load blnk events.
+%
+% Syntax:
+%   blnk_events = load_blnk_events(path)
+%
+% Description:
+%   This local helper function internal helper to load blnk events within its parent workflow.
+% Inputs:
+%   path                     - Path-like input used by the function.
+%
+% Outputs:
+%   blnk_events              - Output produced by the function.
+%
+% Examples:
+%{
+    % See generateVirtuallyFoveatedVideos.m for usage context.
+%}
+
     opts = detectImportOptions(path, 'VariableNamingRule', 'preserve');
 
     % Force timestamp column to int64 (preserves ns precision)
@@ -325,14 +380,24 @@ end
 % Local function to get the name of the Neon recording given 
 % its output folder 
 function folderName = getSingleSubfolder(parentDir)
-%GETSINGLESUBFOLDER Returns the single subfolder name inside a directory.
+% Internal helper to get single subfolder.
 %
+% Syntax:
 %   folderName = getSingleSubfolder(parentDir)
 %
-%   - parentDir must exist
-%   - Exactly one subfolder (excluding . and ..) must exist
-%   - Returns the name (not full path)
-    % Ensure directory exists
+% Description:
+%   This local helper function internal helper to get single subfolder within its parent workflow.
+% Inputs:
+%   parentDir                - Path-like input used by the function.
+%
+% Outputs:
+%   folderName               - Output produced by the function.
+%
+% Examples:
+%{
+    % See generateVirtuallyFoveatedVideos.m for usage context.
+%}
+
     assert(isfolder(parentDir), ...
         "Input path does not exist or is not a folder.")
 

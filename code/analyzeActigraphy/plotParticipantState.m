@@ -1,5 +1,62 @@
 function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, activity, figureTitle, IMUdata, eyeStateData, blinkData, gazeData, options)
-    arguments 
+% Generate multi-panel summary figures of participant actigraphy, gaze, and light data
+%
+% Syntax:
+%   plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, activity, figureTitle, IMUdata, eyeStateData, blinkData, gazeData)
+%   plotParticipantState(..., 'save_figures', true)
+%
+% Description:
+%   Produces four diagnostic figures for a single participant and activity
+%   session: (1) a five-panel time-series summary showing ENMO activity,
+%   rotational velocity, gaze angles, eye state (aperture, pupil, blinks),
+%   and illuminance; (2) gaze-vs-head correlation scatter plots; (3)
+%   activity-vs-eye-state correlations; and (4) illuminance-vs-eye-state
+%   correlations. Sensor data are temporally aligned using Neon timestamps,
+%   world camera timestamps, and a configurable world-to-AS temporal offset.
+%
+% Inputs:
+%   raw_dir               - String. Path to the raw recording directory.
+%   processing_dir        - String. Path to the processing directory.
+%   output_dir            - String. Path to the output directory for saved
+%                           figures.
+%   subject_id            - String. Subject identifier (e.g., 'FLIC_2001').
+%   activity              - String. Activity name (e.g., 'walkOutdoor').
+%   figureTitle           - String. Title string used in correlation figure
+%                           titles.
+%   IMUdata               - Table or char/string. IMU sensor data table or
+%                           path to CSV file.
+%   eyeStateData          - Table or char/string. Eye state data table or
+%                           path to CSV file.
+%   blinkData             - Table or char/string. Blink event data table or
+%                           path to CSV file.
+%   gazeData              - Table or char/string. Gaze angle data table or
+%                           path to CSV file.
+%
+% Optional key/value pairs:
+%   'save_figures'        - Logical (default: false). Export figures as PDF
+%                           and EPS to output_dir.
+%   'winSizeSec'          - Scalar double (default: 5). Sliding window
+%                           size in seconds for smoothing signals.
+%   'force_recalc'        - Logical (default: false). Force reload of
+%                           Python utility libraries.
+%   'w_as_offset'         - Scalar double (default: -139.354). World-to-AS
+%                           temporal offset in milliseconds.
+%   'active_threshold'    - Scalar double (default: 0.025). ENMO threshold
+%                           for active/inactive classification.
+%   'outdoor_threshold'   - Scalar double (default: 10^2.5). Illuminance
+%                           threshold in lux for outdoor classification.
+%
+% Outputs:
+%   none
+%
+% Examples:
+%{
+    plotParticipantState(raw_dir, processing_dir, output_dir, ...
+        'FLIC_2001', 'walkOutdoor', 'Walk Outdoor', ...
+        IMUdata, eyeStateData, blinkData, gazeData, ...
+        'save_figures', true);
+%}
+    arguments
         raw_dir;
         processing_dir;    
         output_dir; 
@@ -439,6 +496,24 @@ end
 
 % Load in the world timestamps 
 function world_t = load_world_gka_neon_timestamps(path)
+% Internal helper to load world gka neon timestamps.
+%
+% Syntax:
+%   world_t = load_world_gka_neon_timestamps(path)
+%
+% Description:
+%   This local helper function internal helper to load world gka neon timestamps within its parent workflow.
+% Inputs:
+%   path                     - Path-like input used by the function.
+%
+% Outputs:
+%   world_t                  - Output produced by the function.
+%
+% Examples:
+%{
+    % See plotParticipantState.m for usage context.
+%}
+
     opts = detectImportOptions(path, 'VariableNamingRule', 'preserve');
 
     % Force timestamp column to int64 (preserves ns precision)
@@ -453,12 +528,29 @@ end
 
 
 function [world_t, ms_t, ms_v] = load_ms_world_timestamps_and_data(path_to_raw_recording,  path_to_gka_world_timestamps_neon_time, world_util, ms_util)
-    % Load in the world timesstamps and the MS data/ timestamps in nanoseconds from the RAW recording
-    %
-    % Timestamps are w.r.t the start of the light logger device NOT the recording, 
-    % so you will need to find a common start point to match
-    
-    % Load in the timestamps in GKA time 
+% Internal helper to load ms world timestamps and data.
+%
+% Syntax:
+%   world_t, ms_t, ms_v = load_ms_world_timestamps_and_data(path_to_raw_recording, path_to_gka_world_timestamps_neon_time, world_util, ms_util)
+%
+% Description:
+%   This local helper function internal helper to load ms world timestamps and data within its parent workflow.
+% Inputs:
+%   path_to_raw_recording    - Path-like input used by the function.
+%   path_to_gka_world_timestamps_neon_time - Path-like input used by the function.
+%   world_util               - Input used by the function.
+%   ms_util                  - Input used by the function.
+%
+% Outputs:
+%   world_t                  - Output produced by the function.
+%   ms_t                     - Output produced by the function.
+%   ms_v                     - Output produced by the function.
+%
+% Examples:
+%{
+    % See plotParticipantState.m for usage context.
+%}
+
     gka_world_timestamps_gka_time = int64( world_util.world_timestamps_from_chunks(path_to_raw_recording, py.False) )'; % nanoseconds  
     ms_data_and_timestamps = cell(ms_util.ms_data_from_chunks(path_to_raw_recording));
     ms_data = double(ms_data_and_timestamps{1}); 
@@ -559,7 +651,30 @@ end
 
 % Local function to do loading in of the needed .csv files 
 function [IMUdata, eyeStateData, blinkData, gazeData] = load_actigraphy_data(IMUdata, eyeStateData, blinkData, gazeData)
-    % If these are paths, read them in, otherwise just return them 
+% Internal helper to load actigraphy data.
+%
+% Syntax:
+%   IMUdata, eyeStateData, blinkData, gazeData = load_actigraphy_data(IMUdata, eyeStateData, blinkData, gazeData)
+%
+% Description:
+%   This local helper function internal helper to load actigraphy data within its parent workflow.
+% Inputs:
+%   IMUdata                  - Input used by the function.
+%   eyeStateData             - Input used by the function.
+%   blinkData                - Input used by the function.
+%   gazeData                 - Input used by the function.
+%
+% Outputs:
+%   IMUdata                  - Output produced by the function.
+%   eyeStateData             - Output produced by the function.
+%   blinkData                - Output produced by the function.
+%   gazeData                 - Output produced by the function.
+%
+% Examples:
+%{
+    % See plotParticipantState.m for usage context.
+%}
+
     if(isstring(IMUdata) || ischar(IMUdata))
         IMUdata = readtable(IMUdata);
     end 
@@ -580,6 +695,26 @@ function [IMUdata, eyeStateData, blinkData, gazeData] = load_actigraphy_data(IMU
 end 
 
 function add_task_boundary_lines(axesHandles, timeMinTask, lineColor)
+% Internal helper to add task boundary lines.
+%
+% Syntax:
+%   add_task_boundary_lines(axesHandles, timeMinTask, lineColor)
+%
+% Description:
+%   This local helper function internal helper to add task boundary lines within its parent workflow.
+% Inputs:
+%   axesHandles              - Input used by the function.
+%   timeMinTask              - Input used by the function.
+%   lineColor                - Input used by the function.
+%
+% Outputs:
+%   None.
+%
+% Examples:
+%{
+    % See plotParticipantState.m for usage context.
+%}
+
     if(isempty(timeMinTask) || numel(timeMinTask) ~= 2 || any(~isfinite(timeMinTask)))
         return;
     end
@@ -592,6 +727,26 @@ function add_task_boundary_lines(axesHandles, timeMinTask, lineColor)
 end
 
 function export_figure_dual(figHandle, output_dir, basename)
+% Internal helper to export figure dual.
+%
+% Syntax:
+%   export_figure_dual(figHandle, output_dir, basename)
+%
+% Description:
+%   This local helper function internal helper to export figure dual within its parent workflow.
+% Inputs:
+%   figHandle                - Input used by the function.
+%   output_dir               - Path-like input used by the function.
+%   basename                 - Input used by the function.
+%
+% Outputs:
+%   None.
+%
+% Examples:
+%{
+    % See plotParticipantState.m for usage context.
+%}
+
     pdf_path = fullfile(output_dir, basename + ".pdf");
     eps_path = fullfile(output_dir, basename + ".eps");
 
@@ -607,6 +762,24 @@ function export_figure_dual(figHandle, output_dir, basename)
 end
 
 function formatted_title = format_activity_title(activity_name)
+% Internal helper to format activity title.
+%
+% Syntax:
+%   formatted_title = format_activity_title(activity_name)
+%
+% Description:
+%   This local helper function internal helper to format activity title within its parent workflow.
+% Inputs:
+%   activity_name            - Input used by the function.
+%
+% Outputs:
+%   formatted_title          - Output produced by the function.
+%
+% Examples:
+%{
+    % See plotParticipantState.m for usage context.
+%}
+
     formatted_title = regexprep(char(activity_name), '([a-z])([A-Z])', '$1 $2');
     formatted_title(1) = upper(formatted_title(1));
 end

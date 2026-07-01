@@ -1,3 +1,14 @@
+% GazeCalSubjVariables - Per-subject gaze calibration parameters
+%
+% Description:
+%   Reference script containing the gaze calibration parameters for each
+%   FLIC participant (FLIC_2001 through FLIC_2006). Includes start times,
+%   target durations, frame sets, gaze target coordinates, observer
+%   optical corrections, confidence cutoffs, and optimization starting
+%   points. Values are meant to be copied into GazeCalShepherd or sourced
+%   during interactive calibration sessions. This file is not executable
+%   as-is; it contains multiple participant blocks separated by comments.
+
 %FLIC_2001 Gaze cal values:
 startTime = [1, 23, 683]
 targetDurSec = 3.267;

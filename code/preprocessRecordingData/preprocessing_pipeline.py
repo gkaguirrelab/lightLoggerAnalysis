@@ -1,3 +1,5 @@
+"""Preprocessing pipeline for FLIC light logger recording data."""
+
 import os
 import shutil
 from natsort import natsorted
@@ -50,9 +52,28 @@ def get_subject_ids(FLIC_subject_dir: str="/Users/zacharykelly/Aguirre-Brainard 
 
     return set([ _extract_num_from_id(subject_id) for subject_id in df["Subject ID"]])
 
-def get_activity_names(FLIC_subject_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_subject/NEWscriptedIndoorOutdoorVideos2026", 
+def get_activity_names(FLIC_subject_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_subject/NEWscriptedIndoorOutdoorVideos2026",
                        group_by: list[str] | None=["Activity Name"]
                       ) -> set[str] | dict[tuple, str]:
+    """Load activity names from the activities Excel spreadsheet.
+
+    Reads an Excel file whose name contains "activitiesmigraine" from
+    the given directory. Optionally groups activity names by one or more
+    columns in the spreadsheet.
+
+    Args:
+        FLIC_subject_dir: Path to the directory containing the activities
+            Excel file.
+        group_by: Column name(s) to group activities by. When set to
+            ``["Activity Name"]`` (the default), returns a flat set of
+            activity names. Otherwise returns a dict mapping group keys
+            to lists of activity names.
+
+    Returns:
+        A set of activity name strings when ``group_by`` is
+        ``["Activity Name"]``, or a dict mapping group tuples to lists
+        of activity name strings otherwise.
+    """
     # Load in the excel file containing the activity names
     activities_filename: str = [filename for filename in os.listdir(FLIC_subject_dir)
                                 if "activitiesmigraine" in filename.lower() 
@@ -79,6 +100,11 @@ def get_activity_names(FLIC_subject_dir: str="/Users/zacharykelly/Aguirre-Braina
     return groups
 
 def get_pupil_cloud_apikey() -> str:
+    """Read and return the Pupil Cloud API key from a local text file.
+
+    Returns:
+        The API key string with leading and trailing whitespace removed.
+    """
     api_key_path: str = os.path.join(light_loger_analysis_dir, "code", "apiTokens", "pupil_cloud.txt")
     with open(api_key_path, "r") as f:
         return f.readline().strip()
@@ -544,6 +570,16 @@ def generate_spds(src_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoo
     return 
 
 def _is_desired_item(item, items_to_process: Iterable, items_to_skip: Iterable) -> bool:
+    """Internal helper to is desired item.
+
+    Args:
+        item: Input value for item.
+        items_to_process: Input value for items to process.
+        items_to_skip: Input value for items to skip.
+
+    Returns:
+        Return value produced by is desired item.
+    """
     return (item in items_to_process if len(items_to_process) > 0 else item not in items_to_skip)
     
 
@@ -562,6 +598,24 @@ def group_spds_per_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brainard La
                            verbose: bool=False
                          ) -> None:
     
+    """Group spds per subject.
+
+    Args:
+        src_dir: Path-like input for src dir.
+        dst_dir: Path-like input for dst dir.
+        groups: Input value for groups.
+        overwrite_existing: Input value for overwrite existing.
+        subjects_to_skip: Input value for subjects to skip.
+        activities_to_skip: Input value for activities to skip.
+        projection_types: Input value for projection types.
+        projection_types_for_bounds_calculations: Input value for projection types for bounds calculations.
+        sort_by_experiment_ordering: Input value for sort by experiment ordering.
+        color_mode: Input value for color mode.
+        verbose: Input value for verbose.
+
+    Returns:
+        Return value produced by group spds per subject.
+    """
     import matlab.engine
 
     # Now we will make an inverse mapping of activities to groups rather than groups to activities 
@@ -699,6 +753,24 @@ def group_spds_across_subjects(src_dir: str="/Users/zacharykelly/Aguirre-Brainar
                                 verbose: bool=False
                             ) -> None:
     
+    """Group spds across subjects.
+
+    Args:
+        src_dir: Path-like input for src dir.
+        dst_dir: Path-like input for dst dir.
+        groups: Input value for groups.
+        overwrite_existing: Input value for overwrite existing.
+        subjects_to_skip: Input value for subjects to skip.
+        activities_to_skip: Input value for activities to skip.
+        projection_types: Input value for projection types.
+        projection_types_for_bounds_calculations: Input value for projection types for bounds calculations.
+        sort_by_experiment_ordering: Input value for sort by experiment ordering.
+        color_mode: Input value for color mode.
+        verbose: Input value for verbose.
+
+    Returns:
+        Return value produced by group spds across subjects.
+    """
     import matlab.engine
     
     # Initialize the MATLAB engine to utilize the MATLAB function we have developed for this purpose 
@@ -803,6 +875,23 @@ def adjust_spd_axes_copy(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab 
                     color_mode: Literal["L+M+S", "L-M", "GRAY"] = "L+M+S", 
                     verbose: bool=False
                    ) -> None:
+    """Adjust spd axes copy.
+
+    Args:
+        src_dir: Path-like input for src dir.
+        dst_dir: Path-like input for dst dir.
+        subjects_to_skip: Input value for subjects to skip.
+        activities_to_skip: Input value for activities to skip.
+        projection_types: Input value for projection types.
+        projection_types_for_bounds_calculations: Input value for projection types for bounds calculations.
+        combine_figures: Input value for combine figures.
+        overwrite_existing: Input value for overwrite existing.
+        color_mode: Input value for color mode.
+        verbose: Input value for verbose.
+
+    Returns:
+        Return value produced by adjust spd axes copy.
+    """
     import matlab.engine
 
     # Initialize the MATLAB engine to utilize the MATLAB function we have developed for this purpose 
@@ -945,6 +1034,23 @@ def adjust_spd_axes(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropb
                     color_mode: Literal["L+M+S", "L-M", "GRAY"] = "L+M+S", 
                     verbose: bool=False
                    ) -> None:
+    """Adjust spd axes.
+
+    Args:
+        src_dir: Path-like input for src dir.
+        dst_dir: Path-like input for dst dir.
+        subjects_to_skip: Input value for subjects to skip.
+        activities_to_skip: Input value for activities to skip.
+        projection_types: Input value for projection types.
+        projection_types_for_bounds_calculations: Input value for projection types for bounds calculations.
+        combine_figures: Input value for combine figures.
+        overwrite_existing: Input value for overwrite existing.
+        color_mode: Input value for color mode.
+        verbose: Input value for verbose.
+
+    Returns:
+        Return value produced by adjust spd axes.
+    """
     import matlab.engine
 
     # Initialize the MATLAB engine to utilize the MATLAB function we have developed for this purpose 
@@ -1125,6 +1231,18 @@ def _find_spd_axes_across_all(subject_paths: list[str],
                                    verbose: bool=False
                                  ) -> None:
     # Initialize min max per type of graph 
+    """Internal helper to find spd axes across all.
+
+    Args:
+        subject_paths: Path-like input for subject paths.
+        subjects_to_skip: Input value for subjects to skip.
+        activities_to_skip: Input value for activities to skip.
+        projection_types: Input value for projection types.
+        verbose: Input value for verbose.
+
+    Returns:
+        Return value produced by find spd axes across all.
+    """
     min_maxes: dict[str, list[float]] = {"exponentMap": {"bounds": [float("inf"), float("-inf")], "src": ["", ""]},
         "varianceMap": {"bounds": [float("inf"), float("-inf")], "src": ["", ""]},
         "spdByRegion": {"bounds": [float("inf"), float("-inf")], "src": ["", ""]},
@@ -1229,6 +1347,18 @@ def _find_spd_axes_per_subject(subject_paths: list[str],
                               ) -> None:
     
     # Initialize min max per type of graph 
+    """Internal helper to find spd axes per subject.
+
+    Args:
+        subject_paths: Path-like input for subject paths.
+        subjects_to_skip: Input value for subjects to skip.
+        activities_to_skip: Input value for activities to skip.
+        projection_types: Input value for projection types.
+        verbose: Input value for verbose.
+
+    Returns:
+        Return value produced by find spd axes per subject.
+    """
     min_maxes: dict[int, list[float]] = {}
 
     # Make an ellipse mask to only get the nanmin from certain 
@@ -1333,6 +1463,19 @@ def _find_spd_axes_per_activity(subject_paths: list[str],
                               ) -> None:
 
     # Initialize min max per type of graph 
+    """Internal helper to find spd axes per activity.
+
+    Args:
+        subject_paths: Path-like input for subject paths.
+        activities_list: Input value for activities list.
+        activities_to_skip: Input value for activities to skip.
+        subjects_to_skip: Input value for subjects to skip.
+        projection_types: Input value for projection types.
+        verbose: Input value for verbose.
+
+    Returns:
+        Return value produced by find spd axes per activity.
+    """
     min_maxes: dict[str, list[float]] = {}
 
     # Make an ellipse mask to only get the nanmin from certain 
@@ -1438,6 +1581,24 @@ def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brain
                                  color_mode: Literal["L+M+S", "L-M", "GRAY"] = "L+M+S",
                                  verbose: bool=False
                                 ) -> None:
+    """Generate spds across subject.
+
+    Args:
+        src_dir: Path-like input for src dir.
+        dst_dir: Path-like input for dst dir.
+        overwrite_existing: Input value for overwrite existing.
+        subjects_to_skip: Input value for subjects to skip.
+        activities_to_skip: Input value for activities to skip.
+        projection_types: Input value for projection types.
+        projection_types_for_bounds_calculations: Input value for projection types for bounds calculations.
+        common_axes: Input value for common axes.
+        combine_figures: Input value for combine figures.
+        color_mode: Input value for color mode.
+        verbose: Input value for verbose.
+
+    Returns:
+        Return value produced by generate spds across subject.
+    """
     import matlab.engine
 
     # Initialize the MATLAB engine to utilize the MATLAB function we have developed for this purpose 
@@ -1577,6 +1738,25 @@ def generate_spds_across_groups(src_dir: str="/Users/zacharykelly/Aguirre-Braina
                                                                     }
                         ) -> None:
     
+    """Generate spds across groups.
+
+    Args:
+        src_dir: Path-like input for src dir.
+        dst_dir: Path-like input for dst dir.
+        overwrite_existing: Input value for overwrite existing.
+        subjects_to_skip: Input value for subjects to skip.
+        activities_to_skip: Input value for activities to skip.
+        projection_types: Input value for projection types.
+        projection_types_for_bounds_calculations: Input value for projection types for bounds calculations.
+        common_axes: Input value for common axes.
+        combine_figures: Input value for combine figures.
+        verbose: Input value for verbose.
+        color_mode: Input value for color mode.
+        groups: Input value for groups.
+
+    Returns:
+        Return value produced by generate spds across groups.
+    """
     import matlab.engine
     
     # Initialize the MATLAB engine to utilize the MATLAB function we have developed for this purpose 
@@ -1674,6 +1854,24 @@ def generate_spds_across_all(src_dir: str="/Users/zacharykelly/Aguirre-Brainard 
                             color_mode: Literal["L+M+S", "L-M", "GRAY"] = "L+M+S", 
                             verbose: bool=False
                           ) -> None:
+    """Generate spds across all.
+
+    Args:
+        src_dir: Path-like input for src dir.
+        dst_dir: Path-like input for dst dir.
+        overwrite_existing: Input value for overwrite existing.
+        subjects_to_skip: Input value for subjects to skip.
+        activities_to_skip: Input value for activities to skip.
+        projection_types: Input value for projection types.
+        projection_types_for_bounds_calculations: Input value for projection types for bounds calculations.
+        common_axes: Input value for common axes.
+        combine_figures: Input value for combine figures.
+        color_mode: Input value for color mode.
+        verbose: Input value for verbose.
+
+    Returns:
+        Return value produced by generate spds across all.
+    """
     import matlab.engine
     
     # Initialize the MATLAB engine to utilize the MATLAB function we have developed for this purpose 
@@ -1751,6 +1949,26 @@ def generate_mean_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dr
                        dimension: Literal["subject", "activity", "activity_then_subject"] = "subject"
                     ) -> None:
 
+    """Generate mean spds.
+
+    Args:
+        src_dir: Path-like input for src dir.
+        dst_dir: Path-like input for dst dir.
+        overwrite_existing: Input value for overwrite existing.
+        verbose: Input value for verbose.
+        subjects_to_skip: Input value for subjects to skip.
+        subjects_to_process: Input value for subjects to process.
+        activities_to_skip: Input value for activities to skip.
+        activities_to_process: Input value for activities to process.
+        projection_types_to_skip: Input value for projection types to skip.
+        projection_types_to_process: Input value for projection types to process.
+        color_modes_to_skip: Input value for color modes to skip.
+        color_modes_to_process: Input value for color modes to process.
+        dimension: Input value for dimension.
+
+    Returns:
+        Return value produced by generate mean spds.
+    """
     import matlab.engine
     
     # Initialize the MATLAB engine to utilize the MATLAB function we have developed for this purpose 
@@ -2077,6 +2295,25 @@ def plot_mean_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbo
                  color_modes_to_skip: Iterable[Literal["a", "c_lm", "c_s", "L-M", "L+M+S"]] = set(),
                  color_modes_to_process: Iterable[Literal["a", "c_lm", "c_s", "L-M", "L+M+S"]] = set()
                 ) -> None:
+    """Plot mean spds.
+
+    Args:
+        src_dir: Path-like input for src dir.
+        dst_dir: Path-like input for dst dir.
+        overwrite_existing: Input value for overwrite existing.
+        verbose: Input value for verbose.
+        dimension: Input value for dimension.
+        subjects_to_skip: Input value for subjects to skip.
+        subjects_to_process: Input value for subjects to process.
+        activities_to_skip: Input value for activities to skip.
+        activities_to_process: Input value for activities to process.
+        projection_types: Input value for projection types.
+        color_modes_to_skip: Input value for color modes to skip.
+        color_modes_to_process: Input value for color modes to process.
+
+    Returns:
+        Return value produced by plot mean spds.
+    """
     import matlab.engine
 
     # Initialize the MATLAB engine to utilize the MATLAB function we have developed for this purpose 
@@ -2535,6 +2772,18 @@ def verify_world_neon_pairing(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorO
                              ) -> dict[str, str]:
     
     # First, let's find all of the subjects in this experiment 
+    """Verify world neon pairing.
+
+    Args:
+        raw_dir: Path-like input for raw dir.
+        processing_dir: Path-like input for processing dir.
+        subjects_to_skip: Input value for subjects to skip.
+        activities_to_skip: Input value for activities to skip.
+        verbose: Input value for verbose.
+
+    Returns:
+        Return value produced by verify world neon pairing.
+    """
     subject_paths: list[str] = natsorted([os.path.join(raw_dir, subject_name) 
                                           for subject_name in os.listdir(raw_dir) 
                                           if re.fullmatch(r"FLIC_\d+", subject_name) 
@@ -2643,6 +2892,20 @@ def generate_tag_task_start_ends(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndo
 
 
     # First, let's find all of the subjects in this experiment 
+    """Generate tag task start ends.
+
+    Args:
+        src_dir: Path-like input for src dir.
+        dst_dir: Path-like input for dst dir.
+        task_length_seconds: Input value for task length seconds.
+        subjects_to_skip: Input value for subjects to skip.
+        activities_to_skip: Input value for activities to skip.
+        overwrite_existing: Input value for overwrite existing.
+        verbose: Input value for verbose.
+
+    Returns:
+        Return value produced by generate tag task start ends.
+    """
     subject_paths: list[str] = natsorted([os.path.join(src_dir, subject_name) 
                                           for subject_name in os.listdir(src_dir) 
                                           if re.fullmatch(r"FLIC_\d+", subject_name) 
@@ -2748,6 +3011,18 @@ def verify_virtually_foveated_video_integrity(src_dir: str="/Volumes/FLIC_proces
                                              ) -> None:
     
     # First, let's find all of the subjects in this experiment 
+    """Verify virtually foveated video integrity.
+
+    Args:
+        src_dir: Path-like input for src dir.
+        subjects_to_skip: Input value for subjects to skip.
+        activities_to_skip: Input value for activities to skip.
+        verbose: Input value for verbose.
+        target_length_seconds: Input value for target length seconds.
+
+    Returns:
+        Return value produced by verify virtually foveated video integrity.
+    """
     subject_paths: list[str] = natsorted([os.path.join(src_dir, subject_name) 
                                           for subject_name in os.listdir(src_dir) 
                                           if re.fullmatch(r"FLIC_\d+", subject_name) 
@@ -2814,6 +3089,21 @@ def transfer_light_logger_recordings(src_dir: str="/Volumes/T7 Shield",
                                      verbose: bool=False
                                     ) -> None:
     # First, let's get all the recording names from the src dir 
+    """Transfer light logger recordings.
+
+    Args:
+        src_dir: Path-like input for src dir.
+        dst_dir: Path-like input for dst dir.
+        subjects_to_skip: Input value for subjects to skip.
+        subjects_to_transfer: Input value for subjects to transfer.
+        activities_to_skip: Input value for activities to skip.
+        activities_to_transfer: Input value for activities to transfer.
+        overwrite_existing: Input value for overwrite existing.
+        verbose: Input value for verbose.
+
+    Returns:
+        Return value produced by transfer light logger recordings.
+    """
     r_result: list[str] = [filename for filename in os.listdir(src_dir)
                            if os.path.isdir(os.path.join(src_dir, filename))
                           ]
@@ -2930,6 +3220,23 @@ def download_pupil_cloud_recordings(api_key: str,
 
     
     # First, we will get a list of all the recordings on pupil cloud
+    """Download pupil cloud recordings.
+
+    Args:
+        api_key: Input value for api key.
+        dst_dir: Path-like input for dst dir.
+        api_url: Input value for api url.
+        workspace_id: Identifier for workspace id.
+        subjects_to_download: Input value for subjects to download.
+        subjects_to_skip: Input value for subjects to skip.
+        activities_to_download: Input value for activities to download.
+        activities_to_skip: Input value for activities to skip.
+        overwrite_existing: Input value for overwrite existing.
+        verbose: Input value for verbose.
+
+    Returns:
+        Return value produced by download pupil cloud recordings.
+    """
     recordings_list_url: str = f"{api_url}/workspaces/{workspace_id}/recordings"
     r: object = requests.get(recordings_list_url, stream=True, headers={"api-key": api_key})
     r.raise_for_status()
@@ -3082,6 +3389,22 @@ def generate_actigraphy_graphs(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoor
                                 activities_to_skip: Iterable=set(), 
                                 activities_to_process: Iterable=set()
                               ) -> None:
+    """Generate actigraphy graphs.
+
+    Args:
+        raw_dir: Path-like input for raw dir.
+        processing_dir: Path-like input for processing dir.
+        dst_dir: Path-like input for dst dir.
+        overwrite_exsiting: Input value for overwrite exsiting.
+        verbose: Input value for verbose.
+        subjects_to_skip: Input value for subjects to skip.
+        subjects_to_process: Input value for subjects to process.
+        activities_to_skip: Input value for activities to skip.
+        activities_to_process: Input value for activities to process.
+
+    Returns:
+        Return value produced by generate actigraphy graphs.
+    """
     import matlab.engine
     
     # Initialize the MATLAB engine to utilize the MATLAB function we have developed for this purpose 
@@ -3183,11 +3506,20 @@ def generate_actigraphy_graphs(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoor
     return 
 
 def _extract_num_from_id(subject_id: str) -> int:
+    """Internal helper to extract num from id.
+
+    Args:
+        subject_id: Identifier for subject id.
+
+    Returns:
+        Return value produced by extract num from id.
+    """
     assert re.fullmatch("FLIC_\d+", subject_id), f"{subject_id} does not fit the format FLIC_[NUM]"
     return int(re.search(r"\d+", subject_id).group())
 
 
 def main():
+    """Run the command-line entry point."""
     pass 
 
 if(__name__ == "__main__"):

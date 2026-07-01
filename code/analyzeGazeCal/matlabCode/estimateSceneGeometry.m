@@ -166,6 +166,26 @@ pBest = [];
 fValBest = Inf;
 
     function angleError = calcAngleError(gazeTargets,eyePoses,p)
+    % Internal helper to calculate angle error.
+    %
+    % Syntax:
+    %   angleError = calcAngleError(gazeTargets, eyePoses, p)
+    %
+    % Description:
+    %   This local helper function internal helper to calculate angle error within its parent workflow.
+    % Inputs:
+    %   gazeTargets              - Input used by the function.
+    %   eyePoses                 - Input used by the function.
+    %   p                        - Input used by the function.
+    %
+    % Outputs:
+    %   angleError               - Output produced by the function.
+    %
+    % Examples:
+    %{
+        % See estimateSceneGeometry.m for usage context.
+    %}
+
         eyePoses = eyePoses(:,1:2);
         meanEyePoses = mean(eyePoses,'omitmissing');
         eyePoses = eyePoses - meanEyePoses;
@@ -290,8 +310,26 @@ end % main function
 %% LOCAL FUNCTIONS
 
 function sceneGeometry = updateSceneGeometry(sceneGeometry,p,setupArgs)
+% Internal helper to update scene geometry.
+%
+% Syntax:
+%   sceneGeometry = updateSceneGeometry(sceneGeometry, p, setupArgs)
+%
+% Description:
+%   This local helper function internal helper to update scene geometry within its parent workflow.
+% Inputs:
+%   sceneGeometry            - Input used by the function.
+%   p                        - Input used by the function.
+%   setupArgs                - Input used by the function.
+%
+% Outputs:
+%   sceneGeometry            - Output produced by the function.
+%
+% Examples:
+%{
+    % See estimateSceneGeometry.m for usage context.
+%}
 
-% A persistent variable so we can detect what has changed in p
 persistent pLast
 if isempty(pLast)
     pLast = zeros(size(p));
@@ -327,8 +365,28 @@ end
 
 % Fit the set of frames for this scene geometry and return the fits and errors
 function [eyePoses,ellipseRMSEs] = estimateEyePoses(perimeter,glintData,sceneGeometry,confidenceThreshold)
+% Internal helper to estimate eye poses.
+%
+% Syntax:
+%   eyePoses, ellipseRMSEs = estimateEyePoses(perimeter, glintData, sceneGeometry, confidenceThreshold)
+%
+% Description:
+%   This local helper function internal helper to estimate eye poses within its parent workflow.
+% Inputs:
+%   perimeter                - Input used by the function.
+%   glintData                - Input used by the function.
+%   sceneGeometry            - Input used by the function.
+%   confidenceThreshold      - Input used by the function.
+%
+% Outputs:
+%   eyePoses                 - Output produced by the function.
+%   ellipseRMSEs             - Output produced by the function.
+%
+% Examples:
+%{
+    % See estimateSceneGeometry.m for usage context.
+%}
 
-% Define the return variables
 eyePoses = nan(length(perimeter),4);
 ellipseRMSEs = nan(length(perimeter),1);
 

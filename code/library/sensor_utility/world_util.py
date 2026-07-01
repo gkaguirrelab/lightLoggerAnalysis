@@ -1,3 +1,5 @@
+"""Utility functions and constants for the world camera sensor."""
+
 import numpy as np
 import matplotlib.pyplot as plt
 import cv2
@@ -16,6 +18,18 @@ import pandas as pd
 from numba import njit, prange
  
 def _load_pyagc():
+    """Locate and import the optional ``PyAGC`` dependency.
+
+    The world-camera utilities can run without ``PyAGC``, but when it is
+    present we use it to populate AGC state tables and allowed setting
+    ranges. This helper searches a small set of project-relative library
+    locations, appends each candidate directory to ``sys.path`` if needed,
+    and returns the first import that succeeds.
+
+    Returns:
+        The imported ``PyAGC`` module, or ``None`` when the library is not
+        available in any of the expected locations.
+    """
     candidate_dirs = (
         pathlib.Path(__file__).resolve().parents[1] / "libraries_python" / "AGC_lib",
         pathlib.Path(__file__).resolve().parents[4] / "lightLogger" / "libraries_python" / "AGC_lib",
@@ -118,8 +132,17 @@ WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x1 |= {
     0.4: (1.0, 1.0, 5926.0),
     0.5: (1.0, 1.0, 7752.0),
     0.6: (1.14798212, 1.0, 8333),
-    0.7: (1.0, 1.0, 4639.0),
-    0.9: (2.46153855, 1.0, 8333),
+    0.7: (3.32467532, 1.0, 8333),
+    0.8: (3.08433723, 1.0, 8333),
+    0.9: (5, 1.0, 8333), # TODO: Manually changed this to 5 because it was not monotonic? What happened? 
+    1.1: (7.31428576, 1.0, 8333),
+    1.2: (10.23999998, 1.09120502, 8333),
+    1.3: (10.23999998, 1.60061024, 8333),
+    1.4: (10.23999998, 1.97600036, 8333),
+    1.5: (10.23999998, 2.23682353, 8333),
+    1.6: (10.23999998, 3.06064632, 8333),
+    1.7: (10.23999998, 4.71412073, 8333),
+    1.8: (10.23999998, 3.95815762, 8333),
 }
 
 # NDF settings by AGC contrast target
@@ -205,6 +228,19 @@ WORLD_DARK_NOISE: float = 16
 
 
 def get_world_contrast_level_ndf_settings(contrast_level: float) -> dict[float, tuple[float, float, float]]:
+    """Retrieve NDF settings for a given AGC contrast target level.
+
+    Args:
+        contrast_level: The AGC contrast target level to look up.
+
+    Returns:
+        A dictionary mapping NDF values to tuples of calibration parameters
+        for the requested contrast level.
+
+    Raises:
+        ValueError: If ``contrast_level`` is not among the supported keys in
+            ``WORLD_CONTRAST_LEVEL_NDF_SETTINGS``.
+    """
     contrast_level = float(contrast_level)
     if contrast_level not in WORLD_CONTRAST_LEVEL_NDF_SETTINGS:
         raise ValueError(
@@ -215,6 +251,16 @@ def get_world_contrast_level_ndf_settings(contrast_level: float) -> dict[float, 
 
 
 def restore_settings_dict_types(sensor_mode: dict) -> None:
+    """Restore the types of a sensor-mode dict after deserialization.
+
+    Converts fields of ``sensor_mode`` back to their proper Python types
+    in place (e.g. strings, ints, tuples, floats).
+
+    Args:
+        sensor_mode: A dictionary describing a camera sensor mode whose
+            values may have been coerced to generic types during
+            deserialization.
+    """
     sensor_mode['format'] = str(sensor_mode['format'])
     sensor_mode['unpacked'] = str(sensor_mode['unpacked'])
     sensor_mode['bit_depth'] = int(sensor_mode['bit_depth'])
@@ -225,15 +271,51 @@ def restore_settings_dict_types(sensor_mode: dict) -> None:
 
 @njit(parallel=True)
 def _generate_debayered_provenance_map_numba(rows: int, cols: int) -> np.ndarray:
+    """Compute raw Bayer-frame contributor coordinates for each debayered pixel.
+
+    This is a Numba-compiled helper used by
+    ``generate_debayered_provenance_map``. It fills a dense array with the
+    ``(row, col)`` coordinates from the raw Bayer frame that contribute to
+    each output pixel after bilinear demosaicing.
+
+    Args:
+        rows: Number of rows in the image.
+        cols: Number of columns in the image.
+
+    Returns:
+        A ``np.ndarray`` of shape ``(rows, cols, 9, 2)`` with dtype
+        ``uint16``, where the last two dimensions list up to 9
+        ``(row, col)`` contributor coordinates per output pixel.
+    """
     # Initialize the provenance map. We store a fixed-size list of 9 (row, col)
     # locations per debayered output pixel so downstream code can index the result
     # with a regular dense NumPy array.
     provenance_map: np.ndarray = np.empty((rows, cols, 9, 2), dtype=np.uint16)
 
     def clamp_row(row_num: int) -> int:
+        """Clamp a candidate row index into valid image bounds.
+
+        Args:
+            row_num: Requested row index from a local interpolation
+                neighborhood.
+
+        Returns:
+            The nearest valid row in the closed interval
+            ``[0, rows - 1]``.
+        """
         return min(max(row_num, 0), rows - 1)
 
     def clamp_col(col_num: int) -> int:
+        """Clamp a candidate column index into valid image bounds.
+
+        Args:
+            col_num: Requested column index from a local interpolation
+                neighborhood.
+
+        Returns:
+            The nearest valid column in the closed interval
+            ``[0, cols - 1]``.
+        """
         return min(max(col_num, 0), cols - 1)
 
     for r in prange(rows):
@@ -334,30 +416,46 @@ def _generate_debayered_provenance_map_numba(rows: int, cols: int) -> np.ndarray
     return provenance_map
 
 
-"""Generate a provenance map for a debayered frame.
-
-Returns an array of shape ``(rows, cols, 9, 2)`` whose last two dimensions
-store the raw Bayer-frame ``(row, col)`` coordinates that contributed to each
-debayered output pixel.
-
-This implementation is designed to match the contributor layout implied by
-``cv2.cvtColor(..., cv2.COLOR_BayerRG2RGB)`` more closely than a simple clamped
-3x3 neighborhood model:
-    - border output pixels are mapped to the adjacent interior output pixel whose
-      debayered value OpenCV copies onto the border
-    - red and blue sites use the full 3x3 bilinear support
-    - green sites use the 5-pixel cross that is the union of the horizontal and
-      vertical bilinear contributors used for the two missing color channels
-
-For ``pattern="RGGB"``, this function intentionally follows the measured layout
-used elsewhere in this module:
-    - blue  at ``(even row, even col)``
-    - green at mixed parity coordinates
-    - red   at ``(odd row, odd col)``
-"""
 def generate_debayered_provenance_map(debayered_image: np.ndarray,
                                       pattern: Literal["RGGB"] = "RGGB"
                                     ) -> np.ndarray:
+    """Generate a provenance map for a debayered frame.
+
+    Returns an array of shape ``(rows, cols, 9, 2)`` whose last two
+    dimensions store the raw Bayer-frame ``(row, col)`` coordinates that
+    contributed to each debayered output pixel.
+
+    This implementation is designed to match the contributor layout implied
+    by ``cv2.cvtColor(..., cv2.COLOR_BayerRG2RGB)`` more closely than a
+    simple clamped 3x3 neighborhood model:
+
+        - Border output pixels are mapped to the adjacent interior output
+          pixel whose debayered value OpenCV copies onto the border.
+        - Red and blue sites use the full 3x3 bilinear support.
+        - Green sites use the 5-pixel cross that is the union of the
+          horizontal and vertical bilinear contributors used for the two
+          missing color channels.
+
+    For ``pattern="RGGB"``, this function intentionally follows the measured
+    layout used elsewhere in this module:
+
+        - blue  at ``(even row, even col)``
+        - green at mixed parity coordinates
+        - red   at ``(odd row, odd col)``
+
+    Args:
+        debayered_image: A debayered image array whose first two dimensions
+            ``(rows, cols)`` define the output size.
+        pattern: The Bayer pattern to use. Currently only ``"RGGB"`` is
+            supported.
+
+    Returns:
+        A ``np.ndarray`` of shape ``(rows, cols, 9, 2)`` with dtype
+        ``uint16`` mapping each output pixel to its raw-frame contributors.
+
+    Raises:
+        ValueError: If ``pattern`` is not ``"RGGB"``.
+    """
     if(pattern != "RGGB"):
         raise ValueError(f"Unsupported Bayer pattern for provenance mapping: {pattern}")
 
@@ -371,12 +469,26 @@ def generate_debayered_provenance_map(debayered_image: np.ndarray,
 
     return provenance_map.astype(np.uint16, copy=False)
 
-"""Debayer a world camera image into an RGB image"""
-def debayer_image(image: np.ndarray, 
-                  visualize_results: bool=False, 
+def debayer_image(image: np.ndarray,
+                  visualize_results: bool=False,
                   dst: np.ndarray | None=None
                 ) -> np.ndarray | tuple[np.ndarray, object]:
-    # Initialize a variable for the figure handle that 
+    """Debayer a world camera image into an RGB image.
+
+    Args:
+        image: A single-channel Bayer-pattern image.
+        visualize_results: If ``True``, display a before/after plot and
+            return the figure handle alongside the debayered image.
+        dst: Optional pre-allocated output array for in-place debayering.
+
+    Returns:
+        The debayered RGB image as a ``np.ndarray``. When
+        ``visualize_results`` is ``True``, returns a tuple of
+        ``(debayered_image, figure)``. When ``dst`` is provided and
+        ``visualize_results`` is ``False``, returns ``None`` (the result
+        is written into ``dst``).
+    """
+    # Initialize a variable for the figure handle that
     # will be used to visualize (if desired)
     fig: object | None = None
 
@@ -414,15 +526,44 @@ def debayer_image(image: np.ndarray,
     return debayered_image if dst is None else None
 
 def generate_fielding_function(image: np.ndarray) -> np.ndarray:
-    """
-    TODO: Everything here
+    """Construct a fielding correction image for a world-camera frame.
+
+    This function is still a stub. Its intended role is to estimate a
+    spatial gain map that compensates for vignetting or pixel-to-pixel
+    sensitivity differences, but that calibration has not been implemented
+    here yet.
+
+    Args:
+        image: Example frame whose shape determines the desired correction
+            map shape.
+
+    Returns:
+        A zero-valued array with the same shape and dtype as ``image``.
+        Callers should treat this as a placeholder, not a calibrated
+        correction surface.
     """
 
     return np.zeros_like(image)
 
-"""Apply the fielding function to a frame"""
 def apply_fielding_function(original_frame: np.ndarray, visualize_results: bool=False) -> tuple[np.ndarray, object] | np.ndarray:
-    # Initialize a variable for the figure handle that 
+    """Apply the registered fielding correction for this frame shape.
+
+    The function looks up a multiplicative gain image from
+    ``WORLD_FIELDING_FUNCTIONS`` using ``original_frame.shape`` as the key,
+    multiplies the frame by that gain image in ``float64``, and then clips
+    and rounds the result back to ``uint8``.
+
+    Args:
+        original_frame: Raw frame to correct. Its shape must match one of
+            the fielding maps stored in ``WORLD_FIELDING_FUNCTIONS``.
+        visualize_results: When ``True``, display a before/after figure and
+            return that figure together with the corrected frame.
+
+    Returns:
+        The corrected ``uint8`` frame, or ``(frame, figure)`` when
+        ``visualize_results`` is ``True``.
+    """
+    # Initialize a variable for the figure handle that
     # will be used to visualize (if desired)
     fig: object | None = None
 
@@ -456,11 +597,29 @@ def apply_fielding_function(original_frame: np.ndarray, visualize_results: bool=
 
     return modified_image
 
-"""Generate an RGB mask of the bayer pattern 
-   for an arbitrary frame size
-"""
 def generate_RGB_mask(original_frame: np.ndarray, marker: Literal["str", "num"]="str", visualize_results: bool=False) -> tuple[np.ndarray, object] | np.ndarray:
-    # Initialize a variable for the figure handle that 
+    """Build a Bayer-pattern lookup mask for the frame geometry.
+
+    The world camera is modeled here as blue on even/even coordinates, red
+    on odd/odd coordinates, and green on the mixed-parity sites. This
+    helper converts that parity rule into a reusable 2-D mask so later code
+    can select raw Bayer samples by color without recomputing the coordinate
+    sets.
+
+    Args:
+        original_frame: Example frame whose first two dimensions define the
+            mask shape.
+        marker: Output encoding for each pixel site. ``"str"`` stores the
+            literal channel labels ``"R"``, ``"G"``, and ``"B"``; ``"num"``
+            stores the RGB channel indices ``0``, ``1``, and ``2``.
+        visualize_results: When ``True``, render a colorized depiction of
+            the Bayer layout and return it alongside the mask.
+
+    Returns:
+        A 2-D mask array, or ``(mask, figure)`` when visualization is
+        requested.
+    """
+    # Initialize a variable for the figure handle that
     # will be used to visualize (if desired)
     fig: object | None = None
 
@@ -533,12 +692,31 @@ def generate_RGB_mask(original_frame: np.ndarray, marker: Literal["str", "num"]=
     
     return mask
 
-"""Apply the per color weights to the color 
-   pixels of a frame 
-"""
+# Apply the per-color weights to the color pixels of a frame.
 def apply_color_correction(original_frame: np.ndarray, 
                            visualize_results: bool=False,
                            ) -> tuple[np.ndarray, object] | np.ndarray:
+    """Apply the calibrated world-camera RGB scaling factors.
+
+    The correction constants in ``WORLD_RGB_SCALARS`` are applied in one of
+    two ways depending on the input layout:
+
+    1. For a 2-D raw Bayer frame, the function first builds the Bayer color
+       mask and then scales only the pixels belonging to each color class.
+    2. For a 3-D RGB image, it scales each channel plane directly.
+
+    The computation is done in ``float64`` and then rounded and clipped back
+    into the 8-bit image range.
+
+    Args:
+        original_frame: Either a raw Bayer image or a debayered RGB image.
+        visualize_results: When ``True``, show a before/after figure and
+            return it with the corrected frame.
+
+    Returns:
+        The corrected frame as ``uint8``, or ``(frame, figure)`` when
+        visualization is requested.
+    """
     # Initialize a variable for the figure handle that 
     # will be used to visualize (if desired)
     fig: object | None = None
@@ -602,10 +780,45 @@ def apply_color_correction(original_frame: np.ndarray,
 def apply_color_weights(original_frame: np.ndarray,
                         visualize_results: bool=False,
                         ) -> tuple[np.ndarray, object] | np.ndarray:
+    """Backward-compatible alias for :func:`apply_color_correction`.
+
+    Older code in this project referred to the radiometric RGB correction
+    factors as "color weights." The actual implementation lives in
+    ``apply_color_correction``; this wrapper preserves the older public API
+    and forwards the arguments unchanged.
+
+    Args:
+        original_frame: Bayer or RGB frame to correct.
+        visualize_results: Whether to request the optional before/after
+            figure from ``apply_color_correction``.
+
+    Returns:
+        The corrected frame, or ``(frame, figure)`` when visualization is
+        enabled.
+    """
     return apply_color_correction(original_frame, visualize_results=visualize_results)
 
-"""Embed a world frame's timestamp into the 8 bit image itself"""
+# Embed a world-frame timestamp into the 8-bit image itself.
 def embed_timestamp(original_frame: np.ndarray, timestamp: np.float64, visualize_results: bool=False) -> tuple[np.ndarray, object] | np.ndarray:
+    """Embed a ``float64`` timestamp into the first 8 bytes of a frame.
+
+    The frame is flattened, the timestamp is converted into its little-endian
+    8-byte representation, and those bytes overwrite the first 8 pixels of
+    the flattened buffer. The result is then reshaped back to the original
+    image shape. This preserves the frame container while intentionally
+    sacrificing a small number of pixel values.
+
+    Args:
+        original_frame: ``uint8`` frame that will carry the embedded
+            timestamp bytes.
+        timestamp: ``np.float64`` timestamp value to encode.
+        visualize_results: When ``True``, display the image before and after
+            the byte overwrite and return the figure as well.
+
+    Returns:
+        The modified frame, or ``(frame, figure)`` when visualization is
+        requested.
+    """
     # Initialize a variable for the figure handle that 
     # will be used to visualize (if desired)
     fig: object | None = None
@@ -645,8 +858,17 @@ def embed_timestamp(original_frame: np.ndarray, timestamp: np.float64, visualize
     return embedded_frame 
 
 
-"""Extract the world frame timestamp's from an embedded 8 bit image"""
+# Extract a world-frame timestamp from an embedded 8-bit image.
 def extract_timestamp(embedded_frame: np.ndarray) -> np.float64:
+    """Decode a timestamp that was embedded by :func:`embed_timestamp`.
+
+    Args:
+        embedded_frame: ``uint8`` frame whose first 8 flattened bytes store
+            a little-endian ``float64`` timestamp.
+
+    Returns:
+        The recovered timestamp as ``np.float64``.
+    """
     assert embedded_frame.dtype == np.uint8, f"To extract a timestamp, the frame must be uint8"
     
     # First, let's flatten the image to get the bytes as a sequence 
@@ -661,7 +883,7 @@ def extract_timestamp(embedded_frame: np.ndarray) -> np.float64:
 
     return timestamp
 
-"""Convert a bayer image to LMS color space"""
+# Convert a Bayer image to LMS color space.
 def bayer_to_lms(original_image: np.ndarray, 
                  camera: Literal["IMX219", "standard"]="IMX219",
                  path_to_spectral_sensitivities: str="", 
@@ -670,6 +892,31 @@ def bayer_to_lms(original_image: np.ndarray,
                 ) -> tuple[object, np.ndarray] | np.ndarray:  
     # We need a Psychtoobox function to complete this (sadge)
     # namely  WlsToS 
+    """Prototype for mapping a raw Bayer image into LMS cone space.
+
+    The current implementation performs only the setup stages of that
+    pipeline. It optionally starts MATLAB, loads the camera spectral
+    sensitivity table, converts the wavelength axis into Psychtoolbox's
+    sampling format, and asks MATLAB for human cone sensitivities. The final
+    numerical image projection has not been completed yet, so the function
+    currently returns ``None`` after those preparations.
+
+    Args:
+        original_image: Raw Bayer image that will eventually be converted.
+        camera: Camera model label reserved for the full conversion
+            pipeline.
+        path_to_spectral_sensitivities: Path to a ``.mat`` or spreadsheet
+            file containing camera spectral sensitivity data.
+        visualize_results: Reserved for future visualization of the LMS
+            output.
+        matlab_engine: Optional existing MATLAB engine session. If omitted,
+            one is started and the ``lightLoggerAnalysis`` project is
+            activated.
+
+    Returns:
+        Currently ``None`` because the Bayer-to-LMS projection is not yet
+        implemented.
+    """
     if(matlab_engine is None):
         import matlab.engine
         matlab_engine = matlab.engine.start_matlab()
@@ -735,18 +982,46 @@ def bayer_to_lms(original_image: np.ndarray,
 
     return 
 
-"""Convert an RGB image to LMS color space"""
+# Convert an RGB image to LMS color space.
 def rgb_to_lms(original_image: np.ndarray, visualize_results: bool=False) -> tuple[object, np.ndarray] | np.ndarray:
 
 
+    """Placeholder for converting an RGB image into LMS space.
+
+    Args:
+        original_image: Debayered RGB image to convert.
+        visualize_results: Reserved for future visualization hooks.
+
+    Returns:
+        Currently ``None`` because the conversion has not been implemented.
+    """
     return 
 
 
-"""Calculate the per color weights to apply to each color 
-   in order to equalize them to the R channel 
-"""
+# Calculate per-color statistics used to derive color weights.
 def calculate_color_weights(sorted_calibration_measurements: dict, visualize_results: bool=False) -> np.ndarray:
     # Let's generate the bayer pattern for a 480, 640 frame 
+    """Measure raw Bayer-channel means from calibration recordings.
+
+    Despite the historical name, this function does not normalize the
+    outputs into multiplicative weights. Instead, it traverses the
+    ``contrast_gamma`` calibration structure, averages a selected subset of
+    repeated world-camera recordings for each contrast/frequency condition,
+    extracts a square ROI centered in the frame, and computes the temporal
+    mean intensity of the ROI separately for the Bayer ``R``, ``G``, and
+    ``B`` pixel classes.
+
+    Args:
+        sorted_calibration_measurements: Nested calibration structure whose
+            inner elements contain world-camera frame stacks at
+            ``measurement['W']['v']``.
+        visualize_results: When ``True``, plot the ROI time-series and the
+            per-channel temporal means for each condition.
+
+    Returns:
+        Array of shape ``(n_contrast_levels, n_frequencies, 3)`` containing
+        the raw temporal means for ``R``, ``G``, and ``B``.
+    """
     bayer_pattern: np.ndarray = generate_RGB_mask(np.zeros((480, 640), dtype=np.uint8))
     R_pixel_locations: set[tuple] = set([(y, x) for (y, x) in zip(*np.where(bayer_pattern == 'R')) ])
     G_pixel_locations: set[tuple] = set([(y, x) for (y, x) in zip(*np.where(bayer_pattern == 'G')) ])
@@ -914,6 +1189,25 @@ def calculate_color_weights_single_measurement(measurement: dict,
                                                roi_half_size: int = 20 
                                                ) -> np.ndarray:
     # Generate the Bayer pattern for a 480x640 frame
+    """Compute raw ROI means for one world-camera measurement.
+
+    The function selects a square ROI around the frame center, partitions
+    those ROI pixels by their Bayer color class, computes a per-frame mean
+    trace for each class, and then collapses each trace to a single temporal
+    mean. As with ``calculate_color_weights``, the return value is the raw
+    ``[R, G, B]`` mean vector rather than a normalized set of gains.
+
+    Args:
+        measurement: Measurement dictionary containing
+            ``measurement['W']['v']`` with shape ``(time, height, width)``.
+        visualize_results: When ``True``, display the ROI time-series and
+            temporal mean summary plots.
+        roi_half_size: Half-width of the square ROI in pixels.
+
+    Returns:
+        Length-3 ``float64`` vector containing the ROI temporal means for
+        the Bayer ``R``, ``G``, and ``B`` samples.
+    """
     bayer_pattern: np.ndarray = generate_RGB_mask(np.zeros((480, 640), dtype=np.uint8))
 
     R_pixel_locations: set[tuple[int, int]] = set(zip(*np.where(bayer_pattern == "R")))
@@ -1009,18 +1303,29 @@ def calculate_color_weights_single_measurement(measurement: dict,
 
     return RGB_weights
 
-"""Given a recording path, return all of the timestamps 
-   of the frames
-"""
+# Given a recording path, return all frame timestamps.
 def world_timestamps_from_chunks(recording_path: str, 
                                  convert_to_seconds: bool=True,
                                  verbose: bool=False
                                 ) -> np.ndarray:
+    """Return the concatenated world-camera timestamp vector.
+
+    This is a convenience wrapper around ``world_metadata_from_chunks`` that
+    extracts only the timestamp column after chunk concatenation and any gap
+    interpolation.
+
+    Args:
+        recording_path: Recording directory containing world metadata chunks.
+        convert_to_seconds: Whether to convert the stored nanosecond
+            timestamps into seconds.
+        verbose: Whether to display chunk-loading progress.
+
+    Returns:
+        One-dimensional NumPy array of world-frame timestamps.
+    """
     return world_metadata_from_chunks(recording_path, convert_to_seconds, verbose)["timestamp"].to_numpy()
 
-"""Given a recording path, return all of the metadata (timestamps, AGC settings, etc) 
-   of the frames
-"""
+# Given a recording path, return all frame metadata.
 def world_metadata_from_chunks(recording_path: str, 
                                  convert_to_seconds: bool=True,
                                  verbose: bool=False
@@ -1028,6 +1333,26 @@ def world_metadata_from_chunks(recording_path: str,
     # Find the config file 
     # of the recording. This will tell us about the FPS 
     # and how to interpolate between chunks 
+    """Assemble timestamps and AGC metadata across all world chunks.
+
+    The function reads ``config.pkl`` to recover the nominal world-camera
+    frame rate, loads each naturally sorted metadata chunk, and concatenates
+    them into a single table. When a timestamp gap appears between adjacent
+    chunks, it estimates how many frames are missing from the nominal frame
+    period and inserts synthetic rows whose timestamps span the gap while
+    the AGC-setting columns are filled with ``NaN``.
+
+    Args:
+        recording_path: Recording directory containing ``config.pkl`` and
+            ``world*_metadata*.npy`` files.
+        convert_to_seconds: Whether to convert timestamps from nanoseconds
+            since boot into seconds.
+        verbose: Whether to show progress while loading the metadata chunks.
+
+    Returns:
+        ``pandas.DataFrame`` with columns ``["timestamp", "Again",
+        "Dgain", "exposure"]`` in frame order.
+    """
     config_filepath: str = os.path.join(recording_path, "config.pkl")
     assert os.path.exists(config_filepath), f"Config filepath does not exist: {config_filepath}"
     config_data: dict | None = None
@@ -1113,6 +1438,7 @@ def world_metadata_from_chunks(recording_path: str,
 
 
 def main():
+    """Run the command-line entry point."""
     pass
 
 

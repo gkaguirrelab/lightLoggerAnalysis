@@ -2,42 +2,36 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
 % Collect calibration data for all of the sensors given their ids on a specific light logger. 
 %
 % Syntax:
-%   collect_light_logger_calibration_data(device_num, sensor_ids, calibration_metadata, upload_video_data)
+%   collect_light_logger_calibration_data(experiment_name, device_num, sensor_ids, NDFs, calibration_metadata, upload_video_data)
 %
 % Description:
-%   Perform serveral calibration operations between the light logger,
-%   connected remotely via Bluetooth, as well as the CombiLED, 
-%   connected over the serial port. They are 1. measure the 
-%   linearity of the light sensing chips of the MS, 
-%   2. measure the linearity of the world camera,
-%   3. measure the temporal sensitivity of all sensors,
-%   4. measure the offset between sensors in phase/time of all sensors, and
-%   5. measure the contrast gamma of the sensors of the world camera. 
-%   Upload these either to DropBox or an external SSD. 
+%   This function is the top-level orchestration entry point for the light
+%   logger radiometric calibration workflow. It initializes the Bluetooth
+%   connection to the recording device, loads the Python and MATLAB helper
+%   libraries used by the individual calibration stages, constructs or
+%   rebuilds the calibration metadata struct, and then runs the MS
+%   linearity, world-camera linearity, temporal-sensitivity, phase-fitting,
+%   and contrast-gamma collection routines in sequence. After each stage it
+%   persists the current metadata so partially completed calibrations can
+%   be resumed after transport or hardware failures without redoing
+%   finished measurements.
 %
 % Inputs:
-%   device_num            - Int. The deviceID of the RPI 
-%                           that will run the calibration.
-%                           We need this to target the right 
-%                           one to connect to over Bluetooth.  
-%   
-%   sensor_ids            - Vector. The numerical id of 
-%                           the sensors in the form 
-%                           [W_id, P_id, M_id]
-%
-%   NDF                   - Numeric. The NDF that is present for
-%                           this calibration.
-%   
-%   calibration_metadata  - Struct. Primarily optional, 
-%                           as a new one will be generated 
-%                           and saved to DropBox, when this is 
-%                           false. Otherwise, simply take the 
-%                           incompleted struct and pass it back 
-%                           into the function 
-%
-%   upload_video_data    -  Bool. Whether or not to upload 
-%                           videos onto DropBox, as opposed 
-%                           to storing them on an external SSD. 
+%   experiment_name       - String. Name of the calibration run, used to
+%                           organize output folders and filenames.
+%   device_num            - Scalar. Identifier of the target light logger
+%                           peripheral.
+%   sensor_ids            - Numeric vector giving the device ids for the
+%                           world, pupil, and minispect sensors.
+%   NDFs                  - Struct listing which NDFs should be measured
+%                           for each calibration stage.
+%   calibration_metadata  - Optional struct from a previous run. When
+%                           omitted or false, a fresh metadata plan is
+%                           generated. When supplied, the function resumes
+%                           from the unfinished portions of that plan.
+%   upload_video_data     - Logical scalar. True uploads recordings to the
+%                           configured cloud destination; false keeps the
+%                           video outputs local.
 %
 % Outputs:
 %
@@ -306,6 +300,28 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
 end 
 
 function wait_for_combiLED_cooldown_between_NDFs(CombiLED, NDF)
+% Enforce a timed CombiLED cooldown period between NDF blocks.
+%
+% Syntax:
+%   wait_for_combiLED_cooldown_between_NDFs(CombiLED, NDF)
+%
+% Description:
+%   This helper zeros the CombiLED primaries after a completed NDF block
+%   and then counts down a fixed cooldown interval so the source can
+%   thermally recover before the next block of measurements begins.
+% Inputs:
+%   CombiLED                 - Active CombiLED controller object.
+%   NDF                      - NDF value whose measurement block just
+%                              completed.
+%
+% Outputs:
+%   None.
+%
+% Examples:
+%{
+    % See collect_light_logger_calibration_data.m for usage context.
+%}
+
     cooldown_seconds = 10 * 60;
     zero_primaries = zeros(1, 8);
 
@@ -331,8 +347,38 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
                                                        world_util,...
                                                        pupil_util...
                                                       )
+% Build the calibration metadata struct for a fresh acquisition run.
+%
+% Syntax:
+%   CalibrationData = initialize_calibration_data(CalibrationData, NDFs, background, world_util, pupil_util)
+%
+% Description:
+%   This helper constructs the nested metadata structs that define every
+%   calibration stage: which NDFs to visit, which CombiLED settings or
+%   modulations to present, which randomized orders to use, which sensor
+%   settings to push to the device, and which measurements have already
+%   been completed. The resulting struct is designed to be both a run plan
+%   and a resumable progress record.
+% Inputs:
+%   CalibrationData          - Existing metadata value, typically empty or
+%                              `false` for a fresh run.
+%   NDFs                     - Struct listing which NDFs should be visited
+%                              for each calibration stage.
+%   background               - Base CombiLED primary vector used when
+%                              constructing measurement conditions.
+%   world_util               - Imported Python world-camera utility
+%                              module.
+%   pupil_util               - Imported Python pupil-camera utility
+%                              module.
+%
+% Outputs:
+%   CalibrationData          - Fully initialized nested metadata struct.
+%
+% Examples:
+%{
+    % See collect_light_logger_calibration_data.m for usage context.
+%}
 
-    % Initialize an object to save the parameters and metadata of this calibration data 
     CalibrationData = struct; 
 
     % Extract the world camera sensor mode 
@@ -622,10 +668,31 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
 end 
 
 function calibration_metadata = rebuild_calibration_metadata(loaded_calibration_metadata, world_util)
-    % Rebuild a fresh calibration metadata struct while preserving prior
-    % progress and outputs. The main thing we need to refresh is the
-    % world-camera sensor settings payload so resumed runs don't carry stale
-    % sensor_mode structs or embedded Python-derived state.
+% Normalize loaded calibration metadata for reuse in a resumed run.
+%
+% Syntax:
+%   calibration_metadata = rebuild_calibration_metadata(loaded_calibration_metadata, world_util)
+%
+% Description:
+%   Saved MATLAB structs may contain older representations of the world
+%   camera settings, especially around sensor-mode bookkeeping. This
+%   helper walks the loaded calibration metadata and rewrites those fields
+%   into the current expected format so collection can resume safely.
+% Inputs:
+%   loaded_calibration_metadata - Metadata struct loaded from a previous
+%                              calibration run.
+%   world_util               - Imported Python world-camera utility
+%                              module.
+%
+% Outputs:
+%   calibration_metadata     - Updated metadata struct compatible with the
+%                              current collection code.
+%
+% Examples:
+%{
+    % See collect_light_logger_calibration_data.m for usage context.
+%}
+
     calibration_metadata = loaded_calibration_metadata;
 
     calibration_fields = {"world_linearity", "temporal_sensitivity", "phase_fitting", "contrast_gamma"};
@@ -648,6 +715,30 @@ function calibration_metadata = rebuild_calibration_metadata(loaded_calibration_
 end
 
 function rebuilt_collection = rebuild_sensor_settings_collection(loaded_collection, world_util)
+% Recursively rebuild sensor-setting collections from saved metadata.
+%
+% Syntax:
+%   rebuilt_collection = rebuild_sensor_settings_collection(loaded_collection, world_util)
+%
+% Description:
+%   This helper descends through cells and structs of saved sensor-setting
+%   payloads, applying the single-entry rebuild logic wherever needed while
+%   preserving the overall collection shape.
+% Inputs:
+%   loaded_collection        - Cell array, struct, or leaf value storing
+%                              sensor-setting payloads.
+%   world_util               - Imported Python world-camera utility
+%                              module.
+%
+% Outputs:
+%   rebuilt_collection       - Collection with each sensor-settings entry
+%                              normalized to current schema.
+%
+% Examples:
+%{
+    % See collect_light_logger_calibration_data.m for usage context.
+%}
+
     if(iscell(loaded_collection))
         rebuilt_collection = cell(size(loaded_collection));
         for idx = 1:numel(loaded_collection)
@@ -670,6 +761,28 @@ function rebuilt_collection = rebuild_sensor_settings_collection(loaded_collecti
 end
 
 function sensors = rebuild_single_sensor_settings_entry(loaded_sensors, world_util)
+% Rebuild one saved sensor-settings struct into current schema.
+%
+% Syntax:
+%   sensors = rebuild_single_sensor_settings_entry(loaded_sensors, world_util)
+%
+% Description:
+%   This helper updates one saved sensor-settings entry, with special
+%   handling for the world camera fields that have evolved across metadata
+%   versions.
+% Inputs:
+%   loaded_sensors           - One saved sensor-settings struct.
+%   world_util               - Imported Python world-camera utility
+%                              module.
+%
+% Outputs:
+%   sensors                  - Rebuilt sensor-settings struct.
+%
+% Examples:
+%{
+    % See collect_light_logger_calibration_data.m for usage context.
+%}
+
     sensors = loaded_sensors;
     if(~isstruct(sensors))
         return;
@@ -684,6 +797,30 @@ function sensors = rebuild_single_sensor_settings_entry(loaded_sensors, world_ut
 end
 
 function world_sensor_settings = rebuild_world_sensor_settings(world_sensor_settings, world_util)
+% Normalize world-camera settings fields after loading saved metadata.
+%
+% Syntax:
+%   world_sensor_settings = rebuild_world_sensor_settings(world_sensor_settings, world_util)
+%
+% Description:
+%   This helper ensures the world-camera settings use the modern
+%   `sensor_mode_idx` representation. If an older saved payload stores a
+%   full sensor-mode struct instead, it resolves that struct back to the
+%   corresponding mode index and removes the obsolete field.
+% Inputs:
+%   world_sensor_settings    - Saved world-camera settings struct.
+%   world_util               - Imported Python world-camera utility
+%                              module.
+%
+% Outputs:
+%   world_sensor_settings    - Updated settings struct with normalized
+%                              sensor-mode representation.
+%
+% Examples:
+%{
+    % See collect_light_logger_calibration_data.m for usage context.
+%}
+
     default_sensor_mode_idx = 0;
     resolved_sensor_mode_idx = default_sensor_mode_idx;
 
@@ -703,6 +840,29 @@ function world_sensor_settings = rebuild_world_sensor_settings(world_sensor_sett
 end
 
 function sensor_mode_idx = resolve_world_sensor_mode_idx(sensor_mode, world_util, fallback_idx)
+% Match a saved world-camera sensor-mode struct to its mode index.
+%
+% Syntax:
+%   sensor_mode_idx = resolve_world_sensor_mode_idx(sensor_mode, world_util, fallback_idx)
+%
+% Description:
+%   This helper compares a saved MATLAB sensor-mode struct against the
+%   Python-side list of known custom world-camera modes and returns the
+%   matching zero-based index, or a fallback if no match is found.
+% Inputs:
+%   sensor_mode              - Saved MATLAB sensor-mode struct.
+%   world_util               - Imported Python world-camera utility
+%                              module.
+%   fallback_idx             - Mode index to return if no match is found.
+%
+% Outputs:
+%   sensor_mode_idx          - Resolved zero-based sensor-mode index.
+%
+% Examples:
+%{
+    % See collect_light_logger_calibration_data.m for usage context.
+%}
+
     sensor_mode_idx = fallback_idx;
 
     if(~isstruct(sensor_mode))
@@ -721,6 +881,28 @@ function sensor_mode_idx = resolve_world_sensor_mode_idx(sensor_mode, world_util
 end
 
 function tf = world_sensor_modes_match(matlab_sensor_mode, py_sensor_mode)
+% Compare MATLAB and Python sensor-mode descriptions for equivalence.
+%
+% Syntax:
+%   tf = world_sensor_modes_match(matlab_sensor_mode, py_sensor_mode)
+%
+% Description:
+%   This helper checks whether a saved MATLAB sensor-mode struct and a
+%   Python sensor-mode mapping describe the same mode by comparing all
+%   relevant string, scalar, and vector fields.
+% Inputs:
+%   matlab_sensor_mode       - Saved MATLAB sensor-mode struct.
+%   py_sensor_mode           - Python mapping describing one candidate
+%                              sensor mode.
+%
+% Outputs:
+%   tf                       - Logical result returned by the function.
+%
+% Examples:
+%{
+    % See collect_light_logger_calibration_data.m for usage context.
+%}
+
     tf = strings_match(fetch_struct_string(matlab_sensor_mode, "format"), fetch_py_string(py_sensor_mode, "format")) && ...
          strings_match(fetch_struct_string(matlab_sensor_mode, "unpacked"), fetch_py_string(py_sensor_mode, "unpacked")) && ...
          scalars_match(fetch_struct_scalar(matlab_sensor_mode, "bit_depth"), fetch_py_scalar(py_sensor_mode, "bit_depth")) && ...
@@ -730,6 +912,26 @@ function tf = world_sensor_modes_match(matlab_sensor_mode, py_sensor_mode)
 end
 
 function value = fetch_struct_string(input_struct, field_name)
+% Safely fetch a string field from a MATLAB struct.
+%
+% Syntax:
+%   value = fetch_struct_string(input_struct, field_name)
+%
+% Description:
+%   This helper returns the requested field as a string scalar when it is
+%   present, or an empty string when the field is absent.
+% Inputs:
+%   input_struct             - MATLAB struct to inspect.
+%   field_name               - Field name to retrieve.
+%
+% Outputs:
+%   value                    - Retrieved string value or `""`.
+%
+% Examples:
+%{
+    % See collect_light_logger_calibration_data.m for usage context.
+%}
+
     value = "";
     if(isfield(input_struct, field_name))
         value = string(input_struct.(field_name));
@@ -737,10 +939,50 @@ function value = fetch_struct_string(input_struct, field_name)
 end
 
 function value = fetch_py_string(py_mapping, key_name)
+% Safely fetch a string value from a Python mapping.
+%
+% Syntax:
+%   value = fetch_py_string(py_mapping, key_name)
+%
+% Description:
+%   This helper retrieves a named entry from a Python mapping and converts
+%   it into a MATLAB string scalar.
+% Inputs:
+%   py_mapping               - Python mapping to inspect.
+%   key_name                 - Key name to retrieve.
+%
+% Outputs:
+%   value                    - Retrieved string value.
+%
+% Examples:
+%{
+    % See collect_light_logger_calibration_data.m for usage context.
+%}
+
     value = string(py.str(py_getitem(py_mapping, key_name)));
 end
 
 function value = fetch_struct_scalar(input_struct, field_name)
+% Safely fetch a scalar field from a MATLAB struct.
+%
+% Syntax:
+%   value = fetch_struct_scalar(input_struct, field_name)
+%
+% Description:
+%   This helper returns a struct field as a MATLAB double scalar when
+%   present, or `NaN` when the field is absent.
+% Inputs:
+%   input_struct             - MATLAB struct to inspect.
+%   field_name               - Field name to retrieve.
+%
+% Outputs:
+%   value                    - Retrieved scalar value or `NaN`.
+%
+% Examples:
+%{
+    % See collect_light_logger_calibration_data.m for usage context.
+%}
+
     value = NaN;
     if(isfield(input_struct, field_name))
         field_value = input_struct.(field_name);
@@ -751,10 +993,50 @@ function value = fetch_struct_scalar(input_struct, field_name)
 end
 
 function value = fetch_py_scalar(py_mapping, key_name)
+% Safely fetch a scalar value from a Python mapping.
+%
+% Syntax:
+%   value = fetch_py_scalar(py_mapping, key_name)
+%
+% Description:
+%   This helper retrieves a numeric entry from a Python mapping and
+%   converts it into a MATLAB double scalar.
+% Inputs:
+%   py_mapping               - Python mapping to inspect.
+%   key_name                 - Key name to retrieve.
+%
+% Outputs:
+%   value                    - Retrieved scalar value.
+%
+% Examples:
+%{
+    % See collect_light_logger_calibration_data.m for usage context.
+%}
+
     value = double(py_getitem(py_mapping, key_name));
 end
 
 function value = fetch_struct_vector(input_struct, field_name)
+% Safely fetch a numeric vector field from a MATLAB struct.
+%
+% Syntax:
+%   value = fetch_struct_vector(input_struct, field_name)
+%
+% Description:
+%   This helper returns a struct field as a row vector of doubles when
+%   present, or an empty vector when the field is absent.
+% Inputs:
+%   input_struct             - MATLAB struct to inspect.
+%   field_name               - Field name to retrieve.
+%
+% Outputs:
+%   value                    - Retrieved numeric vector or `[]`.
+%
+% Examples:
+%{
+    % See collect_light_logger_calibration_data.m for usage context.
+%}
+
     value = [];
     if(isfield(input_struct, field_name))
         field_value = input_struct.(field_name);
@@ -765,6 +1047,26 @@ function value = fetch_struct_vector(input_struct, field_name)
 end
 
 function value = fetch_py_vector(py_mapping, key_name)
+% Safely fetch a numeric vector value from a Python mapping.
+%
+% Syntax:
+%   value = fetch_py_vector(py_mapping, key_name)
+%
+% Description:
+%   This helper retrieves a vector-like entry from a Python mapping and
+%   converts it into a MATLAB row vector of doubles.
+% Inputs:
+%   py_mapping               - Python mapping to inspect.
+%   key_name                 - Key name to retrieve.
+%
+% Outputs:
+%   value                    - Retrieved numeric vector.
+%
+% Examples:
+%{
+    % See collect_light_logger_calibration_data.m for usage context.
+%}
+
     py_vector = py_getitem(py_mapping, key_name);
     n_vals = int64(py.len(py_vector));
     value = zeros(1, n_vals);
@@ -774,21 +1076,102 @@ function value = fetch_py_vector(py_mapping, key_name)
 end
 
 function tf = strings_match(lhs, rhs)
+% Compare two string-like values after normalization.
+%
+% Syntax:
+%   tf = strings_match(lhs, rhs)
+%
+% Description:
+%   This helper compares two string-like values after coercing them into a
+%   common normalized representation.
+% Inputs:
+%   lhs                      - First string-like value.
+%   rhs                      - Second string-like value.
+%
+% Outputs:
+%   tf                       - Logical result returned by the function.
+%
+% Examples:
+%{
+    % See collect_light_logger_calibration_data.m for usage context.
+%}
+
     tf = strlength(lhs) > 0 && strlength(rhs) > 0 && lhs == rhs;
 end
 
 function tf = scalars_match(lhs, rhs)
+% Compare two scalar values after normalization to doubles.
+%
+% Syntax:
+%   tf = scalars_match(lhs, rhs)
+%
+% Description:
+%   This helper compares two scalar values after converting them into
+%   doubles and rejecting missing values.
+% Inputs:
+%   lhs                      - First scalar value.
+%   rhs                      - Second scalar value.
+%
+% Outputs:
+%   tf                       - Logical result returned by the function.
+%
+% Examples:
+%{
+    % See collect_light_logger_calibration_data.m for usage context.
+%}
+
     tf = ~isnan(lhs) && ~isnan(rhs) && abs(lhs - rhs) < 1e-9;
 end
 
 function tf = vectors_match(lhs, rhs)
+% Compare two numeric vectors after normalization to doubles.
+%
+% Syntax:
+%   tf = vectors_match(lhs, rhs)
+%
+% Description:
+%   This helper compares two vector values after conversion to doubles,
+%   requiring matching lengths and elementwise agreement.
+% Inputs:
+%   lhs                      - First vector value.
+%   rhs                      - Second vector value.
+%
+% Outputs:
+%   tf                       - Logical result returned by the function.
+%
+% Examples:
+%{
+    % See collect_light_logger_calibration_data.m for usage context.
+%}
+
     tf = ~isempty(lhs) && isequal(size(lhs), size(rhs)) && all(abs(lhs - rhs) < 1e-9);
 end
 
 % Local function to generate a matrix of randomized orders of settings scalars 
 function order_mat = randomize_settings_orders(n_NDFs, settings_scalars, n_measures)
-    % First, let's generate a mat that is the number of measurements (the rows)
-    % by number of settings scalars (the cols)
+% Randomize CombiLED settings order for each NDF and repeat.
+%
+% Syntax:
+%   order_mat = randomize_settings_orders(n_NDFs, settings_scalars, n_measures)
+%
+% Description:
+%   This helper generates a three-dimensional index array whose trailing
+%   dimension contains a random permutation of settings levels for each NDF
+%   and measurement repeat. The collector uses those indices to reduce
+%   order effects during acquisition.
+% Inputs:
+%   n_NDFs                   - Number of NDF levels to plan for.
+%   settings_scalars         - Vector of settings levels to permute.
+%   n_measures               - Number of repeats per NDF.
+%
+% Outputs:
+%   order_mat                - Index tensor of randomized settings orders.
+%
+% Examples:
+%{
+    % See collect_light_logger_calibration_data.m for usage context.
+%}
+
     order_mat = zeros([n_NDFs, n_measures, numel(settings_scalars)]); 
 
    % Next, we will iterate over the NDFs/ measurements and randomize 
@@ -810,8 +1193,28 @@ end
 % Local function to generate a matrix of randomized 
 % contrast orders
 function order_mat = randomize_contrast_orders(n_NDFs, n_contrast_levels, n_measures)
-    % First, let's generate a mat that is the number of measurements (the rows)
-    % by the number of contrast levels (the cols)
+% Randomize contrast order for each NDF and repeat.
+%
+% Syntax:
+%   order_mat = randomize_contrast_orders(n_NDFs, n_contrast_levels, n_measures)
+%
+% Description:
+%   This helper generates a three-dimensional index array containing a
+%   random permutation of contrast levels for each NDF and measurement
+%   repeat.
+% Inputs:
+%   n_NDFs                   - Number of NDF levels to plan for.
+%   n_contrast_levels        - Number of contrast levels to permute.
+%   n_measures               - Number of repeats per NDF.
+%
+% Outputs:
+%   order_mat                - Index tensor of randomized contrast orders.
+%
+% Examples:
+%{
+    % See collect_light_logger_calibration_data.m for usage context.
+%}
+
     order_mat = zeros([n_NDFs, n_measures, n_contrast_levels]); 
 
     % Next, we will iterate over the measurements and randomize 
@@ -832,8 +1235,29 @@ end
 % Local function to generate a matrix of randomized frequency orders 
 % For each of the contrast levels 
 function order_mat = randomize_frequency_orders(n_NDFs, n_measures, n_contrast_levels, n_frequencies)
-    % Let's first initialize an array to hold the frequency order
-    % for each measure and each contrast level at each measurement
+% Randomize frequency order within each NDF, repeat, and contrast level.
+%
+% Syntax:
+%   order_mat = randomize_frequency_orders(n_NDFs, n_measures, n_contrast_levels, n_frequencies)
+%
+% Description:
+%   This helper generates a four-dimensional index tensor containing a
+%   random permutation of frequencies for each combination of NDF,
+%   measurement repeat, and contrast level.
+% Inputs:
+%   n_NDFs                   - Number of NDF levels to plan for.
+%   n_measures               - Number of repeats per NDF.
+%   n_contrast_levels        - Number of contrast levels per NDF.
+%   n_frequencies            - Number of frequency levels to permute.
+%
+% Outputs:
+%   order_mat                - Index tensor of randomized frequency orders.
+%
+% Examples:
+%{
+    % See collect_light_logger_calibration_data.m for usage context.
+%}
+
     order_mat = zeros([n_NDFs, n_measures, n_contrast_levels, n_frequencies]); 
 
     % Then, let's generate the orders 
@@ -851,15 +1275,76 @@ function order_mat = randomize_frequency_orders(n_NDFs, n_measures, n_contrast_l
 end 
 
 function value = py_module_attr(module, attr_name)
+% Fetch an attribute from a Python module or object.
+%
+% Syntax:
+%   value = py_module_attr(module, attr_name)
+%
+% Description:
+%   This helper centralizes direct `py.getattr` access for the
+%   orchestration code.
+% Inputs:
+%   module                   - Python module or object to inspect.
+%   attr_name                - Name of the attribute to retrieve.
+%
+% Outputs:
+%   value                    - Retrieved Python attribute.
+%
+% Examples:
+%{
+    % See collect_light_logger_calibration_data.m for usage context.
+%}
+
     value = py.getattr(module, attr_name);
 end
 
 function value = py_call_module_attr(module, attr_name, varargin)
+% Fetch and immediately call a Python attribute.
+%
+% Syntax:
+%   value = py_call_module_attr(module, attr_name, varargin)
+%
+% Description:
+%   This helper looks up a named Python callable and invokes it with the
+%   supplied arguments.
+% Inputs:
+%   module                   - Python module or object to inspect.
+%   attr_name                - Name of the callable attribute to invoke.
+%   varargin                 - Arguments forwarded to the callable.
+%
+% Outputs:
+%   value                    - Return value from the Python callable.
+%
+% Examples:
+%{
+    % See collect_light_logger_calibration_data.m for usage context.
+%}
+
     callable = py_module_attr(module, attr_name);
     value = callable(varargin{:});
 end
 
 function value = py_getitem(py_obj, key)
+% Retrieve an item from a Python mapping or sequence.
+%
+% Syntax:
+%   value = py_getitem(py_obj, key)
+%
+% Description:
+%   This helper wraps Python `__getitem__` access so MATLAB code can read
+%   entries from mappings and sequences in a consistent way.
+% Inputs:
+%   py_obj                   - Python mapping or sequence.
+%   key                      - Key or index to retrieve.
+%
+% Outputs:
+%   value                    - Retrieved Python item.
+%
+% Examples:
+%{
+    % See collect_light_logger_calibration_data.m for usage context.
+%}
+
     getitem = py.getattr(py_obj, "__getitem__");
     value = getitem(key);
 end
@@ -867,12 +1352,57 @@ end
 % Local function to upload the CalibrationData struct. Used on error 
 % and at the end of the script 
 function upload_calibration_data(CalibrationData, dropbox_savedir, upload_mode)
+% Save calibration metadata locally and optionally upload it through Python.
+%
+% Syntax:
+%   upload_calibration_data(CalibrationData, dropbox_savedir, upload_mode)
+%
+% Description:
+%   This helper writes the current calibration metadata to disk and then
+%   invokes the Python upload helper so long-running calibrations leave a
+%   recoverable state record after every major stage.
+% Inputs:
+%   CalibrationData          - Current calibration metadata struct.
+%   dropbox_savedir          - Destination path for the saved metadata
+%                              artifact.
+%   upload_mode              - Imported Python upload helper module.
+%
+% Outputs:
+%   None.
+%
+% Examples:
+%{
+    % See collect_light_logger_calibration_data.m for usage context.
+%}
+
     caldata_dropbox_path = fullfile(dropbox_savedir, "calibration_metadata.mat.bytes"); 
     py_call_module_attr(upload_mode, "upload_file", py.bytes(getByteStreamFromArray(CalibrationData)), caldata_dropbox_path);
 
 end 
 
 function raise_calibration_failure(prefix, calibration_substruct)
+% Raise a MATLAB error that includes the saved calibration failure details.
+%
+% Syntax:
+%   raise_calibration_failure(prefix, calibration_substruct)
+%
+% Description:
+%   This helper pulls the most recent detailed error message from a
+%   calibration substruct and combines it with a caller-supplied prefix so
+%   aborted calibration stages fail with actionable context.
+% Inputs:
+%   prefix                   - User-facing context message for the error.
+%   calibration_substruct    - Calibration substruct that may contain a
+%                              saved detailed error message.
+%
+% Outputs:
+%   None.
+%
+% Examples:
+%{
+    % See collect_light_logger_calibration_data.m for usage context.
+%}
+
     detailed_message = "";
     if(isstruct(calibration_substruct) && isfield(calibration_substruct, "last_error_message"))
         detailed_message = string(calibration_substruct.last_error_message);

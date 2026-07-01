@@ -143,11 +143,24 @@ end
 
 
 function output_struct = iLoadSpdPathStruct(input_struct)
-% Recursively walk the nested SPD filepath struct and load terminal
-% `.spd` / `.best_fit` mat-file leaves into MATLAB structs.
+% Internal helper to i load spd path struct.
+%
+% Syntax:
+%   output_struct = iLoadSpdPathStruct(input_struct)
+%
+% Description:
+%   This local helper function internal helper to i load spd path struct within its parent workflow.
+% Inputs:
+%   input_struct             - Input used by the function.
+%
+% Outputs:
+%   output_struct            - Output produced by the function.
+%
+% Examples:
+%{
+    % See loadSPDs.m for usage context.
+%}
 
-    % Base case: if the current input is not a struct, there is nothing
-    % further to recurse into, so return the value unchanged.
     if (~isstruct(input_struct))
         output_struct = input_struct;
         return;
@@ -197,10 +210,24 @@ end
 
 
 function loaded_value = iLoadMatFileFromPath(path_value)
-% Load a .mat file from a filepath leaf stored in the intermediate SPD
-% path structure.
+% Internal helper to i load mat file from path.
+%
+% Syntax:
+%   loaded_value = iLoadMatFileFromPath(path_value)
+%
+% Description:
+%   This local helper function internal helper to i load mat file from path within its parent workflow.
+% Inputs:
+%   path_value               - Path-like input used by the function.
+%
+% Outputs:
+%   loaded_value             - Output produced by the function.
+%
+% Examples:
+%{
+    % See loadSPDs.m for usage context.
+%}
 
-    % Accept MATLAB strings directly.
     if (isstring(path_value))
         mat_path = path_value;
 

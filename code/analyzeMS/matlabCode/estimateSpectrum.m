@@ -1,3 +1,14 @@
+% estimateSpectrum - Estimate RGB camera weights from MiniSpectrometer readings
+%
+% Description:
+%   Script that loads ASM7341 and IMX219 spectral sensitivity functions,
+%   reads light logger chunk files containing MiniSpectrometer and world
+%   camera data, estimates the spectral source from MS sensor readings
+%   using pseudo-inverse recovery, predicts camera BGR weights from the
+%   estimated spectrum, and normalizes those predictions against the
+%   observed camera red channel. Plots the MS-estimated RGB weights
+%   alongside the actual camera RGB means over time for validation.
+
 % Load the spectral sensitivity functions for the AS chip
 % Save the path to CombiExperiments. We will use this as a relative
 % path to find other files

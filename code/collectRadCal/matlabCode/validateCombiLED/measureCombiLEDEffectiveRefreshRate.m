@@ -54,6 +54,25 @@ fprintf('The effective refresh rate of the source is %2.2f Hz\n',sourceRefreshRa
 %% LOCAL FUNCTIONS
 
 function [filterFreqHz,filterAmp] = approxFreqFilter(frequencies,amplitudes)
+% Internal helper to approx freq filter.
+%
+% Syntax:
+%   filterFreqHz, filterAmp = approxFreqFilter(frequencies, amplitudes)
+%
+% Description:
+%   This local helper function internal helper to approx freq filter within its parent workflow.
+% Inputs:
+%   frequencies              - Input used by the function.
+%   amplitudes               - Input used by the function.
+%
+% Outputs:
+%   filterFreqHz             - Output produced by the function.
+%   filterAmp                - Output produced by the function.
+%
+% Examples:
+%{
+    % See measureCombiLEDEffectiveRefreshRate.m for usage context.
+%}
 
     myObj = @(p) norm(amplitudes - p(1)*idealDiscreteSampleFilter(frequencies,1/p(2)));
     x0 = [1,205];

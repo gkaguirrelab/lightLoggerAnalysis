@@ -1,17 +1,33 @@
 function degPositions = displayGazeCalGrid(heightCm, widthCm, viewingDistCm)
-% DISPLAYGAZECALGRID
-% Displays all gaze calibration dots simultaneously until a button is pressed.
+% Display the full gaze-calibration target grid on screen.
+%
+% Syntax:
+%   degPositions = displayGazeCalGrid(heightCm, widthCm, viewingDistCm)
+%
+% Description:
+%   This function opens a Psychtoolbox window, converts a fixed set of
+%   target coordinates from degrees of visual angle into screen pixels,
+%   and draws all calibration targets simultaneously. The routine is meant
+%   as a quick visualization or alignment aid rather than the timed
+%   calibration task itself. It waits for a key press before closing the
+%   display and returns the degree-space target locations that were shown.
 %
 % Inputs:
-%   heightCm       - Screen height in cm
-%   widthCm        - Screen width in cm
-%   viewingDistCm  - Viewing distance in cm
+%   heightCm                 - Scalar. Physical height of the display in
+%                              centimeters.
+%   widthCm                  - Scalar. Physical width of the display in
+%                              centimeters.
+%   viewingDistCm            - Scalar. Viewing distance from the observer
+%                              to the display in centimeters.
 %
-% Output:
-%   degPositions   - Nx2 array of dot positions in degrees visual angle
-% Example
+% Outputs:
+%   degPositions             - Numeric matrix. One [xDeg, yDeg] pair per
+%                              calibration target, expressed in degrees of
+%                              visual angle relative to screen center.
+%
+% Examples:
 %{
-    displayGazeCalGrid(106.7, 192.4, 100)
+    degPositions = displayGazeCalGrid(106.7, 192.4, 100);
 %}
 
 arguments

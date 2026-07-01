@@ -1,6 +1,23 @@
 function delayByLineSecs = generateRollingShutterPhaseMap(CalibrationData, sorted_measurements)
-
+% Generate rolling shutter phase map.
+%
+% Syntax:
+%   delayByLineSecs = generateRollingShutterPhaseMap(CalibrationData, sorted_measurements)
+%
+% Description:
+%   This function generate rolling shutter phase map.
+% Inputs:
+%   CalibrationData          - Input used by the function.
+%   sorted_measurements      - Input used by the function.
+%
+% Outputs:
+%   delayByLineSecs          - Output produced by the function.
+%
+% Examples:
 %{
+    delayByLineSecs = generateRollingShutterPhaseMap(CalibrationData, sorted_measurements)
+%}
+
 LightLoggerCalibrationData = ndf0_meanedCols;
 CalibrationData = LightLoggerCalibrationData.CalibrationData;
 parsed_readings = LightLoggerCalibrationData.ParsedReadings;

@@ -1,13 +1,36 @@
 function barPlotSpdSlopes(activity_name, options)
-% PLOT_SPD_SLOPES Creates a vertically stacked 4-tile bar plot with SEM error bars and vibrant, semi-transparent data points.
+% Create a stacked bar plot of SPD slope exponents with error bars
+%
+% Syntax:
+%   barPlotSpdSlopes(activity_name)
+%   barPlotSpdSlopes(activity_name, options)
+%
+% Description:
+%   Creates a vertically stacked tiled bar plot showing 1/f exponent
+%   slopes for center and periphery regions, comparing non-foveated and
+%   foveated projection types across one or more color modes. Each tile
+%   corresponds to one color mode (achromatic, L-M, or S). Bars show the
+%   mean negative slope across subjects, with SEM error bars. Optionally,
+%   semi-transparent jittered data points for individual subjects are
+%   overlaid (beeswarm style).
 %
 % Inputs:
-%   - activity_name: Name of the activity to plot (e.g., 'walkIndoor' or 'walkOutdoor')
-%   - options: 
-%       - src_dir: path to data
-%       - color_mode: "a", "c_lm", "c_s" or an array of them
-%       - show_beeswarm: true/false (default true)
-% Example
+%   activity_name         - Char/string. Name of the activity to plot
+%                           (e.g., 'walkIndoor', 'chat', 'walkOutdoor').
+%
+% Optional key/value pairs:
+%   src_dir               - Char/string. Path to the directory containing
+%                           saved SPD outputs. Defaults to the Dropbox
+%                           FLIC analysis directory.
+%   color_mode            - String or string array. Color modes to plot.
+%                           Must be one or more of "a", "c_lm", "c_s".
+%   show_beeswarm         - Logical. If true, overlay jittered individual
+%                           subject data points on each bar.
+%
+% Outputs:
+%   none
+%
+% Examples:
 %{
     barPlotSpdSlopes('chat', "color_mode", ["a"])
 %}  
@@ -159,6 +182,24 @@ function barPlotSpdSlopes(activity_name, options)
 end
 
 function condition_name = iFormatConditionName(condition)
+% Internal helper to i format condition name.
+%
+% Syntax:
+%   condition_name = iFormatConditionName(condition)
+%
+% Description:
+%   This local helper function internal helper to i format condition name within its parent workflow.
+% Inputs:
+%   condition                - Input used by the function.
+%
+% Outputs:
+%   condition_name           - Output produced by the function.
+%
+% Examples:
+%{
+    % See barPlotSpdSlopes.m for usage context.
+%}
+
     switch string(condition)
         case "a",   condition_name = 'Achromatic';
         case "c_lm", condition_name = 'L-M';

@@ -1,4 +1,44 @@
 function frame = readFrame(obj, options)
+% Read one frame from a buffered AVI source, with optional color transforms.
+%
+% Syntax:
+%   frame = readFrame(obj, options)
+%
+% Description:
+%   This method services frame reads through a read-ahead HDF5 buffer that
+%   is generated on demand by the Python utility library. When the caller
+%   requests a frame outside the current buffer, changes color mode, or
+%   explicitly forces a rebuffer, the method exports a new block of frames
+%   from the source AVI into a temporary HDF5 file, loads that block into
+%   MATLAB memory, and optionally converts the frames from RGB into LMS or
+%   derived achromatic/chromatic representations. The method also supports
+%   masking floor and ceiling values, caching global normalization factors
+%   for opponent-color spaces, and returning either grayscale/two-
+%   dimensional frames or three-channel arrays depending on the requested
+%   color mode.
+%
+% Inputs:
+%   obj                      - `videoIOWrapper` instance configured in read
+%                              mode.
+%   options                  - Name/value options controlling which frame
+%                              to read, the requested color space, whether
+%                              0 and 255 should be treated as invalid, how
+%                              buffering should be performed, and whether
+%                              LMS conversion should run in parallel.
+%
+% Outputs:
+%   frame                    - Numeric matrix or array containing the
+%                              requested frame in the selected color space.
+%
+% Examples:
+%{
+    frame = readFrame(reader, "frameNum", 10, "color", "RGB");
+%}
+%{
+    lmsFrame = readFrame(reader, "frameNum", 25, "color", "c_lm", ...
+        "zeros_as_nans", true, "ceiling_as_nans", true);
+%}
+
     arguments 
         obj 
         options.frameNum {mustBeNumeric} = []; 
@@ -423,6 +463,27 @@ function frame = readFrame(obj, options)
 
     % Local function used to update progress waitbars
     function updateWaitbar(~)
+    % Update the verbose-mode waitbar during LMS buffer conversion.
+    %
+    % Syntax:
+    %   updateWaitbar(~)
+    %
+    % Description:
+    %   This nested helper is registered with a `parallel.pool.DataQueue`
+    %   so each completed worker iteration can increment the waitbar shown
+    %   while RGB frames are being converted into LMS space.
+    %
+    % Inputs:
+    %   ~                        - Unused DataQueue payload.
+    %
+    % Outputs:
+    %   None.
+    %
+    % Examples:
+    %{
+        % See readFrame.m for usage context.
+    %}
+
         progressCount = progressCount + 1;
 
         if isvalid(hWait)

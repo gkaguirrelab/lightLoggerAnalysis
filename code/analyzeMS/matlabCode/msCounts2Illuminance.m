@@ -1,17 +1,23 @@
 function MS2illum_lux = msCounts2Illuminance(ms_counts, options)
-% msCountsToIlluminance - Converts MiniSpectrometer readings to illuminance
-% (lux) using fits saved from linear fit of illuminance to MS readings
-% during calibration. Averages across all channels.
+% Ms counts2 illuminance.
 %
 % Syntax:
-%   MS2illum_lux = msCounts2Illuminance(ms_counts, illum_to_MS)
+%   MS2illum_lux = msCounts2Illuminance(ms_counts, options)
 %
+% Description:
+%   This function ms counts2 illuminance.
 % Inputs:
-%   ms_counts    - [nSamples x nChannels] matrix of MS counts (can be linear or log10)
+%   ms_counts                - Input used by the function.
+%   options                  - Input used by the function.
 %
-% Output:
-%   illum_lux    - [nSamples] estimated illuminance in lux
+% Outputs:
+%   MS2illum_lux             - Output produced by the function.
 %
+% Examples:
+%{
+    MS2illum_lux = msCounts2Illuminance(ms_counts, options)
+%}
+
     arguments 
         ms_counts 
         options.force_recalc = false; 

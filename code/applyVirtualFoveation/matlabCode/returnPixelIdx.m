@@ -1,38 +1,24 @@
 function [idxMatrix_flat, idxMatrix_mat] = returnPixelIdx(pixelClass, options)
-% Generates 1D and 2D pixel location masks for a specific RBG value. 
+% Return pixel idx.
 %
-% Syntax:l
-%   idxMatrix = returnPixelIdx(pixelClass, options)
-% 
-% Description;
-%   Calculates the Bayer filter mask (1 for specified color, 0 otherwise)
-%   for the frame dimensions found in the specified chunk.
+% Syntax:
+%   idxMatrix_flat, idxMatrix_mat = returnPixelIdx(pixelClass, options)
 %
-%   This mask represents the physical locations of the R, G, or B pixels
-%   on the camera sensor. This mask is static and does not change based on
-%   the content of the video frame, only its dimensions.
-% 
+% Description:
+%   This function return pixel idx.
 % Inputs:
-%   pixelClass          - String ('R', 'G', or 'B') specifying the color to identify.
+%   pixelClass               - Input used by the function.
+%   options                  - Input used by the function.
 %
-% Optional key/value pairs:
-%   'nRows'             - Scalar integer. The number of rows (height) of the camera frame.
-%                         Defaults to 480 if not provided.
-% 
-%   'nCols'             - Scalar integer. The number of columns (width) of the camera frame.
-%                         Defaults to 640 if not provided.
-%
-% Output:
-%   idxMatrix_flat      1D column vector (mask).
-%                       - '1' at indices where the specified color pixel is located, and '0' elsewhere.
-%                       - Length is (nRows * nCols).
-% 
-%   idxMatrix_mat       2D matrix (mask).
-%                       - '1' at indices where the specified color pixel is located, and '0' elsewhere.
-%                       - Dimensions are (nRows * nCols).
+% Outputs:
+%   idxMatrix_flat           - Output produced by the function.
+%   idxMatrix_mat            - Output produced by the function.
 %
 % Examples:
 %{
+    [idxMatrix_flat, idxMatrix_mat] = returnPixelIdx(pixelClass, options)
+%}
+
     ---- To Use With Chunks Data ----
     1. ** create necessary file paths **
     2. ** parse Chunks as normal **

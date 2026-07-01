@@ -1,5 +1,22 @@
 function calibration_metadata = load_calibration_metadata(path_to_metadata)
-    % Open the file 
+% Load calibration metadata.
+%
+% Syntax:
+%   calibration_metadata = load_calibration_metadata(path_to_metadata)
+%
+% Description:
+%   This function load calibration metadata.
+% Inputs:
+%   path_to_metadata         - Path-like input used by the function.
+%
+% Outputs:
+%   calibration_metadata     - Output produced by the function.
+%
+% Examples:
+%{
+    calibration_metadata = load_calibration_metadata(path_to_metadata)
+%}
+
     calibration_metadata_struct_file = fopen(path_to_metadata, 'rb'); % Open the file whose bytes represent the CalibrationData struct 
     
     % Read the contents of the file as raw bytes 

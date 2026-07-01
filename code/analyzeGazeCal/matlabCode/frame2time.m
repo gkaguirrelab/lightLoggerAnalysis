@@ -1,24 +1,32 @@
 function [output] = frame2time(frame_num, fps)
-% FRAME2TIME Converts a frame number (or vector of frame numbers) into a timestamp 
-% (minutes, seconds, ms).
+% Convert frame numbers to timestamps in [minutes, seconds, milliseconds]
 %
-% Usage:
-%   [m, s, ms] = frame2time(frame_number, fps)
+% Syntax:
+%   output = frame2time(frame_num)
+%   output = frame2time(frame_num, fps)
+%
+% Description:
+%   Converts one or more frame numbers into human-readable timestamps
+%   expressed as [minutes, seconds, milliseconds]. Handles rollover of
+%   milliseconds to seconds and seconds to minutes. Defaults to 120 fps
+%   if no frame rate is specified.
 %
 % Inputs:
-%   frame_num - The sequential number(s) of the frame. This can be a 
-%                  scalar or a column vector.
-%                  (Numeric vector/scalar)
-%   fps          - Frames Per Second rate. Defaults to 120 if not provided.
-%                  (Numeric scalar, must be > 0)
+%   frame_num             - Numeric scalar or vector. The sequential frame
+%                           number(s) to convert. Must be non-negative.
+%   fps                   - Scalar double (default: 120). Frames per second
+%                           rate. Must be positive.
 %
 % Outputs:
-% output [minutes seconds ms]
-%   minutes      - The whole number of minutes (Column vector).
-%   seconds      - The whole number of seconds remaining after minutes (Column vector).
-%   ms           - The whole number of milliseconds remaining after seconds
-%                  (rounded to the nearest millisecond, Column vector).
+%   output                - Nx3 double. Matrix with columns [minutes,
+%                           seconds, milliseconds] where N is the number
+%                           of input frame numbers.
 %
+% Examples:
+%{
+    output = frame2time(14400);       % 2 minutes at 120 fps
+    output = frame2time([120; 240], 120);
+%}
 
     % --- Input Handling and Default FPS ---
     % Set the default FPS value if the second argument is not provided.

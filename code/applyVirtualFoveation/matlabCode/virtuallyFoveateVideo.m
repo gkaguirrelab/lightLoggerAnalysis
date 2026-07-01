@@ -265,6 +265,25 @@ end
 % Local function to determine if a given pupil frame timestamp 
 % is in a range of blink events 
 function is_blink = is_blnk_event(timestamp, blnk_events)
+% Internal helper to is blnk event.
+%
+% Syntax:
+%   is_blink = is_blnk_event(timestamp, blnk_events)
+%
+% Description:
+%   This local helper function internal helper to is blnk event within its parent workflow.
+% Inputs:
+%   timestamp                - Timestamp-related input.
+%   blnk_events              - Input used by the function.
+%
+% Outputs:
+%   is_blink                 - Logical result returned by the function.
+%
+% Examples:
+%{
+    % See virtuallyFoveateVideo.m for usage context.
+%}
+
     is_blink = false; 
 
     % Iterate over the blnk_events

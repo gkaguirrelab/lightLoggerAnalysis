@@ -1,3 +1,11 @@
+"""Utility functions for minispectrometer (MS) sensor data processing.
+
+Provides constants, parsing, and plotting utilities for working with
+minispectrometer readings including the AS, TS, LS (accelerometer), and
+temperature sensors. Supports serial packet parsing, chunk-based data
+loading, and accelerometer timestamp generation.
+"""
+
 import os
 import numpy as np 
 from natsort import natsorted 
@@ -64,15 +72,24 @@ MS_SUNGLASSES_FRAME_SHAPE: np.ndarray = MS_UNCOMPRESSED_FRAME_SHAPE + SUNGLASSES
 MS_SUNGLASSES_METADATA_DTYPE: object = np.float64 # Define the datatype of the merged sensors' metadata (timestamps)
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
-"""
-    Generate a t vector for the accelerometer readings. 
-    We cannot use the default t vector associated with the MS 
-    buffer reading metadata because accelerometer readings 
-    are sent as buffers of n readings. 
-"""
 def generate_accelerometer_t(t: np.ndarray | list | tuple) -> np.ndarray:
-    # Convert to numpy array if passed in a list, for instance, 
-    # like from MATLAB 
+    """Generate a time vector for accelerometer readings.
+
+    The default time vector associated with the MS buffer reading metadata
+    cannot be used for accelerometer readings because they are sent as
+    buffers of n readings. This function interpolates timestamps to produce
+    a time vector with one entry per accelerometer sample.
+
+    Args:
+        t: Original timestamp vector from MS buffer metadata. Can be a
+            numpy array, list, or tuple.
+
+    Returns:
+        A numpy array of interpolated timestamps with length
+        ``MS_LS_BUFFER_SIZE * len(t)``.
+    """
+    # Convert to numpy array if passed in a list, for instance,
+    # like from MATLAB
     if(isinstance(t, np.ndarray) is False):
         t = np.array(t)
     
@@ -122,14 +139,26 @@ def generate_accelerometer_t(t: np.ndarray | list | tuple) -> np.ndarray:
     return LS_t
 
 
-"""Plot a single recording buffer of the MS (nSeconds, MS_SUNGLASSES_FRAME_SHAPE)
-   onto a MATPLOT lib axis and return said axis. 
-"""
-def plot_chunk_readings(t_vector: np.ndarray, readings_buffer: np.ndarray, 
+def plot_chunk_readings(t_vector: np.ndarray, readings_buffer: np.ndarray,
                         axes: plt.Axes=None
                        ) -> None | tuple:
-    # First, we will generate a figure + associated axis to plot 
-    # if this has not been passed in 
+    """Plot a single recording buffer of MS readings.
+
+    Plots the MS data shaped ``(nSeconds, MS_SUNGLASSES_FRAME_SHAPE)`` onto
+    matplotlib axes, with one subplot per sensor chip (AS, TS, LS, TEMP).
+
+    Args:
+        t_vector: Time vector corresponding to the readings.
+        readings_buffer: Array of MS readings with shape
+            ``(nSeconds, MS_SUNGLASSES_FRAME_SHAPE)``.
+        axes: Optional matplotlib axes array to plot onto. If None, a new
+            2x2 figure and axes are created.
+
+    Returns:
+        None if axes were provided, otherwise a tuple of ``(fig, axes)``.
+    """
+    # First, we will generate a figure + associated axis to plot
+    # if this has not been passed in
     fig: None | plt.figure = None
     if(axes is None):
         fig, axes = plt.subplots(2, 2, figsize=(10,10)) # Size is 2,2 because we have 4 sensors 
@@ -178,10 +207,19 @@ def plot_chunk_readings(t_vector: np.ndarray, readings_buffer: np.ndarray,
     # Otherwise, return the axes and figure 
     return fig, axes
 
-"""After receiving a packet of data from the MS over serial, 
-   parse it into raw buffers for each of the sensors 
-"""
 def parse_packet(packet: bytes) -> tuple:
+    """Parse a serial packet from the MS into raw sensor buffers.
+
+    After receiving a packet of data from the MS over serial, splits it
+    into separate numpy arrays for each sensor.
+
+    Args:
+        packet: Raw bytes received from the MS over serial.
+
+    Returns:
+        A tuple of ``(AS_channels, TS_channels, LS_channels, TEMP_channels)``
+        as numpy arrays.
+    """
     AS_channels: np.ndarray = np.frombuffer(packet[0:20], dtype=np.uint16)
     TS_channels: np.ndarray = np.frombuffer(packet[20:24], dtype=np.uint16)
     LS_channels: np.ndarray = np.frombuffer(packet[24 : len(packet) - 4 ], dtype=np.int16)
@@ -189,10 +227,22 @@ def parse_packet(packet: bytes) -> tuple:
 
     return AS_channels, TS_channels, LS_channels, TEMP_channels
 
-"""Parse a single recording buffer of MS readings (nSeconds, MS_SUNGLASSES_FRAME_SHAPE) and return them as a tuple of
-   either numpy arrays or pd.DataFrames. Returning as numpy can sometimes help crashing in MATLAB
-   as there can be a version mismatch of MATLAB pandas and Python libraries."""
 def parse_readings(readings_buffer: np.ndarray) -> tuple:
+    """Parse a recording buffer of MS readings into per-sensor DataFrames.
+
+    Parses a single recording buffer shaped
+    ``(nSeconds, MS_SUNGLASSES_FRAME_SHAPE)`` and returns the sensor data
+    as DataFrames. Returning as numpy can sometimes help avoid crashes in
+    MATLAB due to version mismatches with pandas.
+
+    Args:
+        readings_buffer: Array of MS readings with shape
+            ``(nSeconds, MS_SUNGLASSES_FRAME_SHAPE)``.
+
+    Returns:
+        A tuple of ``(AS_df, TS_df, LS_df, LS_temp_df)`` as
+        ``pd.DataFrame`` instances.
+    """
     # First, we must parse the np.array of bytes into the respective sensors' bytes
     AS_channels, TS_channels, LS_channels, LS_temp = parse_SERIAL(readings_buffer)
 
@@ -204,9 +254,21 @@ def parse_readings(readings_buffer: np.ndarray) -> tuple:
 
     return AS_df, TS_df, LS_df, LS_temp_df
 
-"""Extract the different sensor's information out of the readings buffer"""
 def parse_SERIAL(readings_buffer: np.ndarray) -> tuple:
-    # Define a variable to keep track of where we are in the buffer 
+    """Extract each sensor's data from the combined readings buffer.
+
+    Splits the readings buffer by column ranges corresponding to each
+    sensor and casts the data to the appropriate dtype.
+
+    Args:
+        readings_buffer: Combined readings array with all sensor channels
+            along the column axis.
+
+    Returns:
+        A tuple of ``(AS_channels, TS_channels, LS_channels, LS_temp)``
+        as numpy arrays with their respective dtypes.
+    """
+    # Define a variable to keep track of where we are in the buffer
     current_buffer_pos: int = 0 
     
     # Splice out the values and return them to their intended types 
@@ -228,16 +290,42 @@ def parse_SERIAL(readings_buffer: np.ndarray) -> tuple:
     return AS_channels, TS_channels, LS_channels, LS_temp 
 
 
-"""Parse a reading buffer and return the resulting dataframe with labeled cols"""
-def reading_to_df(readings: np.ndarray, 
-                  channel_type : type, 
+def reading_to_df(readings: np.ndarray,
+                  channel_type : type,
                   sensor_name: str
                  ) -> pd.DataFrame:
-    
-    """Unpack a buffer of accelerometer buffers. We will have (nRows, 60 cols)
-       where these 60 cols are buffers of 10 accelerometer readings from the 6 channels
+    """Parse a reading buffer and return a DataFrame with labeled columns.
+
+    Converts a raw numpy array of sensor readings into a pandas DataFrame
+    with appropriately named columns and dtypes. For accelerometer (LS)
+    data, unpacks the interleaved buffer format first.
+
+    Args:
+        readings: Raw numpy array of sensor readings.
+        channel_type: The numpy dtype to cast each column to.
+        sensor_name: Single-character sensor identifier (e.g., ``'A'``,
+            ``'T'``, ``'L'``, ``'c'``). Prefix ``'L'`` triggers
+            accelerometer unpacking.
+
+    Returns:
+        A ``pd.DataFrame`` with labeled columns and the specified dtype.
     """
+
     def unpack_accel_readings(buffer_of_buffers: np.ndarray) -> np.ndarray:
+        """Unpack interleaved accelerometer buffer into a channel-separated array.
+
+        Takes an array shaped ``(nRows, MS_LS_CHANNELS * MS_LS_BUFFER_SIZE)``
+        where columns are interleaved accelerometer readings and reshapes
+        it into ``(nRows * MS_LS_BUFFER_SIZE, MS_LS_CHANNELS)``.
+
+        Args:
+            buffer_of_buffers: Interleaved accelerometer data with shape
+                ``(nRows, MS_LS_CHANNELS * MS_LS_BUFFER_SIZE)``.
+
+        Returns:
+            A numpy array with shape
+            ``(nRows * MS_LS_BUFFER_SIZE, MS_LS_CHANNELS)``.
+        """
         # Allocate a new array that is the correct shape 
         unpacked_buffer: np.ndarray = np.full((buffer_of_buffers.shape[0] * MS_LS_BUFFER_SIZE, MS_LS_CHANNELS), -1, dtype=np.int16)
         assert(buffer_of_buffers.shape[1] == MS_LS_CHANNELS * MS_LS_BUFFER_SIZE)
@@ -281,7 +369,27 @@ def reading_to_df(readings: np.ndarray,
 def ms_data_from_chunks(recording_path: str,
                         verbose: bool=False
                        ) -> np.ndarray:
-    # First, we need to find all of the MS chunks 
+    """Load and concatenate MS data and metadata chunks from a recording.
+
+    Reads all minispectrometer chunk files from the given recording
+    directory, parses them, and concatenates them into single arrays for
+    data and metadata.
+
+    Args:
+        recording_path: Path to the directory containing MS chunk files.
+        verbose: If True, display a progress bar while loading chunks.
+
+    Returns:
+        A tuple of ``(data, metadata)`` where ``data`` is a numpy array
+        of shape ``(total_readings, n_channels)`` and ``metadata`` is a
+        flattened numpy array of timestamps.
+
+    Raises:
+        AssertionError: If no MS chunks are found or if the number of data
+            chunks does not match the number of metadata chunks.
+        Exception: If chunk shapes are incompatible for concatenation.
+    """
+    # First, we need to find all of the MS chunks
     ms_data_chunks: list[str] = natsorted([os.path.join(recording_path, filename)
                                            for filename in os.listdir(recording_path)
                                            if filename.startswith("ms")
@@ -343,7 +451,8 @@ def ms_data_from_chunks(recording_path: str,
     return data, metadata
 
 def main():
-    pass 
+    """Entry point placeholder."""
+    pass
 
 if(__name__ == "__main__"):
     main()

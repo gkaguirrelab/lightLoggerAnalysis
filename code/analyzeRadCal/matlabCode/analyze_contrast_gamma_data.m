@@ -44,15 +44,7 @@ function figureHandles = analyze_contrast_gamma_data(calibration_metadata, measu
     n_measures = calibration_metadata.n_measures;
 
 
-    colorList = [
-    0.6350, 0.0780, 0.1840;   % Red
-    0.8500, 0.3250, 0.0980;   % Orange
-    0.9290, 0.6940, 0.1250;   % Yellow
-    0.4660, 0.6740, 0.1880;   % Green
-    0.3010, 0.7450, 0.9330;   % Light Blue
-    0,      0.4470, 0.7410;   % Blue
-    0.4940, 0.1840, 0.5560;   % Purple
-    ];
+    colorList = ndf_color_list(numel(NDFs));
 
    fit_slopes_per_NDF = zeros(numel(NDFs), numel(frequencies));
 
@@ -109,4 +101,34 @@ function figureHandles = analyze_contrast_gamma_data(calibration_metadata, measu
         hold off;
     end
 
+end
+
+function colorList = ndf_color_list(num_NDFs)
+% Internal helper to create one plotting color per NDF level.
+%
+% Syntax:
+%   colorList = ndf_color_list(num_NDFs)
+%
+% Description:
+%   Returns the historical 7-color NDF palette for small calibrations and
+%   interpolates through that palette when a calibration has more NDF levels.
+
+baseColors = [
+    0.6350, 0.0780, 0.1840;   % Red
+    0.8500, 0.3250, 0.0980;   % Orange
+    0.9290, 0.6940, 0.1250;   % Yellow
+    0.4660, 0.6740, 0.1880;   % Green
+    0.3010, 0.7450, 0.9330;   % Light Blue
+    0,      0.4470, 0.7410;   % Blue
+    0.4940, 0.1840, 0.5560;   % Purple
+    ];
+
+if(num_NDFs <= size(baseColors, 1))
+    colorList = baseColors(1:num_NDFs, :);
+    return;
+end
+
+basePositions = linspace(1, num_NDFs, size(baseColors, 1));
+requestedPositions = 1:num_NDFs;
+colorList = interp1(basePositions, baseColors, requestedPositions, 'linear');
 end

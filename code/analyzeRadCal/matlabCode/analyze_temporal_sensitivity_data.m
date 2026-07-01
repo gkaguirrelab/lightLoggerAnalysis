@@ -175,9 +175,27 @@ end
 
 %% LOCAL FUNCTIONS
 function [filterFreqHz,filterAmp] = approxFreqFilter(frequencies, amplitudes, opts)
+% Internal helper to approx freq filter.
+%
+% Syntax:
+%   filterFreqHz, filterAmp = approxFreqFilter(frequencies, amplitudes, opts)
+%
+% Description:
+%   This local helper function internal helper to approx freq filter within its parent workflow.
+% Inputs:
+%   frequencies              - Input used by the function.
+%   amplitudes               - Input used by the function.
+%   opts                     - Input used by the function.
+%
+% Outputs:
+%   filterFreqHz             - Output produced by the function.
+%   filterAmp                - Output produced by the function.
+%
+% Examples:
+%{
+    % See analyze_temporal_sensitivity_data.m for usage context.
+%}
 
-% Trim off the 100 Hz case; this is dominated by signed noise in the
-% amplitude estimation
 frequencies = frequencies(frequencies~=100);
 amplitudes = amplitudes(frequencies~=100);
 
@@ -194,22 +212,37 @@ end
 
 % Local function to plot the TTF of all measures of a certain contrast level
 function figHandle = plot_TTF(NDFs, contrast_level, frequencies, response_amplitude_data, world_fps, contrast_attenuation_with_frequency, opts)
-% Construct the Mean TTF for this contrast level
+% Internal helper to plot ttf.
+%
+% Syntax:
+%   figHandle = plot_TTF(NDFs, contrast_level, frequencies, response_amplitude_data, world_fps, contrast_attenuation_with_frequency, opts)
+%
+% Description:
+%   This local helper function internal helper to plot ttf within its parent workflow.
+% Inputs:
+%   NDFs                     - Input used by the function.
+%   contrast_level           - Input used by the function.
+%   frequencies              - Input used by the function.
+%   response_amplitude_data  - Input used by the function.
+%   world_fps                - Input used by the function.
+%   contrast_attenuation_with_frequency - Input used by the function.
+%   opts                     - Input used by the function.
+%
+% Outputs:
+%   figHandle                - Output produced by the function.
+%
+% Examples:
+%{
+    % See analyze_temporal_sensitivity_data.m for usage context.
+%}
+
 figHandle = [];
 if opts.plotEachMeasure
     figHandle = figure('Name', sprintf("Temporal_Sensitivity_TTF_All_Measures_C_%0.2f", contrast_level));
     set(figHandle, 'Position', [100 100 750 600]);
 
-    % Make a list of colors for each ND level for the conjoined plot
-    colorList = [
-        0.6350, 0.0780, 0.1840   % Red
-        0.8500, 0.3250, 0.0980;  % Orange
-        0.9290, 0.6940, 0.1250;  % Yellow
-        0.4660, 0.6740, 0.1880;  % Green
-        0.3010, 0.7450, 0.9330;  % Light Blue
-        0, 0.4470, 0.7410;   % Blue
-        0.4940, 0.1840, 0.5560;  % Purple
-        ];
+    % Make a list of colors for each ND level for the conjoined plot.
+    colorList = ndf_color_list(numel(NDFs));
 
     % Plot each NDF line
     for nn = 1:numel(NDFs)
@@ -263,20 +296,35 @@ end
 
 % Local function to plot the mean TTF
 function figHandle = plot_mean_TTF(NDFs, contrast_level, frequencies, response_amplitude_data, world_fps, contrast_attenuation_with_frequency, opts)
-% Construct the Mean TTF for this contrast level
+% Internal helper to plot mean ttf.
+%
+% Syntax:
+%   figHandle = plot_mean_TTF(NDFs, contrast_level, frequencies, response_amplitude_data, world_fps, contrast_attenuation_with_frequency, opts)
+%
+% Description:
+%   This local helper function internal helper to plot mean ttf within its parent workflow.
+% Inputs:
+%   NDFs                     - Input used by the function.
+%   contrast_level           - Input used by the function.
+%   frequencies              - Input used by the function.
+%   response_amplitude_data  - Input used by the function.
+%   world_fps                - Input used by the function.
+%   contrast_attenuation_with_frequency - Input used by the function.
+%   opts                     - Input used by the function.
+%
+% Outputs:
+%   figHandle                - Output produced by the function.
+%
+% Examples:
+%{
+    % See analyze_temporal_sensitivity_data.m for usage context.
+%}
+
 figHandle = figure('Name', sprintf("Temporal_Sensitivity_TTF_Mean_C_%0.2f", contrast_level));
 set(figHandle, 'Position', [100 100 750 600]);   % same aspect ratio, larger figure
 
-% Make a list of colors for each ND level for the conjoined plot
-    colorList = [
-        0.6350, 0.0780, 0.1840   % Red
-        0.8500, 0.3250, 0.0980;  % Orange
-        0.9290, 0.6940, 0.1250;  % Yellow
-        0.4660, 0.6740, 0.1880;  % Green
-        0.3010, 0.7450, 0.9330;  % Light Blue
-        0, 0.4470, 0.7410;   % Blue
-        0.4940, 0.1840, 0.5560;  % Purple
-        ];
+% Make a list of colors for each ND level for the conjoined plot.
+colorList = ndf_color_list(numel(NDFs));
 
 % We will now take the mean of all measures per frequency
 mean_response_amplitude_data = mean(response_amplitude_data, 3);
@@ -335,4 +383,34 @@ set(gcf, 'Color', 'w');
 axis square;          % makes axes box square
 pbaspect([1 1 1]);   % prevents horizontal stretching
 
+end
+
+function colorList = ndf_color_list(num_NDFs)
+% Internal helper to create one plotting color per NDF level.
+%
+% Syntax:
+%   colorList = ndf_color_list(num_NDFs)
+%
+% Description:
+%   Returns the historical 7-color NDF palette for small calibrations and
+%   interpolates through that palette when a calibration has more NDF levels.
+
+baseColors = [
+    0.6350, 0.0780, 0.1840   % Red
+    0.8500, 0.3250, 0.0980;  % Orange
+    0.9290, 0.6940, 0.1250;  % Yellow
+    0.4660, 0.6740, 0.1880;  % Green
+    0.3010, 0.7450, 0.9330;  % Light Blue
+    0, 0.4470, 0.7410;       % Blue
+    0.4940, 0.1840, 0.5560;  % Purple
+    ];
+
+if(num_NDFs <= size(baseColors, 1))
+    colorList = baseColors(1:num_NDFs, :);
+    return;
+end
+
+basePositions = linspace(1, num_NDFs, size(baseColors, 1));
+requestedPositions = 1:num_NDFs;
+colorList = interp1(basePositions, baseColors, requestedPositions, 'linear');
 end

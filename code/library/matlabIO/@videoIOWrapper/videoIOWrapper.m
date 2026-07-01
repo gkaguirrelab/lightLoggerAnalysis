@@ -1,4 +1,4 @@
-% Object to support reading AVI video files using python routines
+% Object to support reading and writing AVI video files via Python helpers.
 
 classdef videoIOWrapper < handle
 
@@ -55,9 +55,44 @@ classdef videoIOWrapper < handle
 
         % Constructor
         function obj = videoIOWrapper(videoFileName,varargin)
+        % Construct a video I/O wrapper around the Python utility layer.
+        %
+        % Syntax:
+        %   obj = videoIOWrapper(videoFileName, varargin)
+        %
+        % Description:
+        %   This constructor stores basic metadata about the target video,
+        %   imports the Python support library used elsewhere in the
+        %   project, and configures the object for either read mode or
+        %   write mode. In read mode it inspects the existing AVI file and
+        %   prepares a unique temporary HDF5 path that will later hold
+        %   buffered frame blocks for faster MATLAB access. In write mode
+        %   it records the output target and defers frame-directory
+        %   creation until `open` is called. The constructor also loads the
+        %   RGB-to-LMS transform matrices so color-space conversions can be
+        %   applied during buffered reads.
+        %
+        % Inputs:
+        %   videoFileName            - String or char vector. Path to the
+        %                              AVI file to read from or write to.
+        %   varargin                 - Optional name/value pairs:
+        %                              `ioAction` selects "read" or
+        %                              "write", `readAheadBufferSize`
+        %                              controls how many frames are loaded
+        %                              per HDF5 buffer, and `camera_used`
+        %                              selects the spectral calibration
+        %                              used for LMS conversion.
+        %
+        % Outputs:
+        %   obj                      - `videoIOWrapper` instance configured
+        %                              for the requested I/O mode.
+        %
+        % Examples:
+        %{
+            reader = videoIOWrapper("W.avi", "ioAction", "read");
+            writer = videoIOWrapper("output.avi", "ioAction", "write");
+        %}
 
-            % Using an old-fashioned input parser as the arguments block
-            % syntax fails under Matlab 2025a.
             p = inputParser; p.KeepUnmatched = false;            
             p.addParameter('ioAction','read', @(x) ischar(x) || @(x) isstring(x));
             p.addParameter('readAheadBufferSize',1000);

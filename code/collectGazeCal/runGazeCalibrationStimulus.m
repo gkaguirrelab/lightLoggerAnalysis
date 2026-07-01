@@ -1,34 +1,60 @@
 function degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, agc_convergence_wait_s, subjectId, experiment_name, session, heightCm, widthCm, viewingDistCm)
-% Displays 26-dot gaze calibration stimulus at fixed visual angles, with a brief beep signaling each dot onset.
-% 
-% TO DO: figure out why dots are displaying for ~3.267 seconds!!!
-% Description: 
-%   Displays calibration dots on a screen for the subject to fixate. The
-%   dots are at various distances in degrees visual angle from a central
-%   point. The regime also starts the light logger recording if the option
-%   to record is turned on (i.e., not in simulation mode).
-% 
+% Present the timed gaze-calibration stimulus and optionally record it.
+%
+% Syntax:
+%   degPositions = runGazeCalibrationStimulus(simulation_mode, device_num, agc_convergence_wait_s, subjectId, experiment_name, session, heightCm, widthCm, viewingDistCm)
+%
+% Description:
+%   This function coordinates the visual gaze-calibration task used with
+%   the light logger recordings. In visual modes it opens a Psychtoolbox
+%   window, displays instructions, converts a predefined set of target
+%   locations from degrees to pixels, and then presents the targets one at
+%   a time with audio beeps and red synchronization flashes at task onset
+%   and offset. In bluetooth-enabled modes it also commands the light
+%   logger to enter and leave its science state, waits for AGC convergence
+%   before beginning the task, and saves the measured task timing metadata
+%   alongside the target positions for downstream synchronization.
+%
 % Inputs:
-%   simulation_mode             - String & Enum. Choose whether to run full stimulus or simulate 
-%                                 a part for testing. 
+%   simulation_mode          - String. Execution mode: "full" runs both
+%                              stimulus presentation and bluetooth control,
+%                              "visual" runs the on-screen task only, and
+%                              "bluetooth" controls the device without
+%                              presenting the task.
+%   device_num               - Scalar. Index of the bluetooth peripheral to
+%                              command through the Python control layer.
+%   agc_convergence_wait_s   - Scalar. Number of seconds to wait after the
+%                              recording enters science mode so the camera
+%                              AGC can settle before the first target.
+%   subjectId                - String or char vector. Subject identifier
+%                              used in both the recording name and the
+%                              saved MATLAB task data.
+%   experiment_name          - String or char vector. Label used when
+%                              generating the light logger recording state.
+%   session                  - Scalar. Session number appended to the light
+%                              logger recording name.
+%   heightCm                 - Scalar. Physical display height in
+%                              centimeters.
+%   widthCm                  - Scalar. Physical display width in
+%                              centimeters.
+%   viewingDistCm            - Scalar. Viewing distance from the observer
+%                              to the display in centimeters.
 %
-%   device_num                  - Numeric. The device number to use when recording from a real device.
+% Outputs:
+%   degPositions             - Numeric matrix. Ordered [xDeg, yDeg]
+%                              calibration target positions used during the
+%                              stimulus presentation.
 %
-%   agc_convergence_wait_s      - Numeric. The time in seconds to wait for the AGC to converge to appropriate settings.
-%
-%   experiment_name             - String. The filename the recording will be saved under on the light logger. 
-%
-%   heightCm                    - Numeric. Display screen height in cm.
-%
-%   widthCm                     - Numeric. Display screen width in cm.
-%
-%   viewingDistCm               - Numeric. Distance from participant to the screen in cm.
-% 
-% Example:
+% Examples:
+%{
+    degPositions = runGazeCalibrationStimulus("visual", 2, 60, ...
+        "FLIC_2004", "GazeCalibration", 1, 106.7, 192.4, 100);
+%}
 %{
     subjectId = 'FLIC_2004';
     sessionNum = 1;
-    runGazeCalibrationStimulus("visual", 2, 60, subjectId, 'GazeCalibration',sessionNum, 106.7, 192.4)
+    runGazeCalibrationStimulus("visual", 2, 60, subjectId, ...
+        'GazeCalibration', sessionNum, 106.7, 192.4, 100);
 %}
                           
     arguments 
@@ -308,6 +334,30 @@ end
 
 % Local function to perform a busy-wait until a specified time
 function waitUntil(stopTimeSeconds)
+% Busy-wait until a target CPU time is reached.
+%
+% Syntax:
+%   waitUntil(stopTimeSeconds)
+%
+% Description:
+%   This local helper spins until MATLAB's CPU timer reaches the supplied
+%   stop time. It is used inside the stimulus loop to keep the nominal
+%   dwell time of each calibration target close to the desired duration
+%   without inserting additional scheduling logic into the presentation
+%   loop itself.
+%
+% Inputs:
+%   stopTimeSeconds          - Scalar. Target value of `cputime` at which
+%                              the function should return.
+%
+% Outputs:
+%   None.
+%
+% Examples:
+%{
+    % See runGazeCalibrationStimulus.m for usage context.
+%}
+
     while cputime() < stopTimeSeconds
         % Busy-wait loop
     end
@@ -317,8 +367,36 @@ function success = start_recording_light_logger(bluetooth_central,...
                                                 experiment_name,...
                                                 device_num...
                                                ) 
-% [No change to this local function]
-    % Initialize a success variable 
+% Request that the light logger enter its science recording state.
+%
+% Syntax:
+%   success = start_recording_light_logger(bluetooth_central, experiment_name, device_num)
+%
+% Description:
+%   This helper assembles the appropriate update message, sends it to the
+%   selected peripheral, and then repeatedly polls the device state until
+%   the light logger reports that it has entered the "science" state. It
+%   returns false immediately if message transmission fails or if the
+%   peripheral reports an error state while the acknowledgement loop is
+%   running.
+%
+% Inputs:
+%   bluetooth_central        - Python module or object. Interface that
+%                              exposes the bluetooth messaging wrappers.
+%   experiment_name          - String or char vector. Recording name to
+%                              embed in the state transition request.
+%   device_num               - Scalar. Identifier of the peripheral to
+%                              message.
+%
+% Outputs:
+%   success                  - Logical scalar. True if the device confirms
+%                              entry into science mode; false otherwise.
+%
+% Examples:
+%{
+    % See runGazeCalibrationStimulus.m for usage context.
+%}
+
     success = 0; 
     % Generate a message to send to the light logger 
     disp("Main | Generating recording message...")
@@ -369,8 +447,34 @@ function success = start_recording_light_logger(bluetooth_central,...
 end 
 % Local function to generate the recording message for the light logger 
 function message = generate_light_logger_recording_message(bluetooth_central, experiment_name)
-% [No change to this local function]
-    % Then, initialize a struct that will be sent to the light logger 
+% Build the light logger state-update message for task recording.
+%
+% Syntax:
+%   message = generate_light_logger_recording_message(bluetooth_central, experiment_name)
+%
+% Description:
+%   This helper creates the Python-side update message that places the
+%   device into science mode for the gaze-calibration run. It imports the
+%   world camera utility module to pull a default sensor mode and a
+%   preselected set of world-camera gain and exposure settings so the
+%   logger begins recording near a reasonable operating point before AGC
+%   convergence.
+%
+% Inputs:
+%   bluetooth_central        - Python module or object used to create and
+%                              populate the update message.
+%   experiment_name          - String or char vector. Recording label to
+%                              attach to the generated science state.
+%
+% Outputs:
+%   message                  - Python message object ready to be sent to
+%                              the peripheral.
+%
+% Examples:
+%{
+    % See runGazeCalibrationStimulus.m for usage context.
+%}
+
     message = bluetooth_central.initialize_update_message();
     
     % Import world_util to retrieve the initial settings for the experiment 
@@ -402,8 +506,32 @@ function message = generate_light_logger_recording_message(bluetooth_central, ex
 end 
 % Local function to end light logger recording 
 function success = stop_recording_light_logger(bluetooth_central, device_num) 
-% [No change to this local function]
-    % Initialize a success variable 
+% Request that the light logger leave its science recording state.
+%
+% Syntax:
+%   success = stop_recording_light_logger(bluetooth_central, device_num)
+%
+% Description:
+%   This helper sends a wait-state transition message to the peripheral
+%   and then polls until the light logger reports that it has returned to
+%   the "wait" state. The logic mirrors the start-recording handshake so
+%   the calling code can verify that the recording was shut down cleanly.
+%
+% Inputs:
+%   bluetooth_central        - Python module or object. Interface that
+%                              exposes the bluetooth messaging wrappers.
+%   device_num               - Scalar. Identifier of the peripheral to
+%                              message.
+%
+% Outputs:
+%   success                  - Logical scalar. True if the device confirms
+%                              re-entry into wait mode; false otherwise.
+%
+% Examples:
+%{
+    % See runGazeCalibrationStimulus.m for usage context.
+%}
+
     success = 0; 
     % Generate a message to send to the light logger 
     disp("Main | Generating stop message...")
@@ -454,8 +582,29 @@ function success = stop_recording_light_logger(bluetooth_central, device_num)
 end 
 % Local function to generate the recording message for the light logger 
 function message = generate_light_logger_stop_message(bluetooth_central)
-% [No change to this local function]
-    % Then, initialize a struct that will be sent to the light logger 
+% Build the light logger update message that ends recording.
+%
+% Syntax:
+%   message = generate_light_logger_stop_message(bluetooth_central)
+%
+% Description:
+%   This helper creates a Python-side update message and populates it with
+%   the state transition that returns the light logger to its idle wait
+%   state after the calibration task has completed.
+%
+% Inputs:
+%   bluetooth_central        - Python module or object used to create and
+%                              populate the update message.
+%
+% Outputs:
+%   message                  - Python message object ready to be sent to
+%                              the peripheral.
+%
+% Examples:
+%{
+    % See runGazeCalibrationStimulus.m for usage context.
+%}
+
     message = bluetooth_central.initialize_update_message();
     
     % Next, we will enter a wait to end the science state
@@ -463,7 +612,28 @@ function message = generate_light_logger_stop_message(bluetooth_central)
 end 
 % Local function to print out error information from a caught error 
 function print_error_info(ME)
-% [No change to this local function]
+% Print a readable summary of a caught MATLAB exception.
+%
+% Syntax:
+%   print_error_info(ME)
+%
+% Description:
+%   This helper prints the exception message and each frame in the stack so
+%   bluetooth communication failures can be inspected from the MATLAB
+%   console without rethrowing the original error.
+%
+% Inputs:
+%   ME                       - `MException` object caught by a surrounding
+%                              `try/catch` block.
+%
+% Outputs:
+%   None.
+%
+% Examples:
+%{
+    % See runGazeCalibrationStimulus.m for usage context.
+%}
+
     fprintf('Error message: %s\n', ME.message);
     fprintf('Error occurred in:\n');
     for k = 1:length(ME.stack)

@@ -1,7 +1,29 @@
 function bluetooth_control()
+% Interactively build and send bluetooth control messages to a device.
+%
+% Syntax:
+%   bluetooth_control()
+%
+% Description:
+%   This utility opens an interactive MATLAB prompt for constructing light
+%   logger state-transition messages through the Python bluetooth control
+%   layer. It imports the phone-firmware module, asks the user which state
+%   to generate, collects any additional sensor and recording parameters
+%   needed for that state, displays the resulting update message, and then
+%   sends it to the target peripheral. Snapshot requests optionally
+%   trigger immediate visualization on the local machine after upload.
+%
+% Inputs:
+%   None.
+%
+% Outputs:
+%   None.
+%
+% Examples:
+%{
+    bluetooth_control()
+%}
 
-    % First, get the current directory the user is in so that we can 
-    % return to it after importing the Python modules 
     current_dir = pwd();
 
     % Retrieve the path to the phone firmware directory

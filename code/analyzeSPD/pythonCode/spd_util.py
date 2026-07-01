@@ -1,4 +1,10 @@
-import os 
+"""Utilities for loading and filtering spectral power distribution (SPD) data.
+
+Provides functions to load SPD result files organized by color mode,
+subject, activity, and projection type from a structured directory hierarchy.
+"""
+
+import os
 import re
 from typing import Iterable, Literal, Any
 from natsort import natsorted
@@ -7,17 +13,47 @@ from scipy.io import loadmat, savemat
 
 def load_spds(src_dir: str,
                 subjects_to_skip: Iterable=set(),
-                subjects_to_process: Iterable=set(), 
-                activities_to_skip: Iterable=set(), 
-                activities_to_process: Iterable=set(), 
-                color_modes_to_skip: Iterable[Literal["a", "c_lm", "c_s"]]=set(), 
-                color_modes_to_process: Iterable[Literal["a", "c_lm", "c_s"]]=set(), 
-                projection_types_to_skip: Iterable=set(), 
-                projection_types_to_process: Iterable=set(), 
-                paths_only: bool=False, 
+                subjects_to_process: Iterable=set(),
+                activities_to_skip: Iterable=set(),
+                activities_to_process: Iterable=set(),
+                color_modes_to_skip: Iterable[Literal["a", "c_lm", "c_s"]]=set(),
+                color_modes_to_process: Iterable[Literal["a", "c_lm", "c_s"]]=set(),
+                projection_types_to_skip: Iterable=set(),
+                projection_types_to_process: Iterable=set(),
+                paths_only: bool=False,
                 output_as_mat: str = ""
                 ) -> dict | None:
-    
+    """Load SPD result files from a structured directory hierarchy.
+
+    Traverses a directory organized as color_mode/subject/activity and
+    loads SPD and best-fit .mat files for each projection type. Supports
+    filtering by subject, activity, color mode, and projection type via
+    include and exclude sets.
+
+    Args:
+        src_dir: Root directory containing color mode subdirectories.
+        subjects_to_skip: Subject numbers to exclude.
+        subjects_to_process: Subject numbers to include. If empty, all
+            subjects are included.
+        activities_to_skip: Activity names to exclude.
+        activities_to_process: Activity names to include. If empty, all
+            activities are included.
+        color_modes_to_skip: Color modes to exclude.
+        color_modes_to_process: Color modes to include. If empty, all
+            are included.
+        projection_types_to_skip: Projection types to exclude.
+        projection_types_to_process: Projection types to include. If
+            empty, all are included.
+        paths_only: If True, store file paths instead of loading the
+            .mat file contents.
+        output_as_mat: If non-empty, save the output dict to this .mat
+            file path and return None.
+
+    Returns:
+        Nested dict keyed by color_mode, subject_id, activity, and
+        projection_type, each containing 'spd' and 'best_fit' data.
+        Returns None if output_as_mat is specified.
+    """
     # Convert everything to set if not set already for fast lookups
     subjects_to_skip = set(subjects_to_skip)
     subjects_to_process = set(subjects_to_process)
@@ -110,12 +146,30 @@ def load_spds(src_dir: str,
     return output_dict
 
 def _is_desired(item: Any, to_process: Iterable, to_skip: Iterable) -> bool:
+    """Internal helper to is desired.
+
+    Args:
+        item: Input value for item.
+        to_process: Input value for to process.
+        to_skip: Input value for to skip.
+
+    Returns:
+        Return value produced by is desired.
+    """
     if(item in to_process):
         return True 
     
     return len(to_process) == 0 and item not in to_skip
 
 def _extract_num_from_id(subject_id: str) -> int:
+    """Internal helper to extract num from id.
+
+    Args:
+        subject_id: Identifier for subject id.
+
+    Returns:
+        Return value produced by extract num from id.
+    """
     assert re.fullmatch("FLIC_\d+", subject_id), f"{subject_id} does not fit the format FLIC_[NUM]"
     return int(re.search(r"\d+", subject_id).group())
 

@@ -292,16 +292,25 @@ end
 
 
 function sorted_activity_names = iSortActivitiesByPreferredOrder(activity_names, group_name)
-% Reorder activity names according to a fixed preferred order for each
-% group. Any activity names not explicitly listed are appended afterward in
-% alphabetical order.
+% Internal helper to i sort activities by preferred order.
 %
-% Preferred order:
-%   indoor  -> work, chat, walkIndoor
-%   outdoor -> sitBiopond, walkBiopond, walkOutdoor
+% Syntax:
+%   sorted_activity_names = iSortActivitiesByPreferredOrder(activity_names, group_name)
+%
+% Description:
+%   This local helper function internal helper to i sort activities by preferred order within its parent workflow.
+% Inputs:
+%   activity_names           - Input used by the function.
+%   group_name               - Input used by the function.
+%
+% Outputs:
+%   sorted_activity_names    - Output produced by the function.
+%
+% Examples:
+%{
+    % See groupSPDs.m for usage context.
+%}
 
-    % Start from alphabetically sorted names so "other" activities are
-    % appended in a stable, predictable order
     activity_names = sort(activity_names);
 
     switch lower(group_name)
@@ -339,14 +348,29 @@ function sorted_activity_names = iSortActivitiesByPreferredOrder(activity_names,
 end
 
 function iCopyEntireMapFigureFromPlotSPDs(sourceFigureHandle, targetFigureHandle, tilePosition, activity_name, group_name, is_first_column)
-% Copy the FULL map layout from a plotSPDs figure directly into a target
-% figure region corresponding to one outer tile.
+% Internal helper to i copy entire map figure from plot spds.
 %
-% Unlike the earlier uipanel-based approach, this recreates everything as
-% ordinary axes/colorbar graphics objects parented directly to the figure,
-% which is much more reliable for exportgraphics.
+% Syntax:
+%   iCopyEntireMapFigureFromPlotSPDs(sourceFigureHandle, targetFigureHandle, tilePosition, activity_name, group_name, is_first_column)
+%
+% Description:
+%   This local helper function internal helper to i copy entire map figure from plot spds within its parent workflow.
+% Inputs:
+%   sourceFigureHandle       - Input used by the function.
+%   targetFigureHandle       - Input used by the function.
+%   tilePosition             - Input used by the function.
+%   activity_name            - Input used by the function.
+%   group_name               - Input used by the function.
+%   is_first_column          - Logical flag controlling function behavior.
+%
+% Outputs:
+%   None.
+%
+% Examples:
+%{
+    % See groupSPDs.m for usage context.
+%}
 
-    % Find all real plotting axes in the source figure
     sourceAxes = findall(sourceFigureHandle, 'Type', 'axes');
 
     keepMask = true(size(sourceAxes));
@@ -427,9 +451,26 @@ function iCopyEntireMapFigureFromPlotSPDs(sourceFigureHandle, targetFigureHandle
 end
 
 function iCopySingleAxesWithColorbar(sourceAxes, targetFigureHandle, targetPosition)
-% Recreate one map axes and its colorbar directly in the destination figure.
+% Internal helper to i copy single axes with colorbar.
+%
+% Syntax:
+%   iCopySingleAxesWithColorbar(sourceAxes, targetFigureHandle, targetPosition)
+%
+% Description:
+%   This local helper function internal helper to i copy single axes with colorbar within its parent workflow.
+% Inputs:
+%   sourceAxes               - Input used by the function.
+%   targetFigureHandle       - Input used by the function.
+%   targetPosition           - Input used by the function.
+%
+% Outputs:
+%   None.
+%
+% Examples:
+%{
+    % See groupSPDs.m for usage context.
+%}
 
-    % Create destination axes
     targetAxes = axes( ...
         'Parent', targetFigureHandle, ...
         'Units', 'normalized', ...
@@ -486,7 +527,25 @@ function iCopySingleAxesWithColorbar(sourceAxes, targetFigureHandle, targetPosit
 end
 
 function groups_across_participant_std = find_across_participant_std(groupedActivityData, n_participants)
-    % First, find the group names 
+% Internal helper to find across participant std.
+%
+% Syntax:
+%   groups_across_participant_std = find_across_participant_std(groupedActivityData, n_participants)
+%
+% Description:
+%   This local helper function internal helper to find across participant std within its parent workflow.
+% Inputs:
+%   groupedActivityData      - Input used by the function.
+%   n_participants           - Input used by the function.
+%
+% Outputs:
+%   groups_across_participant_std - Output produced by the function.
+%
+% Examples:
+%{
+    % See groupSPDs.m for usage context.
+%}
+
     group_names = fieldnames(groupedActivityData); 
 
     % Initialize map to save averages by group struct 

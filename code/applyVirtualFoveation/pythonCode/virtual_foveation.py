@@ -25,6 +25,7 @@ class Args:
                 ):
         
         
+        """Initialize the object."""
         self.neon_timeseries_dir = neon_timeseries_dir
         self.alternative_vid_path = alternative_vid_path
         self.output_dir = output_dir
@@ -48,6 +49,14 @@ class Args:
 """Find the start times of each of the sensors in the recording"""
 def find_sensor_start_end_times(path_to_recording: str) -> dict[str, tuple]:
     # Group metadata files by sensor 
+    """Find sensor start end times.
+
+    Args:
+        path_to_recording: Path-like input for path to recording.
+
+    Returns:
+        Return value produced by find sensor start end times.
+    """
     sensor_files: dict[str, tuple[str]] = {sensor: [os.path.join(path_to_recording, file) 
                                                     for file in natsort.natsorted(os.listdir(path_to_recording))
                                                     if file.startswith(sensor) and "metadata" in file
@@ -102,6 +111,15 @@ def find_sensor_start_end_times(path_to_recording: str) -> dict[str, tuple]:
     return sensor_start_ends
 
 def convert_avi_to_mp4(input_path: str, output_path: str) -> None:
+    """Convert avi to mp4.
+
+    Args:
+        input_path: Path-like input for input path.
+        output_path: Path-like input for output path.
+
+    Returns:
+        Return value produced by convert avi to mp4.
+    """
     cmd = [
         "ffmpeg",
         "-y",                     # force overwrite
@@ -142,6 +160,23 @@ def run_egocentric_video_mapper(neon_timeseries_dir: str,
                                 show_video_preview: bool=False
                                ) -> None:
     
+    """Run egocentric video mapper.
+
+    Args:
+        neon_timeseries_dir: Path-like input for neon timeseries dir.
+        alternative_vid_path: Path-like input for alternative vid path.
+        output_dir: Path-like input for output dir.
+        mapping_choice: Input value for mapping choice.
+        refresh_time_threshold_sec: Input value for refresh time threshold sec.
+        render_video: Input value for render video.
+        render_video_comparison: Input value for render video comparison.
+        optic_flow_algorithm: Input value for optic flow algorithm.
+        image_matcher: Input value for image matcher.
+        show_video_preview: Input value for show video preview.
+
+    Returns:
+        Return value produced by run egocentric video mapper.
+    """
     from pupil_labs.egocentric_video_mapper.utils import show_videos_preview
     import pupil_labs.egocentric_video_mapper.__main__ as egocentric_main
 
@@ -177,6 +212,7 @@ def run_egocentric_video_mapper(neon_timeseries_dir: str,
 
 
 def main():
+    """Run the command-line entry point."""
     pass 
 
 if(__name__ == "__main__"):

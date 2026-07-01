@@ -1,4 +1,15 @@
-close all; 
+% generate_perspective_projections - Compute perspective projections for all subjects
+%
+% Description:
+%   Script that iterates over FLIC subjects, loads world camera intrinsics,
+%   intended gaze target angles, and observed screen positions for each
+%   participant, then computes and saves a perspective projection mapping
+%   from screen coordinates to eye visual angle coordinates. Uses
+%   calculate_perspective_transform_w2e for the projection calculation.
+%   Output .mat files are saved to the participant's Dropbox analysis
+%   folder.
+
+close all;
 clear all;
 
 subjectIDs = {"2001", "2002", "2003", "2004", "2005", "2006"};

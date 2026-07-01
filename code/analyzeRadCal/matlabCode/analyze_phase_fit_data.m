@@ -347,7 +347,30 @@ end
 
 % Calculate the phase offset between the sensors and plot them before and after adjustment
 function [phase_offset, A_fit, B_fit] = calculate_phase_offset(sensorA_t, sensorA_v, sensorB_t, sensorB_v, frequency)
-    % First, fit the two waves independently
+% Internal helper to calculate phase offset.
+%
+% Syntax:
+%   phase_offset, A_fit, B_fit = calculate_phase_offset(sensorA_t, sensorA_v, sensorB_t, sensorB_v, frequency)
+%
+% Description:
+%   This local helper function internal helper to calculate phase offset within its parent workflow.
+% Inputs:
+%   sensorA_t                - Timestamp-related input.
+%   sensorA_v                - Value array used by the function.
+%   sensorB_t                - Timestamp-related input.
+%   sensorB_v                - Value array used by the function.
+%   frequency                - Input used by the function.
+%
+% Outputs:
+%   phase_offset             - Output produced by the function.
+%   A_fit                    - Output produced by the function.
+%   B_fit                    - Output produced by the function.
+%
+% Examples:
+%{
+    % See analyze_phase_fit_data.m for usage context.
+%}
+
     [A_r2, A_amplitude, A_phase, A_fit] = fourierRegression( sensorA_v, sensorA_t, frequency );
     [B_r2, B_amplitude, B_phase, B_fit] = fourierRegression( sensorB_v, sensorB_t, frequency );
 
@@ -365,7 +388,24 @@ end
 
 % Convert raw data in arbirtary units to contrast units
 function contrast_v = convert_to_contrast(v)
-% Take the mean of the input vector
+% Internal helper to convert to contrast.
+%
+% Syntax:
+%   contrast_v = convert_to_contrast(v)
+%
+% Description:
+%   This local helper function internal helper to convert to contrast within its parent workflow.
+% Inputs:
+%   v                        - Input used by the function.
+%
+% Outputs:
+%   contrast_v               - Output produced by the function.
+%
+% Examples:
+%{
+    % See analyze_phase_fit_data.m for usage context.
+%}
+
 m = mean(v);
 
 % Convert to contrast

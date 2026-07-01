@@ -1,4 +1,23 @@
 function frames = avi2frames(video_path, options)
+% Avi2frames.
+%
+% Syntax:
+%   frames = avi2frames(video_path, options)
+%
+% Description:
+%   This function avi2frames.
+% Inputs:
+%   video_path               - Path-like input used by the function.
+%   options                  - Input used by the function.
+%
+% Outputs:
+%   frames                   - Output produced by the function.
+%
+% Examples:
+%{
+    frames = avi2frames(video_path, options)
+%}
+
     arguments
         video_path {mustBeText}
         options.grayscale {mustBeNumericOrLogical} = false; 

@@ -1,9 +1,52 @@
 function [x_offset, y_offset] = calculateManualOffset(subjectID, activity, intrinsics, options)
+% Calculate manual gaze offset from April tag frames via interactive clicking
+%
+% Syntax:
+%   [x_offset, y_offset] = calculateManualOffset(subjectID, activity, intrinsics)
+%   [x_offset, y_offset] = calculateManualOffset(subjectID, activity, intrinsics, options)
+%
+% Description:
+%   Computes a manual gaze offset for a given subject and activity by
+%   generating a short virtually foveated video containing only the
+%   specified April tag frames, then displaying those frames for the
+%   user to click on the target locations. The clicked pixel coordinates
+%   are converted to visual-field angles using the provided fisheye
+%   camera intrinsics, and the mean offset across frames is returned.
+%   The sign convention of the returned offsets is: +x = right, +y = up.
+%
+% Inputs:
+%   subjectID             - Char/string. Subject identifier (numeric
+%                           part), e.g., '2001'.
+%   activity              - Char/string. Name of the activity folder to
+%                           process.
+%   intrinsics            - Fisheye intrinsics object. Camera calibration
+%                           intrinsics used for pixel-to-angle conversion.
+%
+% Optional key/value pairs:
+%   april_tag_frames      - Numeric vector. Frame indices containing
+%                           April tag targets to use for offset
+%                           calculation. Must be provided; auto-detection
+%                           is not yet implemented.
+%
+% Outputs:
+%   x_offset              - Scalar. Horizontal gaze offset in degrees
+%                           (positive = right).
+%   y_offset              - Scalar. Vertical gaze offset in degrees
+%                           (positive = up).
+%
+% Examples:
+%{
+    intr = load('intrinsics_calibration.mat');
+    intr = intr.camera_intrinsics_calibration.results.Intrinsics;
+    [x_off, y_off] = calculateManualOffset('2001', 'walkIndoor', intr, ...
+        "april_tag_frames", [100, 200, 300]);
+%}
+
     arguments
-        subjectID; 
+        subjectID;
         activity;
         options.april_tag_frames {mustBeNumeric} = [];
-    end     
+    end
 
     % If not provided april tag frames, let's calculate them 
     if(numel(options.april_tag_frames) == 0)
@@ -62,8 +105,24 @@ end
 
 % Local function to do the clicking in screen coordinates for manual offsets
 function mean_manual_offsets = click_points(frames)
+% Internal helper to click points.
+%
+% Syntax:
+%   mean_manual_offsets = click_points(frames)
+%
+% Description:
+%   This local helper function internal helper to click points within its parent workflow.
+% Inputs:
+%   frames                   - Input used by the function.
+%
+% Outputs:
+%   mean_manual_offsets      - Output produced by the function.
+%
+% Examples:
+%{
+    % See calculateManualOffset.m for usage context.
+%}
 
-    % Initialize output array for our offsets 
     nFrames = size(frames, 1);
     manual_offsets_per_target = nan(nFrames, 2);
 

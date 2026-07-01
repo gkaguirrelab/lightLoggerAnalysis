@@ -1,5 +1,22 @@
 function camera_intrinsics = convert_camera_calibration_data(input_path, output_path)
-
+% Convert camera calibration data.
+%
+% Syntax:
+%   camera_intrinsics = convert_camera_calibration_data(input_path, output_path)
+%
+% Description:
+%   This function convert camera calibration data.
+% Inputs:
+%   input_path               - Path-like input used by the function.
+%   output_path              - Path-like input used by the function.
+%
+% Outputs:
+%   camera_intrinsics        - Output produced by the function.
+%
+% Examples:
+%{
+    camera_intrinsics = convert_camera_calibration_data(input_path, output_path)
+%}
 
     arguments 
         input_path {mustBeText}; % Path to folder containing images (as raw .npy/.blosc) used for Camera Calibration in MATLAB
@@ -50,7 +67,24 @@ end
 % Local function to convert the py.tuple (title, image)
 % to pure MATLAB type 
 function converted = image_title_tuple_to_matlab(tuple)
-    % Convert the tuple into a cell array 
+% Internal helper to image title tuple to matlab.
+%
+% Syntax:
+%   converted = image_title_tuple_to_matlab(tuple)
+%
+% Description:
+%   This local helper function internal helper to image title tuple to matlab within its parent workflow.
+% Inputs:
+%   tuple                    - Input used by the function.
+%
+% Outputs:
+%   converted                - Output produced by the function.
+%
+% Examples:
+%{
+    % See convert_camera_calibration_data.m for usage context.
+%}
+
     converted = cell(tuple); 
 
     % Next, the tuple is in the form (title, image)
@@ -67,7 +101,24 @@ end
 % NOTE: You can do this more efficiently with binary search,
 %       just doing it the lazy way for implementation speed 
 function grid_size = calculate_preview_grid_size(num_images)
-    % Iterate over ints up to the size of the images 
+% Internal helper to calculate preview grid size.
+%
+% Syntax:
+%   grid_size = calculate_preview_grid_size(num_images)
+%
+% Description:
+%   This local helper function internal helper to calculate preview grid size within its parent workflow.
+% Inputs:
+%   num_images               - Input used by the function.
+%
+% Outputs:
+%   grid_size                - Output produced by the function.
+%
+% Examples:
+%{
+    % See convert_camera_calibration_data.m for usage context.
+%}
+
     for ii = 1:num_images 
         % If i^2 >= num_images, we found the size 
         if(ii ^ 2 >= num_images)

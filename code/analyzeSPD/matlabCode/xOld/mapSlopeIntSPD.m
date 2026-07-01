@@ -1,29 +1,28 @@
 function [slopeMap, interceptMap, frq] = mapSlopeIntSPD(v, fps, window, step, options)
-% Computes slope and intercept maps of temporal SPD across image regions
-% and projects them onto a 1 m visual field surface, then plots both maps.
+% Map slope int spd.
 %
-% Required Inputs:
-%   v                 - [frames x rows x cols] video chunk (double)
-%   fps               - Sampling rate (Hz)
-%   window            - [height width] of square region. Defaults to [40 40]
-%   step              - Step size for moving window. Defaults to 20
-%   doPlot            - (boolean) Visualize the SPD maps or not
-%   theta             - (radians) [rows x cols] elevation-from-optical-axis
-%   phi               - (radians) [rows x cols] azimuth                    
-%   R                 - (radians) (scalar) radius                       
+% Syntax:
+%   slopeMap, interceptMap, frq = mapSlopeIntSPD(v, fps, window, step, options)
 %
-% Optional:
-%   affineMat         - 2x3 affine matrix to apply to [az, el] before XYZ
+% Description:
+%   This function map slope int spd.
+% Inputs:
+%   v                        - Input used by the function.
+%   fps                      - Input used by the function.
+%   window                   - Input used by the function.
+%   step                     - Input used by the function.
+%   options                  - Input used by the function.
 %
 % Outputs:
-%   slopeMap          - local 1/f slope per pixel
-%   interceptMap      - local y-intercept of log-log fit per pixel
-%   frq               - frequency vector used in SPD
-%   hFigSlope         - figure handle for slope map
-%   hFigIntercept     - figure handle for intercept map
+%   slopeMap                 - Output produced by the function.
+%   interceptMap             - Output produced by the function.
+%   frq                      - Output produced by the function.
 %
-% Example Usage: 
+% Examples:
 %{
+    [slopeMap, interceptMap, frq] = mapSlopeIntSPD(v, fps, window, step, options)
+%}
+
     [slopeMap, interceptMap, frq] = mapSlopeIntSPD(v, fps, [40 40], 20, True, theta, phi, R)
 %}
 

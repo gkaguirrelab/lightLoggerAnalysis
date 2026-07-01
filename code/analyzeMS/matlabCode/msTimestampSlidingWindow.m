@@ -1,4 +1,25 @@
 function result = msTimestampSlidingWindow(ms_t, ms_v, window_size_ns, operation)
+% Ms timestamp sliding window.
+%
+% Syntax:
+%   result = msTimestampSlidingWindow(ms_t, ms_v, window_size_ns, operation)
+%
+% Description:
+%   This function ms timestamp sliding window.
+% Inputs:
+%   ms_t                     - Timestamp-related input.
+%   ms_v                     - Value array used by the function.
+%   window_size_ns           - Input used by the function.
+%   operation                - Input used by the function.
+%
+% Outputs:
+%   result                   - Output produced by the function.
+%
+% Examples:
+%{
+    result = msTimestampSlidingWindow(ms_t, ms_v, window_size_ns, operation)
+%}
+
     arguments
         ms_t (:,1) double
         ms_v (:,1) double

@@ -1,4 +1,45 @@
 function combineSPDs(spds, output_dir, options)
+% Generate combined SPD plots and best-fit exports for each subject and activity
+%
+% Syntax:
+%   combineSPDs(spds, output_dir)
+%   combineSPDs(spds, output_dir, options)
+%
+% Description:
+%   Iterates over a nested structure of SPD file paths organized by
+%   subject, activity, color mode, and projection type. For each
+%   subject-activity pair, the function loads the stored SPD results,
+%   generates a combined SPD-by-region figure with center and periphery
+%   curves across all color modes and projection types, and exports
+%   exponent and variance spatial maps as PDF files. Best-fit line
+%   coefficients (slope and intercept in log-log space) are saved as
+%   .mat files for downstream analysis.
+%
+% Inputs:
+%   spds                  - Struct or char/string filepath. Nested
+%                           structure of SPD file paths organized as:
+%                             spds.(subject).(activity).(color_mode).(projection_type)
+%                           If a filepath is provided, the struct is
+%                           loaded from the .mat file at that path.
+%   output_dir            - Char/string. Directory where figures and
+%                           best-fit .mat files are saved. Created
+%                           automatically if it does not exist.
+%
+% Optional key/value pairs:
+%   overwrite_existing    - Logical. If true, regenerate outputs even
+%                           when they already exist. Defaults to false.
+%   verbose               - Logical. If true, print progress information
+%                           during processing. Defaults to true.
+%
+% Outputs:
+%   none
+%
+% Examples:
+%{
+    spds = load("spd_paths.mat").spds;
+    combineSPDs(spds, "/path/to/output", "overwrite_existing", true);
+%}
+
     arguments
         spds
         output_dir
@@ -112,7 +153,27 @@ end
 
 % Local Function to Handle the SPD plotting
 function [figure_handle, best_fit_lines] = localPlotSPD(activity_struct, subject_id, activity_name)
-    % Initialize the figure that we will draw too
+% Internal helper to local plot spd.
+%
+% Syntax:
+%   figure_handle, best_fit_lines = localPlotSPD(activity_struct, subject_id, activity_name)
+%
+% Description:
+%   This local helper function internal helper to local plot spd within its parent workflow.
+% Inputs:
+%   activity_struct          - Input used by the function.
+%   subject_id               - Input used by the function.
+%   activity_name            - Input used by the function.
+%
+% Outputs:
+%   figure_handle            - Output produced by the function.
+%   best_fit_lines           - Output produced by the function.
+%
+% Examples:
+%{
+    % See combineSPDs.m for usage context.
+%}
+
     axis_font_size = 14;
     label_font_size = 18;
     title_font_size = 20;
@@ -237,7 +298,25 @@ end
 
 
 function best_fit_line = iComputeBestFitLine(frq, spd)
-    % Compute the best-fit line in log-log space for a cleaned SPD curve
+% Internal helper to i compute best fit line.
+%
+% Syntax:
+%   best_fit_line = iComputeBestFitLine(frq, spd)
+%
+% Description:
+%   This local helper function internal helper to i compute best fit line within its parent workflow.
+% Inputs:
+%   frq                      - Input used by the function.
+%   spd                      - Input used by the function.
+%
+% Outputs:
+%   best_fit_line            - Output produced by the function.
+%
+% Examples:
+%{
+    % See combineSPDs.m for usage context.
+%}
+
     x = log10(frq(:));
     y = log10(spd(:));
     coefficients = polyfit(x, y, 1);
@@ -254,6 +333,26 @@ end
 
 
 function [frq, region_averages] = iLoadSpdRegionAverages(spd_path, projection_type)
+% Internal helper to i load spd region averages.
+%
+% Syntax:
+%   frq, region_averages = iLoadSpdRegionAverages(spd_path, projection_type)
+%
+% Description:
+%   This local helper function internal helper to i load spd region averages within its parent workflow.
+% Inputs:
+%   spd_path                 - Path-like input used by the function.
+%   projection_type          - Input used by the function.
+%
+% Outputs:
+%   frq                      - Output produced by the function.
+%   region_averages          - Output produced by the function.
+%
+% Examples:
+%{
+    % See combineSPDs.m for usage context.
+%}
+
     frq = [];
     region_averages = [];
 
@@ -300,9 +399,24 @@ end
 
 
 function map_handles = localPlotMaps(activity_struct, activity_name)
-% Plot exponent and variance maps for each color mode using the same
-% justProjection / virtuallyFoveated side-by-side style as plotSPDs_copy.
-% Return the figure handles so the caller can export them outside.
+% Internal helper to local plot maps.
+%
+% Syntax:
+%   map_handles = localPlotMaps(activity_struct, activity_name)
+%
+% Description:
+%   This local helper function internal helper to local plot maps within its parent workflow.
+% Inputs:
+%   activity_struct          - Input used by the function.
+%   activity_name            - Input used by the function.
+%
+% Outputs:
+%   map_handles              - Output produced by the function.
+%
+% Examples:
+%{
+    % See combineSPDs.m for usage context.
+%}
 
     color_modes = fieldnames(activity_struct);
     map_handles = struct();
@@ -403,7 +517,23 @@ end
 
 
 function loaded_projection = iLoadProjectionPayload(projection_entry)
-% Load either a filepath-backed projection entry or a preloaded SPD struct.
+% Internal helper to i load projection payload.
+%
+% Syntax:
+%   loaded_projection = iLoadProjectionPayload(projection_entry)
+%
+% Description:
+%   This local helper function internal helper to i load projection payload within its parent workflow.
+% Inputs:
+%   projection_entry         - Input used by the function.
+%
+% Outputs:
+%   loaded_projection        - Output produced by the function.
+%
+% Examples:
+%{
+    % See combineSPDs.m for usage context.
+%}
 
     if (isstring(projection_entry) || ischar(projection_entry))
         loaded_mat = load(projection_entry);
@@ -416,8 +546,24 @@ end
 
 
 function line_style = iGetProjectionLineStyle(projection_type)
-    % Virtually foveated data should be solid and just
-    % projection data should be dashed
+% Internal helper to i get projection line style.
+%
+% Syntax:
+%   line_style = iGetProjectionLineStyle(projection_type)
+%
+% Description:
+%   This local helper function internal helper to i get projection line style within its parent workflow.
+% Inputs:
+%   projection_type          - Input used by the function.
+%
+% Outputs:
+%   line_style               - Output produced by the function.
+%
+% Examples:
+%{
+    % See combineSPDs.m for usage context.
+%}
+
     switch string(projection_type)
         case "virtuallyFoveated"
             line_style = '-';
@@ -430,8 +576,24 @@ end
 
 
 function color = iGetColorModeColor(color_mode)
-    % Match the requested plotting colors for each
-    % post-receptoral / color mode family
+% Internal helper to i get color mode color.
+%
+% Syntax:
+%   color = iGetColorModeColor(color_mode)
+%
+% Description:
+%   This local helper function internal helper to i get color mode color within its parent workflow.
+% Inputs:
+%   color_mode               - Input used by the function.
+%
+% Outputs:
+%   color                    - Output produced by the function.
+%
+% Examples:
+%{
+    % See combineSPDs.m for usage context.
+%}
+
     switch string(color_mode)
         case {"L+M", "L+M+S", "a"}
             color = [0 0 0];
@@ -446,15 +608,50 @@ end
 
 
 function lighter_color = iLightenColor(color, amount)
-    % Create a lighter companion color for the periphery
-    % traces while preserving the original hue
+% Internal helper to i lighten color.
+%
+% Syntax:
+%   lighter_color = iLightenColor(color, amount)
+%
+% Description:
+%   This local helper function internal helper to i lighten color within its parent workflow.
+% Inputs:
+%   color                    - Input used by the function.
+%   amount                   - Input used by the function.
+%
+% Outputs:
+%   lighter_color            - Output produced by the function.
+%
+% Examples:
+%{
+    % See combineSPDs.m for usage context.
+%}
+
     lighter_color = color + (1 - color) .* amount;
 end
 
 
 function [frq_clean, spd_clean] = iCleanSpdForPlot(frq, spd)
-    % Flatten, align, and remove invalid entries before
-    % plotting on log axes
+% Internal helper to i clean spd for plot.
+%
+% Syntax:
+%   frq_clean, spd_clean = iCleanSpdForPlot(frq, spd)
+%
+% Description:
+%   This local helper function internal helper to i clean spd for plot within its parent workflow.
+% Inputs:
+%   frq                      - Input used by the function.
+%   spd                      - Input used by the function.
+%
+% Outputs:
+%   frq_clean                - Output produced by the function.
+%   spd_clean                - Output produced by the function.
+%
+% Examples:
+%{
+    % See combineSPDs.m for usage context.
+%}
+
     frq = frq(:);
     spd = spd(:);
 
@@ -469,8 +666,25 @@ end
 
 
 function region_mean_spd = iComputeRegionMean(spd_by_region, region_mask)
-    % Compute the mean SPD across all patches belonging
-    % to the provided spatial mask
+% Internal helper to i compute region mean.
+%
+% Syntax:
+%   region_mean_spd = iComputeRegionMean(spd_by_region, region_mask)
+%
+% Description:
+%   This local helper function internal helper to i compute region mean within its parent workflow.
+% Inputs:
+%   spd_by_region            - Input used by the function.
+%   region_mask              - Input used by the function.
+%
+% Outputs:
+%   region_mean_spd          - Output produced by the function.
+%
+% Examples:
+%{
+    % See combineSPDs.m for usage context.
+%}
+
     num_frequencies = size(spd_by_region, 3);
     region_mean_spd = nan(num_frequencies, 1);
 
@@ -487,8 +701,24 @@ end
 
 
 function reference_handle = iPlotReferenceLine(ax)
-    % Plot the 1/f^2 reference line across the visible
-    % frequency range of the current axes
+% Internal helper to i plot reference line.
+%
+% Syntax:
+%   reference_handle = iPlotReferenceLine(ax)
+%
+% Description:
+%   This local helper function internal helper to i plot reference line within its parent workflow.
+% Inputs:
+%   ax                       - Input used by the function.
+%
+% Outputs:
+%   reference_handle         - Output produced by the function.
+%
+% Examples:
+%{
+    % See combineSPDs.m for usage context.
+%}
+
     drawnow;
     axis_limits = axis(ax);
     reference_freq = axis_limits(1:2).';
@@ -499,6 +729,26 @@ end
 
 
 function legend_label = iFormatLegendLabel(color_mode, projection_type, region_name)
+% Internal helper to i format legend label.
+%
+% Syntax:
+%   legend_label = iFormatLegendLabel(color_mode, projection_type, region_name)
+%
+% Description:
+%   This local helper function internal helper to i format legend label within its parent workflow.
+% Inputs:
+%   color_mode               - Input used by the function.
+%   projection_type          - Input used by the function.
+%   region_name              - Input used by the function.
+%
+% Outputs:
+%   legend_label             - Output produced by the function.
+%
+% Examples:
+%{
+    % See combineSPDs.m for usage context.
+%}
+
     color_mode_label = iFormatColorModeLabel(color_mode);
     projection_label = iFormatProjectionLabel(projection_type);
     legend_label = sprintf('%s %s %s', color_mode_label, projection_label, region_name);
@@ -506,6 +756,24 @@ end
 
 
 function color_mode_label = iFormatColorModeLabel(color_mode)
+% Internal helper to i format color mode label.
+%
+% Syntax:
+%   color_mode_label = iFormatColorModeLabel(color_mode)
+%
+% Description:
+%   This local helper function internal helper to i format color mode label within its parent workflow.
+% Inputs:
+%   color_mode               - Input used by the function.
+%
+% Outputs:
+%   color_mode_label         - Output produced by the function.
+%
+% Examples:
+%{
+    % See combineSPDs.m for usage context.
+%}
+
     switch string(color_mode)
         case "a"
             color_mode_label = '\ita\rm';
@@ -528,6 +796,24 @@ end
 
 
 function projection_label = iFormatProjectionLabel(projection_type)
+% Internal helper to i format projection label.
+%
+% Syntax:
+%   projection_label = iFormatProjectionLabel(projection_type)
+%
+% Description:
+%   This local helper function internal helper to i format projection label within its parent workflow.
+% Inputs:
+%   projection_type          - Input used by the function.
+%
+% Outputs:
+%   projection_label         - Output produced by the function.
+%
+% Examples:
+%{
+    % See combineSPDs.m for usage context.
+%}
+
     switch string(projection_type)
         case "virtuallyFoveated"
             projection_label = 'Foveated';
@@ -540,6 +826,24 @@ end
 
 
 function formula_text = iGetFormulaAnnotationText()
+% Internal helper to i get formula annotation text.
+%
+% Syntax:
+%   formula_text = iGetFormulaAnnotationText()
+%
+% Description:
+%   This local helper function internal helper to i get formula annotation text within its parent workflow.
+% Inputs:
+%   None.
+%
+% Outputs:
+%   formula_text             - Output produced by the function.
+%
+% Examples:
+%{
+    % See combineSPDs.m for usage context.
+%}
+
     formula_text = strjoin({
         '\bfFormula definitions\rm'
         ''
@@ -561,7 +865,23 @@ end
 
 
 function ticks = iGetQuarterStepTicks(climVals)
-% Build colorbar ticks at 0.25 increments across the provided limits.
+% Internal helper to i get quarter step ticks.
+%
+% Syntax:
+%   ticks = iGetQuarterStepTicks(climVals)
+%
+% Description:
+%   This local helper function internal helper to i get quarter step ticks within its parent workflow.
+% Inputs:
+%   climVals                 - Input used by the function.
+%
+% Outputs:
+%   ticks                    - Output produced by the function.
+%
+% Examples:
+%{
+    % See combineSPDs.m for usage context.
+%}
 
     tickStart = ceil(climVals(1) / 0.25) * 0.25;
     tickEnd = floor(climVals(2) / 0.25) * 0.25;

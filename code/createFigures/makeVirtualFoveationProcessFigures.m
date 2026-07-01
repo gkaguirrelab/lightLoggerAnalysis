@@ -1,8 +1,22 @@
 function outputPaths = makeVirtualFoveationProcessFigures(varargin)
-% Make annotated frames illustrating virtual foveation/projection videos.
+% Make virtual foveation process figures.
+%
+% Syntax:
+%   outputPaths = makeVirtualFoveationProcessFigures(varargin)
+%
+% Description:
+%   This function make virtual foveation process figures.
+% Inputs:
+%   varargin                 - Input used by the function.
+%
+% Outputs:
+%   outputPaths              - Path-like value returned by the function.
 %
 % Examples:
 %{
+    outputPaths = makeVirtualFoveationProcessFigures(varargin)
+%}
+
     makeVirtualFoveationProcessFigures();
     makeVirtualFoveationProcessFigures( ...
         "frameIdx", time2frame([1 31 508], 120), ...
@@ -133,12 +147,49 @@ function outputPaths = makeVirtualFoveationProcessFigures(varargin)
 end
 
 function videoReader = iOpenVideoReader(videoPath, readAheadBufferSize)
+% Internal helper to i open video reader.
+%
+% Syntax:
+%   videoReader = iOpenVideoReader(videoPath, readAheadBufferSize)
+%
+% Description:
+%   This local helper function internal helper to i open video reader within its parent workflow.
+% Inputs:
+%   videoPath                - Path-like input used by the function.
+%   readAheadBufferSize      - Input used by the function.
+%
+% Outputs:
+%   videoReader              - Output produced by the function.
+%
+% Examples:
+%{
+    % See makeVirtualFoveationProcessFigures.m for usage context.
+%}
+
         videoReader.reader = videoIOWrapper(videoPath, "ioAction", 'read', ...
             "readAheadBufferSize", readAheadBufferSize);
         videoReader.type = "videoIOWrapper";
 end
 
 function nFrames = iNumFrames(videoReader)
+% Internal helper to i num frames.
+%
+% Syntax:
+%   nFrames = iNumFrames(videoReader)
+%
+% Description:
+%   This local helper function internal helper to i num frames within its parent workflow.
+% Inputs:
+%   videoReader              - Input used by the function.
+%
+% Outputs:
+%   nFrames                  - Output produced by the function.
+%
+% Examples:
+%{
+    % See makeVirtualFoveationProcessFigures.m for usage context.
+%}
+
     switch videoReader.type
         case "videoIOWrapper"
             nFrames = videoReader.reader.NumFrames;
@@ -150,6 +201,25 @@ function nFrames = iNumFrames(videoReader)
 end
 
 function frame = iReadVideoFrame(videoReader, frameIdx)
+% Internal helper to i read video frame.
+%
+% Syntax:
+%   frame = iReadVideoFrame(videoReader, frameIdx)
+%
+% Description:
+%   This local helper function internal helper to i read video frame within its parent workflow.
+% Inputs:
+%   videoReader              - Input used by the function.
+%   frameIdx                 - Input used by the function.
+%
+% Outputs:
+%   frame                    - Output produced by the function.
+%
+% Examples:
+%{
+    % See makeVirtualFoveationProcessFigures.m for usage context.
+%}
+
     switch videoReader.type
         case "videoIOWrapper"
             frame = videoReader.reader.readFrame("frameNum", frameIdx, "color", "RGB");
@@ -157,6 +227,24 @@ function frame = iReadVideoFrame(videoReader, frameIdx)
 end
 
 function iCloseVideoReader(videoReader)
+% Internal helper to i close video reader.
+%
+% Syntax:
+%   iCloseVideoReader(videoReader)
+%
+% Description:
+%   This local helper function internal helper to i close video reader within its parent workflow.
+% Inputs:
+%   videoReader              - Input used by the function.
+%
+% Outputs:
+%   None.
+%
+% Examples:
+%{
+    % See makeVirtualFoveationProcessFigures.m for usage context.
+%}
+
     if videoReader.type == "videoIOWrapper"
         close(videoReader.reader);
     end
@@ -164,6 +252,24 @@ end
 
 
 function executablePath = iFindExecutable(executableName)
+% Internal helper to i find executable.
+%
+% Syntax:
+%   executablePath = iFindExecutable(executableName)
+%
+% Description:
+%   This local helper function internal helper to i find executable within its parent workflow.
+% Inputs:
+%   executableName           - Input used by the function.
+%
+% Outputs:
+%   executablePath           - Path-like value returned by the function.
+%
+% Examples:
+%{
+    % See makeVirtualFoveationProcessFigures.m for usage context.
+%}
+
     homebrewPath = "/opt/homebrew/bin/" + executableName;
     if isfile(homebrewPath)
         executablePath = homebrewPath;
@@ -177,17 +283,75 @@ function executablePath = iFindExecutable(executableName)
 end
 
 function quoted = iShellQuote(value)
+% Internal helper to i shell quote.
+%
+% Syntax:
+%   quoted = iShellQuote(value)
+%
+% Description:
+%   This local helper function internal helper to i shell quote within its parent workflow.
+% Inputs:
+%   value                    - Input used by the function.
+%
+% Outputs:
+%   quoted                   - Output produced by the function.
+%
+% Examples:
+%{
+    % See makeVirtualFoveationProcessFigures.m for usage context.
+%}
+
     value = char(string(value));
     quoted = "'" + string(strrep(value, "'", "'\''")) + "'";
 end
 
 function iDeleteIfExists(filePath)
+% Internal helper to i delete if exists.
+%
+% Syntax:
+%   iDeleteIfExists(filePath)
+%
+% Description:
+%   This local helper function internal helper to i delete if exists within its parent workflow.
+% Inputs:
+%   filePath                 - Path-like input used by the function.
+%
+% Outputs:
+%   None.
+%
+% Examples:
+%{
+    % See makeVirtualFoveationProcessFigures.m for usage context.
+%}
+
     if isfile(filePath)
         delete(filePath);
     end
 end
 
 function annotatedFrame = iAddEccentricityOverlay(frame, fovDegrees, eccentricitiesDeg, lineWidth, lineStyle)
+% Internal helper to i add eccentricity overlay.
+%
+% Syntax:
+%   annotatedFrame = iAddEccentricityOverlay(frame, fovDegrees, eccentricitiesDeg, lineWidth, lineStyle)
+%
+% Description:
+%   This local helper function internal helper to i add eccentricity overlay within its parent workflow.
+% Inputs:
+%   frame                    - Input used by the function.
+%   fovDegrees               - Input used by the function.
+%   eccentricitiesDeg        - Input used by the function.
+%   lineWidth                - Input used by the function.
+%   lineStyle                - Input used by the function.
+%
+% Outputs:
+%   annotatedFrame           - Output produced by the function.
+%
+% Examples:
+%{
+    % See makeVirtualFoveationProcessFigures.m for usage context.
+%}
+
     annotatedFrame = frame;
     if ~isa(annotatedFrame, "uint8")
         annotatedFrame = uint8(annotatedFrame);
@@ -236,6 +400,30 @@ function annotatedFrame = iAddEccentricityOverlay(frame, fovDegrees, eccentricit
 end
 
 function frame = iDrawCircle(frame, centerX, centerY, radiusPix, color, lineWidth, lineStyle)
+% Internal helper to i draw circle.
+%
+% Syntax:
+%   frame = iDrawCircle(frame, centerX, centerY, radiusPix, color, lineWidth, lineStyle)
+%
+% Description:
+%   This local helper function internal helper to i draw circle within its parent workflow.
+% Inputs:
+%   frame                    - Input used by the function.
+%   centerX                  - Input used by the function.
+%   centerY                  - Input used by the function.
+%   radiusPix                - Input used by the function.
+%   color                    - Input used by the function.
+%   lineWidth                - Input used by the function.
+%   lineStyle                - Input used by the function.
+%
+% Outputs:
+%   frame                    - Output produced by the function.
+%
+% Examples:
+%{
+    % See makeVirtualFoveationProcessFigures.m for usage context.
+%}
+
     circumference = 2 * pi * radiusPix;
     nPoints = ceil(circumference);
     nPoints = max(nPoints, 36); % Ensure at least 36 points
@@ -257,6 +445,31 @@ function frame = iDrawCircle(frame, centerX, centerY, radiusPix, color, lineWidt
 end
 
 function frame = iDrawLine(frame, x1, y1, x2, y2, color, lineWidth, lineStyle)
+% Internal helper to i draw line.
+%
+% Syntax:
+%   frame = iDrawLine(frame, x1, y1, x2, y2, color, lineWidth, lineStyle)
+%
+% Description:
+%   This local helper function internal helper to i draw line within its parent workflow.
+% Inputs:
+%   frame                    - Input used by the function.
+%   x1                       - Input used by the function.
+%   y1                       - Input used by the function.
+%   x2                       - Input used by the function.
+%   y2                       - Input used by the function.
+%   color                    - Input used by the function.
+%   lineWidth                - Input used by the function.
+%   lineStyle                - Input used by the function.
+%
+% Outputs:
+%   frame                    - Output produced by the function.
+%
+% Examples:
+%{
+    % See makeVirtualFoveationProcessFigures.m for usage context.
+%}
+
     nPoints = ceil(max(abs(x2 - x1), abs(y2 - y1))) + 1;
     x = linspace(x1, x2, nPoints);
     y = linspace(y1, y2, nPoints);
@@ -275,6 +488,28 @@ function frame = iDrawLine(frame, x1, y1, x2, y2, color, lineWidth, lineStyle)
 end
 
 function frame = iSetDisc(frame, x, y, color, lineWidth)
+% Internal helper to i set disc.
+%
+% Syntax:
+%   frame = iSetDisc(frame, x, y, color, lineWidth)
+%
+% Description:
+%   This local helper function internal helper to i set disc within its parent workflow.
+% Inputs:
+%   frame                    - Input used by the function.
+%   x                        - Input used by the function.
+%   y                        - Input used by the function.
+%   color                    - Input used by the function.
+%   lineWidth                - Input used by the function.
+%
+% Outputs:
+%   frame                    - Output produced by the function.
+%
+% Examples:
+%{
+    % See makeVirtualFoveationProcessFigures.m for usage context.
+%}
+
     [nRows, nCols, ~] = size(frame);
     radius = max(0, floor((lineWidth - 1) / 2));
     colCenter = round(x);
@@ -289,6 +524,25 @@ function frame = iSetDisc(frame, x, y, color, lineWidth)
 end
 
 function iExportFramePdf(frame, pdfPath)
+% Internal helper to i export frame pdf.
+%
+% Syntax:
+%   iExportFramePdf(frame, pdfPath)
+%
+% Description:
+%   This local helper function internal helper to i export frame pdf within its parent workflow.
+% Inputs:
+%   frame                    - Input used by the function.
+%   pdfPath                  - Path-like input used by the function.
+%
+% Outputs:
+%   None.
+%
+% Examples:
+%{
+    % See makeVirtualFoveationProcessFigures.m for usage context.
+%}
+
     fig = figure("Visible", "off", "Color", "w");
     ax = axes("Parent", fig);
     image(ax, frame);

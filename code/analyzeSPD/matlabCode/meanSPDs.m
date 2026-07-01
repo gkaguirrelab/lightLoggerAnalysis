@@ -1,8 +1,52 @@
 function avgSPDStruct = meanSPDs(spds, options)
-    arguments 
+% Compute mean and standard deviation of SPD results across subjects
+%
+% Syntax:
+%   avgSPDStruct = meanSPDs(spds)
+%   avgSPDStruct = meanSPDs(spds, options)
+%
+% Description:
+%   Accepts a cell array of per-subject SPD result structures, each
+%   containing one or more projection types (e.g., virtuallyFoveated,
+%   justProjection). For each projection type, the function computes
+%   element-wise means and standard deviations of the exponent maps,
+%   variance maps, regional SPDs, median images, frequency vectors, and
+%   best-fit line coefficients (slope, intercept, and fitted curves for
+%   both center and periphery regions). The averaged results are returned
+%   in a single struct and can optionally be saved to disk.
+%
+% Inputs:
+%   spds                  - Cell array. Each element is a struct with
+%                           fields indexed by projection type, where each
+%                           projection type contains:
+%                             .spd       - SPD result struct or filepath
+%                             .best_fit  - Best-fit struct or filepath
+%
+% Optional key/value pairs:
+%   output_path           - String. Path to save the averaged result as a
+%                           .mat file. If empty (default), no file is
+%                           written.
+%
+% Outputs:
+%   avgSPDStruct          - Struct. Contains:
+%                             .mean.(projection_type) - Mean values
+%                             .std.(projection_type)  - Standard deviations
+%                             .n                      - Number of input SPDs
+%                           Each projection type subfield contains:
+%                             .exponentMap, .varianceMap, .spdByRegion,
+%                             .medianImage, .frq, .best_fit.center.*,
+%                             .best_fit.periphery.*
+%
+% Examples:
+%{
+    spds = loadSPDS(src_dir);
+    avgSPDStruct = meanSPDs(spds, "output_path", "mean_spds.mat");
+%}
+
+    arguments
         spds = {}
-        options.output_path = ""; 
-    end 
+        options.output_path = "";
+    end
 
     % The input argument of spds is a flat 
     % cell array of structs 
@@ -138,10 +182,24 @@ end
 
 
 function loaded_spd = iLoadProjectionEntry(projection_entry)
-% Normalize a projection leaf into the single-activity SPD struct that
-% contains exponentMap / varianceMap / spdByRegion / frq / medianImage.
+% Internal helper to i load projection entry.
+%
+% Syntax:
+%   loaded_spd = iLoadProjectionEntry(projection_entry)
+%
+% Description:
+%   This local helper function internal helper to i load projection entry within its parent workflow.
+% Inputs:
+%   projection_entry         - Input used by the function.
+%
+% Outputs:
+%   loaded_spd               - Output produced by the function.
+%
+% Examples:
+%{
+    % See meanSPDs.m for usage context.
+%}
 
-    % If we passed in a string path to the spd, load it in 
     if (isstring(projection_entry) || ischar(projection_entry))
         loaded_mat = load(projection_entry);
 
@@ -165,10 +223,24 @@ end
 
 
 function loaded_best_fit = iLoadBestFitEntry(best_fit_entry)
-% Normalize a best-fit leaf into the struct saved by combineSPDs, with
-% `.center` and `.periphery` subfields.
+% Internal helper to i load best fit entry.
+%
+% Syntax:
+%   loaded_best_fit = iLoadBestFitEntry(best_fit_entry)
+%
+% Description:
+%   This local helper function internal helper to i load best fit entry within its parent workflow.
+% Inputs:
+%   best_fit_entry           - Input used by the function.
+%
+% Outputs:
+%   loaded_best_fit          - Output produced by the function.
+%
+% Examples:
+%{
+    % See meanSPDs.m for usage context.
+%}
 
-    % If we passed in a string path to the best-fit data, load it in.
     if (isstring(best_fit_entry) || ischar(best_fit_entry))
         loaded_mat = load(best_fit_entry);
 

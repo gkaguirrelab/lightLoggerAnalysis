@@ -52,7 +52,25 @@ end
 
 % Local function to convert a Python feature dict to MATLAB
 function converted = convert_feature_dict(feature_dict_py, pupil_feature_extraction_method)
-    % First, convert the feature dict to a struct 
+% Internal helper to convert feature dict.
+%
+% Syntax:
+%   converted = convert_feature_dict(feature_dict_py, pupil_feature_extraction_method)
+%
+% Description:
+%   This local helper function internal helper to convert feature dict within its parent workflow.
+% Inputs:
+%   feature_dict_py          - Input used by the function.
+%   pupil_feature_extraction_method - Input used by the function.
+%
+% Outputs:
+%   converted                - Output produced by the function.
+%
+% Examples:
+%{
+    % See extract_eye_features.m for usage context.
+%}
+
     converted = struct(feature_dict_py); 
 
     % Convert the pupil field of the struct 
@@ -67,7 +85,25 @@ end
 
 % Local function to convert the pupil subdictionary 
 function converted_pupil_features = convert_pupil_features(pupil_features, pupil_feature_extraction_method)
-    % Initialize return variable 
+% Internal helper to convert pupil features.
+%
+% Syntax:
+%   converted_pupil_features = convert_pupil_features(pupil_features, pupil_feature_extraction_method)
+%
+% Description:
+%   This local helper function internal helper to convert pupil features within its parent workflow.
+% Inputs:
+%   pupil_features           - Input used by the function.
+%   pupil_feature_extraction_method - Input used by the function.
+%
+% Outputs:
+%   converted_pupil_features - Output produced by the function.
+%
+% Examples:
+%{
+    % See extract_eye_features.m for usage context.
+%}
+
     converted_pupil_features = struct(pupil_features); 
 
     % Parse the dict according to the method that was used to generate it
@@ -115,7 +151,24 @@ end
 
 % Local function to convert the eyelids subdictionary 
 function converted_eyelid_features = convert_eyelid_features(eyelid_features)
-    % Initialize return variable 
+% Internal helper to convert eyelid features.
+%
+% Syntax:
+%   converted_eyelid_features = convert_eyelid_features(eyelid_features)
+%
+% Description:
+%   This local helper function internal helper to convert eyelid features within its parent workflow.
+% Inputs:
+%   eyelid_features          - Input used by the function.
+%
+% Outputs:
+%   converted_eyelid_features - Output produced by the function.
+%
+% Examples:
+%{
+    % See extract_eye_features.m for usage context.
+%}
+
     converted_eyelid_features = struct(eyelid_features); 
 
     % Iterate over the the subfields of this new struct and convert all np.ndarrays 

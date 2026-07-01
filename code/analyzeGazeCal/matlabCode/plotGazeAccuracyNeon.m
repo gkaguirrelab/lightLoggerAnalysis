@@ -1,4 +1,29 @@
 function plotGazeAccuracyNeon(startIds, endIds, filePaths)
+% Plot gaze accuracy for multiple participants using Neon eye tracker data
+%
+% Syntax:
+%   plotGazeAccuracyNeon(startIds, endIds, filePaths)
+%
+% Description:
+%   For each participant, reads a Neon gaze CSV file, extracts fixation
+%   data between the specified start and end fixation IDs, segments the
+%   gaze signal into target epochs, computes the median gaze position per
+%   target, applies a mean-bias correction, and plots intended vs. actual
+%   gaze positions. Creates a tabbed figure with one tab per participant
+%   plus a grand average tab. Reports mean angular error in degrees.
+%
+% Inputs:
+%   startIds              - 1xN double. Starting fixation IDs for each of
+%                           the N participants.
+%   endIds                - 1xN double. Ending fixation IDs for each of
+%                           the N participants.
+%   filePaths             - 1xN cell array of char. Paths to gaze.csv
+%                           files for each participant.
+%
+% Outputs:
+%   none (creates a tabbed figure)
+%
+% Examples:
 %{
     startIds = [3, 45, 5, 36, 43];
     endIds = [82, 163, 52, 108, 120];
@@ -47,7 +72,27 @@ drawGazePlot(avgTab, masterIntended, grandAvgActual, 'Grand Average Across All P
 end
 
 function drawGazePlot(parent, intendedGaze, actualGaze, figTitle)
-% Create axes specifically inside the passed tab
+% Internal helper to draw gaze plot.
+%
+% Syntax:
+%   drawGazePlot(parent, intendedGaze, actualGaze, figTitle)
+%
+% Description:
+%   This local helper function internal helper to draw gaze plot within its parent workflow.
+% Inputs:
+%   parent                   - Input used by the function.
+%   intendedGaze             - Input used by the function.
+%   actualGaze               - Input used by the function.
+%   figTitle                 - Input used by the function.
+%
+% Outputs:
+%   None.
+%
+% Examples:
+%{
+    % See plotGazeAccuracyNeon.m for usage context.
+%}
+
 ax = axes('Parent', parent);
 hold(ax, 'on');
 
@@ -79,7 +124,27 @@ end
 % (Keep your existing processParticipant function exactly as it was)
 
 function [actualGaze, intendedGaze] = processParticipant(startId, endId, filePath)
-% 1. FORCE IMPORT: Read as text to bypass "NaN" heuristic trap
+% Internal helper to process participant.
+%
+% Syntax:
+%   actualGaze, intendedGaze = processParticipant(startId, endId, filePath)
+%
+% Description:
+%   This local helper function internal helper to process participant within its parent workflow.
+% Inputs:
+%   startId                  - Input used by the function.
+%   endId                    - Input used by the function.
+%   filePath                 - Path-like input used by the function.
+%
+% Outputs:
+%   actualGaze               - Output produced by the function.
+%   intendedGaze             - Output produced by the function.
+%
+% Examples:
+%{
+    % See plotGazeAccuracyNeon.m for usage context.
+%}
+
 opts = detectImportOptions(filePath, 'FileType', 'text');
 opts = setvartype(opts, 'string');
 data = readtable(filePath, opts);

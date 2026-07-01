@@ -618,13 +618,48 @@ function [exponentMapHandle, varianceMapHandle, spdByRegionHandle, regionAverage
 end
 
 function mustBeStructOrText(x)
+% Internal helper to must be struct or text.
+%
+% Syntax:
+%   mustBeStructOrText(x)
+%
+% Description:
+%   This local helper function internal helper to must be struct or text within its parent workflow.
+% Inputs:
+%   x                        - Input used by the function.
+%
+% Outputs:
+%   None.
+%
+% Examples:
+%{
+    % See plotSPDs.m for usage context.
+%}
+
     if ~(isstruct(x) || ischar(x) || isstring(x))
         error('Input must be a struct, char, or string.');
     end
 end
 
 function regionMeanSpd = iComputeRegionMean(spdByRegion, regionMask)
-% Compute mean SPD at each frequency for a spatial region.
+% Internal helper to i compute region mean.
+%
+% Syntax:
+%   regionMeanSpd = iComputeRegionMean(spdByRegion, regionMask)
+%
+% Description:
+%   This local helper function internal helper to i compute region mean within its parent workflow.
+% Inputs:
+%   spdByRegion              - Input used by the function.
+%   regionMask               - Input used by the function.
+%
+% Outputs:
+%   regionMeanSpd            - Output produced by the function.
+%
+% Examples:
+%{
+    % See plotSPDs.m for usage context.
+%}
 
     numFrequencies = size(spdByRegion, 3);
     regionMeanSpd = nan(numFrequencies, 1);
@@ -641,17 +676,53 @@ function regionMeanSpd = iComputeRegionMean(spdByRegion, regionMask)
 end
 
 function regionSemSpd = iComputeRegionSemFromAcrossParticipantStd(acrossParticipantRegionSTD, numParticipants)
-% Convert across-participant region STD into SEM.
+% Internal helper to i compute region sem from across participant std.
 %
-% Expected input:
-%   acrossParticipantRegionSTD is a column vector (or vector-like) with one
-%   STD value per frequency.
+% Syntax:
+%   regionSemSpd = iComputeRegionSemFromAcrossParticipantStd(acrossParticipantRegionSTD, numParticipants)
+%
+% Description:
+%   This local helper function internal helper to i compute region sem from across participant std within its parent workflow.
+% Inputs:
+%   acrossParticipantRegionSTD - Input used by the function.
+%   numParticipants          - Input used by the function.
+%
+% Outputs:
+%   regionSemSpd             - Output produced by the function.
+%
+% Examples:
+%{
+    % See plotSPDs.m for usage context.
+%}
 
     regionSemSpd = acrossParticipantRegionSTD(:) ./ sqrt(numParticipants);
 end
 
 function [patchHandle, lineHandle] = iPlotSpdWithSemPatch(targetAxes, frqVector, meanSpd, semSpd, lineColor, lineStyle, lineWidth)
-% Plot mean SPD with a shaded SEM background band.
+% Internal helper to i plot spd with sem patch.
+%
+% Syntax:
+%   patchHandle, lineHandle = iPlotSpdWithSemPatch(targetAxes, frqVector, meanSpd, semSpd, lineColor, lineStyle, lineWidth)
+%
+% Description:
+%   This local helper function internal helper to i plot spd with sem patch within its parent workflow.
+% Inputs:
+%   targetAxes               - Input used by the function.
+%   frqVector                - Input used by the function.
+%   meanSpd                  - Input used by the function.
+%   semSpd                   - Input used by the function.
+%   lineColor                - Input used by the function.
+%   lineStyle                - Input used by the function.
+%   lineWidth                - Input used by the function.
+%
+% Outputs:
+%   patchHandle              - Output produced by the function.
+%   lineHandle               - Output produced by the function.
+%
+% Examples:
+%{
+    % See plotSPDs.m for usage context.
+%}
 
     frqVector = frqVector(:);
     meanSpd = meanSpd(:);
@@ -692,6 +763,24 @@ function [patchHandle, lineHandle] = iPlotSpdWithSemPatch(targetAxes, frqVector,
 end
 
 function mustBePositive(x)
+% Internal helper to must be positive.
+%
+% Syntax:
+%   mustBePositive(x)
+%
+% Description:
+%   This local helper function internal helper to must be positive within its parent workflow.
+% Inputs:
+%   x                        - Input used by the function.
+%
+% Outputs:
+%   None.
+%
+% Examples:
+%{
+    % See plotSPDs.m for usage context.
+%}
+
     if (any(x <= 0))
         error('Value must be positive.');
     end

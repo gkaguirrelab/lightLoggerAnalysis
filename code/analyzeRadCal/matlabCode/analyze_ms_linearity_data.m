@@ -133,16 +133,8 @@ function figureHandles = analyze_ms_linearity_data(calibration_metadata, measure
         } ...
         );
 
-    % Make a list of colors for each ND level for the conjoined plot
-    colorList = [
-        0.6350, 0.0780, 0.1840   % Red
-        0.8500, 0.3250, 0.0980;  % Orange
-        0.9290, 0.6940, 0.1250;  % Yellow
-        0.4660, 0.6740, 0.1880;  % Green
-        0.3010, 0.7450, 0.9330;  % Light Blue
-        0, 0.4470, 0.7410;   % Blue
-        0.4940, 0.1840, 0.5560;  % Purple
-        ];
+    % Make a list of colors for each ND level for the conjoined plot.
+    colorList = ndf_color_list(numel(calibration_metadata.NDFs));
 
     % add path to isetBIO CIE luminous efficiency function
     addpath('~/Documents/MATLAB/toolboxes/Psychtoolbox-3/Psychtoolbox/PsychColorimetricData/PsychColorimetricMatFiles');
@@ -401,12 +393,58 @@ function figureHandles = analyze_ms_linearity_data(calibration_metadata, measure
     end
     end % function loop
 
+function colorList = ndf_color_list(num_NDFs)
+% Internal helper to create one plotting color per NDF level.
+%
+% Syntax:
+%   colorList = ndf_color_list(num_NDFs)
+%
+% Description:
+%   Returns the historical 7-color NDF palette for small calibrations and
+%   interpolates through that palette when a calibration has more NDF levels.
+
+    baseColors = [
+        0.6350, 0.0780, 0.1840   % Red
+        0.8500, 0.3250, 0.0980;  % Orange
+        0.9290, 0.6940, 0.1250;  % Yellow
+        0.4660, 0.6740, 0.1880;  % Green
+        0.3010, 0.7450, 0.9330;  % Light Blue
+        0, 0.4470, 0.7410;       % Blue
+        0.4940, 0.1840, 0.5560;  % Purple
+        ];
+
+    if(num_NDFs <= size(baseColors, 1))
+        colorList = baseColors(1:num_NDFs, :);
+        return;
+    end
+
+    basePositions = linspace(1, num_NDFs, size(baseColors, 1));
+    requestedPositions = 1:num_NDFs;
+    colorList = interp1(basePositions, baseColors, requestedPositions, 'linear');
+end
+
     % Local function to reformat the minispect SPDs to be in the space of
     % the source SPDs
     function minipspectP_rels_map = reformat_SPDs(spectral_sensitivity_map, sourceS)
-        % Next, let's iterate over the chips at this NDF level
-        % and reformat the minispect SPDs to be in the space of
-        % the source SPDs
+    % Internal helper to reformat spds.
+    %
+    % Syntax:
+    %   minipspectP_rels_map = reformat_SPDs(spectral_sensitivity_map, sourceS)
+    %
+    % Description:
+    %   This local helper function internal helper to reformat spds within its parent workflow.
+    % Inputs:
+    %   spectral_sensitivity_map - Input used by the function.
+    %   sourceS                  - Input used by the function.
+    %
+    % Outputs:
+    %   minipspectP_rels_map     - Output produced by the function.
+    %
+    % Examples:
+    %{
+        % See analyze_ms_linearity_data.m for usage context.
+    %}
+
         minipspectP_rels_map = containers.Map();
         chips = keys(spectral_sensitivity_map);
         for cc = 1:numel(chips)
@@ -432,7 +470,25 @@ function figureHandles = analyze_ms_linearity_data(calibration_metadata, measure
 
     % Local function to find the min square figsize required to plot data
     function [rows, cols] = find_min_figsize(num_plots)
-        % Iterate over the ints between 1 and num_plots
+    % Internal helper to find min figsize.
+    %
+    % Syntax:
+    %   rows, cols = find_min_figsize(num_plots)
+    %
+    % Description:
+    %   This local helper function internal helper to find min figsize within its parent workflow.
+    % Inputs:
+    %   num_plots                - Input used by the function.
+    %
+    % Outputs:
+    %   rows                     - Output produced by the function.
+    %   cols                     - Output produced by the function.
+    %
+    % Examples:
+    %{
+        % See analyze_ms_linearity_data.m for usage context.
+    %}
+
         for ii = 1:num_plots
             rows = ii;
             cols = ii;
@@ -449,7 +505,26 @@ end
 % Local function to extract solely the values of a given MS
 % sensor from the measurements
 function counts_mat = extract_detector_counts(NDF_num, measurements, chip)
-% Extract some information about the experiment
+% Internal helper to extract detector counts.
+%
+% Syntax:
+%   counts_mat = extract_detector_counts(NDF_num, measurements, chip)
+%
+% Description:
+%   This local helper function internal helper to extract detector counts within its parent workflow.
+% Inputs:
+%   NDF_num                  - Input used by the function.
+%   measurements             - Input used by the function.
+%   chip                     - Input used by the function.
+%
+% Outputs:
+%   counts_mat               - Output produced by the function.
+%
+% Examples:
+%{
+    % See analyze_ms_linearity_data.m for usage context.
+%}
+
 [num_NDF_levels, num_settings_levels, n_measures] = size(measurements);
 
 % First, let's find the max number of readings we have and the number

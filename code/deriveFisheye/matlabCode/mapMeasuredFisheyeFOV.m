@@ -1,22 +1,23 @@
 function mapFisheyeFOV(v, fisheyeIntrinsics)
-% projects the temporal mean of a fisheye video chunk onto a 3D visual field
-% surface at 1 meter.
+% Map fisheye fov.
 %
-% mapFisheyeVideoChunkToVisualField(v, fisheyeIntrinsics)
-%   
-% takes a video chunk (frames x rows x cols) and the calibration
-% fisheyeIntrinsics, and visualizes the temporally averaged frame
-% remapped onto a hemisphere at 1 m.
+% Syntax:
+%   mapFisheyeFOV(v, fisheyeIntrinsics)
 %
+% Description:
+%   This function map fisheye fov.
 % Inputs:
-%   v                   - Video chunk (frames x rows x cols), double.
-%   fisheyeIntrinsics   - camera.FisheyeIntrinsics object.
+%   v                        - Input used by the function.
+%   fisheyeIntrinsics        - Input used by the function.
 %
 % Outputs:
-%   Displays a 3D surface plot with angularly correct warping.
-% 
-% Example Usage:
+%   None.
+%
+% Examples:
 %{
+    mapFisheyeFOV(v, fisheyeIntrinsics)
+%}
+
     data = load('/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_admin/Equipment/ArduCam B0392 IMX219 Wide Angle M12/intrinsics_calibration/intrinsics_calibration.mat');
     fisheyeIntrinsics = camera_intrinsics_calibration.results.Intrinsics  
     mapFisheyeFOV(v, fisheyeIntrinsics)

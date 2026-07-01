@@ -1,10 +1,51 @@
 function [frame_list] = findGazeFrames(start_time, gaze_targets_deg, perimeterFile, target_dur_s, onset_dur_s, confidence_cutoff, min_perimeter_points)
-%FINDGAZEFRAMES Automated process to identify representative frames from gaze calibration.
-%   Uses the MEDIAN of the Xp/Yp points to find a robust center 
-%   frame for each target, based on a 120 fps rate.
+% Identify representative pupil perimeter frames for each gaze calibration target
 %
-%   NOTE: When a target fails to yield a valid frame (returns NaN), 
-%   a detailed diagnostic is printed to the command window.
+% Syntax:
+%   frame_list = findGazeFrames(start_time, gaze_targets_deg, perimeterFile)
+%   frame_list = findGazeFrames(start_time, gaze_targets_deg, perimeterFile, target_dur_s, onset_dur_s, confidence_cutoff, min_perimeter_points)
+%
+% Description:
+%   For each gaze calibration target, this function identifies the single
+%   video frame whose pupil center is closest to the median pupil position
+%   within a 1.5-second analysis window centered on the expected fixation
+%   interval. Uses a 120 fps rate assumption. Handles skipped targets by
+%   detecting large inter-frame gaps and adjusting subsequent timing
+%   windows. Prints detailed diagnostics when a target fails to yield a
+%   valid frame.
+%
+% Inputs:
+%   start_time            - 1x3 double. Time of the first fixation dot in
+%                           [minutes, seconds, milliseconds] format.
+%   gaze_targets_deg      - Nx2 double. Target positions in degrees of
+%                           visual angle [azimuth, elevation]. N determines
+%                           the number of targets to search for.
+%   perimeterFile         - Char. Full path to the .mat file containing
+%                           the pupil perimeter data struct.
+%   target_dur_s          - Scalar double (default: 3.43). Duration in
+%                           seconds each dot was presented.
+%   onset_dur_s           - Scalar double (default: 2.6). Duration of the
+%                           first fixation, which may be shorter due to
+%                           eye opening.
+%   confidence_cutoff     - Scalar double (default: 0.7). Minimum
+%                           confidence value for perimeter points to be
+%                           considered valid.
+%   min_perimeter_points  - Scalar double (default: 8). Minimum number of
+%                           high-confidence perimeter points required for
+%                           a frame to be a valid candidate.
+%
+% Outputs:
+%   frame_list            - Nx1 double. Frame indices for each target. NaN
+%                           entries indicate targets where no valid frame
+%                           was found.
+%
+% Examples:
+%{
+    start_time = [1, 25, 400];
+    gaze_targets_deg = [0 0; -15 15; -15 -15; 15 15];
+    perimeterFile = '/path/to/perimeter.mat';
+    frame_list = findGazeFrames(start_time, gaze_targets_deg, perimeterFile, 3.34, 2.6, 0.8, 8);
+%}
     arguments
         start_time (1,3) double      % time of first dot in [minute, second, millisecond] format. Human observer should determine this with IINA for now.
         gaze_targets_deg (:, 2) double         % N x 2 array of target positions [phi, theta] (Used for N, but not position values)
@@ -138,7 +179,28 @@ end
 % -------------------------------------------------------------------------
 % --- LOCAL FUNCTIONS ---
 function [median_pupil_centers, frame_confidence, pupil_t, frame_idx] = flatten_features(pupil_features, confidence_cutoff, min_perimeter_points)
-    % UPDATED: Now assumes pupil_features is the direct cell array of perimeter structs.
+% Internal helper to flatten features.
+%
+% Syntax:
+%   median_pupil_centers, frame_confidence, pupil_t, frame_idx = flatten_features(pupil_features, confidence_cutoff, min_perimeter_points)
+%
+% Description:
+%   This local helper function internal helper to flatten features within its parent workflow.
+% Inputs:
+%   pupil_features           - Input used by the function.
+%   confidence_cutoff        - Input used by the function.
+%   min_perimeter_points     - Input used by the function.
+%
+% Outputs:
+%   median_pupil_centers     - Output produced by the function.
+%   frame_confidence         - Output produced by the function.
+%   pupil_t                  - Output produced by the function.
+%   frame_idx                - Output produced by the function.
+%
+% Examples:
+%{
+    % See findGazeFrames.m for usage context.
+%}
 
     if ~iscell(pupil_features) 
         return;
@@ -208,7 +270,27 @@ end
 
 % -------------------------------------------------------------------------
 function diagnoseFailure(pupil_features, f_start, f_end, confidence_cutoff, min_perimeter_points)
-% Helper function to print detailed reasons for why frames failed the confidence check.
+% Internal helper to diagnose failure.
+%
+% Syntax:
+%   diagnoseFailure(pupil_features, f_start, f_end, confidence_cutoff, min_perimeter_points)
+%
+% Description:
+%   This local helper function internal helper to diagnose failure within its parent workflow.
+% Inputs:
+%   pupil_features           - Input used by the function.
+%   f_start                  - Input used by the function.
+%   f_end                    - Input used by the function.
+%   confidence_cutoff        - Input used by the function.
+%   min_perimeter_points     - Input used by the function.
+%
+% Outputs:
+%   None.
+%
+% Examples:
+%{
+    % See findGazeFrames.m for usage context.
+%}
 
     window_indices = f_start:f_end;
 

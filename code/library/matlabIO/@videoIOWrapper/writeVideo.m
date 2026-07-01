@@ -1,4 +1,35 @@
 function writeVideo(obj, frame, options)
+% Append one frame to a `videoIOWrapper` writer session.
+%
+% Syntax:
+%   writeVideo(obj, frame, options)
+%
+% Description:
+%   This method validates an output frame, optionally clamps floor and
+%   ceiling values into the displayable 0-255 image range, and writes the
+%   frame as a numbered PNG into the writer's temporary directory. The AVI
+%   itself is not emitted here; instead, `close` later stitches the saved
+%   frame sequence into a video. Frame dimensions are locked from the
+%   first written frame onward so later calls cannot silently create a
+%   malformed output video.
+%
+% Inputs:
+%   obj                      - `videoIOWrapper` instance configured in
+%                              write mode.
+%   frame                    - Numeric image array or struct with a
+%                              `cdata` field containing the image data.
+%   options                  - Name/value options. `apply_floor_ceiling`
+%                              controls whether subrange and overrange
+%                              pixel values are saturated before writing.
+%
+% Outputs:
+%   None.
+%
+% Examples:
+%{
+    writeVideo(writer, frame, "apply_floor_ceiling", true);
+%}
+
     arguments 
         obj 
         frame

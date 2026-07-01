@@ -18,6 +18,7 @@ splash_screen_text: str = """
 
 def main():
     # Display the startup message 
+    """Run the command-line entry point."""
     for line in splash_screen_text.split('\n'):
         print(line)
         time.sleep(0.05)

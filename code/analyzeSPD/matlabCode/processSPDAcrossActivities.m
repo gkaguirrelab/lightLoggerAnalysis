@@ -419,13 +419,24 @@ end
 
 
 function mustBeMemberString(value, allowed)
-% mustBeMemberString
+% Internal helper to must be member string.
 %
-% Local custom validator for MATLAB argument blocks.
+% Syntax:
+%   mustBeMemberString(value, allowed)
 %
-% This helper converts both the input and the list of allowed values to
-% strings, then checks whether the input matches one of the permitted
-% values.
+% Description:
+%   This local helper function internal helper to must be member string within its parent workflow.
+% Inputs:
+%   value                    - Input used by the function.
+%   allowed                  - Input used by the function.
+%
+% Outputs:
+%   None.
+%
+% Examples:
+%{
+    % See processSPDAcrossActivities.m for usage context.
+%}
 
     valueStr = string(value);
     allowedStr = string(allowed);

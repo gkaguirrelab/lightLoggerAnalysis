@@ -302,8 +302,45 @@ function plot_summary_card(world_chunks_t, world_chunks_v, world_chunks_v_contra
                            MS_sunglasses_chunks_v,...
                            min_common_time, max_common_time...
                           )
-     % Open a figure for plotting 
-    % information about the performance of sensors combined 
+% Internal helper to plot summary card.
+%
+% Syntax:
+%   plot_summary_card(world_chunks_t, world_chunks_v, world_chunks_v_contrast, present_world_chunks_v_contrast, world_chunks_fps, pupil_chunks_t, pupil_chunks_v, pupil_chunks_v_contrast, present_pupil_chunks_v_contrast, pupil_chunks_fps, MS_light_sensing_chunks_t, MS_AS_chunks_v, present_MS_AS_chunks_v, MS_TS_chunks_v, MS_chunks_fps, MS_accelerometer_chunks_t, MS_LS_chunks_v, MS_LS_chunks_v_std, MS_chunkstarts, MS_sunglasses_chunks_v, min_common_time, max_common_time)
+%
+% Description:
+%   This local helper function internal helper to plot summary card within its parent workflow.
+% Inputs:
+%   world_chunks_t           - Timestamp-related input.
+%   world_chunks_v           - Value array used by the function.
+%   world_chunks_v_contrast  - Input used by the function.
+%   present_world_chunks_v_contrast - Input used by the function.
+%   world_chunks_fps         - Input used by the function.
+%   pupil_chunks_t           - Timestamp-related input.
+%   pupil_chunks_v           - Value array used by the function.
+%   pupil_chunks_v_contrast  - Input used by the function.
+%   present_pupil_chunks_v_contrast - Input used by the function.
+%   pupil_chunks_fps         - Input used by the function.
+%   MS_light_sensing_chunks_t - Timestamp-related input.
+%   MS_AS_chunks_v           - Value array used by the function.
+%   present_MS_AS_chunks_v   - Value array used by the function.
+%   MS_TS_chunks_v           - Value array used by the function.
+%   MS_chunks_fps            - Input used by the function.
+%   MS_accelerometer_chunks_t - Timestamp-related input.
+%   MS_LS_chunks_v           - Value array used by the function.
+%   MS_LS_chunks_v_std       - Input used by the function.
+%   MS_chunkstarts           - Input used by the function.
+%   MS_sunglasses_chunks_v   - Value array used by the function.
+%   min_common_time          - Input used by the function.
+%   max_common_time          - Input used by the function.
+%
+% Outputs:
+%   None.
+%
+% Examples:
+%{
+    % See plot_chunks.m for usage context.
+%}
+
     figure ; 
     t = tiledlayout(3,3); 
     title(t, "Sensors' Performance Summarized", "FontWeight", "bold");
@@ -480,7 +517,28 @@ end
 function plot_world_card(world_chunks_t, world_frame_means, world_chunks_agc_settings,...
                          min_common_time, max_common_time...
                         )
-    % Generate a figure to display the World Camera mean and settings over time 
+% Internal helper to plot world card.
+%
+% Syntax:
+%   plot_world_card(world_chunks_t, world_frame_means, world_chunks_agc_settings, min_common_time, max_common_time)
+%
+% Description:
+%   This local helper function internal helper to plot world card within its parent workflow.
+% Inputs:
+%   world_chunks_t           - Timestamp-related input.
+%   world_frame_means        - Input used by the function.
+%   world_chunks_agc_settings - Input used by the function.
+%   min_common_time          - Input used by the function.
+%   max_common_time          - Input used by the function.
+%
+% Outputs:
+%   None.
+%
+% Examples:
+%{
+    % See plot_chunks.m for usage context.
+%}
+
     figure ; 
     t = tiledlayout(1, 2); 
     title(t, "World Camera", "FontWeight", "bold");
@@ -534,7 +592,28 @@ end
 function plot_pupil_card(pupil_chunks_t, pupil_frame_means, pupil_chunks_agc_settings,...
                          min_common_time, max_common_time...
                         )
-    % Generate a figure to display the Pupil Camera mean and settings over time 
+% Internal helper to plot pupil card.
+%
+% Syntax:
+%   plot_pupil_card(pupil_chunks_t, pupil_frame_means, pupil_chunks_agc_settings, min_common_time, max_common_time)
+%
+% Description:
+%   This local helper function internal helper to plot pupil card within its parent workflow.
+% Inputs:
+%   pupil_chunks_t           - Timestamp-related input.
+%   pupil_frame_means        - Input used by the function.
+%   pupil_chunks_agc_settings - Input used by the function.
+%   min_common_time          - Input used by the function.
+%   max_common_time          - Input used by the function.
+%
+% Outputs:
+%   None.
+%
+% Examples:
+%{
+    % See plot_chunks.m for usage context.
+%}
+
     figure ; 
     t = tiledlayout(1, 2); 
     title(t, "Pupil Camera", "FontWeight", "bold");
@@ -589,8 +668,33 @@ function plot_ms_and_sunglasses_card(MS_light_sensing_chunks_t, MS_AS_chunks_v, 
                                      MS_sunglasses_chunks_v,...
                                      min_common_time, max_common_time...
                                     )
-    % Open a figure for plotting 
-    % information about the MS 
+% Internal helper to plot ms and sunglasses card.
+%
+% Syntax:
+%   plot_ms_and_sunglasses_card(MS_light_sensing_chunks_t, MS_AS_chunks_v, MS_TS_chunks_v, MS_accelerometer_chunks_t, MS_LS_chunks_v, MS_LS_chunks_v_std, MS_chunkstarts, MS_sunglasses_chunks_v, min_common_time, max_common_time)
+%
+% Description:
+%   This local helper function internal helper to plot ms and sunglasses card within its parent workflow.
+% Inputs:
+%   MS_light_sensing_chunks_t - Timestamp-related input.
+%   MS_AS_chunks_v           - Value array used by the function.
+%   MS_TS_chunks_v           - Value array used by the function.
+%   MS_accelerometer_chunks_t - Timestamp-related input.
+%   MS_LS_chunks_v           - Value array used by the function.
+%   MS_LS_chunks_v_std       - Input used by the function.
+%   MS_chunkstarts           - Input used by the function.
+%   MS_sunglasses_chunks_v   - Value array used by the function.
+%   min_common_time          - Input used by the function.
+%   max_common_time          - Input used by the function.
+%
+% Outputs:
+%   None.
+%
+% Examples:
+%{
+    % See plot_chunks.m for usage context.
+%}
+
     figure ; 
     t = tiledlayout(3,3); 
     title(t, "MS + Sunglasses", "FontWeight", "bold"); 

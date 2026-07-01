@@ -1,5 +1,42 @@
 function classifications = classifyActiveInactivePeriods(IMUdata, options)
-    arguments 
+% Classify each IMU timepoint as active or inactive based on accelerometer data
+%
+% Syntax:
+%   classifications = classifyActiveInactivePeriods(IMUdata)
+%   classifications = classifyActiveInactivePeriods(IMUdata, 'window_size_seconds', 10)
+%
+% Description:
+%   Given IMU accelerometer data (either as a table or a path to a CSV
+%   file), compute the Euclidean Norm Minus One (ENMO) activity index
+%   using a sliding window average, then classify each timepoint as
+%   active (1) or inactive (0) based on a threshold.
+%
+% Inputs:
+%   IMUdata               - Table or char/string. Either a table of IMU
+%                           readings with columns 'timestamp_ns_',
+%                           'accelerationX_g_', 'accelerationY_g_',
+%                           'accelerationZ_g_', or a path to a CSV file
+%                           containing such a table.
+%
+% Optional key/value pairs:
+%   'window_size_seconds' - Scalar double (default: 5). Size of the
+%                           sliding window in seconds for smoothing the
+%                           ENMO signal.
+%   'active_threshold'    - Scalar double (default: 0.05). ENMO values
+%                           above this threshold are classified as active.
+%
+% Outputs:
+%   classifications       - Numeric vector. Binary vector (0 or 1) of the
+%                           same length as the number of IMU readings,
+%                           where 1 indicates active and 0 indicates
+%                           inactive.
+%
+% Examples:
+%{
+    IMUdata = readtable('imu.csv');
+    classifications = classifyActiveInactivePeriods(IMUdata, 'active_threshold', 0.03);
+%}
+    arguments
         IMUdata 
         options.window_size_seconds = 5; 
         options.active_threshold = 0.05; % Anything above this value is considered active. 

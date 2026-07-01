@@ -2,6 +2,25 @@
 % 
 % Adjust settings as necessary.
 function maps = generate_SPD_light(directory, analyses_to_perform, visualize_results)
+% Internal helper to generate spd light.
+%
+% Syntax:
+%   maps = generate_SPD_light(directory, analyses_to_perform, visualize_results)
+%
+% Description:
+%   This local helper function internal helper to generate spd light within its parent workflow.
+% Inputs:
+%   directory                - Input used by the function.
+%   analyses_to_perform      - Input used by the function.
+%   visualize_results        - Input used by the function.
+%
+% Outputs:
+%   maps                     - Output produced by the function.
+%
+% Examples:
+%{
+    % See generate_SPD_light.m for usage context.
+%}
 
     arguments
         directory {mustBeText} = '/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_data/lightLogger/HERO_sm/sophia_in_wild_7-22/sophia_in_wild_7-22_chunks'
@@ -56,7 +75,24 @@ function maps = generate_SPD_light(directory, analyses_to_perform, visualize_res
  
     % Local function to sort filenames from the directory 
     function files = sort_chunk_filenames(directory)
-        % Retrieve the chunk filepaths for the video  (unsorted)
+    % Internal helper to sort chunk filenames.
+    %
+    % Syntax:
+    %   files = sort_chunk_filenames(directory)
+    %
+    % Description:
+    %   This local helper function internal helper to sort chunk filenames within its parent workflow.
+    % Inputs:
+    %   directory                - Input used by the function.
+    %
+    % Outputs:
+    %   files                    - Output produced by the function.
+    %
+    % Examples:
+    %{
+        % See generate_SPD_light.m for usage context.
+    %}
+
         files = dir(fullfile(directory,'chunk_*.mat'));
         N_chunks = numel(files); 
     
@@ -97,6 +133,28 @@ function maps = generate_SPD_light(directory, analyses_to_perform, visualize_res
     
     % Local function to plot MS high/ligh 
     function [yHigh, yLow, thr, t_all] = obtain_ms_high_low(files, N_chunks)
+    % Internal helper to obtain ms high low.
+    %
+    % Syntax:
+    %   yHigh, yLow, thr, t_all = obtain_ms_high_low(files, N_chunks)
+    %
+    % Description:
+    %   This local helper function internal helper to obtain ms high low within its parent workflow.
+    % Inputs:
+    %   files                    - Input used by the function.
+    %   N_chunks                 - Input used by the function.
+    %
+    % Outputs:
+    %   yHigh                    - Output produced by the function.
+    %   yLow                     - Output produced by the function.
+    %   thr                      - Output produced by the function.
+    %   t_all                    - Output produced by the function.
+    %
+    % Examples:
+    %{
+        % See generate_SPD_light.m for usage context.
+    %}
+
         AS_all  = [];
         t_all   = [];
         
@@ -124,6 +182,27 @@ function maps = generate_SPD_light(directory, analyses_to_perform, visualize_res
     
     % Local function to plot the MS high/low results 
     function plot_ms_high_low(yHigh, yLow, t_all, thr)
+    % Internal helper to plot ms high low.
+    %
+    % Syntax:
+    %   plot_ms_high_low(yHigh, yLow, t_all, thr)
+    %
+    % Description:
+    %   This local helper function internal helper to plot ms high low within its parent workflow.
+    % Inputs:
+    %   yHigh                    - Input used by the function.
+    %   yLow                     - Input used by the function.
+    %   t_all                    - Input used by the function.
+    %   thr                      - Input used by the function.
+    %
+    % Outputs:
+    %   None.
+    %
+    % Examples:
+    %{
+        % See generate_SPD_light.m for usage context.
+    %}
+
         figure; hold on;
     
         % Plot; hide handles so legend doesn’t get cluttered
@@ -146,8 +225,37 @@ function maps = generate_SPD_light(directory, analyses_to_perform, visualize_res
     % Local function to obtain SPD data 
     function [globalAll, globalHi, globalLo, globalCen, globalPer, f_int] = ...
             obtain_SPD_data(files, N_chunks, Twin, hop, fsVid, fMax, centerRows, centerCols, thr)
-        % BUILD COMMON FREQUENCY GRID
-        % Use a nominal 10 s block from chunk 1 to get its frequency bins
+    % Internal helper to obtain spd data.
+    %
+    % Syntax:
+    %   globalAll, globalHi, globalLo, globalCen, globalPer, f_int = obtain_SPD_data(files, N_chunks, Twin, hop, fsVid, fMax, centerRows, centerCols, thr)
+    %
+    % Description:
+    %   This local helper function internal helper to obtain spd data within its parent workflow.
+    % Inputs:
+    %   files                    - Input used by the function.
+    %   N_chunks                 - Input used by the function.
+    %   Twin                     - Input used by the function.
+    %   hop                      - Input used by the function.
+    %   fsVid                    - Input used by the function.
+    %   fMax                     - Input used by the function.
+    %   centerRows               - Input used by the function.
+    %   centerCols               - Input used by the function.
+    %   thr                      - Input used by the function.
+    %
+    % Outputs:
+    %   globalAll                - Output produced by the function.
+    %   globalHi                 - Output produced by the function.
+    %   globalLo                 - Output produced by the function.
+    %   globalCen                - Output produced by the function.
+    %   globalPer                - Output produced by the function.
+    %   f_int                    - Output produced by the function.
+    %
+    % Examples:
+    %{
+        % See generate_SPD_light.m for usage context.
+    %}
+
         tmp = load(fullfile(files(1).folder,files(1).name),'chunk');
         Vid0 = tmp.chunk.W.v;
         [~, frq0] = calcTemporalSPD( Vid0(1:round(2*Twin*fsVid),:,:), fsVid, 'lineResolution', false );
@@ -268,7 +376,29 @@ function maps = generate_SPD_light(directory, analyses_to_perform, visualize_res
     
     % Local function to plot the SPD data 
     function plot_SPD_data(globalAll, globalHi, globalLo, globalCen, globalPer, f_int)
-        % PLOT GLOBAL SPD
+    % Internal helper to plot spd data.
+    %
+    % Syntax:
+    %   plot_SPD_data(globalAll, globalHi, globalLo, globalCen, globalPer, f_int)
+    %
+    % Description:
+    %   This local helper function internal helper to plot spd data within its parent workflow.
+    % Inputs:
+    %   globalAll                - Input used by the function.
+    %   globalHi                 - Input used by the function.
+    %   globalLo                 - Input used by the function.
+    %   globalCen                - Input used by the function.
+    %   globalPer                - Input used by the function.
+    %   f_int                    - Input used by the function.
+    %
+    % Outputs:
+    %   None.
+    %
+    % Examples:
+    %{
+        % See generate_SPD_light.m for usage context.
+    %}
+
         figure;
         plotSPD(globalAll, f_int);
         xlabel('Frequency (Hz)', 'FontSize',14);
@@ -326,7 +456,24 @@ function maps = generate_SPD_light(directory, analyses_to_perform, visualize_res
     
     % Local function to obtain slope and intercept maps 
     function mapsOut = obtain_slope_and_intercept_maps()
-        % ===== Running means (lazy init after first chunk) ===== *********
+    % Internal helper to obtain slope and intercept maps.
+    %
+    % Syntax:
+    %   mapsOut = obtain_slope_and_intercept_maps()
+    %
+    % Description:
+    %   This local helper function internal helper to obtain slope and intercept maps within its parent workflow.
+    % Inputs:
+    %   None.
+    %
+    % Outputs:
+    %   mapsOut                  - Output produced by the function.
+    %
+    % Examples:
+    %{
+        % See generate_SPD_light.m for usage context.
+    %}
+
         meanSlopeHigh = [];  cntHigh = [];
         meanIntHigh   = [];
         meanSlopeLow  = [];  cntLow  = [];
@@ -386,6 +533,28 @@ function maps = generate_SPD_light(directory, analyses_to_perform, visualize_res
     end
 
     function [meanM, countM] = updateMean(meanM, countM, newM, w)
+    % Internal helper to update mean.
+    %
+    % Syntax:
+    %   meanM, countM = updateMean(meanM, countM, newM, w)
+    %
+    % Description:
+    %   This local helper function internal helper to update mean within its parent workflow.
+    % Inputs:
+    %   meanM                    - Input used by the function.
+    %   countM                   - Input used by the function.
+    %   newM                     - Input used by the function.
+    %   w                        - Input used by the function.
+    %
+    % Outputs:
+    %   meanM                    - Output produced by the function.
+    %   countM                   - Output produced by the function.
+    %
+    % Examples:
+    %{
+        % See generate_SPD_light.m for usage context.
+    %}
+
         if isempty(newM), return; end
         if isempty(meanM), meanM=zeros(size(newM)); countM=zeros(size(newM)); end
         valid = ~isnan(newM);
@@ -395,6 +564,25 @@ function maps = generate_SPD_light(directory, analyses_to_perform, visualize_res
     end
     
     function out = finalizeMean(meanM, countM)
+    % Internal helper to finalize mean.
+    %
+    % Syntax:
+    %   out = finalizeMean(meanM, countM)
+    %
+    % Description:
+    %   This local helper function internal helper to finalize mean within its parent workflow.
+    % Inputs:
+    %   meanM                    - Input used by the function.
+    %   countM                   - Input used by the function.
+    %
+    % Outputs:
+    %   out                      - Output produced by the function.
+    %
+    % Examples:
+    %{
+        % See generate_SPD_light.m for usage context.
+    %}
+
         out = meanM; out(countM==0) = NaN;
     end
 

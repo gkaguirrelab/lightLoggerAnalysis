@@ -204,6 +204,27 @@ end
 %% LOCAL FUNCTIONS
 
 function [c, ceq] = negativeWeights(x,mySPD,mySPDwiggle)
+% Internal helper to negative weights.
+%
+% Syntax:
+%   c, ceq = negativeWeights(x, mySPD, mySPDwiggle)
+%
+% Description:
+%   This local helper function internal helper to negative weights within its parent workflow.
+% Inputs:
+%   x                        - Input used by the function.
+%   mySPD                    - Input used by the function.
+%   mySPDwiggle              - Input used by the function.
+%
+% Outputs:
+%   c                        - Output produced by the function.
+%   ceq                      - Output produced by the function.
+%
+% Examples:
+%{
+    % See environmentSPDfromSensors.m for usage context.
+%}
+
 spd = mySPD(x);
 c = sum(spd<=0);
 ceq = [];

@@ -1,3 +1,10 @@
+"""Extract gaze calibration stimulus targets from world camera video.
+
+Provides utilities for detecting and extracting gaze calibration target
+positions from recorded world camera videos, supporting both automated
+circle detection via Hough transforms and manual point selection.
+"""
+
 import numpy as np
 import multiprocessing as mp
 import queue
@@ -17,7 +24,7 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 import shutil
 import argparse
 import scipy.io
-import tqdm 
+import tqdm
 import h5py
 
 
@@ -33,7 +40,13 @@ import video_io
 import world_util
 
 def parse_args() -> str:
-    # Initialize argument parser 
+    """Parse command-line arguments for gaze stimulus extraction.
+
+    Returns:
+        A tuple of (path_to_video, path_to_output_file,
+        intended_gaze_targets_path, frame_indices).
+    """
+    # Initialize argument parser
     parser: argparse.ArgumentParser = argparse.ArgumentParser(description="Extract gaze targets from world gaze calibration video")
 
     # Add the path to video argument 
@@ -47,10 +60,16 @@ def parse_args() -> str:
 
     return args.path_to_video,  args.path_to_output_file, args.intended_gaze_targets_path, args.frame_indices
 
-"""Given a dict of detected gaze targets and an image to display 
-   on, visualize the results 
-"""
 def visualize_targets(background: np.ndarray, targets: dict[int, np.ndarray]) -> object:
+    """Visualize detected gaze targets overlaid on a background image.
+
+    Args:
+        background: Grayscale background image to display.
+        targets: Mapping of target number to array of (cx, cy, radius).
+
+    Returns:
+        The matplotlib figure with targets drawn as red circles.
+    """
     # Initialize a figure 
     fig, ax = plt.subplots() 
 
@@ -71,13 +90,18 @@ def visualize_targets(background: np.ndarray, targets: dict[int, np.ndarray]) ->
 
     return fig
 
-"""Calculate the euclidean distance between circles in pixel space"""
 def calculate_euclidean_distance(a: tuple[int], b: tuple[int]):
+    """Calculate the Euclidean distance between two circles in pixel space.
+
+    Args:
+        a: First circle center as (x, y).
+        b: Second circle center as (x, y).
+
+    Returns:
+        The Euclidean distance between the two centers.
+    """
     return math.sqrt( (b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2)
 
-"""Find the start and end of the stimulus period
-   Denoted by the screen flashing a single frame of RED 
-"""
 def find_stimulus_period(video: str | np.ndarray,
                          visualize_results: bool=False, 
                          peak_height: float=100,
@@ -85,7 +109,27 @@ def find_stimulus_period(video: str | np.ndarray,
                          peak_min_distance: int=240,
                          verbose: bool=False
                         ) -> tuple[int | object]:
-    # If np.ndarray, not yet implemeneted 
+    """Find the start and end of the stimulus period in a video.
+
+    The stimulus period is denoted by the screen flashing a single frame
+    of RED. Detects red intensity peaks and applies a frame offset to
+    determine where the stimulus begins and ends.
+
+    Args:
+        video: Path to the video file. Array input is not yet supported.
+        visualize_results: Whether to plot the intensity curve with peaks.
+        peak_height: Minimum height for peak detection.
+        peak_prominence: Minimum prominence for peak detection.
+        peak_min_distance: Minimum distance between peaks in frames.
+        verbose: Whether to display a progress bar.
+
+    Returns:
+        A tuple of (start_frame, end_frame, figure).
+
+    Raises:
+        NotImplementedError: If video is passed as an np.ndarray.
+    """
+    # If np.ndarray, not yet implemeneted
     if(isinstance(video, np.ndarray)):
         raise NotImplementedError
     
@@ -178,15 +222,26 @@ def find_stimulus_period(video: str | np.ndarray,
     return start, end, fig
 
 
-"""Find the background image of a video.
-   Calculated as the average from of all the videos
-"""
 def find_background_image(video: str | np.ndarray,
                           start_frame: int, end_frame: int | None=None,
                           is_grayscale: bool=False,
                           visualize_results: bool=False,
                           verbose: bool=False
                          ) -> np.ndarray | tuple[np.ndarray, object]:
+    """Compute the background image of a video as the average of its frames.
+
+    Args:
+        video: Path to the video file. Array input is not yet supported.
+        start_frame: Frame number to start averaging from.
+        end_frame: Frame number to stop averaging at (exclusive).
+        is_grayscale: Whether to convert frames to grayscale before averaging.
+        visualize_results: Whether to display the resulting background image.
+        verbose: Whether to display a progress bar.
+
+    Returns:
+        The averaged background image as a numpy array. If visualize_results
+        is True, returns a tuple of (background_image, figure).
+    """
 
     if(isinstance(video, np.ndarray)):
         NotImplementedError("Array support not yet added")
@@ -242,10 +297,16 @@ def find_background_image(video: str | np.ndarray,
     
     return background_img 
 
-"""Given a matplotlib figure, render the figure as an image
-   figure and return it as a numpy array
-"""
 def rasterize_figure(matplotlib_figure: object) -> np.ndarray:
+    """Rasterize a matplotlib figure and return it as a BGR numpy array.
+
+    Args:
+        matplotlib_figure: The matplotlib figure to rasterize.
+
+    Returns:
+        The rasterized figure as a BGR uint8 numpy array suitable for
+        writing with OpenCV.
+    """
     # Rasterize the image
     canvas: object = FigureCanvas(matplotlib_figure)
     canvas.draw()
@@ -260,10 +321,7 @@ def rasterize_figure(matplotlib_figure: object) -> np.ndarray:
 
     return visualized_bgr
 
-"""From a given frame, threshold the frame and return 
-   the circles from the frame
-"""
-def auto_extract_target_circles(video: str, 
+def auto_extract_target_circles(video: str,
                                 background_img: np.ndarray, 
                                 start_frame: int=0, end_frame: int | None=None,
                                 is_grayscale: bool=False,
@@ -273,10 +331,45 @@ def auto_extract_target_circles(video: str,
                                 visualize_results: Literal["None", "Circles", "Video"]="None", 
                                 visualization_output_path: str | None=None
                                ) -> list[tuple] | tuple[list, object]:
-  
+    """Automatically extract gaze target circles from a video using Hough transforms.
 
-    # Subfunction to init the output stream 
+    Performs background subtraction, thresholding, and Hough circle
+    detection on each frame to find calibration target circles. Merges
+    circles that are close together by averaging their positions.
+
+    Args:
+        video: Path to the video file.
+        background_img: Background image to subtract from each frame.
+        start_frame: Frame number to start processing from.
+        end_frame: Frame number to stop processing at.
+        is_grayscale: Whether to read frames as grayscale.
+        threshold_value: Pixel intensity threshold for binarization.
+        radius_range: Range of radii to search for circles.
+        min_intercircle_distance: Minimum Euclidean distance between
+            circle centers to consider them distinct.
+        visualize_results: Visualization mode. "None" for no output,
+            "Circles" to show detected circles, "Video" to write a
+            visualization video.
+        visualization_output_path: Path to save the visualization output.
+
+    Returns:
+        Detected circle items as (index, array(cx, cy, radius)) pairs.
+        If visualize_results is "Circles", returns a tuple of
+        (circle_items, figure).
+    """
+
+    # Subfunction to init the output stream
     def _init_output_stream(output_path: str, output_fps: float, output_frame_size_w_h: tuple[int]) -> cv2.VideoWriter:
+        """Initialize an OpenCV VideoWriter for visualization output.
+
+        Args:
+            output_path: File path for the output video.
+            output_fps: Frames per second for the output video.
+            output_frame_size_w_h: Output frame size as (width, height).
+
+        Returns:
+            An initialized cv2.VideoWriter instance.
+        """
         # Initialize the video writer
         output_stream: cv2.VideoWriter = cv2.VideoWriter(output_path,
                                                          0,
@@ -511,8 +604,21 @@ def auto_extract_target_circles(video: str,
     
     return circles.items()  
 
-"""Manually extract"""
-def manual_extract_target_circles(background_img: np.ndarray, path_to_intended_targets: str | None=None) -> np.ndarray:    
+def manual_extract_target_circles(background_img: np.ndarray, path_to_intended_targets: str | None=None) -> np.ndarray:
+    """Manually extract gaze target positions by clicking on a displayed image.
+
+    Displays the background image and allows the user to click on target
+    positions interactively. Optionally shows the intended target order
+    from a reference file for guidance.
+
+    Args:
+        background_img: Background image to display for point selection.
+        path_to_intended_targets: Optional path to an HDF5 file containing
+            the intended gaze target positions in degrees.
+
+    Returns:
+        Array of selected (x, y) pixel coordinates.
+    """
     
     if(path_to_intended_targets is not None):
         # First, let's load in the intended order of the points 
@@ -553,7 +659,20 @@ def manual_extract_target_circles(background_img: np.ndarray, path_to_intended_t
 
 
 def extract_gazecal_stimulus(video_path: str, intended_gaze_targets_path: str) -> np.ndarray:
-    print("---Finding stimulus start/end---") 
+    """Extract gaze calibration stimulus target positions from a video.
+
+    Finds the stimulus period, computes the background image, and then
+    allows manual selection of gaze target points.
+
+    Args:
+        video_path: Path to the world camera video.
+        intended_gaze_targets_path: Path to the HDF5 file with intended
+            gaze target positions.
+
+    Returns:
+        Array of selected gaze target (x, y) pixel coordinates.
+    """
+    print("---Finding stimulus start/end---")
     start, end, fig = find_stimulus_period(video_path, visualize_results=True, verbose=True)
 
     # Calculate the background image 
@@ -575,8 +694,20 @@ def extract_gazecal_stimulus(video_path: str, intended_gaze_targets_path: str) -
 def extract_april_tag_stimulus(source_video: str,
                                target_frames_idx: Iterable,
                               ) -> np.ndarray:
+    """Extract AprilTag stimulus target positions from specific video frames.
 
-    # First, extract the target frames from the video 
+    Extracts the specified frames, computes an averaged background from
+    them, and allows manual selection of target points.
+
+    Args:
+        source_video: Path to the source video file.
+        target_frames_idx: Indices of frames containing the AprilTag targets.
+
+    Returns:
+        Array of selected target (x, y) pixel coordinates.
+    """
+
+    # First, extract the target frames from the video
     target_frames: np.ndarray = video_io.extract_frames_from_video(source_video, target_frames_idx, is_grayscale=True)
 
     # Construct the avg frame to display the targets in a ghosting format 
@@ -588,6 +719,11 @@ def extract_april_tag_stimulus(source_video: str,
     return target_points
 
 def main() -> None:
+    """Entry point for gaze stimulus extraction.
+
+    Parses command-line arguments and dispatches to either AprilTag or
+    gaze calibration stimulus extraction, then saves the results.
+    """
     # Parse arguments
     print("---Parsing Args---")
     video_path, path_to_output, intended_gaze_targets_path, frame_indices = parse_args()

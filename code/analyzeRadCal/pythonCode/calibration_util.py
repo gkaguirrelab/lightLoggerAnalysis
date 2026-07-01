@@ -1,3 +1,5 @@
+"""Utilities for loading, sorting, and parsing radiometric calibration measurement files."""
+
 import gc
 import re
 import os
@@ -16,11 +18,17 @@ for path in (chunk_io_path,):
 
 import chunk_io
 
-"""Define a subfunction to sort MS linearity measurements
-   first by the setting idx of the recording and then
-   the measurement idx of that setting
-"""
 def _sort_by_setting_measurement(flattened_readings: list[str]) -> list[list[str]]:
+    """Sort MS linearity measurements by setting index, then measurement index.
+
+    Args:
+        flattened_readings: Flat list of folder path strings, each containing
+            'settingsIdx' and 'measurementIdx' markers.
+
+    Returns:
+        A 2D list where rows correspond to settings levels and columns
+        correspond to measurement indices.
+    """
     # Define the strings that represent each number to sort by
     rows_sort_string: str = "settingsIdx"
     cols_sort_string: str = "measurementIdx"
@@ -68,13 +76,17 @@ def _sort_by_setting_measurement(flattened_readings: list[str]) -> list[list[str
     return readings_matrix
 
 
-"""Define a subfunction to sort any temporal sensitivity
-   measurement first by the contrast level and then
-   by the frequency. Out of this, you get a
-   2D list where the rows are the contrast
-   and the cols are the frequencies
-"""
 def _sort_by_contrast_frequency_measurement(flattened_readings: list[str]) -> list[list[list[str]]]:
+    """Sort temporal sensitivity measurements by contrast, frequency, and measurement index.
+
+    Args:
+        flattened_readings: Flat list of folder path strings, each containing
+            'contrastIdx', 'freqIdx', and 'measurementIdx' markers.
+
+    Returns:
+        A 3D list where the first dimension is contrast level, the second is
+        frequency level, and the third is measurement index.
+    """
     # Define the strings that represent each number to sort by
     rows_sort_string: str = "contrastIdx"
     cols_sort_string: str = "freqIdx"
@@ -140,9 +152,6 @@ def _sort_by_contrast_frequency_measurement(flattened_readings: list[str]) -> li
     return readings_matrix
 
 
-"""Define a subfunction to parse the MS linearity readings
-   into Python from their folder paths
-"""
 def _parse_ms_linearity_readings(folders: list[list[str]],
                                  apply_digital_gain: bool=False,
                                  apply_radiometric_correction: bool=False,
@@ -153,6 +162,27 @@ def _parse_ms_linearity_readings(folders: list[list[str]],
                                  verbose: Literal["tqdm", "text", "off"] = "off",
                                  differentiate_color: bool=False
                                  ) -> list[list[dict]]:
+    """Parse MS linearity readings into Python from their folder paths.
+
+    Args:
+        folders: 2D list of folder path strings, sorted by settings level
+            and measurement index.
+        apply_digital_gain: Whether to apply digital gain correction.
+        apply_radiometric_correction: Whether to apply RGB radiometric
+            correction.
+        use_mean_frame: Whether to average frames.
+        convert_time_units: Whether to convert time units.
+        convert_to_float: Whether to convert data to float.
+        mean_axes: Dictionary mapping sensor keys to axes over which to
+            compute the mean.
+        verbose: Verbosity level. 'tqdm' for progress bars, 'text' for
+            printed progress, 'off' for silent.
+        differentiate_color: Whether to differentiate color channels.
+
+    Returns:
+        A 2D list of parsed measurement dictionaries with the same
+        dimensional structure as the input folders.
+    """
     # Initialize a return list
     parsed_folders = copy.deepcopy(folders)
 
@@ -184,8 +214,17 @@ def _parse_ms_linearity_readings(folders: list[list[str]],
     return parsed_folders
 
 
-"""Define a helper function to sort the camera linearity measurements folderpaths"""
 def _sort_by_contrast_target_settings_measurement(folders: list[str]) -> list[list[list]]:
+    """Sort camera linearity measurement folder paths by contrast target, settings, and measurement.
+
+    Args:
+        folders: Flat list of folder path strings, each containing
+            'contrastTargetIdx', 'settingsIdx', and 'measurementIdx' markers.
+
+    Returns:
+        A 3D list where the first dimension is contrast target, the second
+        is settings index, and the third is measurement index.
+    """
     # Define the output 
     sorted_folders: list[list[list]] = []
 
@@ -222,7 +261,6 @@ def _sort_by_contrast_target_settings_measurement(folders: list[str]) -> list[li
 
     return sorted_folders
 
-"""Define a subfunction to parse the camera linearity readings into Python from their folder paths"""
 def _parse_camera_linearity_readings(folders: list[list[list[str]]],
                                      verbose: Literal["tqdm", "text", "off"] = "off",
                                      apply_radiometric_correction: bool=False,
@@ -230,6 +268,23 @@ def _parse_camera_linearity_readings(folders: list[list[list[str]]],
                                      convert_time_units: bool=False,
                                      differentiate_color: bool=False
                                     ) -> None:
+    """Parse camera linearity readings into Python from their folder paths.
+
+    Args:
+        folders: 3D list of folder path strings, sorted by contrast target,
+            settings index, and measurement index.
+        verbose: Verbosity level. 'tqdm' for progress bars, 'text' for
+            printed progress, 'off' for silent.
+        apply_radiometric_correction: Whether to apply RGB radiometric
+            correction.
+        apply_digital_gain: Whether to apply digital gain correction.
+        convert_time_units: Whether to convert time units.
+        differentiate_color: Whether to differentiate color channels.
+
+    Returns:
+        A 3D list of parsed measurement dictionaries with the same
+        dimensional structure as the input folders.
+    """
     # Deifne the output
     parsed_folders: list[list[list[str]]] | list[list[list[dict]]] = copy.deepcopy(folders)
 
@@ -265,9 +320,6 @@ def _parse_camera_linearity_readings(folders: list[list[list[str]]],
 
     return parsed_folders
 
-"""Define a subfunction to parse the temporal sensitivity
-   readings into Python from their folder paths
-"""
 def _parse_temporal_sensitivity_readings(folders: list[list[str]],
                                          apply_digital_gain: bool=False,
                                          apply_radiometric_correction: bool=False,
@@ -279,6 +331,29 @@ def _parse_temporal_sensitivity_readings(folders: list[list[str]],
                                          verbose: Literal["tqdm", "text", "off"] = "off",
                                          differentiate_color: bool=False
                                         ) -> list[list[dict]]:
+    """Parse temporal sensitivity readings into Python from their folder paths.
+
+    Args:
+        folders: 3D list of folder path strings, sorted by contrast level,
+            frequency level, and measurement index.
+        apply_digital_gain: Whether to apply digital gain correction.
+        apply_radiometric_correction: Whether to apply RGB radiometric
+            correction.
+        use_mean_frame: Whether to average frames.
+        convert_time_units: Whether to convert time units.
+        convert_to_float: Whether to convert data to float.
+        mean_axes: Dictionary mapping sensor keys to axes over which to
+            compute the mean.
+        contains_agc_metadata_dict: Dictionary mapping sensor keys to
+            whether they contain AGC metadata.
+        verbose: Verbosity level. 'tqdm' for progress bars, 'text' for
+            printed progress, 'off' for silent.
+        differentiate_color: Whether to differentiate color channels.
+
+    Returns:
+        A 3D list of parsed measurement dictionaries with the same
+        dimensional structure as the input folders.
+    """
     # Initialize a return list
     parsed_folders: list[list[str]] | list[list[dict]] = copy.deepcopy(folders)
 
@@ -318,14 +393,6 @@ def _parse_temporal_sensitivity_readings(folders: list[list[str]],
 
     return parsed_folders
 
-"""Given a directory to a measurement (e.g. "W1P2M3/NDF_0/),
-   return sorted lists of the measurements per 
-   calibration operation after decompressing 
-   and decrypting. Note: this sorts them by 
-   the index of their occurence. If the stimulate was not 
-   exposed in the same order per measurement for instance, 
-   the frequency and corresponding contrast will not be the same
-"""
 def load_sorted_calibration_files(experiment_path: str,
                                   apply_digital_gain: bool=False,
                                   use_mean_frame: bool=False,
@@ -336,7 +403,38 @@ def load_sorted_calibration_files(experiment_path: str,
                                   verbose: Literal["tqdm", "text", "off"] = "off",
                                   differentiate_color: bool=False,
                                   parse_files: bool=True
-                                  ) -> dict[str, list]:    
+                                  ) -> dict[str, list]:
+    """Load and return sorted calibration measurements after decompressing and decrypting.
+
+    Given a directory to a measurement (e.g. "W1P2M3/NDF_0/"), returns sorted
+    lists of the measurements per calibration operation. Note: this sorts them
+    by the index of their occurrence. If the stimulus was not exposed in the
+    same order per measurement, the frequency and corresponding contrast will
+    not match.
+
+    Args:
+        experiment_path: Path to the experiment directory containing NDF
+            subfolders.
+        apply_digital_gain: Whether to apply digital gain correction.
+        use_mean_frame: Whether to average frames.
+        apply_radiometric_correction: Whether to apply RGB radiometric
+            correction.
+        convert_time_units: Whether to convert time units.
+        convert_to_float: Whether to convert data to float.
+        mean_axes: Dictionary mapping sensor keys to axes over which to
+            compute the mean.
+        verbose: Verbosity level. 'tqdm' for progress bars, 'text' for
+            printed progress, 'off' for silent.
+        differentiate_color: Whether to differentiate color channels.
+        parse_files: If True, parse the files into Python dictionaries.
+            If False, return only the sorted folder paths.
+
+    Returns:
+        A dictionary with keys 'ms_linearity', 'temporal_sensitivity',
+        'phase_fitting', 'contrast_gamma', and 'world_linearity'. Values
+        are nested lists of parsed measurement dictionaries (if parse_files
+        is True) or sorted folder path strings (if parse_files is False).
+    """    
     
     # First, let's find the NDFs for this experiment 
     NDF_folders: list[str] = [os.path.join(experiment_path, folder) 

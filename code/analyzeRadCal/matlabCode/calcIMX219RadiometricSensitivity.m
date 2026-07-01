@@ -1,4 +1,22 @@
 function all_corrections_struct = calcIMX219RadiometricSensitivity(options)
+% Calculate imx219 radiometric sensitivity.
+%
+% Syntax:
+%   all_corrections_struct = calcIMX219RadiometricSensitivity(options)
+%
+% Description:
+%   This function calculate imx219 radiometric sensitivity.
+% Inputs:
+%   options                  - Input used by the function.
+%
+% Outputs:
+%   all_corrections_struct   - Output produced by the function.
+%
+% Examples:
+%{
+    all_corrections_struct = calcIMX219RadiometricSensitivity(options)
+%}
+
     arguments 
         options.verbose logical = false; 
     end 
@@ -44,11 +62,29 @@ end
 
 
 function all_corrections_struct = calculate_corrections_by_experiment(experiment_class, data_dir, metadata, sensorS, T, verbose)
-    % Import the Python utility libraries we wil luse 
-    % Note that Pi util is from light logger, which should not 
-    % be a dependency for this repo, but due to how integrated 
-    % the function I need is, I include it for now and will fix this 
-    % later 
+% Internal helper to calculate corrections by experiment.
+%
+% Syntax:
+%   all_corrections_struct = calculate_corrections_by_experiment(experiment_class, data_dir, metadata, sensorS, T, verbose)
+%
+% Description:
+%   This local helper function internal helper to calculate corrections by experiment within its parent workflow.
+% Inputs:
+%   experiment_class         - Input used by the function.
+%   data_dir                 - Path-like input used by the function.
+%   metadata                 - Input used by the function.
+%   sensorS                  - Input used by the function.
+%   T                        - Input used by the function.
+%   verbose                  - Input used by the function.
+%
+% Outputs:
+%   all_corrections_struct   - Output produced by the function.
+%
+% Examples:
+%{
+    % See calcIMX219RadiometricSensitivity.m for usage context.
+%}
+
     Pi_util = import_pyfile(getpref("lightLoggerAnalysis", "Pi_util_path")); 
     world_util = import_pyfile(getpref("lightLoggerAnalysis", "world_util_path"));
 

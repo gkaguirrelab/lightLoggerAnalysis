@@ -1,4 +1,39 @@
 function classifications = classifyIndoorOutdoorPeriods(raw_recording_dir, options)
+% Classify each MiniSpectrometer timepoint as indoor or outdoor based on illuminance
+%
+% Syntax:
+%   classifications = classifyIndoorOutdoorPeriods(raw_recording_dir)
+%   classifications = classifyIndoorOutdoorPeriods(raw_recording_dir, 'outdoor_threshold', 1000)
+%
+% Description:
+%   Loads MiniSpectrometer data from a raw recording directory, converts
+%   sensor counts to illuminance in lux, applies a sliding window mean
+%   over non-uniformly spaced timestamps, and classifies each timepoint
+%   as indoor (1) or outdoor (0) based on whether the smoothed illuminance
+%   falls below the outdoor threshold.
+%
+% Inputs:
+%   raw_recording_dir     - String. Path to the raw recording directory
+%                           containing light logger chunk data.
+%
+% Optional key/value pairs:
+%   'force_recalc'        - Logical (default: false). Force reload of the
+%                           Python MS utility library.
+%   'window_size_seconds' - Scalar double (default: 5). Sliding window
+%                           size in seconds for smoothing illuminance.
+%   'outdoor_threshold'   - Scalar double (default: 10^2.5). Illuminance
+%                           values at or above this threshold are
+%                           considered outdoor.
+%
+% Outputs:
+%   classifications       - Numeric vector. Binary vector where 1
+%                           indicates indoor and 0 indicates outdoor.
+%
+% Examples:
+%{
+    raw_dir = '/path/to/raw/recording';
+    classifications = classifyIndoorOutdoorPeriods(raw_dir, 'outdoor_threshold', 500);
+%}
     arguments
         raw_recording_dir;
         options.force_recalc = false; 
@@ -42,6 +77,26 @@ end
 
 % Local funciton to load in the MS timestamps and data 
 function [ms_t, ms_v] = load_ms_data(raw_recording_dir, ms_util) 
+% Internal helper to load ms data.
+%
+% Syntax:
+%   ms_t, ms_v = load_ms_data(raw_recording_dir, ms_util)
+%
+% Description:
+%   This local helper function internal helper to load ms data within its parent workflow.
+% Inputs:
+%   raw_recording_dir        - Path-like input used by the function.
+%   ms_util                  - Input used by the function.
+%
+% Outputs:
+%   ms_t                     - Output produced by the function.
+%   ms_v                     - Output produced by the function.
+%
+% Examples:
+%{
+    % See classifyIndoorOutdoorPeriods.m for usage context.
+%}
+
     ms_data_and_timestamps = cell(ms_util.ms_data_from_chunks(raw_recording_dir));
     ms_data = double(ms_data_and_timestamps{1}); 
     ms_timestamps_gka_time = int64(ms_data_and_timestamps{2} * (10 ^ 9))'; % nanoseconds 

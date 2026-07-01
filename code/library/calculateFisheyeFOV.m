@@ -1,20 +1,31 @@
 function fov_degrees = calculateFisheyeFOV(fisheyeIntrinsics)
-% calculateFisheyeFOV_Revised Calculates the field of view (FOV) of a fisheye camera.
+% Estimate the diagonal field of view of a fisheye calibration.
 %
-%   fov_degrees = calculateFisheyeFOV_Revised(fisheyeIntrinsics) calculates the
-%   diagonal field of view in degrees for a fisheye camera using the
-%   Scaramuzza model. This version interprets the MappingCoefficients as
-%   direct coefficients for the polynomial mapping from angle (theta) to
-%   distorted pixel radial distance (r_pixels).
+% Syntax:
+%   fov_degrees = calculateFisheyeFOV(fisheyeIntrinsics)
 %
-%   Inputs:
-%       fisheyeIntrinsics - A camera.FisheyeIntrinsics object obtained
-%                           from fisheye camera calibration in MATLAB.
+% Description:
+%   This function interprets MATLAB's fisheye calibration coefficients as
+%   a Scaramuzza-style polynomial that maps incident angle to radial pixel
+%   distance. It finds the furthest image corner from the distortion
+%   center, solves for the viewing angle that would map to that radius,
+%   and doubles that half-angle to obtain a diagonal field-of-view
+%   estimate in degrees. The function also plots the root-finding
+%   objective and prints intermediate diagnostics to help inspect unusual
+%   calibrations.
 %
-%   Outputs:
-%       fov_degrees       - The diagonal field of view of the camera in degrees.
+% Inputs:
+%   fisheyeIntrinsics        - `camera.FisheyeIntrinsics` object containing
+%                              mapping coefficients, distortion center,
+%                              and image size from MATLAB fisheye camera
+%                              calibration.
 %
-% Usage:
+% Outputs:
+%   fov_degrees              - Scalar. Estimated full diagonal field of
+%                              view in degrees. Returns `NaN` if a valid
+%                              root cannot be found.
+%
+% Examples:
 %{
     data = load('~/FLIC_admin/Equipment/ArduCam B0392 IMX219 Wide Angle M12/camera_intrinsics_calibration.mat');
     fisheyeIntrinsics = data.camera_intrinsics_calibration.results.Intrinsics;    
@@ -143,24 +154,30 @@ end
 
 
 function f_norm = getFocalLengthFromFisheyeIntrinsics(fisheyeIntrinsics)
-% getFocalLengthFromFisheyeIntrinsics Extracts an effective focal length
-% from a fisheyeIntrinsics object by creating a virtual pinhole camera.
+% Derive an effective pinhole focal length from fisheye intrinsics.
 %
+% Syntax:
 %   f_norm = getFocalLengthFromFisheyeIntrinsics(fisheyeIntrinsics)
-%   uses the undistortFisheyeImage function to generate a virtual
-%   cameraIntrinsics object, from which an effective focal length
-%   (fx) is extracted. This focal length is suitable for normalizing
-%   radial pixel distances in the Scaramuzza model.
 %
-%   Inputs:
-%       fisheyeIntrinsics - A camera.FisheyeIntrinsics object.
+% Description:
+%   This helper creates a dummy image, runs MATLAB's fisheye undistortion
+%   pipeline, and extracts the focal length of the virtual pinhole camera
+%   that MATLAB synthesizes. The result is useful when other analyses need
+%   a single effective focal-length scale for a fisheye calibration.
 %
-%   Outputs:
-%       f_norm            - The effective focal length in pixels (fx).
+% Inputs:
+%   fisheyeIntrinsics        - `camera.FisheyeIntrinsics` object to convert
+%                              into an equivalent pinhole representation.
+%
+% Outputs:
+%   f_norm                   - Scalar. Effective focal length in pixels,
+%                              taken from the undistorted pinhole camera.
+%
+% Examples:
+%{
+    % See calculateFisheyeFOV.m for usage context.
+%}
 
-% Create a dummy image just to pass to undistortFisheyeImage
-% The content of the image doesn't matter, only its size, which comes
-% from the intrinsics.
 dummyImage = zeros(fisheyeIntrinsics.ImageSize(1), fisheyeIntrinsics.ImageSize(2), 'uint8');
 
 % Undistort the dummy image to get the virtual pinhole intrinsics

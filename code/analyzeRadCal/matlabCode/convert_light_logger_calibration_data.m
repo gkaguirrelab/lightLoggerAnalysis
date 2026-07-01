@@ -264,6 +264,26 @@ end
 
 
 function converted_linearity = convert_ms_linearity_to_matlab(linearity_calibration_metadata, ms_linearity_paths, chunk_io, opts)
+% Internal helper to convert ms linearity to matlab.
+%
+% Syntax:
+%   converted_linearity = convert_ms_linearity_to_matlab(linearity_calibration_metadata, ms_linearity_paths, chunk_io, opts)
+%
+% Description:
+%   This local helper function internal helper to convert ms linearity to matlab within its parent workflow.
+% Inputs:
+%   linearity_calibration_metadata - Input used by the function.
+%   ms_linearity_paths       - Path-like input used by the function.
+%   chunk_io                 - Input used by the function.
+%   opts                     - Input used by the function.
+%
+% Outputs:
+%   converted_linearity      - Output produced by the function.
+%
+% Examples:
+%{
+    % See convert_light_logger_calibration_data.m for usage context.
+%}
 
     num_NDF_levels = numel(linearity_calibration_metadata.NDFs);
     num_settings_levels = numel(linearity_calibration_metadata.background_scalars);
@@ -329,6 +349,26 @@ end
 
 
 function converted_temporal_sensitivity = convert_temporal_sensitivity_to_matlab(temporal_sensitivity_calibration_metadata, temporal_sensitivity_paths, chunk_io, opts)
+% Internal helper to convert temporal sensitivity to matlab.
+%
+% Syntax:
+%   converted_temporal_sensitivity = convert_temporal_sensitivity_to_matlab(temporal_sensitivity_calibration_metadata, temporal_sensitivity_paths, chunk_io, opts)
+%
+% Description:
+%   This local helper function internal helper to convert temporal sensitivity to matlab within its parent workflow.
+% Inputs:
+%   temporal_sensitivity_calibration_metadata - Input used by the function.
+%   temporal_sensitivity_paths - Path-like input used by the function.
+%   chunk_io                 - Input used by the function.
+%   opts                     - Input used by the function.
+%
+% Outputs:
+%   converted_temporal_sensitivity - Output produced by the function.
+%
+% Examples:
+%{
+    % See convert_light_logger_calibration_data.m for usage context.
+%}
 
     num_NDF_levels = numel(temporal_sensitivity_calibration_metadata.NDFs);
     num_contrast_levels = numel(temporal_sensitivity_calibration_metadata.contrast_levels);
@@ -410,6 +450,26 @@ end
 
 
 function converted_linearity = convert_camera_linearity_to_matlab(linearity_calibration_metadata, world_linearity_paths, chunk_io, opts)
+% Internal helper to convert camera linearity to matlab.
+%
+% Syntax:
+%   converted_linearity = convert_camera_linearity_to_matlab(linearity_calibration_metadata, world_linearity_paths, chunk_io, opts)
+%
+% Description:
+%   This local helper function internal helper to convert camera linearity to matlab within its parent workflow.
+% Inputs:
+%   linearity_calibration_metadata - Input used by the function.
+%   world_linearity_paths    - Path-like input used by the function.
+%   chunk_io                 - Input used by the function.
+%   opts                     - Input used by the function.
+%
+% Outputs:
+%   converted_linearity      - Output produced by the function.
+%
+% Examples:
+%{
+    % See convert_light_logger_calibration_data.m for usage context.
+%}
 
     num_NDF_levels = numel(linearity_calibration_metadata.NDFs);
     num_contrast_targets = numel(linearity_calibration_metadata.contrast_agc_targets);

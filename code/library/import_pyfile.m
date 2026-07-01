@@ -1,4 +1,32 @@
 function module = import_pyfile(path)
+% Import a Python module directly from an explicit file path.
+%
+% Syntax:
+%   module = import_pyfile(path)
+%
+% Description:
+%   This function loads a Python source file by absolute path instead of by
+%   module basename. It creates a unique synthetic module name for every
+%   import so multiple different files with the same basename can coexist
+%   in one MATLAB/Python session, and it temporarily ensures the source
+%   directory is present on `py.sys.path` so sibling imports inside that
+%   module still resolve correctly. This avoids the common failure mode in
+%   which Python reuses a cached module with the right name but from the
+%   wrong project directory.
+%
+% Inputs:
+%   path                     - String or char vector. Full path to the
+%                              Python `.py` file to import.
+%
+% Outputs:
+%   module                   - Python module object corresponding to the
+%                              requested file.
+%
+% Examples:
+%{
+    module = import_pyfile("/path/to/world_util.py");
+%}
+
     arguments
         path {mustBeText}; % The path to the Python file we want to import
     end

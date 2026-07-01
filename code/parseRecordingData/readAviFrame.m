@@ -1,4 +1,24 @@
 function frame = readAviFrame(video_path, idx, options)
+% Read avi frame.
+%
+% Syntax:
+%   frame = readAviFrame(video_path, idx, options)
+%
+% Description:
+%   This function read avi frame.
+% Inputs:
+%   video_path               - Path-like input used by the function.
+%   idx                      - Input used by the function.
+%   options                  - Input used by the function.
+%
+% Outputs:
+%   frame                    - Output produced by the function.
+%
+% Examples:
+%{
+    frame = readAviFrame(video_path, idx, options)
+%}
+
     arguments 
         video_path {mustBeText}; 
         idx {mustBeNumeric}; 

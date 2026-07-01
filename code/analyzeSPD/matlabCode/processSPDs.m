@@ -235,7 +235,24 @@ function activityDataAcrossSubjects = processSPDsAcrossSubjects(input_dir, outpu
 end
 
 function mustBeVideoType(value)
-    % Accept both char and string
+% Internal helper to must be video type.
+%
+% Syntax:
+%   mustBeVideoType(value)
+%
+% Description:
+%   This local helper function internal helper to must be video type within its parent workflow.
+% Inputs:
+%   value                    - Input used by the function.
+%
+% Outputs:
+%   None.
+%
+% Examples:
+%{
+    % See processSPDs.m for usage context.
+%}
+
     valueStr = string(value);
 
     validOptions = ["justProjection", "virtuallyFoveated"];

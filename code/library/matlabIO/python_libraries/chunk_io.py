@@ -1,3 +1,10 @@
+"""Chunk-based I/O for light logger sensor recordings.
+
+Provides parsers for world camera, pupil camera, and minispect/sunglasses
+sensor data stored as chunked numpy files, along with utilities for grouping
+chunk files by sensor and locating chunks by timestamp.
+"""
+
 import gc
 import os
 from natsort import natsorted
@@ -16,7 +23,6 @@ import world_util
 import ms_util 
 import pupil_util
 
-"""Define the parser for the MS and sunglasses data"""
 def minispect_and_sunglasses_chunk_parser(chunk_paths: tuple[str],
                                           apply_digital_gain: bool=False, 
                                           convert_time_units: bool=False,
@@ -30,8 +36,39 @@ def minispect_and_sunglasses_chunk_parser(chunk_paths: tuple[str],
                                           contains_AGC_metadata: bool=False, 
                                           password="1234"
                                          ) -> dict[str, dict]:
-    
-    # Initialize return variable 
+    """Parse one mixed minispect/sunglasses chunk into project-standard data.
+
+    A single MS chunk stores multiple logical sensors together. This parser
+    loads the shared timestamp vector and packed value matrix, derives the
+    accelerometer timebase used by the minispect utilities, splits the
+    trailing sunglasses samples away from the multisensor payload, and then
+    delegates the minispect decoding to ``ms_util.parse_readings``.
+
+    Args:
+        chunk_paths: Tuple of (metadata_path, values_path) for the chunk,
+            or an empty tuple if no readings exist.
+        apply_digital_gain: Unused placeholder so this parser shares a
+            common call signature with the camera parsers.
+        convert_time_units: Unused because these timestamps are already in
+            seconds.
+        use_mean_frame: Unused because these values are not image frames.
+        convert_to_float: Whether to convert values to float64.
+        apply_phase_offset: Whether to apply the MS time offset correction.
+        apply_RGB_correction: Unused for this non-image sensor family.
+        apply_fielding_function: Unused for this non-image sensor family.
+        debayer_images: Unused for this non-image sensor family.
+        mean_axes: Unused placeholder for signature compatibility.
+        contains_AGC_metadata: Unused because AGC metadata is not expected
+            in MS chunks.
+        password: Reserved for future encrypted-chunk support; currently
+            unused.
+
+    Returns:
+        Dictionary with 'M' (minispect) and 'S' (sunglasses) keys, each
+        containing 't' (timestamps) and 'v' (values) sub-dictionaries.
+    """
+
+    # Initialize return variable
     chunk_dict: dict[str, dict] = {'M': {}, 'S': {}}
 
     # If there were no readings for this sensor 
@@ -99,7 +136,6 @@ def minispect_and_sunglasses_chunk_parser(chunk_paths: tuple[str],
 
     return chunk_dict
 
-"""Define the parser for the pupil camera data"""
 def pupil_chunk_parser(chunk_paths: tuple[str],
                        apply_digital_gain: bool=False, 
                        convert_time_units: bool=False,
@@ -113,7 +149,37 @@ def pupil_chunk_parser(chunk_paths: tuple[str],
                        contains_AGC_metadata: bool=False, 
                        password="1234"
                       ) -> dict[str, dict]:
-    # Initialize return variable 
+    """Parse one pupil-camera chunk into timestamps, frames, and settings.
+
+    The parser loads the metadata matrix and frame stack, separates the
+    timestamp column from any AGC setting columns, and then applies the
+    subset of transformations that are meaningful for pupil data: optional
+    phase-offset correction, optional digital-gain scaling, optional frame
+    averaging, and optional conversion to ``float64``.
+
+    Args:
+        chunk_paths: Tuple of (metadata_path, values_path) for the chunk,
+            or an empty tuple if no readings exist.
+        apply_digital_gain: Whether to apply digital gain scaling per frame.
+        convert_time_units: Unused because pupil timestamps are already in
+            seconds.
+        use_mean_frame: Whether to reduce frames by averaging over axes.
+        convert_to_float: Whether to convert values to float64.
+        apply_phase_offset: Whether to apply the pupil time offset.
+        apply_RGB_correction: Unused for the pupil parser.
+        apply_fielding_function: Unused for the pupil parser.
+        debayer_images: Unused because pupil frames are not handled as raw
+            Bayer images here.
+        mean_axes: Axes over which to compute the mean when reducing.
+        contains_AGC_metadata: Whether AGC metadata columns are present.
+        password: Reserved for future encrypted-chunk support; currently
+            unused.
+
+    Returns:
+        Dictionary with 'P' key containing 't' (timestamps), 'v' (values),
+        and 'settings' (AGC metadata) sub-dictionaries.
+    """
+    # Initialize return variable
     chunk_dict: dict[str, dict] = {'P': {}}
 
     # If there were no readings for this sensor 
@@ -179,7 +245,6 @@ def pupil_chunk_parser(chunk_paths: tuple[str],
 
     return chunk_dict
 
-"""Define the individual per chunk parser for the world camera data"""
 def world_chunk_parser(chunk_paths: tuple[str],
                        apply_digital_gain: bool=False,
                        convert_time_units: bool=False,
@@ -194,7 +259,44 @@ def world_chunk_parser(chunk_paths: tuple[str],
                        password="1234",
                        differentiate_color: bool=False
                        ) -> dict[str, dict]:
-    # Initialize a return value 
+    """Parse one world-camera chunk with optional calibration transforms.
+
+    This parser is the main Python entry point for raw world-camera chunks.
+    It loads the timestamp/AGC metadata matrix and Bayer frame stack, then
+    conditionally applies timestamp conversion, optional phase correction,
+    optional digital gain, optional fielding and Bayer RGB scaling, optional
+    debayering, and optional mean reductions. When
+    ``differentiate_color=True`` together with ``use_mean_frame=True``, the
+    spatial reduction is performed separately for the Bayer ``R``, ``G``,
+    and ``B`` pixel classes rather than on the frame as a whole.
+
+    Args:
+        chunk_paths: Tuple of (metadata_path, values_path) for the chunk,
+            or an empty tuple if no readings exist.
+        apply_digital_gain: Whether to apply per-frame digital gain scaling.
+        convert_time_units: Whether to convert nanosecond timestamps to
+            seconds.
+        use_mean_frame: Whether to reduce frames by averaging over axes.
+        convert_to_float: Whether to convert values to float64.
+        apply_phase_offset: Whether to apply the world camera time offset.
+        apply_RGB_correction: Whether to apply per-channel RGB scalar
+            corrections on the Bayer pattern.
+        apply_fielding_function: Whether to apply the spatial fielding
+            function correction.
+        debayer_images: Whether to debayer the raw Bayer frames.
+        mean_axes: Axes over which to compute the mean when reducing.
+        contains_AGC_metadata: Whether AGC metadata columns are present.
+        password: Reserved for future encrypted-chunk support; currently
+            unused.
+        differentiate_color: When True and use_mean_frame is True, computes
+            separate per-color-channel means from the Bayer pattern.
+
+    Returns:
+        Dictionary with a ``'W'`` entry containing timestamps at
+        ``['W']['t']``, processed frame data or reduced statistics at
+        ``['W']['v']``, and per-frame AGC arrays at ``['W']['settings']``.
+    """
+    # Initialize a return value
     chunk_dict: dict = {'W': {}} 
     
     # If there was no chunk paths passed in, 
@@ -330,15 +432,31 @@ def world_chunk_parser(chunk_paths: tuple[str],
     return chunk_dict
 
 
-"""Inspect a recording directory and return a dictionary of sensor names
-   with all of the paths to the chunks for that sensor in order
-"""
-def group_sensors_files(recording_path: str) -> dict[str, list[tuple]]:    
-    """Find all of the chunk filepaths of the sensors and group them into tuples of (t, frames)
-    Do this by iterating over the files over the recording in numerically sorted order (to order the chunks properly),
-    then find the files that denote they are the metadata of the sensors. Then, simply remove the metadata part of 
-    the filename and you arrive at the value file"""
+def group_sensors_files(recording_path: str) -> dict[str, list[tuple]]:
+    """Pair sensor metadata chunks with their matching value files.
+
+    The light-logger recording format stores each chunk as a metadata array
+    plus a value file whose name differs only by the presence of the
+    ``"_metadata"`` marker. This helper groups those pairs by sensor and
+    preserves natural-sort ordering so chunk indices line up with the
+    recording timeline.
+
+    Args:
+        recording_path: Recording directory to inspect.
+
+    Returns:
+        Dictionary keyed by ``"W"``, ``"P"``, and ``"M"`` whose values are
+        ordered ``(metadata_path, value_path)`` tuples.
+    """
     def group_sensor_files(sensor_name: str) -> list:
+        """Collect ordered chunk pairs for one sensor namespace.
+
+        Args:
+            sensor_name: Filename fragment identifying the sensor stream.
+
+        Returns:
+            List of ``(metadata_path, value_path)`` tuples for that sensor.
+        """
         return [ ( os.path.join(recording_path, file), os.path.join(recording_path, file.replace("_metadata", "") ) ) 
                    for file in natsorted(os.listdir(recording_path)) 
                    if sensor_name in file and "metadata" in file
@@ -349,15 +467,30 @@ def group_sensors_files(recording_path: str) -> dict[str, list[tuple]]:
            }
 
 
-"""Given a timestamp range from a sensor video, find the range of  
-   chunks that compose this range
-"""
-def find_chunks_by_timestamp(recording_path: str, 
+def find_chunks_by_timestamp(recording_path: str,
                              sensor_name: str, 
                              timestamp_range: tuple[float | None] = (0, None)
                             ) -> tuple[int | None]:
-    
-    # Retrieve the files for this sensor 
+    """Translate a relative time window into the corresponding chunk range.
+
+    The function first establishes the recording's relative time axis from
+    the first and last chunk timestamps, then scans the chunk boundaries
+    until it finds the chunk containing the requested start time and the
+    chunk containing the requested end time. The returned end index follows
+    normal Python slice semantics and is therefore exclusive.
+
+    Args:
+        recording_path: Path to the recording directory.
+        sensor_name: Single-character sensor key ('W', 'P', or 'M').
+        timestamp_range: Tuple of (start_seconds, end_seconds) relative
+            to recording start. None for end means the recording end.
+
+    Returns:
+        ``(start_chunk_index, end_chunk_index)`` with an exclusive end
+        bound. Either entry can remain ``None`` if that edge is never found.
+    """
+
+    # Retrieve the files for this sensor
     chunks_paths: dict[str, list[tuple]] = group_sensors_files(recording_path)[sensor_name]
     
     # Now, we have to remember that all timestamps in the video are calculated off of 
@@ -433,6 +566,42 @@ def parse_chunks(recording_path: str,
                  differentiate_color: bool=False,
                  verbose: bool=False
                 ) -> list[dict[str, dict]]:
+    """Parse an entire recording across all supported sensor streams.
+
+    This is the orchestration layer above the individual sensor parsers. It
+    groups files by sensor, resolves either explicit chunk ranges or
+    timestamp-derived chunk ranges, iterates across the union of chunk
+    positions present in the recording, and asks the appropriate parser to
+    decode each sensor at each chunk index. When a sensor has no data for a
+    selected chunk position, that parser's empty-output convention is used
+    so the output structure remains regular.
+
+    Args:
+        recording_path: Path to the recording directory.
+        apply_digital_gain: Whether to apply digital gain correction.
+        use_mean_frame: Whether to reduce frames by averaging.
+        convert_time_units: Whether to convert timestamps to seconds.
+        convert_to_float: Whether to convert values to float64.
+        apply_phase_correction: Whether to apply sensor phase offsets.
+        apply_RGB_correction: Whether to apply RGB scalar corrections.
+        apply_fielding_function: Whether to apply the fielding function.
+        debayer_images: Whether to debayer Bayer-pattern frames.
+        time_ranges: Optional per-sensor relative time windows used to
+            select chunks.
+        chunk_ranges: Optional per-sensor explicit chunk-index ranges.
+        mean_axes: Per-sensor axes passed through when frame means are
+            requested.
+        contains_agc_metadata_dict: Per-sensor flags describing whether AGC
+            columns exist in the metadata arrays.
+        password: Reserved for future encrypted-chunk support.
+        differentiate_color: Whether to compute per-color-channel means
+            for the world camera.
+        verbose: Whether to display a progress bar.
+
+    Returns:
+        List of per-chunk dictionaries containing the parsed outputs from
+        the sensor-specific parsers.
+    """
 
     # Ensure the time_ranges and chunk ranges are tuples of ints 
     for parameter_dict in (time_ranges, chunk_ranges):

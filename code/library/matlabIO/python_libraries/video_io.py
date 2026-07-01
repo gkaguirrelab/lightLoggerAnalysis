@@ -1,4 +1,12 @@
-import numpy as np 
+"""Video I/O utilities for light logger recordings.
+
+Provides functions for reading, writing, converting, and transforming
+video data from the light logger's world camera sensor, including
+chunk-based video assembly, HDF5 export, frame extraction, and
+OCR-based event detection.
+"""
+
+import numpy as np
 import cv2
 import warnings
 import time
@@ -31,15 +39,34 @@ for path in (light_logger_analysis_dir_path, world_util_path):
 # Import world camera utility library
 import world_util
 
-"""Inspect a recording directory and return a dictionary of sensor names
-   with all of the paths to the chunks for that sensor in order
-"""
-def group_sensors_files(recording_path: str) -> dict[str, list[tuple]]:    
-    """Find all of the chunk filepaths of the sensors and group them into tuples of (t, frames)
-    Do this by iterating over the files over the recording in numerically sorted order (to order the chunks properly),
-    then find the files that denote they are the metadata of the sensors. Then, simply remove the metadata part of 
-    the filename and you arrive at the value file"""
+def group_sensors_files(recording_path: str) -> dict[str, list[tuple]]:
+    """Pair per-sensor chunk metadata files with their data payloads.
+
+    Each sensor chunk is stored as two sibling files: a metadata array whose
+    filename contains ``"_metadata"`` and a value file with the same stem
+    minus that marker. This helper performs that filename bookkeeping once
+    and returns naturally sorted pairs for the world, pupil, and MS
+    sensors.
+
+    Args:
+        recording_path: Directory containing the chunk files for one
+            recording.
+
+    Returns:
+        Dictionary keyed by ``"W"``, ``"P"``, and ``"M"`` whose values are
+        ordered ``(metadata_path, value_path)`` tuples.
+    """
     def group_sensor_files(sensor_name: str) -> list:
+        """Collect the ordered chunk-file pairs for one sensor namespace.
+
+        Args:
+            sensor_name: Filename fragment identifying the sensor, such as
+                ``"world"``, ``"pupil"``, or ``"ms"``.
+
+        Returns:
+            Naturally sorted list of ``(metadata_path, value_path)`` tuples
+            for that sensor.
+        """
         return [ ( os.path.join(recording_path, file), os.path.join(recording_path, file.replace("_metadata", "") ) ) 
                    for file in natsorted(os.listdir(recording_path)) 
                    if sensor_name in file and "metadata" in file
@@ -49,8 +76,19 @@ def group_sensors_files(recording_path: str) -> dict[str, list[tuple]]:
             for sensor in ("world", "pupil", "ms")
            }
 
-"""Given a directory of frames, read them in and convert to video"""
 def dir_to_video(dir_path: str, output_path: str, fps: float=30) -> None:
+    """Encode a directory of image files into a single FFV1 video.
+
+    The function natural-sorts the visible files in ``dir_path``, uses the
+    first image to establish the frame size, and then writes every frame to
+    an OpenCV ``VideoWriter`` after verifying that all images share the same
+    shape.
+
+    Args:
+        dir_path: Directory containing one image file per frame.
+        output_path: Destination video path.
+        fps: Frame rate to encode into the output file.
+    """
     # Gather all of the frame paths 
     frame_paths: list[str] = [os.path.join(dir_path, filename)
                               for filename in natsorted(os.listdir(dir_path))
@@ -89,12 +127,26 @@ def dir_to_video(dir_path: str, output_path: str, fps: float=30) -> None:
     return 
 
 
-"""Given the frames to a video, generate an .avi video at the desired location 
-   of those frames at the specified FPS
-"""
-def frames_to_video(frames: np.ndarray | queue.Queue, output_path: str, fps: float, 
-                    stop_event: object=None, timeout: float | None=None 
+def frames_to_video(frames: np.ndarray | queue.Queue, output_path: str, fps: float,
+                    stop_event: object=None, timeout: float | None=None
                    ) -> None:
+    """Write frames to a video from either a stack or a live queue.
+
+    Two usage patterns are supported. If ``frames`` is a NumPy array, the
+    function writes that fixed stack directly. If it is a queue-like object,
+    the function waits for the first frame to determine the video geometry
+    and then keeps consuming frames until it receives a ``None`` sentinel,
+    times out, or sees an optional stop event.
+
+    Args:
+        frames: Either a NumPy frame stack or a queue that yields frames
+            followed by ``None``.
+        output_path: Destination video path.
+        fps: Frame rate written into the output container.
+        stop_event: Optional event that aborts waiting or writing early.
+        timeout: Maximum number of seconds to wait for a queued frame before
+            raising an exception.
+    """
    
     # Retreive a sample frame from the video so we can get some information 
     # about how it should look
@@ -174,8 +226,15 @@ def frames_to_video(frames: np.ndarray | queue.Queue, output_path: str, fps: flo
 
     return  
 
-"""Given a path to a video, return the size of each frame of the video"""
 def inspect_video_framesize(video_path: str) -> tuple:
+    """Return the (height, width) frame dimensions of a video.
+
+    Args:
+        video_path: Path to the video file.
+
+    Returns:
+        Tuple of (frame_height, frame_width).
+    """
     assert os.path.exists(video_path), f"Video path: {video_path} does not exist"
 
     # Open the video stream
@@ -193,8 +252,17 @@ def inspect_video_framesize(video_path: str) -> tuple:
 
     return frame.shape[:2]
 
-"""Given a path to a video, return the FPS of that video"""
 def inspect_video_FPS(video_path: str) -> float:
+    """Return the frames per second of a video.
+
+    Falls back to a warning if cv2 reports 0 FPS.
+
+    Args:
+        video_path: Path to the video file.
+
+    Returns:
+        Frames per second as a float.
+    """
     assert os.path.exists(video_path), f"Video path: {video_path} does not exist"
 
     # Open the video via cv2 
@@ -211,8 +279,19 @@ def inspect_video_FPS(video_path: str) -> float:
     # Return the number of frames 
     return fps
 
-"""Given a path to a video, return the number of frames in that video"""
 def inspect_video_frame_count(video_path: str) -> int:
+    """Return the total number of frames in a video.
+
+    First attempts to read the frame count from cv2 metadata. If that
+    returns zero, falls back to counting frames by iterating through
+    the entire video.
+
+    Args:
+        video_path: Path to the video file.
+
+    Returns:
+        Total number of frames in the video.
+    """
     assert os.path.exists(video_path), f"Video path: {video_path} does not exist"
 
     # Open the video via cv2 
@@ -245,8 +324,21 @@ def inspect_video_frame_count(video_path: str) -> int:
     # Return the number of frames 
     return frame_num
 
-"""Given a path to a video, extract the provided frames idx from it as a numpy array"""
-def extract_frames_from_video(video_path: str, frames_idx: Iterable, is_grayscale: bool=False) -> np.ndarray: 
+def extract_frames_from_video(video_path: str, frames_idx: Iterable, is_grayscale: bool=False) -> np.ndarray:
+    """Extract specific frames from a video by their indices.
+
+    Seeks to each requested frame index and reads it, converting to
+    grayscale or RGB as specified.
+
+    Args:
+        video_path: Path to the video file.
+        frames_idx: Iterable of frame indices to extract.
+        is_grayscale: If True, converts frames to grayscale; otherwise
+            converts from BGR to RGB.
+
+    Returns:
+        Numpy array of extracted frames with dtype uint8.
+    """
     assert os.path.exists(video_path), f"Video path: {video_path} does not exist"
     
     # First, sort the frame numbers we want to extract 
@@ -295,16 +387,31 @@ def extract_frames_from_video(video_path: str, frames_idx: Iterable, is_grayscal
 
     return np.array(extracted_frames, dtype=np.uint8)
 
-"""Given a video file, destruct this video into an array of 
-   frames within a given bounds of frames in the video (exclusive).
-   Return as a 2D or 3D array based on if the original video was grayscale.
-   Optionally stream the frames to a queue, not loading in all of them into 
-   memory at once
-"""
-def destruct_video(video_path: str, start_frame: int=0, end_frame: int=float("inf"), 
+def destruct_video(video_path: str, start_frame: int=0, end_frame: int=float("inf"),
                    is_grayscale: bool=False, q: queue.Queue=None, stop_event: object=None,
                    verbose: bool=False,
                   ) -> None | np.ndarray:
+    """Decompose a video into individual frames within a given range.
+
+    Reads frames from start_frame to end_frame (exclusive), optionally
+    converting to grayscale. Frames can be returned as a numpy array or
+    streamed to a multiprocessing Queue with a None sentinel at the end.
+
+    Args:
+        video_path: Path to the video file.
+        start_frame: First frame index to read (supports negative indexing).
+        end_frame: Last frame index (exclusive). Use float("inf") for all
+            remaining frames. Supports negative indexing.
+        is_grayscale: If True, converts frames to grayscale.
+        q: Optional multiprocessing Queue for streaming frames. When
+            provided, frames are put into the queue instead of returned.
+        stop_event: Optional multiprocessing Event to signal early stop.
+        verbose: If True, displays a progress bar.
+
+    Returns:
+        Numpy array of frames if q is None, otherwise None (frames are
+        streamed to the queue).
+    """
     # Let's get some information about the video 
     frame_height, frame_width = inspect_video_framesize(video_path)
     num_frames: int = inspect_video_frame_count(video_path)
@@ -379,8 +486,7 @@ def destruct_video(video_path: str, start_frame: int=0, end_frame: int=float("in
 
     return frames
 
-"""Convert a video to a matlab 7.3 .mat file saved in HDF5 format"""
-def video_to_hdf5(video_path: str, output_path: str, 
+def video_to_hdf5(video_path: str, output_path: str,
                  color_mode: Literal["GRAY", "RGB", "BGR"]="RGB",
                  start_frame: int=0, 
                  end_frame: int | float = float("inf"),
@@ -391,6 +497,26 @@ def video_to_hdf5(video_path: str, output_path: str,
                  ceiling: int=255, 
                  floor: int=0
                 ) -> None:
+    """Convert a video to an HDF5 file with optional pixel transformations.
+
+    Reads frames from the specified interval, applies optional floor/ceiling
+    clipping and NaN substitution, and writes each frame as float64 into a
+    resizable HDF5 dataset.
+
+    Args:
+        video_path: Path to the input video file.
+        output_path: Output path for the HDF5 file (must end in .hdf5).
+        color_mode: Color space for output frames: "GRAY", "RGB", or "BGR".
+        start_frame: First frame index to process.
+        end_frame: Last frame index (exclusive). Use float("inf") for all.
+        apply_floor_celing: If True, clips pixels where any channel hits
+            the floor or ceiling to fully black or white.
+        zeros_as_nans: If True, replaces zero-valued pixels with NaN.
+        ceiling_as_nans: If True, replaces ceiling-valued pixels with NaN.
+        visualize_results: If True, displays a progress bar.
+        ceiling: Upper pixel value threshold for clipping.
+        floor: Lower pixel value threshold for clipping.
+    """
     assert os.path.exists(video_path), f"Video path: {video_path} does not exist"
     assert output_path.endswith(".hdf5"), f"Output path: {output_path} must end in .hdf5"
 
@@ -549,6 +675,31 @@ def _load_world_chunk_shared_memory(chunk_paths: list[tuple[str, str]],
     # This is cheap: we are only attaching this process to named shared-memory blocks,
     # not copying any chunk data yet. These SharedMemory objects are just handles that
     # let this process see the same byte buffers as the main process.
+    """Background loader that stages world chunks into shared memory.
+
+    ``world_chunks_to_video`` uses this helper in a separate process so that
+    disk reads for the next chunk can overlap with transformation and video
+    writing of the current chunk. The loader waits for the main process to
+    announce a free shared-memory slot, memory-maps the next chunk from
+    disk, copies its metadata and frame data into that slot, and reports the
+    ready slot number and valid lengths back through a small queue message.
+
+    Args:
+        chunk_paths: Ordered ``(metadata_path, frame_path)`` tuples for the
+            world sensor.
+        chunk_indices: Chunk indices that this loader should process.
+        metadata_shape: Shape used to wrap each shared metadata buffer.
+        metadata_dtype: Dtype used to interpret the metadata bytes.
+        frame_shape: Shape used to wrap each shared frame buffer.
+        frame_dtype: Dtype used to interpret the frame bytes.
+        metadata_shm_names: Names of the shared-memory blocks holding
+            metadata.
+        frame_shm_names: Names of the shared-memory blocks holding frames.
+        free_buffer_queue: Queue of buffer-slot indices that can be reused.
+        ready_buffer_queue: Queue used to notify the main process that a
+            buffer has been populated.
+        stop_event: Event used to request early termination.
+    """
     metadata_shms: list[shared_memory.SharedMemory] = [shared_memory.SharedMemory(name=name) for name in metadata_shm_names]
     frame_shms: list[shared_memory.SharedMemory] = [shared_memory.SharedMemory(name=name) for name in frame_shm_names]
 
@@ -621,7 +772,26 @@ def _clip_buffer_compiled(raw_frame_buffer: np.ndarray,
                           floor: int,
                           ceiling: int,
                         ) -> None:
+    """Propagate raw Bayer clipping into the debayered RGB buffer.
 
+    ``debayered_provenance_map`` records which raw Bayer samples contribute
+    to each debayered RGB pixel. For every frame and output pixel, this
+    helper scans those contributors. If any contributor is at or below
+    ``floor``, the entire RGB pixel is forced to ``floor``. Otherwise, if
+    any contributor is at or above ``ceiling``, the entire RGB pixel is
+    forced to ``ceiling``. This preserves the project's semantics for
+    floor/ceiling clipping after demosaicing while avoiding the temporary
+    arrays a purely vectorized NumPy approach would create.
+
+    Args:
+        raw_frame_buffer: Raw Bayer frames with shape ``(n, h, w)``.
+        debayered_frame_buffer: Debayered RGB frames with shape
+            ``(n, h, w, 3)`` that are modified in place.
+        debayered_provenance_map: Contributor coordinates for each debayered
+            pixel.
+        floor: Lower clipping threshold.
+        ceiling: Upper clipping threshold.
+    """
     debayered_height: int = debayered_provenance_map.shape[0]
     debayered_width: int = debayered_provenance_map.shape[1]
 
@@ -699,6 +869,47 @@ def world_chunks_to_video(recording_path: str,
 
     ##########################
 
+    """Reconstruct a playable video from chunked world-camera recordings.
+
+    The function overlaps chunk loading and frame processing with a
+    two-buffer shared-memory pipeline. For each chunk it reads timestamps
+    and raw Bayer frames, optionally applies digital gain, fielding, and RGB
+    scaling, optionally debayers the frames, optionally propagates raw
+    floor/ceiling violations into the RGB result, fills timestamp gaps with
+    dummy frames when requested, and finally writes the output to an FFV1
+    ``.avi`` file.
+
+    Args:
+        recording_path: Recording directory containing ``config.pkl`` and
+            world chunk files.
+        output_path: Destination ``.avi`` path.
+        apply_color_weights: Whether to apply
+            ``world_util.WORLD_RGB_SCALARS`` to raw Bayer pixels.
+        apply_floor_ceiling: Whether to set a debayered pixel to ``floor``
+            or ``ceiling`` when any contributing raw Bayer sample crosses
+            those thresholds.
+        remove_dark_noise: Whether to zero pixels that remain at or below
+            ``WORLD_DARK_NOISE`` after clipping.
+        debayer_images: Whether to convert Bayer frames to RGB before
+            writing.
+        apply_digital_gain: Whether to multiply each frame by the stored
+            per-frame digital gain.
+        apply_fielding_function: Whether to apply the registered fielding
+            correction map for the frame size.
+        fill_missing_frames: Whether to synthesize black frames when
+            timestamp gaps imply dropped frames.
+        convert_to_seconds: Whether to convert world timestamps from
+            nanoseconds to seconds before timing calculations.
+        embed_timestamps: Reserved for byte-level timestamp embedding. The
+            current implementation still raises ``NotImplementedError`` if
+            this is requested.
+        verbose: Whether to show progress bars.
+        start_end: Inclusive/exclusive chunk-index range to render.
+        ceiling: Upper clipping threshold used with
+            ``apply_floor_ceiling``.
+        floor: Lower clipping threshold used with
+            ``apply_floor_ceiling``.
+    """
     if(fill_missing_frames and not convert_to_seconds):
         raise Exception("Haven't handled this case. This will generate millions of extra frames")
 
@@ -1116,30 +1327,49 @@ def find_events(video_path: str,
                 verbose: bool = False,
                 show_images: bool=False
                ) -> int | None:
-    """
-    Detect frames in a video that contain a target text string using OCR.
+    """Search a video for frames whose OCR output contains target text.
 
-    Strategy:
-    1. Coarse pass (fast): sample every `frame_step` frames and detect text presence.
-    2. Refinement pass (optional): densely check frames near coarse detections.
-    3. Return indices of frames where text is detected.
+    The search runs in two passes. A coarse pass samples every
+    ``frame_step`` frames and uses a fast substring test on Tesseract's full
+    text output. When ``refine_hits`` is enabled, the function then revisits
+    a small neighborhood around each coarse hit and performs a more precise
+    confidence-filtered OCR pass to localize the matching frame more
+    accurately.
 
-    If verbose:
-        - Plot detection scores over time
-        - Display detected frames
+    Args:
+        video_path: Video file to inspect.
+        search_text: Text snippet to search for in OCR output.
+        min_conf: Minimum Tesseract word confidence used during the
+            refinement pass.
+        case_sensitive: Whether matching should preserve case.
+        frame_step: Stride used for the coarse scan.
+        roi: Optional crop window ``(y0, y1, x0, x1)`` applied before OCR.
+        refine_hits: Whether to run the dense second pass around coarse
+            detections.
+        refine_radius: Number of frames on either side of a coarse hit to
+            revisit during refinement.
+        verbose: Whether to show progress bars and a detection-score plot.
+        show_images: When ``verbose`` is also ``True``, display each matched
+            frame.
 
-    NOTE:
-    - Returns ONLY the last detected frame index (as in original behavior).
+    Returns:
+        The last matching frame index, or ``None`` if no frame contains the
+        requested text. Returning only the last hit preserves the historical
+        behavior of this helper.
     """
 
     # -------------------------
     # Helper: normalize text
     # -------------------------
     def normalize_text(txt: str) -> str:
-        """
-        Normalize text by:
-        - collapsing whitespace
-        - optional lowercasing
+        """Normalize OCR output before matching.
+
+        Args:
+            txt: Raw text string produced by OCR.
+
+        Returns:
+            Text with repeated whitespace collapsed and, unless
+            ``case_sensitive`` is ``True``, lowercased.
         """
         txt = re.sub(r"\s+", " ", txt).strip()
         return txt if case_sensitive else txt.lower()
@@ -1148,12 +1378,14 @@ def find_events(video_path: str,
     # Helper: preprocess frame
     # -------------------------
     def preprocess_frame(frame: np.ndarray) -> np.ndarray:
-        """
-        Prepare frame for OCR:
-        - optional cropping (ROI)
-        - grayscale conversion
-        - slight blur
-        - thresholding (binarization)
+        """Crop and binarize a frame before OCR.
+
+        Args:
+            frame: Raw BGR frame from OpenCV.
+
+        Returns:
+            Preprocessed grayscale image after optional ROI cropping,
+            Gaussian blur, and Otsu thresholding.
         """
         if (roi is not None):
             y0, y1, x0, x1 = roi
@@ -1169,9 +1401,15 @@ def find_events(video_path: str,
     # Fast check (binary match)
     # -------------------------
     def frame_contains_text_fast(frame: np.ndarray, target_text: str) -> float:
-        """
-        Fast OCR check using image_to_string.
-        Returns 1.0 if text is found, else 0.0.
+        """Run a fast binary OCR check on one frame.
+
+        Args:
+            frame: Raw BGR frame.
+            target_text: String to search for after normalization.
+
+        Returns:
+            ``1.0`` if the normalized OCR text contains ``target_text``,
+            otherwise ``0.0``.
         """
         gray = preprocess_frame(frame)
 
@@ -1185,9 +1423,15 @@ def find_events(video_path: str,
     # Accurate check (with confidence)
     # -------------------------
     def frame_contains_text_conf(frame: np.ndarray, target_text: str) -> float:
-        """
-        More precise OCR using word-level confidence.
-        Returns average confidence if text is found, else 0.0.
+        """Run confidence-aware OCR on one frame.
+
+        Args:
+            frame: Raw BGR frame.
+            target_text: String to search for after normalization.
+
+        Returns:
+            Mean OCR confidence for matched words when the normalized OCR
+            text contains ``target_text``, otherwise ``0.0``.
         """
         gray = preprocess_frame(frame)
 
@@ -1362,6 +1606,12 @@ def find_events(video_path: str,
 
 
 def convert_avi_to_mp4(input_path: str, output_path: str) -> None:
+    """Transcode an AVI file to H.264/AAC MP4 using ``ffmpeg``.
+
+    Args:
+        input_path: Source AVI path.
+        output_path: Destination MP4 path.
+    """
     cmd = [
         "ffmpeg",
         "-y",                     # force overwrite
@@ -1378,6 +1628,7 @@ def convert_avi_to_mp4(input_path: str, output_path: str) -> None:
 
 
 def main():
+    """Run the command-line entry point."""
     return 
 
 if(__name__ == "__main__"):

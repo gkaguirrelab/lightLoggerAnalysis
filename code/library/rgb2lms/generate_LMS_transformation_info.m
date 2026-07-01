@@ -1,10 +1,34 @@
 function [T_receptors, T_camera] = generate_LMS_transformation_info(camera)
-% Description: 
-%   % TODO
-% 
+% Load camera and cone spectral sensitivities for RGB-to-LMS conversion.
+%
+% Syntax:
+%   [T_receptors, T_camera] = generate_LMS_transformation_info(camera)
+%
+% Description:
+%   This function prepares the two spectral bases needed by `rgb2lms`: one
+%   for the camera sensors and one for human L, M, and S cones. Depending
+%   on the requested camera type, it reads either tabulated average mobile
+%   camera sensitivities or a saved IMX219 sensitivity measurement,
+%   converts the wavelength support into the Psychtoolbox `S` format, and
+%   then queries the human photoreceptor model on the same sampling grid.
+%
+% Inputs:
+%   camera                   - String. Camera sensitivity model to use:
+%                              `"standard"` loads the spreadsheet-based
+%                              average phone sensitivities and `"imx219"`
+%                              loads the measured IMX219 sensitivities.
+%
+% Outputs:
+%   T_receptors              - 3-by-N matrix of human L-, M-, and S-cone
+%                              sensitivities sampled on the shared
+%                              wavelength grid.
+%   T_camera                 - 3-by-N matrix of red, green, and blue
+%                              camera sensor sensitivities sampled on the
+%                              same grid.
+%
 % Examples:
 %{
-   TODO
+    [T_receptors, T_camera] = generate_LMS_transformation_info("imx219");
 %}
 
 %{ 

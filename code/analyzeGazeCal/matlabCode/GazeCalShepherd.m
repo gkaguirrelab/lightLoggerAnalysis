@@ -1,6 +1,29 @@
 function GazeCalShepherd
-%GazeCalibrationShepherd
-%attempt save
+% Run the full gaze calibration pipeline for a single participant
+%
+% Syntax:
+%   GazeCalShepherd
+%
+% Description:
+%   Orchestrates the end-to-end gaze calibration workflow for a single
+%   participant (subject ID hard-coded inside). Steps include: loading the
+%   pupil perimeter file, determining gaze target frame numbers from video
+%   timing, estimating scene geometry in progressively larger subsets of
+%   gaze targets, fitting pupil perimeters with the final scene geometry,
+%   cleaning and smoothing the resulting eye poses, and saving all outputs.
+%   This function is intended to be run interactively, with manual
+%   inspection of intermediate results between sections.
+%
+% Inputs:
+%   none (parameters are set internally)
+%
+% Outputs:
+%   none (results are saved to disk)
+%
+% Examples:
+%{
+    GazeCalShepherd
+%}
 subjectID = 'FLIC_2004';
 dropboxBasedir = fullfile(getpref("lightLoggerAnalysis", 'dropboxBaseDir'));
 
