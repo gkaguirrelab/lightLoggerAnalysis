@@ -11,24 +11,27 @@ recordings = {
     'Walk Indoor',  '/Users/sophiamirabal/Downloads/timeseriesData/walkIndoor_data/flic_0021_walkindoor_1-a061c060';
     'Walk Outdoor', '/Users/sophiamirabal/Downloads/timeseriesData/walkOutdoor_data/flic_0021_walkoutdoor_1-8cead05d';
     'Walk Biopond', '/Users/sophiamirabal/Downloads/timeseriesData/walkBiopond_data/flic_0021_walkbiopond_1-f90adb81'; 
-    'Sit Biopond',  '/Users/sophiamirabal/Downloads/timeseriesData/sitBiopond_data/flic_0021_walkbiopond_1-f90adb81';
+    'Sit Biopond',  '/Users/sophiamirabal/Downloads/timeseriesData/sitBiopond_data/flic_0021_sitbiopond_1-dd70c117';
 };
 
 %% Center fixation timestamps, seconds from recording start
 centerTimes = {
-    'Walk Indoor', 22.691;
-    'Read',        14.080;
-    'Sit Biopond', 14.712;
-    'Chat',        16.540;
+    'Dark',         33.589;
+    'Read',         22.070;
+    'Chat',         37.748;
+    'Walk Indoor',  11.595;
+    'Walk Outdoor', 16.782;
+    'Walk Biopond', 39.024;
+    'Sit Biopond',  09.572;
 };
 
-windowHalfWidth = 0.15; % 300 ms total
+windowHalfWidth = 0.10;
 smoothWindow = 15;
 
 summary = table();
 
 %% Expected vergence at 1 m, using estimated/measured IED
-IED_mm = 63; % replace with participant's measured IED if available
+IED_mm = 63;                                                    % MEASURED
 expectedVergence_1m_deg = 2 * atan2d(IED_mm/2, 1000);
 
 %% Plot 1: signed horizontal difference
@@ -150,8 +153,8 @@ for r = 1:size(recordings,1)
 end
 
 yline(0, '--');
-yline(expectedVergence_1m_deg, 'k--', '+ expected 1 m');
-yline(-expectedVergence_1m_deg, 'k--', '- expected 1 m');
+yline(expectedVergence_1m_deg, 'w--', '+ expected 1 m');
+yline(-expectedVergence_1m_deg, 'w--', '- expected 1 m');
 
 xlabel('Time relative to center fixation (s)');
 ylabel('Signed horizontal angle difference, Left - Right (deg)');
@@ -199,7 +202,7 @@ for r = 1:size(recordings,1)
 
 end
 
-yline(expectedVergence_1m_deg, 'k--', 'Expected 1 m');
+yline(expectedVergence_1m_deg, 'w--', 'Expected 1 m');
 
 xlabel('Time relative to center fixation (s)');
 ylabel('3D angle between optical axes (deg)');
@@ -275,10 +278,13 @@ xlabel('Time relative to center fixation (s)');
 ylabel('Horizontal eye angle (deg)');
 title('Separate Left and Right Horizontal Eye Angles During Center Fixation');
 
-legend({'Walk left','Walk right', ...
+legend({'Dark left','Dark right', ...
         'Read left','Read right', ...
-        'Biopond left','Biopond right', ...
-        'Chat left','Chat right'}, ...
+        'Chat left', 'Chat right', ...
+        'WalkIn left', 'WalkIn right', ...
+        'WalkOut left', 'WalkOut right', ...
+        'WalkBio left', 'WalkBio right', ...
+        'SitBio left', 'SitBio right'}, ...
         'Location', 'best');
 
 grid on

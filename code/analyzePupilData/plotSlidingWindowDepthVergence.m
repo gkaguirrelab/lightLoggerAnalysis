@@ -8,13 +8,13 @@ clear; close all; clc
 % calibVergenceDeg = median 3D optical-axis separation during known 1 m fixation
 
 recordings = {
-    'Dark',         '/Users/sophiamirabal/Downloads/timeseriesData/dark_data/flic_0021_dark_1-878d6eb2',                    XX;
-    'Read',         '/Users/sophiamirabal/Downloads/timeseriesData/read_data/flic_0021_read_1-286bdbca',                    1.7038;
-    'Chat',         '/Users/sophiamirabal/Downloads/timeseriesData/chat_data/flic_0021_chat_1-1e66beb5',                    7.1289;
-    'Walk Indoor',  '/Users/sophiamirabal/Downloads/timeseriesData/walkIndoor_data/flic_0021_walkindoor_1-a061c060'         XX;
-    'Walk Outdoor', '/Users/sophiamirabal/Downloads/timeseriesData/walkOutdoor_data/flic_0021_walkoutdoor_1-8cead05d',      XX;
-    'Walk Biopond', '/Users/sophiamirabal/Downloads/timeseriesData/walkBiopond_data/flic_0021_walkbiopond_1-f90adb81',      XX; 
-    'Sit Biopond',  '/Users/sophiamirabal/Downloads/timeseriesData/sitBiopond_data/flic_0021_walkbiopond_1-f90adb81',       XX;
+    'Dark',         '/Users/sophiamirabal/Downloads/timeseriesData/dark_data/flic_0021_dark_1-878d6eb2',                    1.4487;
+    'Read',         '/Users/sophiamirabal/Downloads/timeseriesData/read_data/flic_0021_read_1-286bdbca',                    0.94599;
+    'Chat',         '/Users/sophiamirabal/Downloads/timeseriesData/chat_data/flic_0021_chat_1-1e66beb5',                    1.1266;
+    'Walk Indoor',  '/Users/sophiamirabal/Downloads/timeseriesData/walkIndoor_data/flic_0021_walkindoor_1-a061c060'         0.94537;
+    'Walk Outdoor', '/Users/sophiamirabal/Downloads/timeseriesData/walkOutdoor_data/flic_0021_walkoutdoor_1-8cead05d',      2.2051;
+    'Walk Biopond', '/Users/sophiamirabal/Downloads/timeseriesData/walkBiopond_data/flic_0021_walkbiopond_1-f90adb81',      1.6622; 
+    'Sit Biopond',  '/Users/sophiamirabal/Downloads/timeseriesData/sitBiopond_data/flic_0021_sitbiopond_1-dd70c117',        1.6071;
 };
 
 %% Sliding window settings
@@ -23,6 +23,12 @@ stepSize_s = 1;        % move window forward every 1 second
 useMedian = true;      % median is more robust to spikes than mean
 
 allWindowTables = cell(size(recordings,1),1);
+
+meanDepth = NaN(size(recordings,1),1);
+meanVergence = NaN(size(recordings,1),1);
+
+medianDepth = NaN(size(recordings,1),1);
+medianVergence = NaN(size(recordings,1),1);
 
 %% Run depth estimation and sliding-window summaries
 for r = 1:size(recordings,1)
@@ -41,6 +47,14 @@ for r = 1:size(recordings,1)
     t = depthTable.Time_s;
     depth = depthTable.EstimatedDepth_m;
     vergence = depthTable.Vergence3D_deg;
+
+    %% Whole-recording averages
+
+    meanDepth(r) = mean(depth,'omitnan');
+    meanVergence(r) = mean(vergence,'omitnan');
+
+    medianDepth(r) = median(depth,'omitnan');
+    medianVergence(r) = median(vergence,'omitnan');
 
     tStart = min(t);
     tEnd = max(t);
@@ -143,3 +157,29 @@ outFile = 'slidingWindow_depthVergence_5s.csv';
 writetable(combinedWindowTable, outFile);
 
 fprintf('\nSaved sliding-window table to: %s\n', outFile);
+
+%% Whole-recording average depth and vergence by task
+
+figure;
+
+subplot(2,1,1)
+
+bar(meanDepth)
+xticks(1:size(recordings,1))
+xticklabels(recordings(:,1))
+xtickangle(30)
+
+ylabel('Mean Estimated Depth (m)')
+title('Whole-Recording Mean Estimated Depth')
+grid on
+
+subplot(2,1,2)
+
+bar(meanVergence)
+xticks(1:size(recordings,1))
+xticklabels(recordings(:,1))
+xtickangle(30)
+
+ylabel('Mean Vergence (deg)')
+title('Whole-Recording Mean Vergence')
+grid on
