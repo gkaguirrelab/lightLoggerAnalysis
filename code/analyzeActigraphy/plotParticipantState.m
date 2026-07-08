@@ -76,6 +76,13 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
         options.active_threshold = 0.025;
         options.outdoor_threshold = 10 ^ 2.5;
 
+        % Aperture specific arguments
+        options.plot_aperture_separate = false;
+        options.normalize_aperture_to_dark = false;
+        options.dark_eyeStateData = [];
+        options.aperture_baseline_percentile = 95;
+        options.include_luminance = true;
+
     end
     winSizeSec = options.winSizeSec; 
 
@@ -172,12 +179,44 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     vPitch = gradient(IMUdata.pitch_deg_, dt);
     vYaw   = gradient(unwrappedYaw, dt);
     
-    % Eye State & Blink Masking
-    avgAperture = mean(eyeStateData{:, {'eyelidApertureLeft_mm_', 'eyelidApertureRight_mm_'}}, 2, 'omitnan');
-    avgPupil    = mean(eyeStateData{:, {'pupilDiameterLeft_mm_', 'pupilDiameterRight_mm_'}}, 2, 'omitnan');
+    %% Eye State & Blink Masking
+    
+    apertureL = eyeStateData.eyelidApertureLeft_mm_;
+    apertureR = eyeStateData.eyelidApertureRight_mm_;
+    
+    pupilL = eyeStateData.pupilDiameterLeft_mm_;
+    pupilR = eyeStateData.pupilDiameterRight_mm_;
+    
+    avgPupil = mean([pupilL pupilR], 2, 'omitnan');
+    
+    %% Optional: normalize aperture to dark baseline
+    if options.normalize_aperture_to_dark
+    
+        darkEye = options.dark_eyeStateData;
+    
+        if isstring(darkEye) || ischar(darkEye)
+            darkEye = readtable(darkEye);
+        end
+    
+        darkApertureL = darkEye.eyelidApertureLeft_mm_;
+        darkApertureR = darkEye.eyelidApertureRight_mm_;
+    
+        darkBaselineL = prctile(darkApertureL, options.aperture_baseline_percentile);
+        darkBaselineR = prctile(darkApertureR, options.aperture_baseline_percentile);
+    
+        apertureL = apertureL ./ darkBaselineL;
+        apertureR = apertureR ./ darkBaselineR;
+    
+        aperture_ylabel = 'Relative eyelid aperture';
+    else
+        aperture_ylabel = 'Eyelid aperture (mm)';
+    end
+    
+    avgAperture = mean([apertureL apertureR], 2, 'omitnan');
+    
     gazeElev = gazeData.elevation_deg_;
     gazeAzim = gazeData.azimuth_deg_;
-
+    
     isBlinkEye = false(size(avgAperture));
     for i = 1:height(blinkData)
         mask = (eyeStateData.timestamp_ns_ >= blinkData.startTimestamp_ns_(i)) & ...
@@ -192,11 +231,18 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
         isBlinkGaze = isBlinkGaze | mask;
     end
     
-    avgAperture(isBlinkEye) = NaN; avgPupil(isBlinkEye) = NaN;
-    gazeElev(isBlinkGaze) = NaN; gazeAzim(isBlinkGaze) = NaN;
+    % Keep blinks in aperture unless you explicitly want to remove them.
+    % Still remove blinks from gaze and pupil.
+    avgPupil(isBlinkEye) = NaN;
+    gazeElev(isBlinkGaze) = NaN;
+    gazeAzim(isBlinkGaze) = NaN;
     
-    smoothAperture = movmean(avgAperture, winSizeSamplesEye, 'omitnan');
-    smoothPupil    = movmean(avgPupil, winSizeSamplesEye, 'omitnan');
+    %% Temporal smoothing
+    smoothApertureL = movmean(apertureL, winSizeSamplesEye, 'omitnan');
+    smoothApertureR = movmean(apertureR, winSizeSamplesEye, 'omitnan');
+    smoothAperture  = movmean(avgAperture, winSizeSamplesEye, 'omitnan');
+    
+    smoothPupil = movmean(avgPupil, winSizeSamplesEye, 'omitnan');
 
     %% Colors
     cRoll  = [0 0.4470 0.7410]; cPitch = [0.8500 0.3250 0.0980]; cYaw = [0.9290 0.6940 0.1250];
@@ -257,10 +303,37 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     ax4 = nexttile(tlo1); hold(ax4, 'on');
     yyaxis left
     timeMinBlinks = (double(blinkData.startTimestamp_ns_) - double(t0)) / 1e9 / 60;
-    pBlink = stem(ax4, timeMinBlinks, zeros(size(timeMinBlinks)) + 2.0, 'Color', [0.6 0.6 0.6], 'Marker', 'none', 'DisplayName', 'Blinks');
-    pAperture = plot(ax4, timeMinEye, smoothAperture, '-', 'Color', cApert, 'LineWidth', 1.2, 'DisplayName', 'Aperture'); 
-    ylabel('Eyelid Aperture (mm)', 'FontSize', summaryLabelFontSize); ax4.YAxis(1).Color = cApert; 
-    ylim(ax4, [0, 15]);
+    pBlink = stem(ax4, timeMinBlinks, zeros(size(timeMinBlinks)) + 2.0, ...
+        'Color', [0.6 0.6 0.6], ...
+        'Marker', 'none', ...
+        'DisplayName', 'Blinks');
+
+    if options.plot_aperture_separate
+        pApertureL = plot(ax4, timeMinEye, smoothApertureL, '--', ...
+            'Color', cApert, ...
+            'LineWidth', 1.2, ...
+            'DisplayName', 'Left aperture');
+
+        pApertureR = plot(ax4, timeMinEye, smoothApertureR, '-', ...
+            'Color', cApert, ...
+            'LineWidth', 1.2, ...
+            'DisplayName', 'Right aperture');
+    else
+        pAperture = plot(ax4, timeMinEye, smoothAperture, '-', ...
+            'Color', cApert, ...
+            'LineWidth', 1.2, ...
+            'DisplayName', 'Mean aperture');
+    end
+
+    ylabel(aperture_ylabel, 'FontSize', summaryLabelFontSize);
+    ax4.YAxis(1).Color = cApert;
+
+    if options.normalize_aperture_to_dark
+        ylim(ax4, [0, 1.2]);
+        yline(ax4, 1, '--', 'Dark baseline');
+    else
+        ylim(ax4, [0, 15]);
+    end
     yyaxis right
     pPupil = plot(ax4, timeMinEye, smoothPupil, '-', 'Color', cPupil, 'LineWidth', 1.2, 'DisplayName', 'Pupil');
     ylim(ax4, [2, 6]);
@@ -268,7 +341,17 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     grid on;
     ax4.FontSize = summaryAxisFontSize;
     ax4.XTickLabel = [];
-    lgd4 = legend(ax4, [pAperture, pPupil, pBlink], {'Eyelid openness', 'Pupil size', 'Blinks'}, 'FontSize', summaryLegendFontSize, 'Location', 'northeastoutside');
+    if options.plot_aperture_separate
+        lgd4 = legend(ax4, [pApertureL, pApertureR, pPupil, pBlink], ...
+            {'Left aperture', 'Right aperture', 'Pupil size', 'Blinks'}, ...
+            'FontSize', summaryLegendFontSize, ...
+            'Location', 'northeastoutside');
+    else
+        lgd4 = legend(ax4, [pAperture, pPupil, pBlink], ...
+            {'Mean eyelid openness', 'Pupil size', 'Blinks'}, ...
+            'FontSize', summaryLegendFontSize, ...
+            'Location', 'northeastoutside');
+    end
     lgd4.Box = 'off';
 
     % Subplot 5: Absolute Illuminance (Lux)
