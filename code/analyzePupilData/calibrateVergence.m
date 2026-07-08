@@ -5,10 +5,13 @@ clear; close all; clc
 
 %% Recording folders
 recordings = {
-    'Walk Indoor', '/Users/sophiamirabal/Downloads/PupilData_Analysis/walkIndoor_timeseriesData/flic_1034_walkindoor_1-86ecaaf3';
-    'Read',        '/Users/sophiamirabal/Downloads/PupilData_Analysis/read_timeseriesData/flic_1034_read_1-a5ad020a';
-    'Sit Biopond', '/Users/sophiamirabal/Downloads/PupilData_Analysis/sitBiopond_timeseriesData/flic_1034_sitbiopond_1-57b4e2f7';
-    'Chat',        '/Users/sophiamirabal/Downloads/PupilData_Analysis/chat_timeseriesData/flic_1034_chat_1-294a661b';
+    'Dark',         '/Users/sophiamirabal/Downloads/timeseriesData/dark_data/flic_0021_dark_1-878d6eb2';
+    'Read',         '/Users/sophiamirabal/Downloads/timeseriesData/read_data/flic_0021_read_1-286bdbca';
+    'Chat',         '/Users/sophiamirabal/Downloads/timeseriesData/chat_data/flic_0021_chat_1-1e66beb5';
+    'Walk Indoor',  '/Users/sophiamirabal/Downloads/timeseriesData/walkIndoor_data/flic_0021_walkindoor_1-a061c060';
+    'Walk Outdoor', '/Users/sophiamirabal/Downloads/timeseriesData/walkOutdoor_data/flic_0021_walkoutdoor_1-8cead05d';
+    'Walk Biopond', '/Users/sophiamirabal/Downloads/timeseriesData/walkBiopond_data/flic_0021_walkbiopond_1-f90adb81'; 
+    'Sit Biopond',  '/Users/sophiamirabal/Downloads/timeseriesData/sitBiopond_data/flic_0021_walkbiopond_1-f90adb81';
 };
 
 %% Center fixation timestamps, seconds from recording start
