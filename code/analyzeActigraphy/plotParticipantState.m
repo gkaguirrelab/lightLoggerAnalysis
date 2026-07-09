@@ -81,16 +81,20 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
         options.normalize_aperture_to_dark = false;
         options.dark_eyeStateData = [];
         options.aperture_baseline_percentile = 95;
-        options.include_luminance = true;
+
+        % For skipping luminance
+        options.include_luminance = false;
 
     end
     winSizeSec = options.winSizeSec; 
 
     %% Load Utility Libraries & Data
-    persistent world_util ms_util;
-    if isempty(world_util) || isempty(ms_util) || options.force_recalc
-        world_util = import_pyfile(getpref("lightLoggerAnalysis", "world_util_path"));
-        ms_util = import_pyfile(getpref("lightLoggerAnalysis", "ms_util_path")); 
+    if options.include_luminance
+        persistent world_util ms_util;
+        if isempty(world_util) || isempty(ms_util) || options.force_recalc
+            world_util = import_pyfile(getpref("lightLoggerAnalysis", "world_util_path"));
+            ms_util = import_pyfile(getpref("lightLoggerAnalysis", "ms_util_path")); 
+        end
     end
     
     % Load in the actigraphy data if needed 
