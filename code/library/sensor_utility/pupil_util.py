@@ -34,6 +34,20 @@ def _load_pyagc():
 AGC_lib_path: str = str(pathlib.Path(__file__).resolve().parents[1] / "libraries_python" / "AGC_lib")
 PyAGC = _load_pyagc()
 
+
+def _load_agc_lib():
+    """Import the optional compiled AGC library through ``PyAGC``."""
+    if PyAGC is None:
+        return None
+
+    try:
+        return PyAGC.import_AGC_lib()
+    except Exception:
+        return None
+
+
+AGC_LIB = _load_agc_lib()
+
 """Define constant values associated with the Pupil Camera"""
 PUPIL_CAM_FPS: int = 120 # Capture at 120 FPS
 PUPIL_FRAME_SHAPE: np.ndarray = np.array([400, 400], dtype=np.uint16) # Frames from the camera are delivered at (400, 400)
@@ -44,8 +58,8 @@ PUPIL_AGC_MODES_INT_STR: dict[int, str] = {0: "off", 1: "custom", 2:"built-in"} 
 PUPIL_AGC_MODES_STR_INT: dict[str, int] = {val: key for key, val in PUPIL_AGC_MODES_INT_STR.items()} # Mapping between enum types for AGC
 PUPIL_SAVE_AGC_METADATA: bool = True # Whether or not to save all metadata from the AGC as well as timestamps
 PUPIL_AGC_METADATA_COLS: tuple = ("Again", "Dgain", "exposure") # The columns of the AGC metadata
-PUPIL_AGC_SETTINGS_RANGES: dict[str, np.ndarray] = PyAGC.retrieve_settings_ranges('P') if PyAGC is not None else {}
-PUPIL_AGC_DISCRETE_STATES: dict[str, dict[str, int | float]] = PyAGC.retrieve_discrete_states('P') if PyAGC is not None else {}
+PUPIL_AGC_SETTINGS_RANGES: dict[str, np.ndarray] = PyAGC.retrieve_settings_ranges('P', AGC_LIB) if AGC_LIB is not None else {}
+PUPIL_AGC_DISCRETE_STATES: dict[str, dict[str, int | float]] = PyAGC.retrieve_discrete_states('P', AGC_LIB) if AGC_LIB is not None else {}
 PUPIL_AGC_ROI: tuple[tuple[int]] = ( (50, 50), (350, 350)) # Define the ROI of the pupil camera that will be used to calculate frame mean. 
                                                              # This attempts to only mean where the eye is in the image. This tuple is the 
                                                              # top left and the bottom right pixels of the box 

@@ -324,7 +324,10 @@ def inspect_video_frame_count(video_path: str) -> int:
     # Return the number of frames 
     return frame_num
 
-def extract_frames_from_video(video_path: str, frames_idx: Iterable, is_grayscale: bool=False) -> np.ndarray:
+def extract_frames_from_video(video_path: str, 
+                              frames_idx: Iterable, 
+                              is_grayscale: bool=False
+                            ) -> np.ndarray:
     """Extract specific frames from a video by their indices.
 
     Seeks to each requested frame index and reads it, converting to
@@ -342,12 +345,14 @@ def extract_frames_from_video(video_path: str, frames_idx: Iterable, is_grayscal
     assert os.path.exists(video_path), f"Video path: {video_path} does not exist"
     
     # First, sort the frame numbers we want to extract 
-    frames_idx: list[int] = [int(idx) for idx in frames_idx] 
+    frames_idx: list[int] = frames_idx if isinstance(frames_idx, list) else [int(idx) for idx in frames_idx] 
     frames_idx.sort() 
 
     # Initialize array to hold frames 
     # post extraction
-    extracted_frames: list[int] = []
+    video_frame_shape: tuple[int] = inspect_video_framesize(video_path)
+    extracted_frame_shape: tuple[int] = video_frame_shape if is_grayscale is False else tuple(list(video_frame_shape) + [3])
+    extracted_frames: np.ndarray = np.empty(extracted_frame_shape, dtype=np.uint8)
 
     # Open the video via cv2 
     video_stream: cv2.VideoCapture = cv2.VideoCapture(video_path)
@@ -377,15 +382,18 @@ def extract_frames_from_video(video_path: str, frames_idx: Iterable, is_grayscal
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
         # Save the extracted frame 
-        extracted_frames.append(frame)
+        extracted_frames[extracted_frame_idx] = frame
 
         # Increment the number of extracted frames 
         extracted_frame_idx += 1 
+    
+    # Assert that we extracted all of the correct frames 
+    assert extracted_frame_idx == len(extracted_frames), f"Error: Incorrect number of frames extracted: {extracted_frame_idx} compared to target: {len(extracted_frames)}"
 
     # Release the video stream 
     video_stream.release() 
 
-    return np.array(extracted_frames, dtype=np.uint8)
+    return extracted_frames
 
 def destruct_video(video_path: str, start_frame: int=0, end_frame: int=float("inf"),
                    is_grayscale: bool=False, q: queue.Queue=None, stop_event: object=None,

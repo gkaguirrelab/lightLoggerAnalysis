@@ -322,7 +322,7 @@ function wait_for_combiLED_cooldown_between_NDFs(CombiLED, NDF)
     % See collect_light_logger_calibration_data.m for usage context.
 %}
 
-    cooldown_seconds = 10 * 60;
+    cooldown_seconds = 5 * 60;
     zero_primaries = zeros(1, 8);
 
     CombiLED.setPrimaries(zero_primaries);
@@ -431,9 +431,10 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
 
     % { WORLD CAMERA LINEARITY } - We will collect this between NDFs 0-4
     contrast_agc_targets = [0.1]; 
+    world_linearity_agc_target = 127;
     k_settings_levels = 10; % Define the number of settings levels to record
     n_measures = 3; % The number of measurements to make at a given settings level
-    settings_scalars = linspace(0.05, 0.95, k_settings_levels); % Define the settings values we will explore
+    settings_scalars = linspace(0.1, 1.0, k_settings_levels); % Define the settings values we will explore
     settings_levels_orders = randomize_settings_orders(numel(NDFs.world_linearity), settings_scalars, n_measures); % The order we will set the settings in, randomized per measure
     recording_seconds = 15; % Define how long a given recording will be per setting
     completed_measurements = false(numel(NDFs.world_linearity), numel(contrast_agc_targets), k_settings_levels, n_measures); % Define a boolean matrix of completed measurements. We will use this to resume recording on failure
@@ -447,7 +448,7 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
         contrast_target = contrast_agc_targets(tt); 
 
         % Let's get the NDF settings for this contrast level    
-        settings_contrast_dict = py_call_module_attr(world_util, "get_world_contrast_level_ndf_settings", contrast_target); 
+        settings_contrast_dict = py_call_module_attr(world_util, "get_world_contrast_level_ndf_settings", contrast_target, world_linearity_agc_target); 
 
         % Initialize the container for the settings per NDF for this contrast target 
         contrast_target_fieldname = "x" + strrep(string(contrast_target), ".", "x"); 
@@ -480,6 +481,7 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
     % Save the metadata for this calibration measurement
     CalibrationData.world_linearity.NDFs = NDFs.world_linearity;
     CalibrationData.world_linearity.contrast_agc_targets = contrast_agc_targets; 
+    CalibrationData.world_linearity.world_agc_target = world_linearity_agc_target;
     CalibrationData.world_linearity.cal_files = cell(numel(NDFs.world_linearity), 1);
     
     CalibrationData.world_linearity.sensors_and_settings = sensors_and_settings;
@@ -658,10 +660,6 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
     CalibrationData.contrast_gamma.frequencies_orders = frequencies_orders; 
     CalibrationData.contrast_gamma.n_measures = n_measures; 
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-
-    disp("THIS IS CALIBRATION DATA BEFORE I RETURN")
-    disp(CalibrationData)
 
     return ; 
 

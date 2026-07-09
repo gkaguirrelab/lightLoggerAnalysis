@@ -49,6 +49,20 @@ def _load_pyagc():
 PyAGC = _load_pyagc()
 
 
+def _load_agc_lib():
+    """Import the optional compiled AGC library through ``PyAGC``."""
+    if PyAGC is None:
+        return None
+
+    try:
+        return PyAGC.import_AGC_lib()
+    except Exception:
+        return None
+
+
+AGC_LIB = _load_agc_lib()
+
+
 # World temporal offset relative to other sensors. The world is the target, 
 # so this is 0 (ms)
 WORLD_TIME_OFFSET: float = 0
@@ -72,61 +86,65 @@ WORLD_CAMERA_CUSTOM_MODES: list[dict] = [
     {'format': "SRGGB8", 'unpacked': 'SRGGB8', 'bit_depth': 8, 'size': (3296, 2464), 'fps': 20, 'crop_limits': (0, 0, 3280, 2464), 'exposure_limits': (75, 11766829, None)},
 ]
 
-# This is assuming a contrast of 0.9 is the target of 127 at each NDF level
-WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x9: dict[float, tuple[float, float, float]] = {float(NDF_level):  # Define the fixed settings for this camera per NDF filter
-                                                                                  (1.0, 1.0, 468.0) if NDF_level == 0
-                                                                                  else (1.0, 1.0, 4599.0) if NDF_level == 1
-                                                                                  else (7.757575988769531, 1.0, 8290.0) if NDF_level == 2
-                                                                                  else (10.666, 3.5039764011458963, 8290.0) if NDF_level == 3
-                                                                                  else (10.666, 7.2417770421497565, 8290.0) if NDF_level == 4
-                                                                                  else (10.666, 10.0, 8333)
-                                                                                  for NDF_level in range(7)
-                                                                              }
+WORLD_AGC_DEFAULT_TARGET: int = 127
 
-# This is assuming a contrast of 0.75 is the target of 127 at each NDF level
-WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x75: dict[float, tuple[float, float, float]] = {float(NDF_level):  # Define the fixed settings for this camera per NDF filter
-                                                                                   (1.0, 1.0, 508.0) if NDF_level == 0
-                                                                                   else (1.000e+00, 1.000e+00, 5.537e+03) if NDF_level == 1
-                                                                                   else (8.82758617e+00, 1.00000000e+00, 8333) if NDF_level == 2
-                                                                                   else (10.666, 3.89023162e+00, 8333) if NDF_level == 3
-                                                                                   else (10.666, 7.62447626e+00, 8333) if NDF_level == 4
-                                                                                   else (10.666, 10.0, 8333)
-                                                                                   for NDF_level in range(7)
-                                                                               }
+# These contrast tables currently contain settings measured for an AGC
+# target of 127. Additional targets can be added as sibling keys.
+WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x9: dict[int | float, dict[float, tuple[float, float, float]]] = {
+    WORLD_AGC_DEFAULT_TARGET: {float(NDF_level):  # Define the fixed settings for this camera per NDF filter
+                               (1.0, 1.0, 468.0) if NDF_level == 0
+                               else (1.0, 1.0, 4599.0) if NDF_level == 1
+                               else (7.757575988769531, 1.0, 8290.0) if NDF_level == 2
+                               else (10.666, 3.5039764011458963, 8290.0) if NDF_level == 3
+                               else (10.666, 7.2417770421497565, 8290.0) if NDF_level == 4
+                               else (10.666, 10.0, 8333)
+                               for NDF_level in range(7)}
+}
 
-# This is assuming a contrast of 0.5 is the target of 127 at each NDF level TODO: Check this but pretty sure i am correct
-WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x5: dict[float, tuple[float, float, float]] = {float(NDF_level):  # Define the fixed settings for this camera per NDF filter
-                                                                                  (1.0, 1.0, 747.0) if NDF_level == 0
-                                                                                  else (1.0, 1.0, 7085.0) if NDF_level == 1
-                                                                                  else (10.666, 1.14, 8333) if NDF_level == 2
-                                                                                  else (10.666, 4.297, 8333) if NDF_level == 3
-                                                                                  else (10.666, 10.0, 8333)
-                                                                                  for NDF_level in range(7)
-                                                                              }
+WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x75: dict[int | float, dict[float, tuple[float, float, float]]] = {
+    WORLD_AGC_DEFAULT_TARGET: {float(NDF_level):  # Define the fixed settings for this camera per NDF filter
+                               (1.0, 1.0, 508.0) if NDF_level == 0
+                               else (1.000e+00, 1.000e+00, 5.537e+03) if NDF_level == 1
+                               else (8.82758617e+00, 1.00000000e+00, 8333) if NDF_level == 2
+                               else (10.666, 3.89023162e+00, 8333) if NDF_level == 3
+                               else (10.666, 7.62447626e+00, 8333) if NDF_level == 4
+                               else (10.666, 10.0, 8333)
+                               for NDF_level in range(7)}
+}
 
-# This is assuming a contrast of 0.25 is the target of 127 at each NDF level
-WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x25: dict[float, tuple[float, float, float]] = {float(NDF_level):  # Define the fixed settings for this camera per NDF filter
-                                                                                   (1.000e+00, 1.000e+00, 1.466e+03) if NDF_level == 0  # TODO: Fill this in
-                                                                                   else (1.80281687, 1.0, 8333) if NDF_level == 1
-                                                                                   else (10.666, 1.58156674e+00, 8333) if NDF_level == 2
-                                                                                   else (10.666, 5.96331605e+00, 8333) if NDF_level == 3
-                                                                                   else (10.666, 7.97561560e+00, 8333) if NDF_level == 4
-                                                                                   else (10.666, 10.0, 8333)
-                                                                                   for NDF_level in range(7)
-                                                                               }
+WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x5: dict[int | float, dict[float, tuple[float, float, float]]] = {
+    WORLD_AGC_DEFAULT_TARGET: {float(NDF_level):  # Define the fixed settings for this camera per NDF filter
+                               (1.0, 1.0, 747.0) if NDF_level == 0
+                               else (1.0, 1.0, 7085.0) if NDF_level == 1
+                               else (10.666, 1.14, 8333) if NDF_level == 2
+                               else (10.666, 4.297, 8333) if NDF_level == 3
+                               else (10.666, 10.0, 8333)
+                               for NDF_level in range(7)}
+}
 
-# This is assuming a contrast of 0.1 is the target of 127 at each NDF level
-WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x1: dict[float, tuple[float, float, float]] = {float(NDF_level):  # Define the fixed settings for this camera per NDF filter
-                                                                                         (1.0, 1.0, 3711.0) if NDF_level == 0
-                                                                                         else (4.338983058929443, 1.0, 8290.0) if NDF_level == 1
-                                                                                         else (10.666, 2.9977685360728445, 8290.0) if NDF_level == 2
-                                                                                         else (10.666, 7.119079983538314, 8290.0) if NDF_level == 3
-                                                                                         else (10.666, 8.039178161297238, 8290.0) if NDF_level == 4
-                                                                                         else (10.666, 10.0, 8333)
-                                                                                         for NDF_level in range(7)
-                                                                                     }
+WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x25: dict[int | float, dict[float, tuple[float, float, float]]] = {
+    WORLD_AGC_DEFAULT_TARGET: {float(NDF_level):  # Define the fixed settings for this camera per NDF filter
+                               (1.000e+00, 1.000e+00, 1.466e+03) if NDF_level == 0  # TODO: Fill this in
+                               else (1.80281687, 1.0, 8333) if NDF_level == 1
+                               else (10.666, 1.58156674e+00, 8333) if NDF_level == 2
+                               else (10.666, 5.96331605e+00, 8333) if NDF_level == 3
+                               else (10.666, 7.97561560e+00, 8333) if NDF_level == 4
+                               else (10.666, 10.0, 8333)
+                               for NDF_level in range(7)}
+}
+
+WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x1: dict[int | float, dict[float, tuple[float, float, float]]] = {
+    WORLD_AGC_DEFAULT_TARGET: {float(NDF_level):  # Define the fixed settings for this camera per NDF filter
+                               (1.0, 1.0, 3711.0) if NDF_level == 0
+                               else (4.338983058929443, 1.0, 8290.0) if NDF_level == 1
+                               else (10.666, 2.9977685360728445, 8290.0) if NDF_level == 2
+                               else (10.666, 7.119079983538314, 8290.0) if NDF_level == 3
+                               else (10.666, 8.039178161297238, 8290.0) if NDF_level == 4
+                               else (10.666, 10.0, 8333)
+                               for NDF_level in range(7)}
+}
 # Fractional NDFs we later measured
-WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x1 |= {
+WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x1[WORLD_AGC_DEFAULT_TARGET] |= {
     0.2: (1.0, 1.0, 3771.0),
     0.3: (1.0, 1.0, 5860.0),
     0.4: (1.0, 1.0, 5926.0),
@@ -145,18 +163,36 @@ WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x1 |= {
     1.8: (10.23999998, 3.95815762, 8333),
 }
 
+WORLD_NDF_LEVEL_SETTINGS_CONTRAST_1x0: dict[int | float, dict[float, tuple[float, float, float]]] = {
+    254: {
+        0.7: (10.333, 1.28238666, 8333),
+        0.8: (10.333, 1.28885415, 8333),
+        0.9: (10.333, 1.29904864, 8333),
+        1.0: (10.333, 1.3084874, 8333),
+        1.1: (10.333, 1.53624698, 8333),
+        1.2: (10.333, 1.4731802, 8333),
+        1.3: (10.333, 1.56616807, 8333),
+        1.4: (10.333, 1.61156318, 8333),
+        1.5: (10.333, 1.83363244, 8333),
+        1.6: (10.333, 2.30311563, 8333),
+        1.7: (10.333, 3.17007629, 8333),
+        1.8: (10.333, 3.8178041, 8333),
+    },
+}
+
 # NDF settings by AGC contrast target
-WORLD_CONTRAST_LEVEL_NDF_SETTINGS: dict[float, dict[float, tuple[float, float, float]]] = {
+WORLD_CONTRAST_LEVEL_NDF_SETTINGS: dict[float, dict[int | float, dict[float, tuple[float, float, float]]]] = {
     0.1: WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x1,
     0.25: WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x25,
     0.5: WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x5,
     0.75: WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x75,
     0.9: WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x9,
+    1.0: WORLD_NDF_LEVEL_SETTINGS_CONTRAST_1x0,
 }
 
 # Maintain the historical default settings table used elsewhere in the MATLAB
 # calibration pipeline. The 0.5 contrast table is the legacy baseline.
-WORLD_NDF_LEVEL_SETTINGS: dict[float, tuple[float, float, float]] = WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x5
+WORLD_NDF_LEVEL_SETTINGS: dict[float, tuple[float, float, float]] = WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x5[WORLD_AGC_DEFAULT_TARGET]
 WORLD_CAM_FPS: int = 120
 WORLD_FRAME_SHAPE: np.ndarray = np.array([480, 640], dtype=np.uint16)
 WORLD_FRAME_DTYPE: object = np.uint8
@@ -167,8 +203,8 @@ WORLD_AGC_MODES_STR_INT: dict[str, int] = {val: key for key, val in WORLD_AGC_MO
 WORLD_SAVE_AGC_METADATA: bool = True
 WORLD_AGC_CHANGE_INTERVAL: float = 0.250
 WORLD_AGC_SPEED_SETTING: float = 0.95
-WORLD_AGC_SETTINGS_RANGES: dict[str, np.ndarray] = PyAGC.retrieve_settings_ranges('W') if PyAGC is not None else {}
-WORLD_AGC_DISCRETE_STATES: dict[str, dict[str, int | float]] = PyAGC.retrieve_discrete_states('W') if PyAGC is not None else {}
+WORLD_AGC_SETTINGS_RANGES: dict[str, np.ndarray] = PyAGC.retrieve_settings_ranges('W', AGC_LIB) if AGC_LIB is not None else {}
+WORLD_AGC_DISCRETE_STATES: dict[str, dict[str, int | float]] = PyAGC.retrieve_discrete_states('W', AGC_LIB) if AGC_LIB is not None else {}
 
 
 # The labels of the cols of the world AGC metdata 
@@ -227,19 +263,25 @@ for idx, pixel_indices in enumerate((WORLD_R_PIXELS, WORLD_G_PIXELS, WORLD_B_PIX
 WORLD_DARK_NOISE: float = 16
 
 
-def get_world_contrast_level_ndf_settings(contrast_level: float) -> dict[float, tuple[float, float, float]]:
-    """Retrieve NDF settings for a given AGC contrast target level.
+def get_world_contrast_level_ndf_settings(
+    contrast_level: float,
+    agc_target: int | float = WORLD_AGC_DEFAULT_TARGET,
+) -> dict[float, tuple[float, float, float]]:
+    """Retrieve NDF settings for a given contrast level and AGC target.
 
     Args:
-        contrast_level: The AGC contrast target level to look up.
+        contrast_level: The contrast level to look up.
+        agc_target: The AGC target value to look up within the contrast
+            table.
 
     Returns:
         A dictionary mapping NDF values to tuples of calibration parameters
-        for the requested contrast level.
+        for the requested contrast level and AGC target.
 
     Raises:
         ValueError: If ``contrast_level`` is not among the supported keys in
-            ``WORLD_CONTRAST_LEVEL_NDF_SETTINGS``.
+            ``WORLD_CONTRAST_LEVEL_NDF_SETTINGS``, or if ``agc_target`` is
+            not available for that contrast level.
     """
     contrast_level = float(contrast_level)
     if contrast_level not in WORLD_CONTRAST_LEVEL_NDF_SETTINGS:
@@ -247,7 +289,15 @@ def get_world_contrast_level_ndf_settings(contrast_level: float) -> dict[float, 
             f"Unsupported world-camera contrast target {contrast_level}. "
             f"Expected one of {tuple(WORLD_CONTRAST_LEVEL_NDF_SETTINGS.keys())}."
         )
-    return WORLD_CONTRAST_LEVEL_NDF_SETTINGS[contrast_level]
+
+    agc_target_settings = WORLD_CONTRAST_LEVEL_NDF_SETTINGS[contrast_level]
+    if agc_target not in agc_target_settings:
+        raise ValueError(
+            f"Unsupported world-camera AGC target {agc_target} for contrast {contrast_level}. "
+            f"Expected one of {tuple(agc_target_settings.keys())}."
+        )
+
+    return agc_target_settings[agc_target]
 
 
 def restore_settings_dict_types(sensor_mode: dict) -> None:

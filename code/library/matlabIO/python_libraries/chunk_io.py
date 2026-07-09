@@ -227,13 +227,16 @@ def pupil_chunk_parser(chunk_paths: tuple[str],
         digital_gain_scalars: np.ndarray = chunk_dict['P']['settings']['Dgain'] if len(chunk_dict['P']['settings']['Dgain']) > 0 else np.full((len(t),), 1) 
 
         # Apply these scalars elementwise to the value vector (frame buffer)
-        v = np.clip(np.round(v.astype(np.float64) * digital_gain_scalars[:, np.newaxis, np.newaxis]), 0, 255).astype(np.uint8)
+        v = v.astype(np.float64, copy=False) * digital_gain_scalars[:, np.newaxis, np.newaxis]
     
     if(use_mean_frame is True):
         v_mean = np.mean(v, axis=mean_axes)
         del v
         v = v_mean
         del v_mean
+
+    if(v.dtype != np.uint8):
+        v = np.clip(v, 0, 255) if use_mean_frame is True else np.round(np.clip(v, 0, 255)).astype(np.uint8)
 
     if(convert_to_float is True):
         t = t.astype(np.float64)
@@ -257,7 +260,8 @@ def world_chunk_parser(chunk_paths: tuple[str],
                        mean_axes: tuple[int] = (1, 2),
                        contains_AGC_metadata: bool=False,
                        password="1234",
-                       differentiate_color: bool=False
+                       differentiate_color: bool=False, 
+                       clip_data: bool=False 
                        ) -> dict[str, dict]:
     """Parse one world-camera chunk with optional calibration transforms.
 
@@ -296,6 +300,10 @@ def world_chunk_parser(chunk_paths: tuple[str],
         ``['W']['t']``, processed frame data or reduced statistics at
         ``['W']['v']``, and per-frame AGC arrays at ``['W']['settings']``.
     """
+
+    if(differentiate_color is True):
+        assert use_mean_frame is True, f"To differentiate color, the mean frame parameter must be true"
+
     # Initialize a return value
     chunk_dict: dict = {'W': {}} 
     
@@ -343,87 +351,82 @@ def world_chunk_parser(chunk_paths: tuple[str],
         if(apply_phase_offset is True):
             t += world_util.WORLD_TIME_OFFSET
 
-    needs_float_corrections: bool = apply_digital_gain or apply_fielding_function or apply_RGB_correction
 
-    # Only promote to float64 when corrections actually need it
-    if(needs_float_corrections):
-        v = v.astype(np.float64, copy=False)
+    # Let's convert to float at the start before we do all of the transformations 
+    # if it is not float already 
+    v = np.astype(np.float64, copy=False)
 
-        # Apply digital gain as calculated from the AGC
-        if(apply_digital_gain is True):
-            digital_gain_scalars: np.ndarray = chunk_dict['W']['settings']['Dgain'] if len(chunk_dict['W']['settings']['Dgain']) > 0 else np.full((len(t),), 1)
-            v *= digital_gain_scalars[:, np.newaxis, np.newaxis]
 
-        # Apply the fielding function to each color plane
-        if(apply_fielding_function is True):
-            fielding_function: np.ndarray = world_util.WORLD_FIELDING_FUNCTIONS[v.shape[1:3]]
-            v *= fielding_function
+    # Apply digital gain as calculated from the AGC
+    if(apply_digital_gain is True):
+        digital_gain_scalars: np.ndarray = chunk_dict['W']['settings']['Dgain'] if len(chunk_dict['W']['settings']['Dgain']) > 0 else np.full((len(t),), 1)
+        v *= digital_gain_scalars[:, np.newaxis, np.newaxis]
 
-        # Apply correction scalars for each of the RGB channels
-        if(apply_RGB_correction is True):
-            bayer_RGB_mask: np.ndarray = world_util.generate_RGB_mask(v[0])
-            bayer_RGB_pixel_locations: list[np.ndarray] = [ np.argwhere(bayer_RGB_mask == color) for color in "RGB" ]
-            assert bayer_RGB_mask.shape == v.shape[1:], f"Bayer RGB mask shape: {bayer_RGB_mask.shape} not equal to frame shape: {v.shape[1:]}"
+    # Apply the fielding function to each color plane
+    if(apply_fielding_function is True):
+        fielding_function: np.ndarray = world_util.WORLD_FIELDING_FUNCTIONS[v.shape[1:3]]
+        v *= fielding_function
 
-            assert len(bayer_RGB_pixel_locations) == len(world_util.WORLD_RGB_SCALARS)
-            for (pixels, weight) in zip(bayer_RGB_pixel_locations, world_util.WORLD_RGB_SCALARS):
-                rows: np.ndarray = pixels[:, 0]
-                cols: np.ndarray = pixels[:, 1]
-                v[:, rows, cols] *= weight
+    # Apply correction scalars for each of the RGB channels
+    if(apply_RGB_correction is True):
+        bayer_RGB_mask: np.ndarray = world_util.generate_RGB_mask(v[0])
+        bayer_RGB_pixel_locations: list[np.ndarray] = [ np.argwhere(bayer_RGB_mask == color) for color in "RGB" ]
+        assert bayer_RGB_mask.shape == v.shape[1:], f"Bayer RGB mask shape: {bayer_RGB_mask.shape} not equal to frame shape: {v.shape[1:]}"
 
-    # When differentiate_color + use_mean_frame, skip the uint8 roundtrip
-    # and go straight to the color-separated mean while data is still in memory
-    if(use_mean_frame is True and differentiate_color is True):
-        assert all(ax in mean_axes for ax in (1, 2)), \
-            "differentiate_color requires both spatial axes (1, 2) to be in mean_axes"
+        assert len(bayer_RGB_pixel_locations) == len(world_util.WORLD_RGB_SCALARS)
+        for (pixels, weight) in zip(bayer_RGB_pixel_locations, world_util.WORLD_RGB_SCALARS):
+            rows: np.ndarray = pixels[:, 0]
+            cols: np.ndarray = pixels[:, 1]
+            v[:, rows, cols] *= weight
 
-        # Build the Bayer mask from the frame shape (works on any dtype)
-        frame_shape: tuple = v.shape[1:3]
-        bayer_mask: np.ndarray = world_util.generate_RGB_mask(
-            np.zeros(frame_shape, dtype=np.uint8), marker="num"
-        )
-        r_mask: np.ndarray = bayer_mask == 0
-        g_mask: np.ndarray = bayer_mask == 1
-        b_mask: np.ndarray = bayer_mask == 2
-        del bayer_mask
+    # Next, we will debayer the images if desired. Naturally, 
+    # this involves clipping and rounding, so could cause (e.g.)
+    # the mean to deviate from what you expect 
+    if(debayer_images is True):
+        v = v if v.dtype == np.uint8 else np.round(np.clip(v, 0, 255)).astype(np.uint8)
 
-        # Compute per-color and frame means one at a time to avoid
-        # materializing large intermediate slices simultaneously
-        r_means: np.ndarray = v[:, r_mask].mean(axis=1, dtype=np.float64)
-        g_means: np.ndarray = v[:, g_mask].mean(axis=1, dtype=np.float64)
-        b_means: np.ndarray = v[:, b_mask].mean(axis=1, dtype=np.float64)
-        frame_means: np.ndarray = v.mean(axis=(1, 2), dtype=np.float64)
+        debayered_v: np.ndarray = np.empty(list(v.shape) + [3], dtype=np.uint8)
+        for frame_num, frame in v:
+            debayered_v[frame_num] = world_util.debayer_image(frame)
+        v = debayered_v
 
-        # Release the large buffer immediately
-        del v
-        gc.collect()
 
-        v = np.stack([r_means, g_means, b_means, frame_means], axis=1)
-        del r_means, g_means, b_means, frame_means
+    # Next, if we want the mean frame, let's do those operations 
+    if(use_mean_frame is True):
+        # If we we want to differentiate color in the mean, let's do so now 
+        if(differentiate_color is True):
+            assert mean_axes.sort() == (1, 2), f"To differentiate color, it has to be on a per frame basis"
 
-        if 0 in mean_axes:
-            v = v.mean(axis=0)
+            # First, let's get the bayer mask for this frame shape
+            bayer_mask: np.ndarray = world_util.generate_RGB_mask(np.zeros(v.shape[1:3], dtype=np.uint8), marker="num")
 
-    else:
-        # Standard path: convert back to uint8 if corrections promoted to float
-        if(v.dtype != np.uint8):
-            v = np.round(np.clip(v, 0, 255)).astype(np.uint8)
+            # Find where each of the individual pixels are
+            r_mask: np.ndarray = bayer_mask == 0
+            g_mask: np.ndarray = bayer_mask == 1
+            b_mask: np.ndarray = bayer_mask == 2
 
-        # Debayer images if desired
-        if(debayer_images is True):
-            debayered_v: np.ndarray = np.empty(list(v.shape) + [3], dtype=np.uint8)
-            for frame_num, frame in v:
-                debayered_v[frame_num] = world_util.debayer_image(frame)
-            v = debayered_v
+            # Compute per-color and frame means one at a time to avoid
+            # materializing large intermediate slices simultaneously
+            r_means: np.ndarray = v[:, r_mask].mean(axis=1, dtype=np.float64)
+            g_means: np.ndarray = v[:, g_mask].mean(axis=1, dtype=np.float64)
+            b_means: np.ndarray = v[:, b_mask].mean(axis=1, dtype=np.float64)
+            frame_means: np.ndarray = v.mean(axis=(1, 2), dtype=np.float64)
 
-        # Reduce frames by averaging
-        if(use_mean_frame is True):
+            v = np.stack([r_means, g_means, b_means, frame_means], axis=1)
+
+        # Otherwise, simply mean the desired axes
+        else:
             v = np.mean(v, axis=mean_axes)
 
+    # As we are returning camera data, ensure 
+    # it is in the 0-255 range
+    if(clip_data is True and v.dtype != np.uint8):
+        v = np.round(np.clip(v, 0, 255)).astype(np.uint8)
+
     # Convert result to float or not
-    if(convert_to_float is True or differentiate_color is True):
-        t = t.astype(np.float64)
-        v = v.astype(np.float64)
+    if(convert_to_float is True):
+        t = t.astype(np.float64, copy=False)
+        v = v.astype(np.float64, copy=False)
 
     # Save the finalized values
     chunk_dict['W']['t'] = t

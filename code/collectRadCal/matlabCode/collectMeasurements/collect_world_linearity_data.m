@@ -151,8 +151,8 @@ function [success, world_linearity_calibration_metadata] = collect_world_lineari
                         % Generate a message to send to the RPi
                         update_message = py_call_module_attr(bluetooth_central, "initialize_update_message");
 
-                        filename = label + sprintf("WorldCameraLinearity_%dcontrastTargetIdx_%dsettingsIdx_%dmeasurementIdx", ...
-                                                   cc, settings_scalar_idx, mm);
+                        filename = label + sprintf("WorldCameraLinearity_%dNDFIdx_%0.3fNDF_%dcontrastTargetIdx_%dsettingsIdx_%dmeasurementIdx", ...
+                                                   nn, NDF, cc, settings_scalar_idx, mm);
 
                         % Compose the target output dir for this NDF level
                         cloud_output_dir = "";
