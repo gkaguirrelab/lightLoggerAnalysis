@@ -1197,7 +1197,6 @@ def world_chunks_to_video(recording_path: str,
                 frame_buffer[dark_noise_mask] = 0 
 
             # Convert the frame buffer back into uint8 format
-            # TODO: akalsdklasdkdklasdlkaskld 
             if(frame_buffer.dtype != np.uint8): 
                 frame_buffer = np.clip(np.round(frame_buffer), 0, 255).astype(np.uint8)
 

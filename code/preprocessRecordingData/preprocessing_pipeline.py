@@ -11,11 +11,13 @@ import sys
 import zipfile
 import warnings
 import math
+import time
 import matplotlib.pyplot as plt
 import json
 import scipy.io
 import numpy as np
 import copy
+import dill
 import requests
 import pandas as pd
 
@@ -35,6 +37,44 @@ for path in custom_library_paths:
 import video_io 
 import virtual_foveation
 import spd_util
+
+
+def _write_chunk_with_blocking_retry(fd, chunk: bytes, save_path: pathlib.Path, verbose: bool, retry_delay_seconds: float=5.0) -> None:
+    """Write a chunk, retrying when the destination temporarily blocks."""
+    bytes_written: int = 0
+    while(bytes_written < len(chunk)):
+        try:
+            write_result = fd.write(chunk[bytes_written:])
+            if(write_result is None):
+                bytes_written = len(chunk)
+            elif(write_result > 0):
+                bytes_written += write_result
+            else:
+                if(verbose is True):
+                    print(f"Write accepted 0 bytes for {save_path}; retrying in {retry_delay_seconds:g} seconds...", flush=True)
+
+                time.sleep(retry_delay_seconds)
+        except BlockingIOError as error:
+            characters_written: int | None = getattr(error, "characters_written", None)
+            if(characters_written is not None):
+                bytes_written += characters_written
+
+            if(verbose is True):
+                print(f"Write blocked for {save_path}; retrying in {retry_delay_seconds:g} seconds...", flush=True)
+
+            time.sleep(retry_delay_seconds)
+
+
+def _open_path_for_writing_with_blocking_retry(save_path: pathlib.Path, verbose: bool, retry_delay_seconds: float=5.0):
+    """Open a file for writing, retrying when the destination temporarily blocks."""
+    while(True):
+        try:
+            return save_path.open("wb")
+        except BlockingIOError:
+            if(verbose is True):
+                print(f"Open blocked for {save_path}; retrying in {retry_delay_seconds:g} seconds...", flush=True)
+
+            time.sleep(retry_delay_seconds)
 
 def get_subject_ids(FLIC_subject_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_subject/NEWscriptedIndoorOutdoorVideos2026") -> set[int]:
     """
@@ -2587,8 +2627,11 @@ def verify_data_integrity(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
                           subjects_to_process: Iterable=set(),
                           activities_to_skip: Iterable=set(),
                           activities_to_process: Iterable=set(),
-                          verbose: bool=False
-                         ) -> dict[int, dict[str, dict[str, list[str]]]]:
+                          verbose: bool=False,
+                          target_fps: int =120,
+                          target_world_size: tuple[int, int] = (480, 640),
+                          target_sensors: set[Literal["M", "W"]] = set("MW")
+                         ) -> tuple[bool, dict]:
     """
     Performs sanity checks on raw recording folders to ensure that both GKA and
     Neon data exist for each requested subject/activity. By default, subjects
@@ -2602,13 +2645,22 @@ def verify_data_integrity(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
       activities_to_skip     activity names to ignore
       activities_to_process  activity names to exclusively process
       verbose                print additional diagnostics
+      target_fps             expected world-camera recording FPS
+      target_world_size      expected world-camera frame size as (height, width)
+      target_sensors         expected GKA sensors
+
+    Returns:
+      A tuple of (problems_detected, integrity_issues). The second item is a
+      nested dictionary organized as subject -> meta_problems / activities,
+      with each activity storing meta_problems, GKA problems, and Neon problems.
     """
-    
+
     subjects_to_process = set(subjects_to_process)
     subjects_to_skip = set(subjects_to_skip)
     activities_to_process = set(activities_to_process)
     activities_to_skip = set(activities_to_skip)
 
+    # Filter subjects and IDs for just those that we want to check
     subject_ids_to_check: list[int] = sorted([
         subject_id
         for subject_id in (subjects_to_process if len(subjects_to_process) > 0 else get_subject_ids())
@@ -2623,64 +2675,268 @@ def verify_data_integrity(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
     ])
     assert len(activity_names_to_check) > 0, "No activity names selected for verification"
 
-    integrity_issues: dict[int, dict[str, dict[str, list[str]]]] = {}
+
+    # Save a dictionary that stores integrity issues
+    problems_detected: bool = False
+    integrity_issues: dict[int, dict] = {}
 
     # Now, let's iterate over all the subject paths 
     subject_iterator: Iterable = subject_ids_to_check if verbose is False else tqdm(subject_ids_to_check, desc="Processing Subjects", leave=True)
     for subject_id_number in subject_iterator:
         subject_id: str = f"FLIC_{subject_id_number}"
         subject_path: str = os.path.join(src_dir, subject_id)
-        assert os.path.exists(subject_path), f"{subject_path} does not exist"
-        assert os.path.isdir(subject_path), f"{subject_path} is not a directory"
+        integrity_issues[subject_id_number] = {"meta_problems": [], "activities": {}}
 
-        integrity_issues[subject_id_number] = {}
+        # Ensure the path to exists and it is a directory
+        if(not os.path.exists(subject_path)):
+            integrity_issues[subject_id_number]["meta_problems"].append("Subject path does not exist")
+            problems_detected = True
+        if(not os.path.isdir(subject_path)):
+            integrity_issues[subject_id_number]["meta_problems"].append("Subject path is not a directory")
+            problems_detected = True
 
+        if(len(integrity_issues[subject_id_number]["meta_problems"]) > 0):
+            continue
+
+        # Now, let's iterate over the activities for this subject
         activities_iterator: Iterable = activity_names_to_check if verbose is False else tqdm(activity_names_to_check, desc="Processing Activities", leave=False)
         for activity_name in activities_iterator:
+            # Initialize an entry for this activitiy
+            integrity_issues[subject_id_number]["activities"][activity_name] = {"meta_problems": [], "GKA": [], "Neon": []}
+
+            # Get the path to this activity
             activity_path: str = os.path.join(subject_path, activity_name)
-            integrity_issues[subject_id_number][activity_name] = {"GKA": [], "Neon": []}
-            assert os.path.exists(activity_path), f"{activity_path} does not exist"
-            assert os.path.isdir(activity_path), f"{activity_path} is not a directory"
+
+            # Ensure the path to the activity exists and it is a directory
+            if(not os.path.exists(activity_path)):
+                integrity_issues[subject_id_number]["activities"][activity_name]["meta_problems"].append("Activity path does not exist")
+                problems_detected = True
+
+            if(not os.path.isdir(activity_path)):
+                integrity_issues[subject_id_number]["activities"][activity_name]["meta_problems"].append("Activity path is not a directory")
+                problems_detected = True
+
+            if(len(integrity_issues[subject_id_number]["activities"][activity_name]["meta_problems"]) > 0):
+                continue
 
             # Construct the path to the GKA folder
             gka_folder_path: str = os.path.join(activity_path, "GKA")
-            assert os.path.exists(gka_folder_path), f"{gka_folder_path} does not exist"
-            assert os.path.isdir(gka_folder_path), f"{gka_folder_path} is not a directory"
-            assert len(os.listdir(gka_folder_path)) > 0, f"{gka_folder_path} is empty"
+            gka_folder_contents: list[str] = []
+
+            # Ensure the GKA folder is valid
+            if(not os.path.exists(gka_folder_path)):
+                integrity_issues[subject_id_number]["activities"][activity_name]["GKA"].append("GKA path does not exist")
+                problems_detected = True
+            elif(not os.path.isdir(gka_folder_path)):
+                integrity_issues[subject_id_number]["activities"][activity_name]["GKA"].append("GKA path is not a directory")
+                problems_detected = True
+            else:
+                gka_folder_contents = os.listdir(gka_folder_path)
+
+            if(os.path.isdir(gka_folder_path) and len(gka_folder_contents) == 0):
+                integrity_issues[subject_id_number]["activities"][activity_name]["GKA"].append("GKA path is empty")
+                problems_detected = True
+
+            # Ensure the config file exists
+            # and the recording matches our expectations
+            GKA_config_path: str = os.path.join(gka_folder_path, "config.pkl")
+            if(os.path.isdir(gka_folder_path) and len(gka_folder_contents) > 0 and not os.path.exists(GKA_config_path)):
+                integrity_issues[subject_id_number]["activities"][activity_name]["GKA"].append("GKA config path does not exist")
+                problems_detected = True
+            elif(os.path.exists(GKA_config_path)):
+                GKA_config_data: dict | None = None
+                try:
+                    with open(GKA_config_path, "rb") as f:
+                        GKA_config_data = dill.load(f)
+                except Exception as e:
+                    integrity_issues[subject_id_number]["activities"][activity_name]["GKA"].append(f"GKA config could not be read: {e}")
+                    problems_detected = True
+
+                if(GKA_config_data is not None):
+                    try:
+                        recorded_sensors = GKA_config_data["sensors"].keys()
+                        if(not (set(recorded_sensors) == target_sensors)):
+                            integrity_issues[subject_id_number]["activities"][activity_name]["GKA"].append(f"recorded sensors: {set(recorded_sensors)} != target sensors: {target_sensors}")
+                            problems_detected = True
+
+
+                        recorded_fps: float | int = GKA_config_data["sensors"]["W"]["sensor_mode"]["fps"]
+                        if(recorded_fps != target_fps):
+                            integrity_issues[subject_id_number]["activities"][activity_name]["GKA"].append(f"recorded FPS: {recorded_fps} != target fps: {target_fps}")
+                            problems_detected = True
+
+                        recorded_size: tuple[int, int] = GKA_config_data["sensors"]["W"]["sensor_mode"]["size"]
+                        if(recorded_size != target_world_size[::-1]):
+                            integrity_issues[subject_id_number]["activities"][activity_name]["GKA"].append(f"recorded size: {recorded_size} != target size: {target_world_size[::-1]}")
+                            problems_detected = True
+                    
+                        agc_mode_and_target_value: str | dict = GKA_config_data["sensors"]["W"]["agc"]
+                        agc_mode: str = agc_mode_and_target_value if isinstance(agc_mode_and_target_value, str) else list(agc_mode_and_target_value.keys())[0]
+                        agc_target_value: int | float = 127 if isinstance(agc_mode_and_target_value, str) else list(agc_mode_and_target_value.values())[0]
+
+                        if(agc_mode != "custom" or agc_target_value != 127):
+                            integrity_issues[subject_id_number]["activities"][activity_name]["GKA"].append(f"AGC configured incorrectly. Mode: {agc_mode} | Target: {agc_mode_and_target_value}")
+                            problems_detected = True
+
+                    except KeyError as e:
+                        integrity_issues[subject_id_number]["activities"][activity_name]["GKA"].append(f"GKA config missing expected key: {e}")
+                        problems_detected = True
+
 
             # Construct the path to the Neon folder
             neon_folder_path: str = os.path.join(activity_path, "Neon")
-            assert os.path.exists(neon_folder_path), f"{neon_folder_path} does not exist"
-            assert os.path.isdir(neon_folder_path), f"{neon_folder_path} is not a directory"
-            assert len(os.listdir(neon_folder_path)) > 0, f"{neon_folder_path} is empty"
+            neon_folder_contents: list[str] = []
+
+            if(not os.path.exists(neon_folder_path)):
+                integrity_issues[subject_id_number]["activities"][activity_name]["Neon"].append("Neon path does not exist")
+                problems_detected = True
+            elif(not os.path.isdir(neon_folder_path)):
+                integrity_issues[subject_id_number]["activities"][activity_name]["Neon"].append("Neon path is not a directory")
+                problems_detected = True
+            else:
+                neon_folder_contents = os.listdir(neon_folder_path)
+
+            if(os.path.isdir(neon_folder_path) and len(neon_folder_contents) == 0):
+                integrity_issues[subject_id_number]["activities"][activity_name]["Neon"].append("Neon path is empty")
+                problems_detected = True
+
+            if(not os.path.isdir(neon_folder_path) or len(neon_folder_contents) == 0):
+                continue
 
             for filename in ("enrichment_info.txt", "sections.csv"):
                 filepath: str = os.path.join(neon_folder_path, filename)
-                assert os.path.exists(filepath), f"{filepath} does not exist"
+                if(not os.path.exists(filepath)):
+                    integrity_issues[subject_id_number]["activities"][activity_name]["Neon"].append(f"{filename} does not exist")
+                    problems_detected = True
 
             neon_recording_folders: list[str] = [
                 os.path.join(neon_folder_path, filename)
-                for filename in os.listdir(neon_folder_path)
+                for filename in neon_folder_contents
                 if os.path.isdir(os.path.join(neon_folder_path, filename))
             ]
-            assert len(neon_recording_folders) > 0, f"Subfolder does not exist in {neon_folder_path}"
+            if(len(neon_recording_folders) == 0):
+                integrity_issues[subject_id_number]["activities"][activity_name]["Neon"].append("Neon recording subfolder does not exist")
+                problems_detected = True
+                continue
+
+            if(len(neon_recording_folders) > 1):
+                integrity_issues[subject_id_number]["activities"][activity_name]["Neon"].append(f"Multiple Neon recording subfolders found: {len(neon_recording_folders)}")
+                problems_detected = True
+
             neon_recording_folder: str = neon_recording_folders[0]
 
             for filename in ("3d_eye_states.csv", "blinks.csv", "events.csv", "fixations.csv", "gaze.csv", "world_timestamps.csv", "saccades.csv", "template.csv"):
                 filepath: str = os.path.join(neon_recording_folder, filename)
-                assert os.path.exists(filepath), f"{filepath} does not exist"
+                if(not os.path.exists(filepath)):
+                    integrity_issues[subject_id_number]["activities"][activity_name]["Neon"].append(f"{filename} does not exist")
+                    problems_detected = True
 
             mp4_videos: list[str] = [
                 filename
                 for filename in os.listdir(neon_recording_folder)
                 if filename.endswith(".mp4")
             ]
-            assert len(mp4_videos) > 0, f"{neon_recording_folder} does not have an .mp4 video"
+            if(len(mp4_videos) == 0):
+                integrity_issues[subject_id_number]["activities"][activity_name]["Neon"].append("Neon recording folder does not have an .mp4 video")
+                problems_detected = True
 
+            activity_issues: dict[str, list[str]] = integrity_issues[subject_id_number]["activities"][activity_name]
             if(verbose is True):
-                print(f"{subject_id} | {activity_name}: OK")
+                if(all(len(problems) == 0 for problems in activity_issues.values())):
+                    print(f"{subject_id} | {activity_name}: OK")
+                else:
+                    print(f"{subject_id} | {activity_name}: PROBLEMS")
 
-    return integrity_issues
+    return problems_detected, integrity_issues
+
+def display_integrity_issues(integrity_issues: dict,
+                             show_clean: bool=False,
+                             print_output: bool=True
+                            ) -> str:
+    """Format and optionally print data-integrity issues.
+
+    Args:
+        integrity_issues: The integrity-issues dictionary returned by
+            verify_data_integrity, or the full
+            (problems_detected, integrity_issues) tuple.
+        show_clean: Include recordings with no problems in the output.
+        print_output: Print the formatted report when True.
+
+    Returns:
+        A formatted string report.
+    """
+
+    lines: list[str] = []
+    total_subjects: int = len(integrity_issues)
+    total_activities: int = 0
+    subjects_with_issues: int = 0
+    activities_with_issues: int = 0
+    total_issues: int = 0
+
+    def _sorted_keys(values: dict) -> list:
+        return natsorted(values.keys(), key=lambda value: str(value))
+
+    def _as_problem_list(value) -> list[str]:
+        return value if isinstance(value, list) else []
+
+    for subject_id_number in _sorted_keys(integrity_issues):
+        subject_data: dict = integrity_issues[subject_id_number]
+        subject_meta_problems: list[str] = _as_problem_list(subject_data.get("meta_problems", []))
+        activities: dict = subject_data.get("activities", {})
+        subject_issue_count: int = len(subject_meta_problems)
+        subject_lines: list[str] = []
+
+        for problem in subject_meta_problems:
+            subject_lines.append(f"  Subject: {problem}")
+
+        for activity_name in _sorted_keys(activities):
+            total_activities += 1
+            activity_data: dict = activities[activity_name]
+            activity_issue_lines: list[str] = []
+
+            for issue_group in ("meta_problems", "GKA", "Neon"):
+                group_problems: list[str] = _as_problem_list(activity_data.get(issue_group, []))
+                if(len(group_problems) == 0):
+                    continue
+
+                group_label: str = "Activity" if issue_group == "meta_problems" else issue_group
+                for problem in group_problems:
+                    activity_issue_lines.append(f"    {group_label}: {problem}")
+
+            activity_issue_count: int = len(activity_issue_lines)
+            subject_issue_count += activity_issue_count
+            if(activity_issue_count > 0):
+                activities_with_issues += 1
+                subject_lines.append(f"  {activity_name}:")
+                subject_lines.extend(activity_issue_lines)
+            elif(show_clean is True):
+                subject_lines.append(f"  {activity_name}: OK")
+
+        if(subject_issue_count > 0):
+            subjects_with_issues += 1
+            total_issues += subject_issue_count
+
+        if(subject_issue_count > 0 or show_clean is True):
+            subject_label: str = f"FLIC_{subject_id_number}"
+            status_label: str = "PROBLEMS" if subject_issue_count > 0 else "OK"
+            lines.append(f"{subject_label}: {status_label}")
+            lines.extend(subject_lines)
+            lines.append("")
+
+    if(total_issues == 0):
+        lines.insert(0, "No integrity issues detected.")
+    else:
+        lines.insert(0, f"Integrity issues detected: {total_issues}")
+
+    lines.insert(1, f"Subjects with issues: {subjects_with_issues} / {total_subjects}")
+    lines.insert(2, f"Activities with issues: {activities_with_issues} / {total_activities}")
+    lines.insert(3, "")
+
+    report: str = "\n".join(lines).rstrip()
+    if(print_output is True):
+        print(report)
+
+    return report
 
 def verify_neon_integrity(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026",
                           verbose: bool=False
@@ -3357,11 +3613,11 @@ def download_pupil_cloud_recordings(api_key: str,
             r.raise_for_status()
             save_path = pathlib.Path(output_filename) 
             if(verbose is True):
-                print(f"Downloading: {subject_id} | {activity_name} | {save_path}")
+                print(f"Downloading: {subject_id_num} | {activity_name} | {save_path}")
 
-            with save_path.open("wb") as fd:
+            with _open_path_for_writing_with_blocking_retry(save_path, verbose) as fd:
                 for chunk in r.iter_content(chunk_size=1024 * 1024):
-                    fd.write(chunk)
+                    _write_chunk_with_blocking_retry(fd, chunk, save_path, verbose)
 
     # After all the recordings have been downloaded, we will unpack them 
     # here 

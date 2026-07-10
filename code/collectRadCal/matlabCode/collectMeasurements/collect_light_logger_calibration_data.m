@@ -429,9 +429,9 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
     CalibrationData.ms_linearity.completed_measurements = completed_measurements; 
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-    % { WORLD CAMERA LINEARITY } - We will collect this between NDFs 0-4
-    contrast_agc_targets = [0.1]; 
-    world_linearity_agc_target = 127;
+    % { WORLD CAMERA LINEARITY }
+    contrast_agc_targets = [1.0];
+    world_linearity_agc_target = 254;
     k_settings_levels = 10; % Define the number of settings levels to record
     n_measures = 3; % The number of measurements to make at a given settings level
     settings_scalars = linspace(0.1, 1.0, k_settings_levels); % Define the settings values we will explore
@@ -449,6 +449,16 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
 
         % Let's get the NDF settings for this contrast level    
         settings_contrast_dict = py_call_module_attr(world_util, "get_world_contrast_level_ndf_settings", contrast_target, world_linearity_agc_target); 
+
+        for ii = 1:numel(NDFs.world_linearity)
+            NDF = NDFs.world_linearity(ii);
+            try
+                py_getitem(settings_contrast_dict, py.float(NDF));
+            catch
+                error("Missing world linearity settings for NDF %.3f at contrast target %.3f and AGC target %.0f.", ...
+                      NDF, contrast_target, world_linearity_agc_target);
+            end
+        end
 
         % Initialize the container for the settings per NDF for this contrast target 
         contrast_target_fieldname = "x" + strrep(string(contrast_target), ".", "x"); 
