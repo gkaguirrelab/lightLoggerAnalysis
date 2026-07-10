@@ -354,7 +354,7 @@ def world_chunk_parser(chunk_paths: tuple[str],
 
     # Let's convert to float at the start before we do all of the transformations 
     # if it is not float already 
-    v = np.astype(np.float64, copy=False)
+    v = v.astype(np.float64, copy=False)
 
 
     # Apply digital gain as calculated from the AGC
@@ -386,7 +386,7 @@ def world_chunk_parser(chunk_paths: tuple[str],
         v = v if v.dtype == np.uint8 else np.round(np.clip(v, 0, 255)).astype(np.uint8)
 
         debayered_v: np.ndarray = np.empty(list(v.shape) + [3], dtype=np.uint8)
-        for frame_num, frame in v:
+        for frame_num, frame in enumerate(v):
             debayered_v[frame_num] = world_util.debayer_image(frame)
         v = debayered_v
 
@@ -395,7 +395,7 @@ def world_chunk_parser(chunk_paths: tuple[str],
     if(use_mean_frame is True):
         # If we we want to differentiate color in the mean, let's do so now 
         if(differentiate_color is True):
-            assert mean_axes.sort() == (1, 2), f"To differentiate color, it has to be on a per frame basis"
+            assert tuple(sorted(mean_axes)) == (1, 2), f"To differentiate color, it has to be on a per frame basis"
 
             # First, let's get the bayer mask for this frame shape
             bayer_mask: np.ndarray = world_util.generate_RGB_mask(np.zeros(v.shape[1:3], dtype=np.uint8), marker="num")
