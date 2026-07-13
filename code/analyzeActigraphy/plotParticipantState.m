@@ -1,10 +1,119 @@
 function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, activity, figureTitle, IMUdata, eyeStateData, blinkData, gazeData, options)
-    arguments 
+% Generate multi-panel summary figures of participant actigraphy, gaze, and light data
+%
+% Syntax:
+%   plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, activity, figureTitle, IMUdata, eyeStateData, blinkData, gazeData)
+%   plotParticipantState(..., 'save_figures', true)
+%
+% Description:
+%   Produces four diagnostic figures for a single participant and activity
+%   session: (1) a five-panel time-series summary showing ENMO activity,
+%   rotational velocity, gaze angles, eye state (aperture, pupil, blinks),
+%   and illuminance; (2) gaze-vs-head correlation scatter plots; (3)
+%   activity-vs-eye-state correlations; and (4) illuminance-vs-eye-state
+%   correlations. Sensor data are temporally aligned using Neon timestamps,
+%   world camera timestamps, and a configurable world-to-AS temporal offset.
+%
+% Inputs:
+%   raw_dir               - String. Path to the raw recording directory.
+%   processing_dir        - String. Path to the processing directory.
+%   output_dir            - String. Path to the output directory for saved
+%                           figures.
+%   subject_id            - String. Subject identifier (e.g., 'FLIC_2001').
+%   activity              - String. Activity name (e.g., 'walkOutdoor').
+%   figureTitle           - String. Title string used in correlation figure
+%                           titles.
+%   IMUdata               - Table or char/string. IMU sensor data table or
+%                           path to CSV file.
+%   eyeStateData          - Table or char/string. Eye state data table or
+%                           path to CSV file.
+%   blinkData             - Table or char/string. Blink event data table or
+%                           path to CSV file.
+%   gazeData              - Table or char/string. Gaze angle data table or
+%                           path to CSV file.
+%
+% Optional key/value pairs:
+%   'save_figures'                  - Logical (default: false). Export figures as PDF
+%                                     and EPS to output_dir.
+%   'winSizeSec'                    - Scalar double (default: 5). Sliding window
+%                                     size in seconds for smoothing signals.
+%   'force_recalc'                  - Logical (default: false). Force reload of
+%                                     Python utility libraries.
+%   'w_as_offset'                   - Scalar double (default: -139.354). World-to-AS
+%                                     temporal offset in milliseconds.
+%   'active_threshold'              - Scalar double (default: 0.025). ENMO threshold
+%                                     for active/inactive classification.
+%   'outdoor_threshold'             - Scalar double (default: 10^2.5). Illuminance
+%                                     threshold in lux for outdoor classification.
+%   'plot_aperture_separate'        - Logical (default: true). Plot separate right
+%                                     and left eye apertures. 
+%   'normalize_aperture_to_dark'    - Logical (default: true). Normalize aperture
+%                                     data to baseline (selected percentile) eye
+%                                     openness in 'Dark' activity recording.
+%   'dark_eyeStateData'             - File path. Which 'Dark' recording to use as the 
+%                                     normalization reference.
+%   'dark_gazeData'                 - File path or table containing gaze.csv from the
+%                                     same dark recording used for normalization.
+%   'aperture_baseline_percentile'  - Integer. Minimum percentile used to determine
+%                                     how 'Dark' baseline is calculated.
+%
+% Outputs:
+%   none
+%
+% Examples:
+%{
+    plotParticipantState(raw_dir, processing_dir, output_dir, ...
+        'FLIC_2001', 'walkOutdoor', 'Walk Outdoor', ...
+        IMUdata, eyeStateData, blinkData, gazeData, ...
+        'save_figures', true);
+%}
+% TEMPORARY: LOCAL PATHS & CALL (SOPHIA)
+%{
+    readDir = ...
+    '/Users/sophiamirabal/Downloads/migraine_timeseriesData/m_read_data/flic_1029_read_1-3da132df';
+    darkDir = ...
+    '/Users/sophiamirabal/Downloads/migraine_timeseriesData/m_dark_data/flic_1029_dark_2-69b12aae';
+    outputDir = ...
+    '/Users/sophiamirabal/Downloads/m_participantStateFigures';
+    if ~exist(outputDir, 'dir')
+    mkdir(outputDir);
+    end
+
+    imuFile = fullfile(readDir, 'imu.csv');
+    eyeStateFile = fullfile(readDir, '3d_eye_states.csv');
+    blinkFile = fullfile(readDir, 'blinks.csv');
+    gazeFile = fullfile(readDir, 'gaze.csv');
+    darkEyeStateFile = fullfile(darkDir, '3d_eye_states.csv');
+    darkGazeFile = fullfile(darkDir, 'gaze.csv');
+    darkBlinkFile = fullfile(darkDir, 'blinks.csv');
+
+    plotParticipantState( ...
+        '', ...                       
+        '', ...                          
+        outputDir, ...
+        'FLIC_1029', ...
+        'read', ...
+        'Read', ...
+        imuFile, ...
+        eyeStateFile, ...
+        blinkFile, ...
+        gazeFile, ...
+        'save_figures', false, ...
+        'winSizeSec', 5, ...
+        'plot_aperture_separate', true, ...
+        'normalize_aperture_to_dark', true, ...
+        'dark_eyeStateData', darkEyeStateFile, ...
+        'dark_gazeData', darkGazeFile, ...
+        'dark_blinkData', darkBlinkFile, ...
+        'aperture_baseline_percentile', 95, ...
+        'include_luminance', false);
+%}
+    arguments
         raw_dir;
         processing_dir;    
         output_dir; 
         subject_id; 
-        activity; 
+        activity;  
         figureTitle; 
 
         IMUdata, 
@@ -19,73 +128,99 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
         options.active_threshold = 0.025;
         options.outdoor_threshold = 10 ^ 2.5;
 
+        % Aperture specific arguments
+        options.plot_aperture_separate = true;
+        options.normalize_aperture_to_dark = true;
+        options.dark_eyeStateData = [];
+        options.dark_gazeData = [];
+        options.dark_blinkData = [];
+        options.aperture_baseline_percentile = 95;
+
+        % For skipping luminance
+        options.include_luminance = false;
+
     end
     winSizeSec = options.winSizeSec; 
 
     %% Load Utility Libraries & Data
-    persistent world_util ms_util;
-    if isempty(world_util) || isempty(ms_util) || options.force_recalc
-        world_util = import_pyfile(getpref("lightLoggerAnalysis", "world_util_path"));
-        ms_util = import_pyfile(getpref("lightLoggerAnalysis", "ms_util_path")); 
+    if options.include_luminance
+        persistent world_util ms_util;
+        if isempty(world_util) || isempty(ms_util) || options.force_recalc
+            world_util = import_pyfile(getpref("lightLoggerAnalysis", "world_util_path"));
+            ms_util = import_pyfile(getpref("lightLoggerAnalysis", "ms_util_path")); 
+        end
     end
     
     % Load in the actigraphy data if needed 
     [IMUdata, eyeStateData, blinkData, gazeData] = load_actigraphy_data(IMUdata, eyeStateData, blinkData, gazeData);
+
+    %% OPTIONAL LUMINANCE/WORLD-CAMERA PROCESSING
+    % The locally downloaded Neon CSV files do not include the GKA and
+    % processed world-camera files required for illuminance analysis.
+    if options.include_luminance
     
-    % First, we need to find and load in the timestamp data so we can do temporal alignment
-    path_to_raw_recording = fullfile(raw_dir, subject_id, activity, "GKA"); 
-    path_to_activity_start_end = fullfile(processing_dir, subject_id, activity, "tag_task_start_end.mat"); 
-    path_to_gka_world_timestamps_neon_time = fullfile(processing_dir, subject_id, activity, "Neon", "egocentric_mapper_results", "alternative_camera_timestamps.csv"); 
-
-    assert(exist(path_to_raw_recording, 'dir') ~= 0, ...
-    sprintf('Path %s does not exist', path_to_raw_recording));
-
-    assert(exist(path_to_gka_world_timestamps_neon_time, 'file') ~= 0, ...
-    sprintf('Path %s does not exist', path_to_gka_world_timestamps_neon_time));
-
-    % At this point, everything is in Neon time
-    [world_t, ms_t, ms_v] = load_ms_world_timestamps_and_data(path_to_raw_recording, path_to_gka_world_timestamps_neon_time, world_util, ms_util); 
-
-    % With this information, we can also get the start/ending time of the activity in neon time 
-    tag_task_start_end_frames = load(path_to_activity_start_end).tag_task_start_end; 
-
-    % Clip the tag start end to the world t length 
-    % This is due to rare rounding error in the neon alignment that clips off 
-    % some small number of frames sometimes 
-    tag_start_end_frames = tag_task_start_end_frames.tag; 
-    task_start_end_frames = tag_task_start_end_frames.task; 
-    tag_start_end_frames  = max(min(tag_start_end_frames,  numel(world_t)), 1);
-    task_start_end_frames = max(min(task_start_end_frames, numel(world_t)), 1);
-    tag_start_end_neon_time = world_t(tag_start_end_frames); 
-    task_start_end_neon_time = world_t(task_start_end_frames);
-
-
-    % We know the temporal offset (W-AS) is options.w_as_offset milliseconds. 
-    % Therefore, we apply this correction now to the Nanosecond time 
-    % Given that it is negative, it implies that the world is BEHIND 
-    % the MS, so subtract this offset from the MS to bring them onto the same 
-    % time
-    offset_in_nanoseconds = options.w_as_offset * 1e6; 
-    ms_t = ms_t + offset_in_nanoseconds; 
-
-    % Convert MS counts to absolute illuminance
-    MS2illum_lux = msCounts2Illuminance(ms_v);
-    meanLux = mean(MS2illum_lux, 'omitnan');
-    fprintf('%.6f\n', meanLux);
+        % First, we need to find and load in the timestamp data so we can do temporal alignment
+        path_to_raw_recording = fullfile(raw_dir, subject_id, activity, "GKA"); 
+        path_to_activity_start_end = fullfile(processing_dir, subject_id, activity, "tag_task_start_end.mat"); 
+        path_to_gka_world_timestamps_neon_time = fullfile(processing_dir, subject_id, activity, "Neon", "egocentric_mapper_results", "alternative_camera_timestamps.csv"); 
     
-    % Classify outdoor/indoor based on this 
-    outdoor_threshold = options.outdoor_threshold; 
-    outdoor_indoor_classifications = ~classifyIndoorOutdoorPeriods(path_to_raw_recording, ...
-                                                                  "window_size_seconds", options.winSizeSec,...
-                                                                  "outdoor_threshold", outdoor_threshold...
-                                                                  ); 
+        assert(exist(path_to_raw_recording, 'dir') ~= 0, ...
+        sprintf('Path %s does not exist', path_to_raw_recording));
+    
+        assert(exist(path_to_gka_world_timestamps_neon_time, 'file') ~= 0, ...
+        sprintf('Path %s does not exist', path_to_gka_world_timestamps_neon_time));
+    
+        % At this point, everything is in Neon time
+        [world_t, ms_t, ms_v] = load_ms_world_timestamps_and_data(path_to_raw_recording, path_to_gka_world_timestamps_neon_time, world_util, ms_util); 
+    
+        % With this information, we can also get the start/ending time of the activity in neon time 
+        tag_task_start_end_frames = load(path_to_activity_start_end).tag_task_start_end; 
+    
+        % Clip the tag start end to the world t length 
+        % This is due to rare rounding error in the neon alignment that clips off 
+        % some small number of frames sometimes 
+        tag_start_end_frames = tag_task_start_end_frames.tag; 
+        task_start_end_frames = tag_task_start_end_frames.task; 
+        tag_start_end_frames  = max(min(tag_start_end_frames,  numel(world_t)), 1);
+        task_start_end_frames = max(min(task_start_end_frames, numel(world_t)), 1);
+        tag_start_end_neon_time = world_t(tag_start_end_frames); 
+        task_start_end_neon_time = world_t(task_start_end_frames);
+    
+    
+        % We know the temporal offset (W-AS) is options.w_as_offset milliseconds. 
+        % Therefore, we apply this correction now to the Nanosecond time 
+        % Given that it is negative, it implies that the world is BEHIND 
+        % the MS, so subtract this offset from the MS to bring them onto the same 
+        % time
+        offset_in_nanoseconds = options.w_as_offset * 1e6; 
+        ms_t = ms_t + offset_in_nanoseconds; 
+    
+        % Convert MS counts to absolute illuminance
+        MS2illum_lux = msCounts2Illuminance(ms_v);
+        meanLux = mean(MS2illum_lux, 'omitnan');
+        fprintf('%.6f\n', meanLux);
+        
+        % Classify outdoor/indoor based on this 
+        outdoor_threshold = options.outdoor_threshold; 
+        outdoor_indoor_classifications = ~classifyIndoorOutdoorPeriods(path_to_raw_recording, ...
+                                                                      "window_size_seconds", options.winSizeSec,...
+                                                                      "outdoor_threshold", outdoor_threshold...
+                                                                      ); 
+    end % options.include_luminance
 
     %% Calculate Time Offsets (T0 based on IMU start)
     t0 = IMUdata.timestamp_ns_(1);
     
-    % Align MS Timing to T0 (Minutes)
-    timeMinMS = (double(ms_t) - double(t0)) / 1e9 / 60;
-    timeMinTask = (double(task_start_end_neon_time) - double(t0)) / 1e9 / 60;
+    % Light-sensor and task-boundary timing only exist when the
+    % luminance/world-camera data are being included.
+    if options.include_luminance
+        timeMinMS = (double(ms_t) - double(t0)) / 1e9 / 60;
+        timeMinTask = ...
+            (double(task_start_end_neon_time) - double(t0)) / 1e9 / 60;
+    else
+        timeMinMS = [];
+        timeMinTask = [];
+    end
     
     % IMU Timing
     timeMinIMU = (double(IMUdata.timestamp_ns_) - double(t0)) / 1e9 / 60;
@@ -115,12 +250,261 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     vPitch = gradient(IMUdata.pitch_deg_, dt);
     vYaw   = gradient(unwrappedYaw, dt);
     
-    % Eye State & Blink Masking
-    avgAperture = mean(eyeStateData{:, {'eyelidApertureLeft_mm_', 'eyelidApertureRight_mm_'}}, 2, 'omitnan');
-    avgPupil    = mean(eyeStateData{:, {'pupilDiameterLeft_mm_', 'pupilDiameterRight_mm_'}}, 2, 'omitnan');
+    %% Eye State & Blink Masking
+    
+    apertureL = eyeStateData.eyelidApertureLeft_mm_;
+    apertureR = eyeStateData.eyelidApertureRight_mm_;
+    
+    pupilL = eyeStateData.pupilDiameterLeft_mm_;
+    pupilR = eyeStateData.pupilDiameterRight_mm_;
+    
+    avgPupil = mean([pupilL pupilR], 2, 'omitnan');
+    
+    %% Optional: normalize aperture to dark baseline
+    if options.normalize_aperture_to_dark
+
+        if isempty(options.dark_eyeStateData)
+            error(['normalize_aperture_to_dark is true, but no dark ', ...
+                '3d_eye_states.csv path or table was supplied.']);
+        end
+
+        if isempty(options.dark_gazeData)
+            error(['normalize_aperture_to_dark is true, but no dark ', ...
+                'gaze.csv path or table was supplied.']);
+        end
+
+        if isempty(options.dark_blinkData)
+            error(['normalize_aperture_to_dark is true, but no dark ', ...
+                'blinks.csv path or table was supplied.']);
+        end
+    
+        darkEye = options.dark_eyeStateData;
+    
+        if isstring(darkEye) || ischar(darkEye)
+            darkEye = readtable(darkEye);
+        end
+
+        darkGaze = options.dark_gazeData;
+
+        if isstring(darkGaze) || ischar(darkGaze)
+            darkGaze = readtable(darkGaze);
+        end
+
+        darkBlink = options.dark_blinkData;
+
+        if isstring(darkBlink) || ischar(darkBlink)
+            darkBlink = readtable(darkBlink);
+        end
+
+        darkTime = (double(darkEye.timestamp_ns_) - ...
+            double(darkEye.timestamp_ns_(1))) / 1e9;
+    
+        darkApertureL_raw = darkEye.eyelidApertureLeft_mm_;
+        darkApertureR_raw = darkEye.eyelidApertureRight_mm_;
+
+        %% Remove dark-recording blinks before smoothing
+
+        isBlinkDark = false(size(darkTime));
+
+        for b = 1:height(darkBlink)
+
+            blinkMask = ...
+                darkEye.timestamp_ns_ >= darkBlink.startTimestamp_ns_(b) & ...
+                darkEye.timestamp_ns_ <= darkBlink.endTimestamp_ns_(b);
+
+            isBlinkDark = isBlinkDark | blinkMask;
+        end
+
+        darkApertureL_noBlink = darkApertureL_raw;
+        darkApertureR_noBlink = darkApertureR_raw;
+
+        darkApertureL_noBlink(isBlinkDark) = NaN;
+        darkApertureR_noBlink(isBlinkDark) = NaN;
+
+        %% Apply sliding-average window before selecting baseline timestamps
+
+        darkDt_s = mean(diff(darkTime), 'omitnan');
+        darkWindowSamples = max(1, round(options.winSizeSec / darkDt_s));
+
+        darkApertureL = movmean( ...
+            darkApertureL_noBlink, ...
+            darkWindowSamples, ...
+            'omitnan');
+
+        darkApertureR = movmean( ...
+            darkApertureR_noBlink, ...
+            darkWindowSamples, ...
+            'omitnan');
+
+        % movmean(...,'omitnan') can estimate a value at a blink sample using
+        % neighboring non-blink values. Restore NaNs at the blink timestamps so
+        % those exact samples cannot be chosen for normalization.
+        darkApertureL(isBlinkDark) = NaN;
+        darkApertureR(isBlinkDark) = NaN;
+
+        fprintf('\nDark baseline preprocessing:\n');
+        fprintf('Sliding-average window: %.1f s (%d samples)\n', ...
+            options.winSizeSec, darkWindowSamples);
+        fprintf('Blink samples removed: %d\n', sum(isBlinkDark));
+
+        %% Align dark horizontal gaze position to eye-state samples
+
+        darkEyeTime_ns = double(darkEye.timestamp_ns_);
+        darkGazeTime_ns = double(darkGaze.timestamp_ns_);
+
+        darkAzimuth = darkGaze.azimuth_deg_;
+
+        % Gaze and eye-state data are sampled separately, so interpolate gaze
+        % azimuth onto the eye-state timestamps used for aperture measurements.
+        darkAzimuthAtEye = interp1( ...
+            darkGazeTime_ns, ...
+            darkAzimuth, ...
+            darkEyeTime_ns, ...
+            'nearest', ...
+            NaN);
+
+        % Keep only samples with horizontal gaze within 10 degrees of center.
+        maxDarkAzimuth_deg = 10;
+        gazeNearCenter = ...
+            isfinite(darkAzimuthAtEye) & ...
+            abs(darkAzimuthAtEye) <= maxDarkAzimuth_deg;
+    
+        %% Select shared timestamps when both eyes are most open
+
+        % Remove rows where either eye is missing or invalid. The joint baseline
+        % must be based on timestamps containing valid measurements for both eyes.
+        validDark = isfinite(darkApertureL) & isfinite(darkApertureR) & gazeNearCenter;
+        validIdx = find(validDark);
+
+        darkApertureL_valid = darkApertureL(validDark);
+        darkApertureR_valid = darkApertureR(validDark);
+
+        if isempty(darkApertureL_valid)
+            error('No dark-recording samples contain valid data for both eyes.');
+        end
+
+        % Convert each eye's aperture measurements to percentile ranks.
+        % This places the two eyes on comparable scales without averaging their
+        % aperture values or allowing the eye with larger millimeter values to
+        % dominate the joint selection.
+        rankL = tiedrank(darkApertureL_valid) ./ ...
+            numel(darkApertureL_valid);
+
+        rankR = tiedrank(darkApertureR_valid) ./ ...
+            numel(darkApertureR_valid);
+
+        % At each timestamp, joint openness is determined by the less-open eye.
+        % A timestamp scores highly only when BOTH eyes are highly open.
+        jointOpennessRank = min(rankL, rankR);
+
+        %--------------------------------------------------------------
+        % Reject timestamps where the eyes disagree too much.
+        % Large left-right differences are usually caused by eyelid
+        % tracking failures rather than true physiology.
+        maxEyeDifference_mm = 2;
+
+        eyeDifference = abs(darkApertureL_valid - darkApertureR_valid);
+
+        %--------------------------------------------------------------
+        % Select the top jointly-open timestamps.
+        jointThreshold = prctile( ...
+            jointOpennessRank, ...
+            options.aperture_baseline_percentile);
+
+        jointMaskValid = ...
+            jointOpennessRank >= jointThreshold & ...
+            eyeDifference <= maxEyeDifference_mm;
+
+        % Convert the mask back to the full dark-recording indexing.
+        jointOpenMask = false(size(darkApertureL));
+        jointOpenMask(validIdx(jointMaskValid)) = true;
+
+        %% TEMPORARY DIAGNOSTIC:
+        % Plot the blink-cleaned, sliding-average aperture traces from the dark
+        % recording and mark the exact timestamps chosen for normalization.
+
+        selectedDarkTimes_s = darkTime(jointOpenMask);
+
+        figure('Color', 'w', ...
+            'Name', 'Dark Baseline Selection');
+
+        plot(darkTime, darkApertureL, ...
+            'LineWidth', 1.2, ...
+            'DisplayName', 'Left eye');
+        hold on
+
+        plot(darkTime, darkApertureR, ...
+            'LineWidth', 1.2, ...
+            'DisplayName', 'Right eye');
+
+        % Draw a vertical line at every timestamp selected by the actual
+        % normalization algorithm.
+        for k = 1:numel(selectedDarkTimes_s)
+            xline(selectedDarkTimes_s(k), ...
+                ':', ...
+                'Color', [0.35 0.35 0.35], ...
+                'LineWidth', 0.6, ...
+                'HandleVisibility', 'off');
+        end
+
+        % Dummy line so the selected timestamps appear once in the legend.
+        pSelected = plot(nan, nan, ...
+            ':', ...
+            'Color', [0.35 0.35 0.35], ...
+            'LineWidth', 1.5, ...
+            'DisplayName', 'Selected normalization timestamp');
+
+        xlabel('Time from dark recording start (s)');
+        ylabel('Eye openness (mm)');
+        title(sprintf( ...
+            'Dark Baseline Selection: %d Timestamps, %.1f-s Sliding Average', ...
+            numel(selectedDarkTimes_s), ...
+            options.winSizeSec));
+
+        legend('Location', 'best');
+        grid on
+
+        % TEMPORARY: display only the first 150 seconds.
+        % This changes only the view, not which timestamps are selected.
+        xlim([0 150]);
+
+        % Calculate separate left and right baselines using the exact same
+        % jointly selected timestamps.
+        darkBaselineL = mean( ...
+            darkApertureL(jointOpenMask), ...
+            'omitnan');
+
+        darkBaselineR = mean( ...
+            darkApertureR(jointOpenMask), ...
+            'omitnan');
+
+        if ~isfinite(darkBaselineL) || darkBaselineL <= 0 || ...
+                ~isfinite(darkBaselineR) || darkBaselineR <= 0
+            error('Invalid joint dark-aperture baseline.');
+        end
+    
+        apertureL = apertureL ./ darkBaselineL;
+        apertureR = apertureR ./ darkBaselineR;
+
+        [maxDarkL, idxMaxL] = max(darkApertureL, [], 'omitnan');
+        [maxDarkR, idxMaxR] = max(darkApertureR, [], 'omitnan');
+
+        fprintf('Smoothed left-eye maximum: %.3f mm at %.2f s\n', ...
+            maxDarkL, darkTime(idxMaxL));
+
+        fprintf('Smoothed right-eye maximum: %.3f mm at %.2f s\n', ...
+            maxDarkR, darkTime(idxMaxR));
+    
+        aperture_ylabel = 'Eye Openness';
+    else
+        aperture_ylabel = 'Eye Openness (mm)';
+    end
+    
+    avgAperture = mean([apertureL apertureR], 2, 'omitnan');
+    
     gazeElev = gazeData.elevation_deg_;
     gazeAzim = gazeData.azimuth_deg_;
-
+    
     isBlinkEye = false(size(avgAperture));
     for i = 1:height(blinkData)
         mask = (eyeStateData.timestamp_ns_ >= blinkData.startTimestamp_ns_(i)) & ...
@@ -135,15 +519,29 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
         isBlinkGaze = isBlinkGaze | mask;
     end
     
-    avgAperture(isBlinkEye) = NaN; avgPupil(isBlinkEye) = NaN;
-    gazeElev(isBlinkGaze) = NaN; gazeAzim(isBlinkGaze) = NaN;
+    % Keep blinks in aperture unless you explicitly want to remove them.
+    % Still remove blinks from gaze and pupil.
+    avgPupil(isBlinkEye) = NaN;
+    gazeElev(isBlinkGaze) = NaN;
+    gazeAzim(isBlinkGaze) = NaN;
     
-    smoothAperture = movmean(avgAperture, winSizeSamplesEye, 'omitnan');
-    smoothPupil    = movmean(avgPupil, winSizeSamplesEye, 'omitnan');
+    %% Temporal smoothing
+    smoothApertureL = movmean(apertureL, winSizeSamplesEye, 'omitnan');
+    smoothApertureR = movmean(apertureR, winSizeSamplesEye, 'omitnan');
+    smoothAperture  = movmean(avgAperture, winSizeSamplesEye, 'omitnan');
+    
+    smoothPupil = movmean(avgPupil, winSizeSamplesEye, 'omitnan');
 
     %% Colors
     cRoll  = [0 0.4470 0.7410]; cPitch = [0.8500 0.3250 0.0980]; cYaw = [0.9290 0.6940 0.1250];
-    cPupil = [0 0.5 0.5]; cApert = [0.6350 0.0780 0.1840]; cLux = [0.4660 0.6740 0.1880]; % Green
+    cPupil = [0 0.5 0.5]; 
+    cApertL = [0.6350 0.0780 0.1840];
+    cApertR = [0.4940 0.1840 0.5560];
+
+    % Retain cApert for any existing mean-aperture plots.
+    cApert = cApertL;
+    
+    cLux = [0.4660 0.6740 0.1880]; % Green
     cOutdoor = [1 1 0];   % yellow
     cActive  = [0 1 0];   % green
     cTaskBounds = [0 0.65 1];
@@ -153,9 +551,15 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     summaryLegendFontSize = 9;
     
     %----------------------------------------------
-    %% Figure 1: Session Summary (Updated to 5 rows)
+    %% Figure 1: Session Summary
+    if options.include_luminance
+        nSummaryRows = 5;
+    else
+        nSummaryRows = 4;
+    end
+
     figure('Color', 'w', 'Units', 'inches', 'Position', [1 1 14.5 8.32], 'Name', 'Summary');
-    tlo1 = tiledlayout(5, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
+    tlo1 = tiledlayout(nSummaryRows, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
     tlo1.OuterPosition = [0.05 0.06 0.66 0.90];
     
     % Subplot 1: ENMO
@@ -200,10 +604,44 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     ax4 = nexttile(tlo1); hold(ax4, 'on');
     yyaxis left
     timeMinBlinks = (double(blinkData.startTimestamp_ns_) - double(t0)) / 1e9 / 60;
-    pBlink = stem(ax4, timeMinBlinks, zeros(size(timeMinBlinks)) + 2.0, 'Color', [0.6 0.6 0.6], 'Marker', 'none', 'DisplayName', 'Blinks');
-    pAperture = plot(ax4, timeMinEye, smoothAperture, '-', 'Color', cApert, 'LineWidth', 1.2, 'DisplayName', 'Aperture'); 
-    ylabel('Eyelid Aperture (mm)', 'FontSize', summaryLabelFontSize); ax4.YAxis(1).Color = cApert; 
-    ylim(ax4, [0, 15]);
+
+    if options.plot_aperture_separate
+        pApertureL = plot(ax4, timeMinEye, smoothApertureL, '--', ...
+            'Color', cApert, ...
+            'LineWidth', 1.2, ...
+            'DisplayName', 'Left aperture');
+
+        pApertureR = plot(ax4, timeMinEye, smoothApertureR, '-', ...
+            'Color', cApert, ...
+            'LineWidth', 1.2, ...
+            'DisplayName', 'Right aperture');
+    else
+        pAperture = plot(ax4, timeMinEye, smoothAperture, '-', ...
+            'Color', cApert, ...
+            'LineWidth', 1.2, ...
+            'DisplayName', 'Mean aperture');
+    end
+
+    ylabel(aperture_ylabel, 'FontSize', summaryLabelFontSize);
+    ax4.YAxis(1).Color = cApert;
+
+    if options.normalize_aperture_to_dark
+        ylim(ax4, [0, 1.2]);
+        yline(ax4, 1, '--', 'Dark baseline');
+    else
+        ylim(ax4, [0, 15]);
+    end
+
+    % Show blinks as short tick marks along the bottom of the aperture axis.
+    apertureLimits = ylim(ax4);
+    blinkTickY = apertureLimits(1) + 0.025 * range(apertureLimits);
+    pBlink = plot(ax4, timeMinBlinks,repmat(blinkTickY, size(timeMinBlinks)), '|', ...
+        'Color', [0.6 0.6 0.6], ...
+        'MarkerSize', 6, ...
+        'LineStyle', 'none', ...
+        'DisplayName', 'Blinks');
+
+
     yyaxis right
     pPupil = plot(ax4, timeMinEye, smoothPupil, '-', 'Color', cPupil, 'LineWidth', 1.2, 'DisplayName', 'Pupil');
     ylim(ax4, [2, 6]);
@@ -211,81 +649,103 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     grid on;
     ax4.FontSize = summaryAxisFontSize;
     ax4.XTickLabel = [];
-    lgd4 = legend(ax4, [pAperture, pPupil, pBlink], {'Eyelid openness', 'Pupil size', 'Blinks'}, 'FontSize', summaryLegendFontSize, 'Location', 'northeastoutside');
+    if options.plot_aperture_separate
+        lgd4 = legend(ax4, [pApertureL, pApertureR, pPupil, pBlink], ...
+            {'Left aperture', 'Right aperture', 'Pupil size', 'Blinks'}, ...
+            'FontSize', summaryLegendFontSize, ...
+            'Location', 'northeastoutside');
+    else
+        lgd4 = legend(ax4, [pAperture, pPupil, pBlink], ...
+            {'Mean eyelid openness', 'Pupil size', 'Blinks'}, ...
+            'FontSize', summaryLegendFontSize, ...
+            'Location', 'northeastoutside');
+    end
     lgd4.Box = 'off';
 
     % Subplot 5: Absolute Illuminance (Lux)
-    ax5 = nexttile(tlo1);
-    hold(ax5, 'on');
+    if options.include_luminance
+        ax5 = nexttile(tlo1);
+        hold(ax5, 'on');
+    
+        pLux = plot(ax5, timeMinMS, MS2illum_lux, '.', 'Color', cLux, 'LineWidth', 1.1, 'DisplayName', 'Illum');
+    
+        ax5.YScale = 'log';
+        ax5.YMinorGrid = 'off'; 
+        ax5.YGrid = 'on';      
+        ylabel(ax5, 'Illum (Lux)', 'FontSize', summaryLabelFontSize); 
+        xlabel(ax5, 'Time (min)', 'FontSize', summaryLabelFontSize);
+        ylim(ax5, [1, 10e4]); 
+        grid(ax5, 'on');
+        ax5.FontSize = summaryAxisFontSize;
+    else
+        % When illuminance is excluded, Eye State is the bottom subplot.
+        xlabel(ax4, 'Time (min)', 'FontSize', summaryLabelFontSize);
+    end
 
-    pLux = plot(ax5, timeMinMS, MS2illum_lux, '.', 'Color', cLux, 'LineWidth', 1.1, 'DisplayName', 'Illum');
+    if options.include_luminance
+        summaryAxes = [ax1, ax2, ax3, ax4, ax5];
+        maxTime = max([timeMinIMU; timeMinGaze; timeMinEye; timeMinMS]);
+    else
+        summaryAxes = [ax1, ax2, ax3, ax4];
+        maxTime = max([timeMinIMU; timeMinGaze; timeMinEye]);
+    end
 
-    ax5.YScale = 'log';
-    ax5.YMinorGrid = 'off'; 
-    ax5.YGrid = 'on';      
-    ylabel(ax5, 'Illum (Lux)', 'FontSize', summaryLabelFontSize); 
-    xlabel(ax5, 'Time (min)', 'FontSize', summaryLabelFontSize);
-    ylim(ax5, [1, 10e4]); 
-    grid(ax5, 'on');
-    ax5.FontSize = summaryAxisFontSize;
-
-    linkaxes([ax1, ax2, ax3, ax4, ax5], 'x');
-    % Find the maximum time across your data to set a tight limit
-    maxTime = max([timeMinIMU; timeMinGaze; timeMinEye; timeMinMS]);
+    linkaxes(summaryAxes, 'x');
     xlim(ax1, [0, maxTime]);
-    add_task_boundary_lines([ax1, ax2, ax3, ax4, ax5], timeMinTask, cTaskBounds);
+
+    % Task boundaries are unavailable in the temporary local-data mode.
+    if ~isempty(timeMinTask)
+        add_task_boundary_lines(summaryAxes, timeMinTask, cTaskBounds);
+    end
     drawnow;
 
     xl1 = xlim(ax1);
     yl1 = ylim(ax1);
 
-    hActive = patch(ax1, ...
-        [xl1(1) xl1(2) xl1(2) xl1(1)], ...
-        [active_threshold active_threshold yl1(2) yl1(2)], ...
-        cActive, ...
-        'FaceAlpha', 0.18, ...
-        'EdgeColor', 'none', ...
-        'DisplayName', 'Active');
-
+    hActive = patch(ax1, [xl1(1) xl1(2) xl1(2) xl1(1)], [active_threshold active_threshold yl1(2) yl1(2)], cActive, 'FaceAlpha', 0.18, 'EdgeColor', 'none', 'DisplayName', 'Active');
     uistack(hActive, 'bottom');
 
-    plot(ax1, xl1, [active_threshold active_threshold], ...
-        'Color', cActive, ...
-        'LineWidth', 1.5, ...
-        'HandleVisibility', 'off');
+    plot(ax1, xl1, [active_threshold active_threshold], 'Color', cActive, 'LineWidth', 1.5, 'HandleVisibility', 'off');
 
-    pTaskPeriod1 = plot(ax1, nan, nan, '-', 'Color', cTaskBounds, 'LineWidth', 1.8, 'DisplayName', 'Task period');
-    lgd1 = legend(ax1, [pENMO, hActive, pTaskPeriod1], {'ENMO', 'Active threshold', 'Task period'}, 'FontSize', summaryLegendFontSize, 'Location', 'northeastoutside');
+    if ~isempty(timeMinTask)
+        pTaskPeriod1 = plot(ax1, nan, nan, '-', 'Color', cTaskBounds, 'LineWidth', 1.8, 'DisplayName', 'Task period');
+        lgd1 = legend(ax1, [pENMO, hActive, pTaskPeriod1], {'ENMO', 'Active threshold', 'Task period'}, 'FontSize', summaryLegendFontSize, 'Location', 'northeastoutside');
+    else
+        lgd1 = legend(ax1, [pENMO, hActive], {'ENMO', 'Active threshold'}, 'FontSize', summaryLegendFontSize, 'Location', 'northeastoutside');
+    end
+
     lgd1.Box = 'off';
 
+    if options.include_luminance
+        xl5 = xlim(ax5);
+        yl5 = ylim(ax5);
 
-    xl5 = xlim(ax5);
-    yl5 = ylim(ax5);
-
-    hOutdoor = patch(ax5, ...
-        [xl5(1) xl5(2) xl5(2) xl5(1)], ...
-        [outdoor_threshold outdoor_threshold yl5(2) yl5(2)], ...
-        cOutdoor, ...
-        'FaceAlpha', 0.18, ...
-        'EdgeColor', 'none', ...
-        'DisplayName', 'Outdoor');
-
-    uistack(hOutdoor, 'bottom');
-
-    plot(ax5, xl5, [outdoor_threshold outdoor_threshold], ...
-        'Color', cOutdoor, ...
-        'LineWidth', 1.5, ...
-        'HandleVisibility', 'off');
-
-    lgd5 = legend(ax5, [pLux, hOutdoor], {'Illum', 'Outdoor threshold'}, 'FontSize', summaryLegendFontSize, 'Location', 'northeastoutside');
-    lgd5.Box = 'off';
+        hOutdoor = patch(ax5, [xl5(1) xl5(2) xl5(2) xl5(1)], [outdoor_threshold outdoor_threshold yl5(2) yl5(2)], cOutdoor, ...
+            'FaceAlpha', 0.18, ...
+            'EdgeColor', 'none', ...
+            'DisplayName', 'Outdoor');
+    
+        uistack(hOutdoor, 'bottom');
+    
+        plot(ax5, xl5, [outdoor_threshold outdoor_threshold], ...
+            'Color', cOutdoor, ...
+            'LineWidth', 1.5, ...
+            'HandleVisibility', 'off');
+      
+        lgd5 = legend(ax5, [pLux, hOutdoor], {'Illum', 'Outdoor threshold'}, 'FontSize', summaryLegendFontSize, 'Location', 'northeastoutside');
+        lgd5.Box = 'off';
+    end
     
     % Keep the legends at MATLAB's native northeastoutside placement.
     lgd1.Location = 'northeastoutside';
     lgd2.Location = 'northeastoutside';
     lgd3.Location = 'northeastoutside';
     lgd4.Location = 'northeastoutside';
-    lgd5.Location = 'northeastoutside';
+    
+    if options.include_luminance
+        lgd5.Location = 'northeastoutside';
+    end
+
     drawnow;
 
     % Move all summary legends except the eyelid/pupil legend further to
@@ -294,7 +754,10 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     lgd1.Units = 'inches'; lgd1.Position(1) = lgd1.Position(1) + legend_shift_in;
     lgd2.Units = 'inches'; lgd2.Position(1) = lgd2.Position(1) + legend_shift_in;
     lgd3.Units = 'inches'; lgd3.Position(1) = lgd3.Position(1) + legend_shift_in;
-    lgd5.Units = 'inches'; lgd5.Position(1) = lgd5.Position(1) + legend_shift_in;
+    
+    if options.include_luminance
+        lgd5.Units = 'inches'; lgd5.Position(1) = lgd5.Position(1) + legend_shift_in;
+    end
 
     % Save the figure if desired 
     if(options.save_figures)
@@ -319,8 +782,11 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
         'Marker', 'o', ...
         'MarkerEdgeAlpha', 0.05, ...
         'MarkerFaceAlpha', 0.05);
+    
     p1 = polyfit(interpPitch(validP), gazeElev(validP), 1);
-    plot(axA, interpPitch(validP), polyval(p1, interpPitch(validP)), 'k', 'LineWidth', 1.5);
+    xFitP = [min(interpPitch(validP)),max(interpPitch(validP))];
+    plot(axA, xFitP, polyval(p1, xFitP), 'k', 'LineWidth', 1.5);
+
     title(sprintf('Vertical (R=%.2f)', corr(interpPitch(validP), gazeElev(validP))));
     ylim([-60, 60]);
     grid on; axis square; xlabel('Pitch'); ylabel('Elev');
@@ -330,8 +796,11 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
         'Marker', 'o', ...
         'MarkerEdgeAlpha', 0.05, ...
         'MarkerFaceAlpha', 0.05);
+
     p2 = polyfit(interpYaw(validY), gazeAzim(validY), 1);
-    plot(axB, interpYaw(validY), polyval(p2, interpYaw(validY)), 'k', 'LineWidth', 1.5);
+    xFitY = [min(interpYaw(validY)), max(interpYaw(validY))];
+    plot(axB, xFitY, polyval(p2, xFitY), 'k', 'LineWidth', 1.5);
+
     title(sprintf('Horizontal (R=%.2f)', corr(interpYaw(validY), gazeAzim(validY))));
     grid on; axis square; xlabel('Yaw'); ylabel('Azim');
     title(tlo2, ['Gaze Pos vs Head Pos: ' figureTitle], 'FontWeight', 'bold');
@@ -347,41 +816,85 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     %----------------------------------------------
     %% Figure 3: Activity vs. Eye State Correlation
     eyeTime = double(eyeStateData.timestamp_ns_);
-    interpAperture = interp1(eyeTime, smoothAperture, imuTime, 'nearest', NaN);
-    interpPupil    = interp1(eyeTime, smoothPupil, imuTime, 'nearest', NaN);
-    
-    validA = find(~isnan(activityIndex) & ~isnan(interpAperture));
+
+    % APERTURE
+    % Keep the left and right eye-openness signals separate.
+    % If dark normalization is enabled, smoothApertureL and smoothApertureR
+    % are already normalized to their respective eye-specific baselines.
+    interpApertureL = interp1(eyeTime, smoothApertureL, imuTime, 'nearest', NaN);
+    interpApertureR = interp1(eyeTime, smoothApertureR, imuTime, 'nearest', NaN);
+    interpPupil = interp1(eyeTime, smoothPupil, imuTime, 'nearest', NaN);
+
+    validAL = find(~isnan(activityIndex) &  ~isnan(interpApertureL));
+    validAR = find(~isnan(activityIndex) & ~isnan(interpApertureR));
     validPup = find(~isnan(activityIndex) & ~isnan(interpPupil));
 
     figure('Color', 'w', 'Units', 'normalized', 'Position', [0.08 0.10 0.52 0.34], 'Name', 'Activity-Eye Corr');
     tlo3 = tiledlayout(1, 2, 'TileSpacing', 'loose', 'Padding', 'compact');
     
     axC = nexttile(tlo3); hold(axC, 'on');
-    if ~isempty(validA)
-        scatter(axC, activityIndex(validA), interpAperture(validA), 10, cApert,...
-            'Marker', 'o', ...
-            'MarkerEdgeAlpha', 0.05, ...
-            'MarkerFaceAlpha', 0.05);
-        pf = polyfit(activityIndex(validA), interpAperture(validA), 1);
-        plot(axC, activityIndex(validA), polyval(pf, activityIndex(validA)), 'k', 'LineWidth', 1.5);
-        title(sprintf('Aperture (R=%.2f)', corr(activityIndex(validA), interpAperture(validA))));
-    end
-    xlabel('Activity (ENMO)'); ylabel('Aperture (mm)'); grid on; axis square;
-
-    axD = nexttile(tlo3); hold(axD, 'on');
-    if ~isempty(validPup)
-        scatter(axD, activityIndex(validPup), interpPupil(validPup), 10, cPupil, 'filled',...
-            'Marker', 'o', ...
-            'MarkerEdgeAlpha', 0.05, ...
-            'MarkerFaceAlpha', 0.05);
-        pf = polyfit(activityIndex(validPup), interpPupil(validPup), 1);
-        plot(axD, activityIndex(validPup), polyval(pf, activityIndex(validPup)), 'k', 'LineWidth', 1.5);
-        title(sprintf('Pupil (R=%.2f)', corr(activityIndex(validPup), interpPupil(validPup))));
-    end
-    xlabel('Activity (ENMO)'); ylabel('Pupil (mm)'); grid on; axis square;
     
+    pScatterL = gobjects(0);
+    pScatterR = gobjects(0);
+    
+    rLeft = NaN;
+    rRight = NaN;
+    
+    if ~isempty(validAL)    
+        pScatterL = scatter(axC, activityIndex(validAL), interpApertureL(validAL), 10, cApertL, ...
+            'filled', ...
+            'Marker', 'o', ...
+            'MarkerEdgeAlpha', 0.05, ...
+            'MarkerFaceAlpha', 0.05, ...
+            'DisplayName', 'Left eye');
+        pfL = polyfit(activityIndex(validAL), interpApertureL(validAL), 1);
+        xFitL = [min(activityIndex(validAL)), max(activityIndex(validAL))];
+
+        plot(axC, xFitL, polyval(pfL, xFitL), '-', 'Color', cApertL, 'LineWidth', 1.5, 'HandleVisibility', 'off');
+        rLeft = corr( activityIndex(validAL), interpApertureL(validAL));
+    end
+    
+    if ~isempty(validAR)    
+        pScatterR = scatter(axC, activityIndex(validAR), interpApertureR(validAR), 10, cApertR, ...
+            'filled', ...
+            'Marker', 'o', ...
+            'MarkerEdgeAlpha', 0.05, ...
+            'MarkerFaceAlpha', 0.05, ...
+            'DisplayName', 'Right eye');
+        pfR = polyfit(activityIndex(validAR), interpApertureR(validAR), 1);   
+        xFitR = [min(activityIndex(validAR)), max(activityIndex(validAR))];
+    
+        plot(axC, xFitR, polyval(pfR, xFitR), '-', 'Color', cApertR, 'LineWidth', 1.5, 'HandleVisibility', 'off');
+        rRight = corr(activityIndex(validAR), interpApertureR(validAR));
+    end
+    
+    xlabel(axC, 'Activity (ENMO)'); ylabel(axC, aperture_ylabel); grid(axC, 'on'); axis(axC, 'square');
+    title(axC, sprintf('Eye Openness (Left R=%.2f, Right R=%.2f)', rLeft, rRight));    
+    
+    pLegendL = plot(axC, nan, nan, 'o', 'MarkerFaceColor', cApertL, 'MarkerEdgeColor', cApertL, 'MarkerSize', 6, 'LineStyle', 'none', 'DisplayName', 'Left eye');
+    pLegendR = plot(axC, nan, nan, 'o', 'MarkerFaceColor', cApertR, 'MarkerEdgeColor', cApertR, 'MarkerSize', 6, 'LineStyle', 'none', 'DisplayName', 'Right eye');
+    legend(axC, [pLegendL, pLegendR], {'Left eye', 'Right eye'}, 'Location', 'best', 'Box', 'off');
+    
+    axD = nexttile(tlo3); hold(axD, 'on');
+
+    % PUPIL
+    if ~isempty(validPup)
+        scatter(axD, activityIndex(validPup), interpPupil(validPup), 10, cPupil, ...
+            'filled',...
+            'Marker', 'o', ...
+            'MarkerEdgeAlpha', 0.05, ...
+            'MarkerFaceAlpha', 0.05);
+        pfPupil = polyfit(activityIndex(validPup), interpPupil(validPup), 1);
+        xFitPupil = [min(activityIndex(validPup)), max(activityIndex(validPup))];
+
+        plot(axD, xFitPupil, polyval(pfPupil, xFitPupil), 'k', 'LineWidth', 1.5);
+        title(axD, sprintf('Pupil (R=%.2f)', corr(activityIndex(validPup), interpPupil(validPup))));
+    end
+
+    xlabel(axD, 'Activity (ENMO)'); ylabel(axD, 'Pupil (mm)'); grid(axD, 'on'); axis(axD, 'square');
     title(tlo3, ['Activity vs Eye State: ' figureTitle], 'FontWeight', 'bold');
     drawnow;
+
     % Save the figure if desired 
     if(options.save_figures)
         export_figure_dual(gcf, output_dir, "activity_vs_eyestate");
@@ -389,56 +902,76 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     end 
 
     %----------------------------------------------
-    %% Figure 4: Illuminance vs. Eye State Correlation
-    % Use log10 because the pupillary light reflex is logarithmic
-    logLux = log10(MS2illum_lux + eps); 
-    interpLogLux_Eye = interp1(double(ms_t), logLux, eyeTime, 'nearest', NaN);
-
-    figure('Color', 'w', 'Units', 'normalized', 'Position', [0.08 0.10 0.58 0.36], 'Name', 'Illuminance Correlations');
-    tlo4 = tiledlayout(1, 2, 'TileSpacing', 'loose', 'Padding', 'compact');
+    if options.include_luminance
+        %% Figure 4: Illuminance vs. Eye State Correlation
+        % Use log10 because the pupillary light reflex is logarithmic
+        logLux = log10(MS2illum_lux + eps); 
+        interpLogLux_Eye = interp1(double(ms_t), logLux, eyeTime, 'nearest', NaN);
     
-    % Panel 1: Log(Lux) vs. Eyelid Aperture
-    axE = nexttile(tlo4); hold(axE, 'on');
-    validLuxA = ~isnan(interpLogLux_Eye) & ~isnan(smoothAperture);
-    if any(validLuxA)
-        scatter(axE, interpLogLux_Eye(validLuxA), smoothAperture(validLuxA), 10, cApert, 'filled',...
-            'Marker', 'o', ...
-            'MarkerEdgeAlpha', 0.05, ...
-            'MarkerFaceAlpha', 0.05);
-        pf3 = polyfit(interpLogLux_Eye(validLuxA), smoothAperture(validLuxA), 1);
-        plot(axE, interpLogLux_Eye(validLuxA), polyval(pf3, interpLogLux_Eye(validLuxA)), 'k', 'LineWidth', 1.5);
-        title(axE, sprintf('Lux vs Eye Openness (R=%.2f)', corr(interpLogLux_Eye(validLuxA), smoothAperture(validLuxA))));
-    end
-    xlabel(axE, 'Log10(Lux)'); ylabel(axE, 'Eye Openness (mm)'); grid on; axis square;
-    ylim([0, 15]); 
-
-    % Panel 2: Log(Lux) vs. Pupil Diameter
-    axF = nexttile(tlo4); hold(axF, 'on');
-    validLuxP = ~isnan(interpLogLux_Eye) & ~isnan(smoothPupil);
-    if any(validLuxP)
-        scatter(axF, interpLogLux_Eye(validLuxP), smoothPupil(validLuxP), 10, cPupil, 'filled',...
-            'Marker', 'o', ...
-            'MarkerEdgeAlpha', 0.05, ...
-            'MarkerFaceAlpha', 0.05);
-        pf4 = polyfit(interpLogLux_Eye(validLuxP), smoothPupil(validLuxP), 1);
-        plot(axF, interpLogLux_Eye(validLuxP), polyval(pf4, interpLogLux_Eye(validLuxP)), 'k', 'LineWidth', 1.5);
-        title(axF, sprintf('Lux vs Pupil (R=%.2f)', corr(interpLogLux_Eye(validLuxP), smoothPupil(validLuxP))));
-    end
-    xlabel(axF, 'Log10(Lux)'); ylabel(axF, 'Pupil (mm)'); grid on; axis square;
-    ylim([2, 6]);
+        figure('Color', 'w', 'Units', 'normalized', 'Position', [0.08 0.10 0.58 0.36], 'Name', 'Illuminance Correlations');
+        tlo4 = tiledlayout(1, 2, 'TileSpacing', 'loose', 'Padding', 'compact');
+        
+        % Panel 1: Log(Lux) vs. Eyelid Aperture
+        axE = nexttile(tlo4); hold(axE, 'on');
+        validLuxA = ~isnan(interpLogLux_Eye) & ~isnan(smoothAperture);
+        if any(validLuxA)
+            scatter(axE, interpLogLux_Eye(validLuxA), smoothAperture(validLuxA), 10, cApert, 'filled',...
+                'Marker', 'o', ...
+                'MarkerEdgeAlpha', 0.05, ...
+                'MarkerFaceAlpha', 0.05);
+            pf3 = polyfit(interpLogLux_Eye(validLuxA), smoothAperture(validLuxA), 1);
+            plot(axE, interpLogLux_Eye(validLuxA), polyval(pf3, interpLogLux_Eye(validLuxA)), 'k', 'LineWidth', 1.5);
+            title(axE, sprintf('Lux vs Eye Openness (R=%.2f)', corr(interpLogLux_Eye(validLuxA), smoothAperture(validLuxA))));
+        end
+        xlabel(axE, 'Log10(Lux)'); ylabel(axE, 'Eye Openness (mm)'); grid on; axis square;
+        ylim([0, 15]); 
     
-    title(tlo4, ['Environmental Light vs Eye State: ' figureTitle], 'FontWeight', 'bold');
-    drawnow;
-        % Save the figure if desired 
-    if(options.save_figures)
-        export_figure_dual(gcf, output_dir, "illuminance_vs_eyestate");
-        close(gcf); 
-    end 
+        % Panel 2: Log(Lux) vs. Pupil Diameter
+        axF = nexttile(tlo4); hold(axF, 'on');
+        validLuxP = ~isnan(interpLogLux_Eye) & ~isnan(smoothPupil);
+        if any(validLuxP)
+            scatter(axF, interpLogLux_Eye(validLuxP), smoothPupil(validLuxP), 10, cPupil, 'filled',...
+                'Marker', 'o', ...
+                'MarkerEdgeAlpha', 0.05, ...
+                'MarkerFaceAlpha', 0.05);
+            pf4 = polyfit(interpLogLux_Eye(validLuxP), smoothPupil(validLuxP), 1);
+            plot(axF, interpLogLux_Eye(validLuxP), polyval(pf4, interpLogLux_Eye(validLuxP)), 'k', 'LineWidth', 1.5);
+            title(axF, sprintf('Lux vs Pupil (R=%.2f)', corr(interpLogLux_Eye(validLuxP), smoothPupil(validLuxP))));
+        end
+        xlabel(axF, 'Log10(Lux)'); ylabel(axF, 'Pupil (mm)'); grid on; axis square;
+        ylim([2, 6]);
+        
+        title(tlo4, ['Environmental Light vs Eye State: ' figureTitle], 'FontWeight', 'bold');
+        drawnow;
+            % Save the figure if desired 
+        if(options.save_figures)
+            export_figure_dual(gcf, output_dir, "illuminance_vs_eyestate");
+            close(gcf); 
+        end
+    end % options.include_luminance
 
 end
 
 % Load in the world timestamps 
 function world_t = load_world_gka_neon_timestamps(path)
+% Internal helper to load world gka neon timestamps.
+%
+% Syntax:
+%   world_t = load_world_gka_neon_timestamps(path)
+%
+% Description:
+%   This local helper function internal helper to load world gka neon timestamps within its parent workflow.
+% Inputs:
+%   path                     - Path-like input used by the function.
+%
+% Outputs:
+%   world_t                  - Output produced by the function.
+%
+% Examples:
+%{
+    % See plotParticipantState.m for usage context.
+%}
+
     opts = detectImportOptions(path, 'VariableNamingRule', 'preserve');
 
     % Force timestamp column to int64 (preserves ns precision)
@@ -453,12 +986,29 @@ end
 
 
 function [world_t, ms_t, ms_v] = load_ms_world_timestamps_and_data(path_to_raw_recording,  path_to_gka_world_timestamps_neon_time, world_util, ms_util)
-    % Load in the world timesstamps and the MS data/ timestamps in nanoseconds from the RAW recording
-    %
-    % Timestamps are w.r.t the start of the light logger device NOT the recording, 
-    % so you will need to find a common start point to match
-    
-    % Load in the timestamps in GKA time 
+% Internal helper to load ms world timestamps and data.
+%
+% Syntax:
+%   world_t, ms_t, ms_v = load_ms_world_timestamps_and_data(path_to_raw_recording, path_to_gka_world_timestamps_neon_time, world_util, ms_util)
+%
+% Description:
+%   This local helper function internal helper to load ms world timestamps and data within its parent workflow.
+% Inputs:
+%   path_to_raw_recording    - Path-like input used by the function.
+%   path_to_gka_world_timestamps_neon_time - Path-like input used by the function.
+%   world_util               - Input used by the function.
+%   ms_util                  - Input used by the function.
+%
+% Outputs:
+%   world_t                  - Output produced by the function.
+%   ms_t                     - Output produced by the function.
+%   ms_v                     - Output produced by the function.
+%
+% Examples:
+%{
+    % See plotParticipantState.m for usage context.
+%}
+
     gka_world_timestamps_gka_time = int64( world_util.world_timestamps_from_chunks(path_to_raw_recording, py.False) )'; % nanoseconds  
     ms_data_and_timestamps = cell(ms_util.ms_data_from_chunks(path_to_raw_recording));
     ms_data = double(ms_data_and_timestamps{1}); 
@@ -559,7 +1109,30 @@ end
 
 % Local function to do loading in of the needed .csv files 
 function [IMUdata, eyeStateData, blinkData, gazeData] = load_actigraphy_data(IMUdata, eyeStateData, blinkData, gazeData)
-    % If these are paths, read them in, otherwise just return them 
+% Internal helper to load actigraphy data.
+%
+% Syntax:
+%   IMUdata, eyeStateData, blinkData, gazeData = load_actigraphy_data(IMUdata, eyeStateData, blinkData, gazeData)
+%
+% Description:
+%   This local helper function internal helper to load actigraphy data within its parent workflow.
+% Inputs:
+%   IMUdata                  - Input used by the function.
+%   eyeStateData             - Input used by the function.
+%   blinkData                - Input used by the function.
+%   gazeData                 - Input used by the function.
+%
+% Outputs:
+%   IMUdata                  - Output produced by the function.
+%   eyeStateData             - Output produced by the function.
+%   blinkData                - Output produced by the function.
+%   gazeData                 - Output produced by the function.
+%
+% Examples:
+%{
+    % See plotParticipantState.m for usage context.
+%}
+
     if(isstring(IMUdata) || ischar(IMUdata))
         IMUdata = readtable(IMUdata);
     end 
@@ -580,6 +1153,26 @@ function [IMUdata, eyeStateData, blinkData, gazeData] = load_actigraphy_data(IMU
 end 
 
 function add_task_boundary_lines(axesHandles, timeMinTask, lineColor)
+% Internal helper to add task boundary lines.
+%
+% Syntax:
+%   add_task_boundary_lines(axesHandles, timeMinTask, lineColor)
+%
+% Description:
+%   This local helper function internal helper to add task boundary lines within its parent workflow.
+% Inputs:
+%   axesHandles              - Input used by the function.
+%   timeMinTask              - Input used by the function.
+%   lineColor                - Input used by the function.
+%
+% Outputs:
+%   None.
+%
+% Examples:
+%{
+    % See plotParticipantState.m for usage context.
+%}
+
     if(isempty(timeMinTask) || numel(timeMinTask) ~= 2 || any(~isfinite(timeMinTask)))
         return;
     end
@@ -592,6 +1185,26 @@ function add_task_boundary_lines(axesHandles, timeMinTask, lineColor)
 end
 
 function export_figure_dual(figHandle, output_dir, basename)
+% Internal helper to export figure dual.
+%
+% Syntax:
+%   export_figure_dual(figHandle, output_dir, basename)
+%
+% Description:
+%   This local helper function internal helper to export figure dual within its parent workflow.
+% Inputs:
+%   figHandle                - Input used by the function.
+%   output_dir               - Path-like input used by the function.
+%   basename                 - Input used by the function.
+%
+% Outputs:
+%   None.
+%
+% Examples:
+%{
+    % See plotParticipantState.m for usage context.
+%}
+
     pdf_path = fullfile(output_dir, basename + ".pdf");
     eps_path = fullfile(output_dir, basename + ".eps");
 
@@ -607,6 +1220,24 @@ function export_figure_dual(figHandle, output_dir, basename)
 end
 
 function formatted_title = format_activity_title(activity_name)
+% Internal helper to format activity title.
+%
+% Syntax:
+%   formatted_title = format_activity_title(activity_name)
+%
+% Description:
+%   This local helper function internal helper to format activity title within its parent workflow.
+% Inputs:
+%   activity_name            - Input used by the function.
+%
+% Outputs:
+%   formatted_title          - Output produced by the function.
+%
+% Examples:
+%{
+    % See plotParticipantState.m for usage context.
+%}
+
     formatted_title = regexprep(char(activity_name), '([a-z])([A-Z])', '$1 $2');
     formatted_title(1) = upper(formatted_title(1));
 end
