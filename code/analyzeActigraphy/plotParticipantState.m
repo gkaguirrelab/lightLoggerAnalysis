@@ -70,11 +70,11 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
 % TEMPORARY: LOCAL PATHS & CALL (SOPHIA)
 %{
     readDir = ...
-    '/Users/sophiamirabal/Downloads/migraine_timeseriesData/m_read_data/flic_1029_read_1-3da132df';
+    '/Users/sophiamirabal/Downloads/timeseriesData/FLIC_1044/read/data';
     darkDir = ...
-    '/Users/sophiamirabal/Downloads/migraine_timeseriesData/m_dark_data/flic_1029_dark_2-69b12aae';
+    '/Users/sophiamirabal/Downloads/timeseriesData/FLIC_1044/dark/data';
     outputDir = ...
-    '/Users/sophiamirabal/Downloads/m_participantStateFigures';
+    '/Users/sophiamirabal/Downloads/FLIC_1044';
     if ~exist(outputDir, 'dir')
     mkdir(outputDir);
     end
@@ -91,7 +91,7 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
         '', ...                       
         '', ...                          
         outputDir, ...
-        'FLIC_1029', ...
+        'FLIC_1044', ...
         'read', ...
         'Read', ...
         imuFile, ...
@@ -135,9 +135,13 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
         options.dark_gazeData = [];
         options.dark_blinkData = [];
         options.aperture_baseline_percentile = 95;
+        options.plot_dark_diagnostic = false;
 
         % For skipping luminance
         options.include_luminance = false;
+
+        % Just summary plots
+        options.summary_only = false;
 
     end
     winSizeSec = options.winSizeSec; 
@@ -263,35 +267,32 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     %% Optional: normalize aperture to dark baseline
     if options.normalize_aperture_to_dark
 
+        % Check if necessary files were supplied
         if isempty(options.dark_eyeStateData)
             error(['normalize_aperture_to_dark is true, but no dark ', ...
                 '3d_eye_states.csv path or table was supplied.']);
         end
-
         if isempty(options.dark_gazeData)
             error(['normalize_aperture_to_dark is true, but no dark ', ...
                 'gaze.csv path or table was supplied.']);
         end
-
         if isempty(options.dark_blinkData)
             error(['normalize_aperture_to_dark is true, but no dark ', ...
                 'blinks.csv path or table was supplied.']);
         end
     
+        % Assign local variables
         darkEye = options.dark_eyeStateData;
-    
         if isstring(darkEye) || ischar(darkEye)
             darkEye = readtable(darkEye);
         end
 
         darkGaze = options.dark_gazeData;
-
         if isstring(darkGaze) || ischar(darkGaze)
             darkGaze = readtable(darkGaze);
         end
 
         darkBlink = options.dark_blinkData;
-
         if isstring(darkBlink) || ischar(darkBlink)
             darkBlink = readtable(darkBlink);
         end
@@ -422,51 +423,50 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
         %% TEMPORARY DIAGNOSTIC:
         % Plot the blink-cleaned, sliding-average aperture traces from the dark
         % recording and mark the exact timestamps chosen for normalization.
+        if options.plot_dark_diagnostic
 
-        selectedDarkTimes_s = darkTime(jointOpenMask);
-
-        figure('Color', 'w', ...
-            'Name', 'Dark Baseline Selection');
-
-        plot(darkTime, darkApertureL, ...
-            'LineWidth', 1.2, ...
-            'DisplayName', 'Left eye');
-        hold on
-
-        plot(darkTime, darkApertureR, ...
-            'LineWidth', 1.2, ...
-            'DisplayName', 'Right eye');
-
-        % Draw a vertical line at every timestamp selected by the actual
-        % normalization algorithm.
-        for k = 1:numel(selectedDarkTimes_s)
-            xline(selectedDarkTimes_s(k), ...
+            selectedDarkTimes_s = darkTime(jointOpenMask);
+    
+            figure('Color', 'w', ...
+                'Name', 'Dark Baseline Selection');
+    
+            plot(darkTime, darkApertureL, ...
+                'LineWidth', 1.2, ...
+                'DisplayName', 'Left eye');
+            hold on
+    
+            plot(darkTime, darkApertureR, ...
+                'LineWidth', 1.2, ...
+                'DisplayName', 'Right eye');
+    
+            % Draw a vertical line at every timestamp selected by the actual
+            % normalization algorithm.
+            for k = 1:numel(selectedDarkTimes_s)
+                xline(selectedDarkTimes_s(k), ...
+                    ':', ...
+                    'Color', [0.35 0.35 0.35], ...
+                    'LineWidth', 0.6, ...
+                    'HandleVisibility', 'off');
+            end
+    
+            % Dummy line so the selected timestamps appear once in the legend.
+            pSelected = plot(nan, nan, ...
                 ':', ...
                 'Color', [0.35 0.35 0.35], ...
-                'LineWidth', 0.6, ...
-                'HandleVisibility', 'off');
+                'LineWidth', 1.5, ...
+                'DisplayName', 'Selected normalization timestamp');
+    
+            xlabel('Time from dark recording start (s)');
+            ylabel('Eye openness (mm)');
+            title(sprintf( ...
+                'Dark Baseline Selection: %d Timestamps, %.1f-s Sliding Average', ...
+                numel(selectedDarkTimes_s), ...
+                options.winSizeSec));
+    
+            legend('Location', 'best');
+            grid on
+
         end
-
-        % Dummy line so the selected timestamps appear once in the legend.
-        pSelected = plot(nan, nan, ...
-            ':', ...
-            'Color', [0.35 0.35 0.35], ...
-            'LineWidth', 1.5, ...
-            'DisplayName', 'Selected normalization timestamp');
-
-        xlabel('Time from dark recording start (s)');
-        ylabel('Eye openness (mm)');
-        title(sprintf( ...
-            'Dark Baseline Selection: %d Timestamps, %.1f-s Sliding Average', ...
-            numel(selectedDarkTimes_s), ...
-            options.winSizeSec));
-
-        legend('Location', 'best');
-        grid on
-
-        % TEMPORARY: display only the first 150 seconds.
-        % This changes only the view, not which timestamps are selected.
-        xlim([0 150]);
 
         % Calculate separate left and right baselines using the exact same
         % jointly selected timestamps.
@@ -569,7 +569,11 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     formattedTaskTitle = format_activity_title(string(activity));
     pENMO = plot(ax1, timeMinIMU, activityIndex, 'k', 'LineWidth', 1.2, 'DisplayName', 'ENMO');
     ylabel(ax1, 'Activity (g)', 'FontSize', summaryLabelFontSize); 
-    title(ax1, formattedTaskTitle, 'FontSize', summaryTitleFontSize, 'FontWeight', 'bold');
+    
+    title(ax1, sprintf('%s: %s', subject_id, formattedTaskTitle), ...
+        'FontSize', summaryTitleFontSize, ...
+        'FontWeight', 'bold');
+
     ylim(ax1, [0, 0.2]);
     grid(ax1, 'on');
     ax1.FontSize = summaryAxisFontSize;
@@ -764,6 +768,10 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
         export_figure_dual(gcf, output_dir, "actigraphy_summary");
         close(gcf); 
     end 
+
+    if options.summary_only
+        return
+    end
 
     %----------------------------------------------
     %% Figure 2: Gaze-Head Correlation
