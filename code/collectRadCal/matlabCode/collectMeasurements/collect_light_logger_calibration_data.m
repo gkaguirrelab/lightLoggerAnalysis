@@ -52,7 +52,6 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
     collect_light_logger_calibration_data(experiment_name, device_num, sensor_ids, NDFs, calibration_metadata, upload_video_data);
 %}  
 
-
     % Parse and validate the arguments 
     arguments
         experiment_name {mustBeText} % The name of the calibration that will determine the folder it is saved in, e.g. MSOnly 
@@ -467,9 +466,11 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
         for ii = 1:numel(NDFs.world_linearity)
             % Retrieve the given NDF
             NDF = NDFs.world_linearity(ii);
+
             
             % Build the world camera settings for this NDF level
             fixed_settings = double(py_getitem(settings_contrast_dict, py.float(NDF)));
+            fprintf("Contrast Target: %f | NDF: %f | Again: %f | Dgain: %f | Exposure: %f\n", contrast_target, NDF, fixed_settings(1), fixed_settings(2), fixed_settings(3)); 
             sensors.W.Again = fixed_settings(1);
             sensors.W.Dgain = fixed_settings(2);
             sensors.W.exposure = int32(fixed_settings(3));

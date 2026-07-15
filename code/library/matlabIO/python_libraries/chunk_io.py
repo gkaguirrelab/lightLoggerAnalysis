@@ -359,7 +359,7 @@ def world_chunk_parser(chunk_paths: tuple[str],
 
     # Apply digital gain as calculated from the AGC
     if(apply_digital_gain is True):
-        digital_gain_scalars: np.ndarray = chunk_dict['W']['settings']['Dgain'] if len(chunk_dict['W']['settings']['Dgain']) > 0 else np.full((len(t),), 1)
+        digital_gain_scalars: np.ndarray = chunk_dict['W']['settings']['AGCDgain'] if len(chunk_dict['W']['settings']['AGCDgain']) > 0 else np.full((len(t),), 1)
         v *= digital_gain_scalars[:, np.newaxis, np.newaxis]
 
     # Apply the fielding function to each color plane

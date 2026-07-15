@@ -12,7 +12,7 @@ import mat73
 from natsort import natsorted 
 from tqdm.auto import tqdm
 import matlab
-from typing import Iterable
+from typing import Iterable, Iterator
 import dill
 import pandas as pd
 from numba import njit, prange
@@ -165,9 +165,16 @@ WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x1[WORLD_AGC_DEFAULT_TARGET] |= {
 
 WORLD_NDF_LEVEL_SETTINGS_CONTRAST_1x0: dict[int | float, dict[float, tuple[float, float, float]]] = {
     254: {
-        0.7: (10.333, 1.28238666, 8333),
-        0.8: (10.333, 1.28885415, 8333),
-        0.9: (10.333, 1.29904864, 8333),
+        0.0: (1.000e+00, 1.000e+00, 3.461e+03), 
+        0.1: (1.000e+00, 1.000e+00, 5.148e+03), 
+        0.2: (1.92481208e+00, 1.00000000e+00, 8333),
+        0.3: (2.84444451e+00, 1.00000000e+00, 8333), 
+        0.4: (3.1219511e+00, 1.0000000e+00, 8333),
+        0.5: (3.93846154e+00, 1.00000000e+00, 8333), 
+        0.6: (4.83018875e+00, 1.00000000e+00, 8333), 
+        0.7: (7.75757599e+00, 1.00000000e+00, 8333),
+        0.8: (9.14285755e+00, 1.00000000e+00, 8333),
+        0.9: (9.14285755e+00, 1.00000000e+00, 8333),
         1.0: (10.333, 1.3084874, 8333),
         1.1: (10.333, 1.53624698, 8333),
         1.2: (10.333, 1.4731802, 8333),
@@ -210,7 +217,7 @@ WORLD_AGC_DISCRETE_STATES: dict[str, dict[str, int | float]] = PyAGC.retrieve_di
 # The labels of the cols of the world AGC metdata 
 # The world metadata files contain these columns with a 
 # timestamp column before it
-WORLD_AGC_METADATA_COLS: tuple = ("Again", "Dgain", "exposure")
+WORLD_AGC_METADATA_COLS: tuple = ("cameraAgain", "AGCDgain", "cameraExposure", "AGCAgain", "AGCExposure")
 
 # Store the scalar multipliers for all of the different colors of pixel's in an image 
 # We calculated this by making a measurement with the light logger device 
@@ -1482,10 +1489,30 @@ def world_metadata_from_chunks(recording_path: str,
         metadata[:, 0] /= ( 10 ** 9) 
 
     # Make a dataframe so that the columns are clearly labeled
-    metadata: pd.DataFrame = pd.DataFrame(metadata, columns=["timestamp", "Again", "Dgain", "exposure"])
+    metadata: pd.DataFrame = pd.DataFrame(metadata, columns=["timestamp"] + list(WORLD_AGC_METADATA_COLS))
 
     return metadata
 
+
+def world_raw_frames_from_chunks(path_to_recording: str, 
+                                 use_mean_frame: bool=False,
+                                 verbose: bool = False
+                                ) -> np.ndarray:
+    frame_chunk_paths: list[str] = [os.path.join(path_to_recording, folder_name) for folder_name in natsorted(os.listdir(path_to_recording)) if folder_name.startswith("world") and not folder_name.endswith("metadata.npy")]
+    assert len(frame_chunk_paths) > 0, f"No frame chunks found in {path_to_recording}"
+    
+    frames: list[np.ndarray] = []
+    chunk_iterator: Iterable = range(len(frame_chunk_paths)) if verbose is False else tqdm(range(len(frame_chunk_paths)), desc="Processing chunks")
+    for chunk_num in chunk_iterator:
+        chunk_path: str = frame_chunk_paths[chunk_num]
+
+        frame_chunk: np.ndarray = np.load(chunk_path)
+        if(use_mean_frame is False):
+            frames.extend(frame_chunk)
+            continue 
+        frames.extend(np.mean(frame_chunk, axis=(1, 2)))
+
+    return np.array(frames)
 
 def main():
     """Run the command-line entry point."""
