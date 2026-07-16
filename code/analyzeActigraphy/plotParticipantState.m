@@ -54,6 +54,12 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
 %                                     normalization reference.
 %   'aperture_baseline_percentile'  - Integer. Minimum percentile used to determine
 %                                     how 'Dark' baseline is calculated.
+%   'dark_exclusion_sec'             - Scalar double (default: 60). Exclude this
+%                                     many seconds from the beginning of the Dark
+%                                     recording so normalization occurs after the
+%                                     AprilTag period.
+%   'pupil_plot_limits'              - Two-element vector (default: [1 8]). Y-axis
+%                                     limits for pupil diameter plots.
 %
 % Outputs:
 %   none
@@ -68,9 +74,9 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
 % TEMPORARY: LOCAL PATHS & CALL (SOPHIA)
 %{
     readDir = ...
-    '/Users/sophiamirabal/Downloads/timeseriesData/walkOutdoor_data/flic_0021_walkoutdoor_1-8cead05d';
+    '/Users/sophiamirabal/Downloads/timeseriesData/FLIC_0021/walkOutdoor/data';
     darkDir = ...
-    '/Users/sophiamirabal/Downloads/timeseriesData/dark_data/flic_0021_dark_1-878d6eb2';
+    '/Users/sophiamirabal/Downloads/timeseriesData/FLIC_0021/dark/data';
     outputDir = ...
     '/Users/sophiamirabal/Downloads/participantStateFigures';
     if ~exist(outputDir, 'dir')
@@ -127,6 +133,9 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
         options.normalize_aperture_to_dark = true;
         options.dark_eyeStateData = [];
         options.aperture_baseline_percentile = 95;
+
+        options.dark_exclusion_sec = 60;
+        options.pupil_plot_limits = [1 8];
 
         % For skipping luminance
         options.include_luminance = false;
@@ -266,11 +275,25 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
             darkEye = readtable(darkEye);
         end
     
-        darkApertureL = darkEye.eyelidApertureLeft_mm_;
-        darkApertureR = darkEye.eyelidApertureRight_mm_;
+        % Exclude the beginning of the Dark recording, which contains the
+        % AprilTag period. Use timestamps rather than sample count so this
+        % remains correct if the sampling rate changes.
+        darkTimeSec = (double(darkEye.timestamp_ns_) - ...
+                       double(darkEye.timestamp_ns_(1))) / 1e9;
+        useForDarkBaseline = darkTimeSec >= options.dark_exclusion_sec;
+
+        if ~any(useForDarkBaseline)
+            error(['No Dark eye-state samples remain after excluding the first ', ...
+                   num2str(options.dark_exclusion_sec), ' seconds.']);
+        end
+
+        darkApertureL = darkEye.eyelidApertureLeft_mm_(useForDarkBaseline);
+        darkApertureR = darkEye.eyelidApertureRight_mm_(useForDarkBaseline);
     
-        darkBaselineL = prctile(darkApertureL, options.aperture_baseline_percentile);
-        darkBaselineR = prctile(darkApertureR, options.aperture_baseline_percentile);
+        darkBaselineL = prctile(darkApertureL, ...
+                                options.aperture_baseline_percentile);
+        darkBaselineR = prctile(darkApertureR, ...
+                                options.aperture_baseline_percentile);
     
         apertureL = apertureL ./ darkBaselineL;
         apertureR = apertureR ./ darkBaselineR;
@@ -424,7 +447,7 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
 
     yyaxis right
     pPupil = plot(ax4, timeMinEye, smoothPupil, '-', 'Color', cPupil, 'LineWidth', 1.2, 'DisplayName', 'Pupil');
-    ylim(ax4, [2, 6]);
+    ylim(ax4, options.pupil_plot_limits);
     ylabel('Pupil (mm)', 'FontSize', summaryLabelFontSize); ax4.YAxis(2).Color = cPupil; 
     grid on;
     ax4.FontSize = summaryAxisFontSize;
@@ -719,7 +742,7 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
             title(axF, sprintf('Lux vs Pupil (R=%.2f)', corr(interpLogLux_Eye(validLuxP), smoothPupil(validLuxP))));
         end
         xlabel(axF, 'Log10(Lux)'); ylabel(axF, 'Pupil (mm)'); grid on; axis square;
-        ylim([2, 6]);
+        ylim(options.pupil_plot_limits);
         
         title(tlo4, ['Environmental Light vs Eye State: ' figureTitle], 'FontWeight', 'bold');
         drawnow;
