@@ -62,7 +62,7 @@ sensitivity pattern, a two-dimensional parametric model was fit separately to th
 
 The model consisted of a Gaussian-like spatial profile with an additional hyperbolic tangent compression term:
 
-**TO DO: INSERT EQUATION**
+$I(x,y)=B+Atanh(kexp[−(2σx2​(x−x0​)2​+2σy2​(y−y0​)2​)])$
 
 where B is the baseline intensity, A is the amplitude, (x0,y0) is the hotspot center, σx and σy describe the hotspot width, and k 
 controls the degree of flattening near the peak. Parameters were estimated using nonlinear least-squares optimization (lsqcurvefit). 
@@ -79,7 +79,7 @@ and blue channels, indicating minimal chromatic dependence of the hotspot struct
 The fitted hotspot surfaces were used to derive multiplicative flat-field correction factors. For each color channel, a correction 
 factor was calculated at every pixel location as:
 
-**TO DO: INSERT EQUATION**
+$C(x,y)=I(x,y)Imax​​$
 
 where Imax is the peak value of the fitted hotspot surface and I(x,y) is the fitted sensitivity at the corresponding pixel location. 
 This procedure produces correction factors equal to one at the hotspot peak and greater than one in less-sensitive regions of the 
