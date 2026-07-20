@@ -382,6 +382,12 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
 
     % Extract the world camera sensor mode 
     sensor_mode_idx = 0; 
+    world_settings_contrast_target = 0.5;
+    world_settings_agc_target = double(py_module_attr(world_util, "WORLD_AGC_DEFAULT_TARGET"));
+    world_settings_by_ndf = py_call_module_attr(world_util, ...
+                                                "get_world_contrast_level_ndf_settings", ...
+                                                world_settings_contrast_target, ...
+                                                world_settings_agc_target);
 
 
     % A. Set up the substructs we will use for each of the Calibration measures 
@@ -429,8 +435,8 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
     % { WORLD CAMERA LINEARITY }
-    contrast_agc_targets = [1.0];
-    world_linearity_agc_target = 254;
+    contrast_agc_targets = [world_settings_contrast_target];
+    world_linearity_agc_target = world_settings_agc_target;
     k_settings_levels = 10; % Define the number of settings levels to record
     n_measures = 3; % The number of measurements to make at a given settings level
     settings_scalars = linspace(0.1, 1.0, k_settings_levels); % Define the settings values we will explore
@@ -530,8 +536,7 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
         % Create some mapping for the gain and exposure of the world 
         % per NDF level so it behaves properly at the start of the recording 
         % (no warmup needed)
-        world_ndf_level_settings = py_module_attr(world_util, "WORLD_NDF_LEVEL_SETTINGS");
-        fixed_settings = double(py_getitem(world_ndf_level_settings, py.float(NDF)));
+        fixed_settings = double(py_getitem(world_settings_by_ndf, py.float(NDF)));
         sensors.W.Again = fixed_settings(1);
         sensors.W.Dgain = fixed_settings(2);
         sensors.W.exposure = int32(fixed_settings(3)); 
@@ -588,8 +593,7 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
         sensors.M.use_LED = false; % Turn off indicator light for calibration (so the light doesn't illuminate the sphere)
 
         % Build the settings for the W at this NDF level 
-        world_ndf_level_settings = py_module_attr(world_util, "WORLD_NDF_LEVEL_SETTINGS");
-        fixed_settings = double(py_getitem(world_ndf_level_settings, py.float(NDF)));
+        fixed_settings = double(py_getitem(world_settings_by_ndf, py.float(NDF)));
         sensors.W.Again = fixed_settings(1);
         sensors.W.Dgain = fixed_settings(2); 
         sensors.W.exposure = int32(fixed_settings(3)); 
@@ -640,8 +644,7 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
         NDF = NDFs.contrast_gamma(ii); 
 
         % Build the settings for this NDF level 
-        world_ndf_level_settings = py_module_attr(world_util, "WORLD_NDF_LEVEL_SETTINGS");
-        fixed_settings = double(py_getitem(world_ndf_level_settings, py.float(NDF)));
+        fixed_settings = double(py_getitem(world_settings_by_ndf, py.float(NDF)));
         sensors.W.Again = fixed_settings(1);
         sensors.W.Dgain = fixed_settings(2);
         sensors.W.exposure = int32(fixed_settings(3)); 

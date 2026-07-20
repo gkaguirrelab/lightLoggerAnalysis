@@ -73,6 +73,10 @@ function [success, world_linearity_calibration_metadata] = collect_world_lineari
     world_linearity_calibration_metadata.last_error_message = "";
     NDFs = world_linearity_calibration_metadata.NDFs;
     contrast_agc_targets = world_linearity_calibration_metadata.contrast_agc_targets; 
+    world_agc_target = "unspecified";
+    if(isfield(world_linearity_calibration_metadata, "world_agc_target"))
+        world_agc_target = world_linearity_calibration_metadata.world_agc_target;
+    end
     background = world_linearity_calibration_metadata.background;
     settings_scalars = world_linearity_calibration_metadata.background_scalars;
     settings_scalars_orders = world_linearity_calibration_metadata.background_scalars_orders;
@@ -143,6 +147,9 @@ function [success, world_linearity_calibration_metadata] = collect_world_lineari
                     % Calculate the settings by applying the scalar to the
                     % background state
                     settings = background * settings_scalar;
+
+                    fprintf("World Camera Linearity | World AGC target: %s | Contrast AGC target: %.3f | Settings scalar: %.3f | CombiLED primaries: %s\n", ...
+                            local_value_to_text(world_agc_target), contrast_agc_target, settings_scalar, mat2str(settings, 6));
 
                     % Apply the settings to the CombiLED
                     CombiLED.setPrimaries(settings);

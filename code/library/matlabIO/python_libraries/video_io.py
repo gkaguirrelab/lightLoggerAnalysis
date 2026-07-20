@@ -856,9 +856,9 @@ def _clip_buffer_compiled(raw_frame_buffer: np.ndarray,
 """Convert the world chunks of a recording into a playable video"""
 def world_chunks_to_video(recording_path: str,
                           output_path: str,
+                          linearize_camera_responsivity: bool=False, 
                           apply_color_weights: bool=False, 
                           apply_floor_ceiling: bool=False,
-                          remove_dark_noise: bool=False, 
                           debayer_images: bool=False, 
                           apply_digital_gain: bool=False,
                           apply_fielding_function: bool=False, 
@@ -867,9 +867,8 @@ def world_chunks_to_video(recording_path: str,
                           embed_timestamps: bool=False,
                           verbose: bool=False,
                           start_end: tuple[int | float] = (0, float("inf")),
-                          ceiling: int=200, 
-                          floor: int=world_util.WORLD_DARK_NOISE
-                         ) -> None:
+                          floor_ceiling: tuple[int] = (0, 255)
+                        ) -> None: 
     
     ###########################
 
@@ -1112,21 +1111,12 @@ def world_chunks_to_video(recording_path: str,
             # if not in float already
             frame_buffer = frame_buffer.astype(np.float64, copy=False) # copy = False means reuse the same memory if possible (e.g. if it is already float, which it should be)  
 
-            # Apply Dgain if requested
-            if(apply_digital_gain is True):
-                assert frame_buffer.dtype == np.float64, f"Frame buffer dtype must be float64 to apply dgain. Current dtype is {frame_buffer.dtype}"
+            # Linearize the recording data to account for the full well effect of the camera
+            if(linearize_camera_responsivity is True):
+                assert frame_buffer.dtype == np.float64 and frame_buffer.ndim == 3, f"Frame buffer dtype must be float 64 and bayer format to linearize the camera responsivity. Current dtype is: {frame_buffer.dtype} and ndim is {frame_buffer.ndim}"
+                world_util.linearize_camera_responsivity(frame_buffer, int(config_data["sensors"]["W"]["sensor_mode"]["bit_depth"]), dark_noise=world_util.WORLD_DARK_NOISE, dst=frame_buffer)
 
-                # Extract the dgains of the buffers 
-                buffer_dgains: np.ndarray = metadata[:, 2]
-
-                # Multiply the frames by the dgains 
-                # (Note: this does not do any allocation, so all of this stuff is very fast)
-                if(frame_buffer.ndim == 3):
-                    buffer_dgains = buffer_dgains[:, np.newaxis, np.newaxis]
-                else:
-                    buffer_dgains = buffer_dgains[:, np.newaxis, np.newaxis, np.newaxis]
-                frame_buffer *= buffer_dgains
-
+            # Apply the fielding function of the camera that we measured in the planetarium
             if(apply_fielding_function is True):
                 assert frame_buffer.dtype == np.float64 and frame_buffer.ndim == 3, f"Frame buffer dtype must be float64 and in bayer format to apply fielding function. Current dtype is {frame_buffer.dtype}, current ndim: {frame_buffer.ndim}"
                 
@@ -1136,7 +1126,7 @@ def world_chunks_to_video(recording_path: str,
                 # Apply fielding function
                 frame_buffer *= fielding_function
 
-
+            # Apply the radiometric correction weights we calculated outdoors with respect to the PR670
             if(apply_color_weights is True):
                 assert frame_buffer.ndim == 3 and frame_buffer.dtype == np.float64, f"To apply color weights, buffer must be in bayer form np.float64."
 
@@ -1155,6 +1145,21 @@ def world_chunks_to_video(recording_path: str,
 
                     # Apply the weight to the specified pixels 
                     frame_buffer[:, rows, cols] *= weight
+
+            # Apply Dgain if requested
+            if(apply_digital_gain is True):
+                assert frame_buffer.dtype == np.float64, f"Frame buffer dtype must be float64 to apply dgain. Current dtype is {frame_buffer.dtype}"
+
+                # Extract the dgains of the buffers 
+                buffer_dgains: np.ndarray = metadata[:, 2]
+
+                # Multiply the frames by the dgains 
+                # (Note: this does not do any allocation, so all of this stuff is very fast)
+                if(frame_buffer.ndim == 3):
+                    buffer_dgains = buffer_dgains[:, np.newaxis, np.newaxis]
+                else:
+                    buffer_dgains = buffer_dgains[:, np.newaxis, np.newaxis, np.newaxis]
+                frame_buffer *= buffer_dgains
 
             # If we want to debayer the image
             if(debayer_images is True):
@@ -1179,7 +1184,7 @@ def world_chunks_to_video(recording_path: str,
                 raw_frame_buffer = frame_buffer
                 frame_buffer = debayered_frame_buffer
             
-            # If we want to apply floor ceiling (16, 255) in any channel implies 
+            # If we want to apply floor ceiling [LOW, HIGH] in any channel implies 
             # that entire pixel is white or black
             if(apply_floor_ceiling is True):
                 assert frame_buffer.ndim == 4, f"Frames must be debayered before applying floor/ceiling"
@@ -1187,14 +1192,7 @@ def world_chunks_to_video(recording_path: str,
                 if(debayered_provenance_map is None):
                     debayered_provenance_map = world_util.generate_debayered_provenance_map(frame_buffer[0])
 
-                _clip_buffer_compiled(raw_frame_buffer, frame_buffer, debayered_provenance_map, floor, ceiling)
-
-            # Now, if we want to REMOVE the dark noise (darknoise = 0)
-            # let's do that now to 
-            if(remove_dark_noise is True):
-                assert apply_floor_ceiling is True, f"Current implementation requires all pixels <= dark noise to be clipped"
-                dark_noise_mask = frame_buffer <= world_util.WORLD_DARK_NOISE
-                frame_buffer[dark_noise_mask] = 0 
+                _clip_buffer_compiled(raw_frame_buffer, frame_buffer, debayered_provenance_map, *floor_ceiling)
 
             # Convert the frame buffer back into uint8 format
             if(frame_buffer.dtype != np.uint8): 

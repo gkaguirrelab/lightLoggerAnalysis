@@ -113,13 +113,27 @@ WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x75: dict[int | float, dict[float, tuple[floa
 }
 
 WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x5: dict[int | float, dict[float, tuple[float, float, float]]] = {
-    WORLD_AGC_DEFAULT_TARGET: {float(NDF_level):  # Define the fixed settings for this camera per NDF filter
-                               (1.0, 1.0, 747.0) if NDF_level == 0
-                               else (1.0, 1.0, 7085.0) if NDF_level == 1
-                               else (10.666, 1.14, 8333) if NDF_level == 2
-                               else (10.666, 4.297, 8333) if NDF_level == 3
-                               else (10.666, 10.0, 8333)
-                               for NDF_level in range(7)}
+    WORLD_AGC_DEFAULT_TARGET: {
+        0.0: (1.000e+00, 1.000e+00, 7045),
+        0.1: (1.000e+00, 1.000e+00, 7045),
+        0.2: (1.000e+00, 1.000e+00, 7045),
+        0.3: (1.000e+00, 1.000e+00, 7045),
+        0.4: (1.000e+00, 1.000e+00, 7045),
+        0.5: (1.000e+00, 1.000e+00, 7045),
+        0.6: (1.000e+00, 1.000e+00, 7045),
+        0.7: (1.000e+00, 1.000e+00, 7045),
+        0.8: (1.000e+00, 1.000e+00, 7045),
+        0.9: (1.000e+00, 1.000e+00, 7045),
+        1.0: (1.000e+00, 1.000e+00, 7045),
+        1.1: (1.000e+00, 1.000e+00, 7045),
+        1.2: (1.000e+00, 1.000e+00, 7045),
+        1.3: (1.000e+00, 1.000e+00, 7045),
+        1.4: (1.000e+00, 1.000e+00, 7045),
+        1.5: (1.000e+00, 1.000e+00, 7045),
+        1.6: (1.000e+00, 1.000e+00, 7045),
+        1.7: (1.000e+00, 1.000e+00, 7045),
+        1.8: (1.000e+00, 1.000e+00, 7045),
+    },
 }
 
 WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x25: dict[int | float, dict[float, tuple[float, float, float]]] = {
@@ -268,6 +282,7 @@ for idx, pixel_indices in enumerate((WORLD_R_PIXELS, WORLD_G_PIXELS, WORLD_B_PIX
 # from the camera when it is entirely wrapped in black cloth 
 # and this was the result. This is 
 WORLD_DARK_NOISE: float = 16
+WORLD_FULL_WELL_CLIPPING_EXPONENT: float = 5.3918
 
 
 def get_world_contrast_level_ndf_settings(
@@ -581,6 +596,68 @@ def debayer_image(image: np.ndarray,
         return debayered_image, fig
         
     return debayered_image if dst is None else None
+
+def linearize_camera_responsivity(image_or_video: np.ndarray,
+                                  original_bit_depth: int = 8,
+                                  dark_noise: float = WORLD_DARK_NOISE,
+                                  clipping_exponent: float = WORLD_FULL_WELL_CLIPPING_EXPONENT,
+                                  dst: np.ndarray | None = None,
+                                  ) -> np.ndarray:
+    """Linearize world-camera values using the fitted full-well model.
+
+    This is the Python translation of ``linearizeY`` in
+    ``fitFullWellCapacityEffect.m``. Inputs at or below ``dark_noise`` are
+    mapped to zero, the top sensor value is treated as saturated, and the
+    valid range ``dark_noise`` through ``2 ** original_bit_depth - 2`` is
+    expanded onto ``0`` through ``2 ** original_bit_depth - 2``.
+
+    Args:
+        image: Raw camera frame or frame buffer to linearize.
+        original_bit_depth: Bit depth of the input image values.
+        dark_noise: The measured dark offset to remove before inversion.
+        clipping_exponent: The fitted soft-clipping exponent from the
+            full-well calibration.
+        dst: Optional output array. When provided, the result is written
+            in-place and ``None`` is returned.
+
+    Returns:
+        A rounded linearized array, or ``None`` when ``dst`` is provided.
+    """
+    max_sensor_value: float = float(2 ** original_bit_depth - 1)
+    max_linearized_value: float = float(2 ** original_bit_depth - 2)
+    smin: float = float(dark_noise)
+    smax: float = max_sensor_value - smin
+
+    if(smax <= 1):
+        raise ValueError(
+            f"dark_noise={dark_noise} leaves no usable range for "
+            f"original_bit_depth={original_bit_depth}."
+        )
+
+    y_prime: np.ndarray = np.clip(image_or_video.astype(np.float64, copy=False) - smin, 0, smax)
+    y_max: float = smax - 1
+    a_max: float = y_max / (1 - (y_max / smax) ** clipping_exponent) ** (1 / clipping_exponent)
+    saturated_mask: np.ndarray = y_prime >= smax
+    positive_mask: np.ndarray = (y_prime > 0) & ~saturated_mask
+
+    if(dst is None):
+        dst = np.empty_like(y_prime, dtype=np.float64)
+
+    dst[~positive_mask & ~saturated_mask] = 0
+    dst[saturated_mask] = max_sensor_value
+    dst[positive_mask] = (
+        (
+            y_prime[positive_mask]
+            / (1 - (y_prime[positive_mask] / smax) ** clipping_exponent) ** (1 / clipping_exponent)
+        )
+        / a_max
+        * max_linearized_value
+    )
+
+    np.round(dst, out=dst)
+    np.clip(dst, 0, max_sensor_value, out=dst)
+
+    return dst
 
 def generate_fielding_function(image: np.ndarray) -> np.ndarray:
     """Construct a fielding correction image for a world-camera frame.

@@ -7,11 +7,13 @@ chunk files by sensor and locating chunks by timestamp.
 
 import gc
 import os
+import dill
 from natsort import natsorted
 import numpy as np
 import pathlib
 import sys
 from tqdm.auto import tqdm
+from numba import njit, prange
 
 # Import the sensor utility libraries 
 light_logger_analysis_path: str = str(pathlib.Path(__file__).parents[3])
@@ -22,6 +24,50 @@ for path in (sensor_utility_path,):
 import world_util 
 import ms_util 
 import pupil_util
+
+
+@njit(parallel=True)
+def _clip_buffer_compiled(raw_frame_buffer: np.ndarray,
+                          debayered_frame_buffer: np.ndarray,
+                          debayered_provenance_map: np.ndarray,
+                          floor: int,
+                          ceiling: int,
+                        ) -> None:
+    """Propagate raw Bayer clipping into the debayered RGB buffer."""
+    debayered_height: int = debayered_provenance_map.shape[0]
+    debayered_width: int = debayered_provenance_map.shape[1]
+
+    n_frames: int = raw_frame_buffer.shape[0]
+    n_contributors: int = debayered_provenance_map.shape[2]
+
+    for output_row in prange(debayered_height):
+        for output_col in range(debayered_width):
+            for frame_index in range(n_frames):
+                contains_saturated_contributor: bool = False
+                contains_dark_contributor: bool = False
+
+                for contributor_index in range(n_contributors):
+                    contributor_row: int = debayered_provenance_map[output_row, output_col, contributor_index, 0]
+                    contributor_col: int = debayered_provenance_map[output_row, output_col, contributor_index, 1]
+                    raw_value = raw_frame_buffer[frame_index, contributor_row, contributor_col]
+
+                    if(raw_value >= ceiling):
+                        contains_saturated_contributor = True
+
+                    if(raw_value <= floor):
+                        contains_dark_contributor = True
+
+                if(contains_dark_contributor):
+                    debayered_frame_buffer[frame_index, output_row, output_col, 0] = floor
+                    debayered_frame_buffer[frame_index, output_row, output_col, 1] = floor
+                    debayered_frame_buffer[frame_index, output_row, output_col, 2] = floor
+
+                elif(contains_saturated_contributor):
+                    debayered_frame_buffer[frame_index, output_row, output_col, 0] = ceiling
+                    debayered_frame_buffer[frame_index, output_row, output_col, 1] = ceiling
+                    debayered_frame_buffer[frame_index, output_row, output_col, 2] = ceiling
+
+    return
 
 def minispect_and_sunglasses_chunk_parser(chunk_paths: tuple[str],
                                           apply_digital_gain: bool=False, 
@@ -261,7 +307,11 @@ def world_chunk_parser(chunk_paths: tuple[str],
                        contains_AGC_metadata: bool=False,
                        password="1234",
                        differentiate_color: bool=False, 
-                       clip_data: bool=False 
+                       clip_data: bool=False,
+                       linearize_camera_responsivitiy: bool=False,
+                       apply_floor_ceiling: bool=False,
+                       floor_ceiling: tuple[int, int] = (0, 255),
+                       original_bit_depth: int = 8,
                        ) -> dict[str, dict]:
     """Parse one world-camera chunk with optional calibration transforms.
 
@@ -294,6 +344,16 @@ def world_chunk_parser(chunk_paths: tuple[str],
             unused.
         differentiate_color: When True and use_mean_frame is True, computes
             separate per-color-channel means from the Bayer pattern.
+        clip_data: Whether to round, clip, and cast image values to uint8
+            before returning.
+        linearize_camera_responsivitiy: Whether to linearize the raw Bayer
+            values for the camera full-well response before other radiometric
+            corrections.
+        apply_floor_ceiling: Whether to propagate raw Bayer floor/ceiling
+            violations into debayered RGB pixels.
+        floor_ceiling: Lower and upper thresholds used when
+            ``apply_floor_ceiling`` is true.
+        original_bit_depth: Bit depth of the raw world-camera values.
 
     Returns:
         Dictionary with a ``'W'`` entry containing timestamps at
@@ -303,6 +363,9 @@ def world_chunk_parser(chunk_paths: tuple[str],
 
     if(differentiate_color is True):
         assert use_mean_frame is True, f"To differentiate color, the mean frame parameter must be true"
+
+    if(apply_floor_ceiling is True):
+        assert debayer_images is True, f"To apply floor ceiling, currently only works with debayered images due to our algorithm."
 
     # Initialize a return value
     chunk_dict: dict = {'W': {}} 
@@ -357,18 +420,20 @@ def world_chunk_parser(chunk_paths: tuple[str],
     v = v.astype(np.float64, copy=False)
 
 
-    # Apply digital gain as calculated from the AGC
-    if(apply_digital_gain is True):
-        digital_gain_scalars: np.ndarray = chunk_dict['W']['settings']['AGCDgain'] if len(chunk_dict['W']['settings']['AGCDgain']) > 0 else np.full((len(t),), 1)
-        v *= digital_gain_scalars[:, np.newaxis, np.newaxis]
+    # Linearize the recording data to account for the full well effect of the camera
+    if(linearize_camera_responsivitiy is True):
+        assert v.dtype == np.float64 and v.ndim == 3, f"Frame buffer dtype must be float 64 and bayer format to linearize the camera responsivity. Current dtype is: {v.dtype} and ndim is {v.ndim}"
+        world_util.linearize_camera_responsivity(v, original_bit_depth, dark_noise=world_util.WORLD_DARK_NOISE, dst=v)
 
-    # Apply the fielding function to each color plane
+    # Apply the fielding function of the camera that we measured in the planetarium
     if(apply_fielding_function is True):
+        assert v.dtype == np.float64 and v.ndim == 3, f"Frame buffer dtype must be float64 and in bayer format to apply fielding function. Current dtype is {v.dtype}, current ndim: {v.ndim}"
         fielding_function: np.ndarray = world_util.WORLD_FIELDING_FUNCTIONS[v.shape[1:3]]
         v *= fielding_function
 
-    # Apply correction scalars for each of the RGB channels
+    # Apply the radiometric correction weights we calculated outdoors with respect to the PR670
     if(apply_RGB_correction is True):
+        assert v.ndim == 3 and v.dtype == np.float64, f"To apply color weights, buffer must be in bayer form np.float64."
         bayer_RGB_mask: np.ndarray = world_util.generate_RGB_mask(v[0])
         bayer_RGB_pixel_locations: list[np.ndarray] = [ np.argwhere(bayer_RGB_mask == color) for color in "RGB" ]
         assert bayer_RGB_mask.shape == v.shape[1:], f"Bayer RGB mask shape: {bayer_RGB_mask.shape} not equal to frame shape: {v.shape[1:]}"
@@ -379,15 +444,27 @@ def world_chunk_parser(chunk_paths: tuple[str],
             cols: np.ndarray = pixels[:, 1]
             v[:, rows, cols] *= weight
 
+    # Apply digital gain as calculated from the AGC
+    if(apply_digital_gain is True):
+        assert v.dtype == np.float64, f"Frame buffer dtype must be float64 to apply dgain. Current dtype is {v.dtype}"
+        digital_gain_scalars: np.ndarray = chunk_dict['W']['settings']['AGCDgain'] if len(chunk_dict['W']['settings']['AGCDgain']) > 0 else np.full((len(t),), 1)
+        v *= digital_gain_scalars[:, np.newaxis, np.newaxis]
+
     # Next, we will debayer the images if desired. Naturally, 
     # this involves clipping and rounding, so could cause (e.g.)
     # the mean to deviate from what you expect 
     if(debayer_images is True):
         v = v if v.dtype == np.uint8 else np.round(np.clip(v, 0, 255)).astype(np.uint8)
+        raw_v: np.ndarray = v
 
         debayered_v: np.ndarray = np.empty(list(v.shape) + [3], dtype=np.uint8)
         for frame_num, frame in enumerate(v):
             debayered_v[frame_num] = world_util.debayer_image(frame)
+
+        if(apply_floor_ceiling is True):
+            debayered_provenance_map: np.ndarray = world_util.generate_debayered_provenance_map(debayered_v[0])
+            _clip_buffer_compiled(raw_v, debayered_v, debayered_provenance_map, *floor_ceiling)
+
         v = debayered_v
 
 
@@ -567,7 +644,10 @@ def parse_chunks(recording_path: str,
                  contains_agc_metadata_dict: dict[str, bool] = {'W': True, 'P': False, 'M': False},
                  password: str="1234",
                  differentiate_color: bool=False,
-                 verbose: bool=False
+                 verbose: bool=False,
+                 linearize_camera_responsivitiy: bool=False,
+                 apply_floor_ceiling: bool=False,
+                 floor_ceiling: tuple[int, int] = (0, 255),
                 ) -> list[dict[str, dict]]:
     """Parse an entire recording across all supported sensor streams.
 
@@ -600,6 +680,12 @@ def parse_chunks(recording_path: str,
         differentiate_color: Whether to compute per-color-channel means
             for the world camera.
         verbose: Whether to display a progress bar.
+        linearize_camera_responsivitiy: Whether to linearize world-camera
+            raw Bayer values for the fitted full-well response.
+        apply_floor_ceiling: Whether to propagate world-camera raw
+            floor/ceiling values into debayered RGB pixels.
+        floor_ceiling: Lower and upper thresholds used when
+            ``apply_floor_ceiling`` is true.
 
     Returns:
         List of per-chunk dictionaries containing the parsed outputs from
@@ -615,6 +701,14 @@ def parse_chunks(recording_path: str,
     for sensor, axes in mean_axes.items():
         if(isinstance(axes, float) or isinstance(axes, int)): continue 
         mean_axes[sensor] = tuple( [ int(axis) for axis in axes ] )
+
+    floor_ceiling = tuple(int(val) for val in floor_ceiling)
+    assert len(floor_ceiling) == 2, f"floor_ceiling must contain exactly 2 values. Received: {floor_ceiling}"
+
+    config_filepath: str = os.path.join(recording_path, "config.pkl")
+    with open(config_filepath, "rb") as f:
+        config_data: dict = dill.load(f)
+    world_original_bit_depth: int = int(config_data["sensors"]["W"]["sensor_mode"]["bit_depth"])
 
     # Retrieve each of the sensor's files grouped together 
     sensors_chunks_paths: dict[str, list[tuple]] = group_sensors_files(recording_path)
@@ -700,6 +794,10 @@ def parse_chunks(recording_path: str,
             sensor_kwargs: dict = {}
             if sensor_name == "W":
                 sensor_kwargs["differentiate_color"] = differentiate_color
+                sensor_kwargs["linearize_camera_responsivitiy"] = linearize_camera_responsivitiy
+                sensor_kwargs["apply_floor_ceiling"] = apply_floor_ceiling
+                sensor_kwargs["floor_ceiling"] = floor_ceiling
+                sensor_kwargs["original_bit_depth"] = world_original_bit_depth
 
             parsed_sensor_dict: dict = parsers[sensor_name](chunk,
                                                             apply_digital_gain,
