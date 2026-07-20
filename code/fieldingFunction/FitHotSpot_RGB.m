@@ -6,8 +6,8 @@ clear; close all; clc
 
 fitRGB = true;   % false = fit avg_img only; true = fit R/G/B Bayer channels
 
-dataFile = "/Users/sophiamirabal/Documents/MATLAB/projects/lightLoggerAnalysis/code/fieldingFunction/framesAndSurfacePlots/section3/selected_twilight_frames_SEC3.mat";
-avgFile  = "planetarium_average_SEC3.mat";
+dataFile = "selected_twilight_frames.mat";
+avgFile  = "planetarium_average.mat";
 
 bayerPattern = "BGGR";
 
