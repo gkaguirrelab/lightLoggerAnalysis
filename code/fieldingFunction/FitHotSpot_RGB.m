@@ -231,12 +231,11 @@ function plotRGBProfilesAllDirections(results)
             hotspot_fit = results(ii).hotspot_fit;
             pFit = results(ii).pFit;
 
-            % Normalize using min/max of fitted 2D image
-            fitMin = min(hotspot_fit(:));
+            % Normalize relative to fitted peak only
             fitMax = max(hotspot_fit(:));
-
-            I_norm = (I - fitMin) ./ (fitMax - fitMin);
-            fit_norm = (hotspot_fit - fitMin) ./ (fitMax - fitMin);
+            
+            I_norm = I ./ fitMax;
+            fit_norm = hotspot_fit ./ fitMax;
 
             [axisVals, dataProfile] = getProfile(I_norm, pFit, direction);
             [~, fitProfile] = getProfile(fit_norm, pFit, direction);
@@ -271,11 +270,11 @@ function plotRGBProfilesAllDirections(results)
             hotspot_fit = results(ii).hotspot_fit;
             pFit = results(ii).pFit;
 
-            fitMin = min(hotspot_fit(:));
+            % Normalize relative to fitted peak only
             fitMax = max(hotspot_fit(:));
 
-            I_norm = (I - fitMin) ./ (fitMax - fitMin);
-            fit_norm = (hotspot_fit - fitMin) ./ (fitMax - fitMin);
+            I_norm = I ./ fitMax;
+            fit_norm = hotspot_fit ./ fitMax;
 
             residual_norm = I_norm - fit_norm;
 

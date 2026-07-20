@@ -2,8 +2,8 @@
 
 clear; close all; clc
 
-oldData = load("fielding_correction_map_RGB_OLD.mat");
-newData = load("fielding_correction_map_RGB.mat");
+oldData = load("correctionMaps/fielding_correction_map_RGB_old.mat");
+newData = load("correctionMaps/fielding_correction_map_RGB_gammaCorrected.mat");
 
 oldMap = double(oldData.correctionMap);
 newMap = double(newData.correctionMap);
@@ -111,3 +111,71 @@ xlabel('Original correction factor')
 ylabel('Gamma-corrected correction factor')
 title('Pixel-wise comparison of fielding maps')
 legend('Pixels', 'Identity line', 'Location', 'best')
+
+%% CompareLinearityCorrection.m
+
+clear; close all; clc
+
+% Load ORIGINAL (pre-linearity correction)
+
+rawFrames = load("framesAndSurfacePlots_preGamma/section4/selected_twilight_frames_SEC4.mat");
+rawAvg    = load("framesAndSurfacePlots_preGamma/section4/planetarium_average_SEC4.mat");
+
+% Load GAMMA-CORRECTED (post-linearity correction)
+
+gammaFrames = load("selected_twilight_frames.mat");
+gammaAvg    = load("planetarium_average.mat");
+
+% Selected frame statistics
+
+fprintf('\n=============================\n')
+fprintf('SELECTED FRAME STATISTICS\n')
+fprintf('=============================\n')
+
+fprintf('\nOriginal video:\n')
+fprintf('Min: %.2f\n', min(rawFrames.frames(:)))
+fprintf('Max: %.2f\n', max(rawFrames.frames(:)))
+fprintf('Mean: %.2f\n', mean(rawFrames.frames(:)))
+
+fprintf('\nGamma corrected video:\n')
+fprintf('Min: %.2f\n', min(gammaFrames.frames(:)))
+fprintf('Max: %.2f\n', max(gammaFrames.frames(:)))
+fprintf('Mean: %.2f\n', mean(gammaFrames.frames(:)))
+
+% Average image statistics
+
+fprintf('\n=============================\n')
+fprintf('AVERAGE IMAGE STATISTICS\n')
+fprintf('=============================\n')
+
+fprintf('\nOriginal average image:\n')
+fprintf('Min: %.2f\n', min(rawAvg.avg_img(:)))
+fprintf('Max: %.2f\n', max(rawAvg.avg_img(:)))
+fprintf('Mean: %.2f\n', mean(rawAvg.avg_img(:)))
+
+fprintf('\nGamma corrected average image:\n')
+fprintf('Min: %.2f\n', min(gammaAvg.avg_img(:)))
+fprintf('Max: %.2f\n', max(gammaAvg.avg_img(:)))
+fprintf('Mean: %.2f\n', mean(gammaAvg.avg_img(:)))
+
+% Plot average images using identical color scale
+
+cl = [ ...
+    min([rawAvg.avg_img(:); gammaAvg.avg_img(:)]), ...
+    max([rawAvg.avg_img(:); gammaAvg.avg_img(:)])];
+
+figure
+
+subplot(1,2,1)
+imagesc(rawAvg.avg_img)
+axis image
+clim(cl)
+colorbar
+title('Original')
+
+subplot(1,2,2)
+imagesc(gammaAvg.avg_img)
+axis image
+clim(cl)
+colorbar
+title('Gamma corrected')
