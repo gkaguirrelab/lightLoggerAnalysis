@@ -16,6 +16,7 @@ from typing import Iterable, Iterator
 import dill
 import pandas as pd
 from numba import njit, prange
+import scipy.io
  
 def _load_pyagc():
     """Locate and import the optional ``PyAGC`` dependency.
@@ -61,6 +62,28 @@ def _load_agc_lib():
 
 
 AGC_LIB = _load_agc_lib()
+
+# Function to load in the fielding functions in per dimensions. Measured and saved in MATLAB 
+def _import_fielding_functions() -> dict[tuple[int], np.ndarray]:
+    # First find the path to the fielding function directory 
+    fielding_function_folder: str = os.path.join(pathlib.Path(__file__).parents[2], "code", "fieldingFunction") 
+    assert os.path.exists(fielding_function_folder), f"Fielding function path: {fielding_function_folder} does not exist"
+
+    # Find the correction maps for different image shapes 
+    correction_maps_folder: str = os.path.join(fielding_function_folder, "correctionMaps")
+    assert os.path.exists(correction_maps_folder), f"Correction maps folder: {correction_maps_folder} does not exist"
+
+    # Generate a dictionary based off of these correction maps 
+    correction_filepaths: list[str] = [os.path.join(correction_maps_folder, file) for file in os.listdir(correction_maps_folder) if file.endswith(".mat")]
+    assert len(correction_filepaths) > 0, f"No correction files found at path: {correction_maps_folder}"
+
+    fielding_functions: dict[tuple[int], np.ndarray] = {}
+    for filepath in correction_filepaths:
+        fielding_function: dict = scipy.io.loadmat(filepath)["correctionMap"].astype(np.float64, copy=False)
+        
+        fielding_functions[fielding_function.shape] = fielding_function
+
+    return fielding_functions
 
 
 # World temporal offset relative to other sensors. The world is the target, 
@@ -257,7 +280,7 @@ Gb/Rb = Ga/Ra Gb/Bb = Ga/Ba Rb/Bb = Ra/Ba
 WORLD_RGB_SCALARS: np.ndarray = np.array([1.032, 0.803, 1.164], dtype=np.float64) 
 
 # Define a mapping between frame sizes and fielding functions of the camera
-WORLD_FIELDING_FUNCTIONS: dict[tuple[int], np.ndarray] = {(480, 640): np.ones((480, 640), dtype=np.float64)}
+WORLD_FIELDING_FUNCTIONS: dict[tuple[int], np.ndarray] = _import_fielding_functions()
 
 WORLD_RGB_MASK: np.ndarray = np.zeros(WORLD_FRAME_SHAPE, dtype=np.uint8)
 WORLD_R_PIXELS: np.ndarray = np.array([(r, c)
