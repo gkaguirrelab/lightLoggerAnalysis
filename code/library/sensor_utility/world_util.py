@@ -258,7 +258,7 @@ WORLD_RGB_SCALARS: np.ndarray = np.array([1.032, 0.803, 1.164], dtype=np.float64
 
 # Define a mapping between frame sizes and fielding functions of the camera
 WORLD_FIELDING_FUNCTIONS: dict[tuple[int], np.ndarray] = {(480, 640): np.ones((480, 640), dtype=np.float64)}
-WORLD_FIELDING_FUNCTION: np.ndarray = WORLD_FIELDING_FUNCTIONS[(480, 640)]
+
 WORLD_RGB_MASK: np.ndarray = np.zeros(WORLD_FRAME_SHAPE, dtype=np.uint8)
 WORLD_R_PIXELS: np.ndarray = np.array([(r, c)
                                        for r in range(WORLD_FRAME_SHAPE[0])
@@ -658,26 +658,6 @@ def linearize_camera_responsivity(image_or_video: np.ndarray,
     np.clip(dst, 0, max_sensor_value, out=dst)
 
     return dst
-
-def generate_fielding_function(image: np.ndarray) -> np.ndarray:
-    """Construct a fielding correction image for a world-camera frame.
-
-    This function is still a stub. Its intended role is to estimate a
-    spatial gain map that compensates for vignetting or pixel-to-pixel
-    sensitivity differences, but that calibration has not been implemented
-    here yet.
-
-    Args:
-        image: Example frame whose shape determines the desired correction
-            map shape.
-
-    Returns:
-        A zero-valued array with the same shape and dtype as ``image``.
-        Callers should treat this as a placeholder, not a calibrated
-        correction surface.
-    """
-
-    return np.zeros_like(image)
 
 def apply_fielding_function(original_frame: np.ndarray, visualize_results: bool=False) -> tuple[np.ndarray, object] | np.ndarray:
     """Apply the registered fielding correction for this frame shape.
