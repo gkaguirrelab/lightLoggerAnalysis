@@ -66,12 +66,14 @@ $I(x,y)=B+Atanh(kexp[−(2σx2​(x−x0​)2​+2σy2​(y−y0​)2​)])$
 
 where B is the baseline intensity, A is the amplitude, (x0,y0) is the hotspot center, σx and σy describe the hotspot width, and k 
 controls the degree of flattening near the peak. Parameters were estimated using nonlinear least-squares optimization (lsqcurvefit). 
-Separate fits were performed for the red, green, and blue channel images.
+Separate fits were performed for the red, green, and blue channel images. 
 
 To evaluate the quality of the fits, horizontal, vertical, and diagonal cross-sections through the hotspot center were compared 
-between the measured data and the fitted model. The profiles were normalized using the minimum and maximum values of each fitted 
-surface to facilitate comparison across color channels. The resulting profiles showed substantial overlap among the red, green, 
-and blue channels, indicating minimal chromatic dependence of the hotspot structure.
+between the measured data and the fitted model. For visualization and comparison across color channels, both the observed intensity 
+profile and the fitted profile were normalized by the maximum value of the fitted two-dimensional surface for that channel. Under this 
+normalization, the fitted hotspot peak is equal to 1, and values elsewhere in the image represent the proportional intensity relative 
+to that peak. The resulting profiles showed substantial overlap among the red, green, and blue channels, indicating minimal chromatic 
+dependence of the hotspot structure.
 
 
 *Construction of the Fielding Correction Map*
@@ -79,7 +81,7 @@ and blue channels, indicating minimal chromatic dependence of the hotspot struct
 The fitted hotspot surfaces were used to derive multiplicative flat-field correction factors. For each color channel, a correction 
 factor was calculated at every pixel location as:
 
-$C(x,y)=I(x,y)Imax​​$
+$C(x,y)=Imax​​/I(x,y)$
 
 where Imax is the peak value of the fitted hotspot surface and I(x,y) is the fitted sensitivity at the corresponding pixel location. 
 This procedure produces correction factors equal to one at the hotspot peak and greater than one in less-sensitive regions of the 
