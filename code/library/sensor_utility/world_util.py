@@ -1082,6 +1082,208 @@ def apply_digital_gain(image_or_video: np.ndarray,
 
     return None
 
+@njit(parallel=True)
+def _apply_floor_ceiling_compiled(debayered_frame_buffer: np.ndarray,
+                                  raw_frame_buffer: np.ndarray,
+                                  debayered_provenance_map: np.ndarray,
+                                  floor: int | float,
+                                  ceiling: int | float,
+                                  clip_floor: int | float,
+                                  clip_ceiling: int | float,
+                                  ) -> None:
+    """Compiled floor/ceiling propagation over normalized frame buffers."""
+    debayered_height: int = debayered_provenance_map.shape[0]
+    debayered_width: int = debayered_provenance_map.shape[1]
+
+    n_frames: int = raw_frame_buffer.shape[0]
+    n_contributors: int = debayered_provenance_map.shape[2]
+
+    # Parallelize over rows since rows are independent
+    for output_row in prange(debayered_height):
+        for output_col in range(debayered_width):
+
+            # Iterate over every frame for this output pixel
+            for frame_index in range(n_frames):
+
+                contains_saturated_contributor: bool = False
+                contains_dark_contributor: bool = False
+
+                # Iterate over RAW Bayer contributors for this debayered pixel
+                for contributor_index in range(n_contributors):
+
+                    contributor_row: int = debayered_provenance_map[output_row, output_col, contributor_index, 0]
+                    contributor_col: int = debayered_provenance_map[output_row, output_col, contributor_index, 1]
+
+                    # Directly read RAW Bayer value without advanced indexing allocation
+                    raw_value = raw_frame_buffer[frame_index, contributor_row, contributor_col]
+
+                    # Track whether any contributor is saturated/dark
+                    if(raw_value == ceiling):
+                        contains_saturated_contributor = True
+
+                    if(raw_value == floor):
+                        contains_dark_contributor = True
+
+                # This ended up faster than the previous NumPy vectorization approach
+                # because it avoids repeatedly allocating temporary arrays from:
+                #
+                # raw_frame_buffer[:, contributor_rows, contributor_cols]
+                #
+                # which uses advanced indexing and therefore creates copies.
+
+                # Dark clipping takes precedence over saturation clipping
+                if(contains_dark_contributor):
+                    debayered_frame_buffer[frame_index, output_row, output_col, 0] = clip_floor
+                    debayered_frame_buffer[frame_index, output_row, output_col, 1] = clip_floor
+                    debayered_frame_buffer[frame_index, output_row, output_col, 2] = clip_floor
+
+                elif(contains_saturated_contributor):
+                    debayered_frame_buffer[frame_index, output_row, output_col, 0] = clip_ceiling
+                    debayered_frame_buffer[frame_index, output_row, output_col, 1] = clip_ceiling
+                    debayered_frame_buffer[frame_index, output_row, output_col, 2] = clip_ceiling
+
+    return
+
+
+def apply_floor_ceiling(debayered_image_or_video: np.ndarray,
+                        raw_image_or_video: np.ndarray,
+                        debayered_provenance_map: np.ndarray | None=None,
+                        floor_ceiling: tuple[int | float, int | float] = (0, 255), 
+                        clip_values: tuple[int | float, int | float] = (0, 255), 
+                        visualize_results: bool=False 
+                        ) -> None | tuple[np.ndarray, object]:
+    """Propagate raw Bayer floor/ceiling hits into debayered RGB pixels.
+
+    ``debayered_provenance_map`` records which raw Bayer samples contribute
+    to each debayered output pixel. This function scans those raw
+    contributors for every debayered pixel. If any contributor is exactly
+    ``floor``, the entire RGB output pixel is set to ``clip_values[0]``.
+    Otherwise, if any contributor is exactly ``ceiling``, the entire RGB
+    output pixel is set to ``clip_values[1]``. The debayered input is
+    modified in place.
+
+    Args:
+        debayered_image_or_video: Debayered RGB image with shape
+            ``(height, width, 3)`` or debayered RGB frame buffer with shape
+            ``(frames, height, width, 3)``.
+        raw_image_or_video: Raw Bayer image with shape ``(height, width)``
+            or raw Bayer frame buffer with shape ``(frames, height, width)``.
+        debayered_provenance_map: Optional contributor map with shape
+            ``(height, width, contributors, 2)``. When omitted, it is
+            generated from ``debayered_image_or_video``.
+        floor_ceiling: ``(floor, ceiling)`` raw-value sentinels. Floor
+            propagation takes precedence if a pixel has both dark and
+            saturated contributors.
+        clip_values: Output values to write for floor and ceiling
+            contributors, respectively. This can include ``np.nan`` when the
+            debayered input is floating point.
+        visualize_results: When ``True``, display a before/after figure and
+            return it with the modified debayered image. Visualization
+            supports only a single debayered image.
+
+    Returns:
+        ``None`` after in-place correction, or ``(debayered_image_or_video,
+        figure)`` when visualization is requested.
+    """
+
+    assert len(floor_ceiling) == 2, f"floor_ceiling must contain exactly 2 values. Received: {floor_ceiling}"
+    floor, ceiling = floor_ceiling
+    assert floor <= ceiling, f"floor must be <= ceiling. Received floor={floor}, ceiling={ceiling}"
+    assert len(clip_values) == 2, f"clip_values must contain exactly 2 values. Received: {clip_values}"
+    clip_floor, clip_ceiling = clip_values
+
+    unmodified_image_or_video: np.ndarray | None = None
+    if(visualize_results is True):
+        assert debayered_image_or_video.ndim == 3, (
+            "Floor/ceiling visualization only supports a single debayered "
+            f"image with shape (rows, cols, 3). Got shape {debayered_image_or_video.shape}."
+        )
+        unmodified_image_or_video = debayered_image_or_video.copy()
+
+
+    # Normalize single-image and video inputs to the compiled buffer shapes:
+    # raw:       (frames, rows, cols)
+    # debayered: (frames, rows, cols, 3)
+    if(debayered_image_or_video.ndim == 3):
+        assert raw_image_or_video.ndim == 2, (
+            "A single debayered image must be paired with a single raw Bayer "
+            f"image. Got raw shape {raw_image_or_video.shape} and debayered "
+            f"shape {debayered_image_or_video.shape}."
+        )
+        debayered_frame_buffer: np.ndarray = debayered_image_or_video[np.newaxis, ...]
+        raw_frame_buffer: np.ndarray = raw_image_or_video[np.newaxis, ...]
+
+    elif(debayered_image_or_video.ndim == 4):
+        assert raw_image_or_video.ndim == 3, (
+            "A debayered frame buffer must be paired with a raw Bayer frame "
+            f"buffer. Got raw shape {raw_image_or_video.shape} and debayered "
+            f"shape {debayered_image_or_video.shape}."
+        )
+        debayered_frame_buffer = debayered_image_or_video
+        raw_frame_buffer = raw_image_or_video
+
+    else:
+        raise Exception(f"Unsupported debayered N dimensions: {debayered_image_or_video.ndim}")
+
+    assert debayered_frame_buffer.shape[-1] == 3, (
+        f"Debayered input must have 3 RGB channels. Got shape {debayered_image_or_video.shape}."
+    )
+    assert raw_frame_buffer.shape[0] == debayered_frame_buffer.shape[0], (
+        f"Raw and debayered frame counts differ: {raw_frame_buffer.shape[0]} | "
+        f"{debayered_frame_buffer.shape[0]}."
+    )
+    assert raw_frame_buffer.shape[1:3] == debayered_frame_buffer.shape[1:3], (
+        f"Raw and debayered spatial shapes differ: {raw_frame_buffer.shape[1:3]} | "
+        f"{debayered_frame_buffer.shape[1:3]}."
+    )
+
+    if(debayered_provenance_map is None):
+        debayered_provenance_map = generate_debayered_provenance_map(debayered_frame_buffer[0])
+
+    assert debayered_provenance_map.shape[:2] == debayered_frame_buffer.shape[1:3], (
+        f"Debayered provenance map shape {debayered_provenance_map.shape[:2]} "
+        f"does not match debayered frame shape {debayered_frame_buffer.shape[1:3]}."
+    )
+    assert debayered_provenance_map.ndim == 4 and debayered_provenance_map.shape[-1] == 2, (
+        "debayered_provenance_map must have shape (rows, cols, contributors, 2). "
+        f"Got shape {debayered_provenance_map.shape}."
+    )
+
+    clip_values_array: np.ndarray = np.array(clip_values, dtype=np.float64)
+    if(np.any(np.isnan(clip_values_array))):
+        assert np.issubdtype(debayered_frame_buffer.dtype, np.floating), (
+            "clip_values contains NaN, so debayered_image_or_video must have "
+            f"a floating dtype. Got {debayered_frame_buffer.dtype}."
+        )
+
+    _apply_floor_ceiling_compiled(
+        debayered_frame_buffer,
+        raw_frame_buffer,
+        debayered_provenance_map,
+        floor,
+        ceiling,
+        clip_floor,
+        clip_ceiling,
+    )
+
+    if(visualize_results is True):
+        fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+        fig.suptitle("Floor / Ceiling Propagation (Before / After)", fontweight='bold', fontsize=18)
+
+        axes[0].imshow(unmodified_image_or_video)
+        axes[0].set_title("Before")
+        axes[0].axis("off")
+
+        axes[1].imshow(debayered_image_or_video)
+        axes[1].set_title("After")
+        axes[1].axis("off")
+
+        plt.tight_layout()
+        plt.show()
+
+        return debayered_image_or_video, fig
+
+    return None
 
 
 # Embed a world-frame timestamp into the 8-bit image itself.

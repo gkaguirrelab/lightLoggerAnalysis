@@ -770,88 +770,6 @@ def _load_world_chunk_shared_memory(chunk_paths: list[tuple[str, str]],
         for shm in metadata_shms + frame_shms:
             shm.close()
 
-# We parallleize this and just in time compile it. 
-# this ends up being faster than using vectorized boolean 
-# arrays due to memory allocations
-@njit(parallel=True)
-def _clip_buffer_compiled(raw_frame_buffer: np.ndarray,
-                          debayered_frame_buffer: np.ndarray,
-                          debayered_provenance_map: np.ndarray,
-                          floor: int,
-                          ceiling: int,
-                        ) -> None:
-    """Propagate raw Bayer clipping into the debayered RGB buffer.
-
-    ``debayered_provenance_map`` records which raw Bayer samples contribute
-    to each debayered RGB pixel. For every frame and output pixel, this
-    helper scans those contributors. If any contributor is at or below
-    ``floor``, the entire RGB pixel is forced to ``floor``. Otherwise, if
-    any contributor is at or above ``ceiling``, the entire RGB pixel is
-    forced to ``ceiling``. This preserves the project's semantics for
-    floor/ceiling clipping after demosaicing while avoiding the temporary
-    arrays a purely vectorized NumPy approach would create.
-
-    Args:
-        raw_frame_buffer: Raw Bayer frames with shape ``(n, h, w)``.
-        debayered_frame_buffer: Debayered RGB frames with shape
-            ``(n, h, w, 3)`` that are modified in place.
-        debayered_provenance_map: Contributor coordinates for each debayered
-            pixel.
-        floor: Lower clipping threshold.
-        ceiling: Upper clipping threshold.
-    """
-    debayered_height: int = debayered_provenance_map.shape[0]
-    debayered_width: int = debayered_provenance_map.shape[1]
-
-    n_frames: int = raw_frame_buffer.shape[0]
-    n_contributors: int = debayered_provenance_map.shape[2]
-
-    # Parallelize over rows since rows are independent
-    for output_row in prange(debayered_height):
-        for output_col in range(debayered_width):
-
-            # Iterate over every frame for this output pixel
-            for frame_index in range(n_frames):
-
-                contains_saturated_contributor: bool = False
-                contains_dark_contributor: bool = False
-
-                # Iterate over RAW Bayer contributors for this debayered pixel
-                for contributor_index in range(n_contributors):
-
-                    contributor_row: int = debayered_provenance_map[output_row, output_col, contributor_index, 0]
-                    contributor_col: int = debayered_provenance_map[output_row, output_col, contributor_index, 1]
-
-                    # Directly read RAW Bayer value without advanced indexing allocation
-                    raw_value = raw_frame_buffer[frame_index, contributor_row, contributor_col]
-
-                    # Track whether any contributor is saturated/dark
-                    if(raw_value >= ceiling):
-                        contains_saturated_contributor = True
-
-                    if(raw_value <= floor):
-                        contains_dark_contributor = True
-
-                # This ended up faster than the previous NumPy vectorization approach
-                # because it avoids repeatedly allocating temporary arrays from:
-                #
-                # raw_frame_buffer[:, contributor_rows, contributor_cols]
-                #
-                # which uses advanced indexing and therefore creates copies.
-
-                # Dark clipping takes precedence over saturation clipping
-                if(contains_dark_contributor):
-                    debayered_frame_buffer[frame_index, output_row, output_col, 0] = floor
-                    debayered_frame_buffer[frame_index, output_row, output_col, 1] = floor
-                    debayered_frame_buffer[frame_index, output_row, output_col, 2] = floor
-
-                elif(contains_saturated_contributor):
-                    debayered_frame_buffer[frame_index, output_row, output_col, 0] = ceiling
-                    debayered_frame_buffer[frame_index, output_row, output_col, 1] = ceiling
-                    debayered_frame_buffer[frame_index, output_row, output_col, 2] = ceiling
-
-    return
-
 
 """Convert the world chunks of a recording into a playable video"""
 def world_chunks_to_video(recording_path: str,
@@ -1110,11 +1028,26 @@ def world_chunks_to_video(recording_path: str,
             # First, convert to float for float multiplications
             # if not in float already
             frame_buffer = frame_buffer.astype(np.float64, copy=False) # copy = False means reuse the same memory if possible (e.g. if it is already float, which it should be)  
+            raw_saturated_pixel_mask: np.ndarray | None = None
+
+            # If we want to apply the floor / ceiling procedure, 
+            # we need to mark saturated raw pixels as INF. Raw zero pixels
+            # intentionally remain zero until debayering so they can propagate
+            # to neighboring debayered pixels via the provenance map.
+            if(apply_floor_ceiling is True):
+                floor, ceiling = floor_ceiling
+
+                raw_saturated_pixel_mask = frame_buffer >= ceiling
+                frame_buffer[raw_saturated_pixel_mask] = np.inf
 
             # Linearize the recording data to account for the full well effect of the camera
             if(linearize_camera_responsivity is True):
                 assert frame_buffer.dtype == np.float64 and frame_buffer.ndim == 3, f"Frame buffer dtype must be float 64 and bayer format to linearize the camera responsivity. Current dtype is: {frame_buffer.dtype} and ndim is {frame_buffer.ndim}"
                 world_util.linearize_camera_responsivity(frame_buffer, int(config_data["sensors"]["W"]["sensor_mode"]["bit_depth"]), dark_noise=world_util.WORLD_DARK_NOISE, dst=frame_buffer)
+                
+                # We need to reapply the saturated pixel mask because the above operation performed clipping thereby losing our INF values
+                if(raw_saturated_pixel_mask is not None):
+                    frame_buffer[raw_saturated_pixel_mask] = np.inf
 
             # Apply the fielding function of the camera that we measured in the planetarium
             if(apply_fielding_function is True):
@@ -1150,29 +1083,55 @@ def world_chunks_to_video(recording_path: str,
 
                
             # If we want to debayer the image
+            raw_frame_buffer: np.ndarray | None = None
             if(debayer_images is True):
+                if(raw_saturated_pixel_mask is not None):
+                    frame_buffer[raw_saturated_pixel_mask] = np.inf
+
                 # Convert the buffer to uint8 if it has not already been done 
                 # clipping and rounding as needed 
-                if(frame_buffer.dtype != np.uint8):
-                    frame_buffer = np.round(np.clip(frame_buffer, 0, 255)).astype(np.uint8)
-                assert current_color_space == "BAYER" and frame_buffer.dtype == np.uint8, f"Frame buffer must be in BAYER space and uint8 to debayer. Current format is: {current_color_space} | {frame_buffer.dtype}"
+                if(frame_buffer.dtype != np.uint16):
+                    debayer_ceiling_marker: int = 2 ** 16 - 1
+
+                    # Replace INF that occurred before with a uint16 sentinel
+                    # that OpenCV can debayer. Raw zeros remain zeros here.
+                    if(apply_floor_ceiling is True):
+                        frame_buffer[np.isposinf(frame_buffer)] = debayer_ceiling_marker
+
+                    frame_buffer = np.round(np.clip(frame_buffer, 0, debayer_ceiling_marker)).astype(np.uint16)
+                assert current_color_space == "BAYER" and frame_buffer.dtype == np.uint16, f"Frame buffer must be in BAYER space and uint16 to debayer. Current format is: {current_color_space} | {frame_buffer.dtype}"
 
                 # Debayer the frames. This is NOT an in-place operation 
+                raw_frame_buffer: np.ndarray = frame_buffer
                 frame_buffer = world_util.debayer(frame_buffer)
                 current_color_space = "RGB"
             
-            # If we want to apply floor ceiling [LOW, HIGH] in any channel implies 
-            # that entire pixel is white or black
+            # If we want to apply floor ceiling [LOW, HIGH] that implies 
+            # that any output pixel in the debayered image will be either blacked or whited out 
+            # if any of its contributing pixels were floor or ceiling
             if(apply_floor_ceiling is True):
                 assert frame_buffer.ndim == 4, f"Frames must be debayered before applying floor/ceiling"
 
                 if(debayered_provenance_map is None):
                     debayered_provenance_map = world_util.generate_debayered_provenance_map(frame_buffer[0])
 
-                #_clip_buffer_compiled(raw_frame_buffer, frame_buffer, debayered_provenance_map, *floor_ceiling)
+                # Apply the floor / ceiling algorithm IN PLACE
+                world_util.apply_floor_ceiling(
+                    frame_buffer,
+                    raw_frame_buffer,
+                    debayered_provenance_map,
+                    (floor_ceiling[0], 2 ** 16 - 1),
+                    floor_ceiling,
+                )
 
             # Convert the frame buffer back into uint8 format
             if(frame_buffer.dtype != np.uint8): 
+                if(np.issubdtype(frame_buffer.dtype, np.floating)):
+                    assert np.all(np.isfinite(frame_buffer)), (
+                        "Frame buffer contains NaN or Inf values immediately "
+                        "before uint8 conversion. These should have already "
+                        "been filtered out."
+                    )
                 frame_buffer = np.clip(np.round(frame_buffer), 0, 255).astype(np.uint8)
 
             # ALL TRANSFORMATIONS ARE DONE AT THIS POINT. 
