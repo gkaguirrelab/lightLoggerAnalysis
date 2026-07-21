@@ -1120,11 +1120,8 @@ def world_chunks_to_video(recording_path: str,
             if(apply_fielding_function is True):
                 assert frame_buffer.dtype == np.float64 and frame_buffer.ndim == 3, f"Frame buffer dtype must be float64 and in bayer format to apply fielding function. Current dtype is {frame_buffer.dtype}, current ndim: {frame_buffer.ndim}"
                 
-                # Get the fielding function for this frame size
-                fielding_function: np.ndarray = world_util.WORLD_FIELDING_FUNCTIONS[frame_buffer.shape[1:3]]
-
-                # Apply fielding function
-                frame_buffer *= fielding_function
+                # This is an in-place operation, no new memory is allocated here
+                world_util.apply_fielding_function(frame_buffer)
 
             # Apply the radiometric correction weights we calculated outdoors with respect to the PR670
             if(apply_color_weights is True):
@@ -1137,14 +1134,9 @@ def world_chunks_to_video(recording_path: str,
                     bayer_RGB_pixel_locations = [ np.argwhere(bayer_RGB_mask == color) for color in "RGB" ]
                 assert bayer_RGB_mask.shape == frame_buffer.shape[1:], f"Bayer RGB mask shape: {bayer_RGB_mask.shape} not equal to frame shape: {frame_buffer.shape[1:]}" 
 
-                # Apply the color corrections IN-PLACE and vectorized (uglier than using our helper function and copying logic, but faster)
+                # Apply the color corrections IN-PLACE 
                 assert len(bayer_RGB_pixel_locations) == len(world_util.WORLD_RGB_SCALARS)
-                for (pixels, weight) in zip(bayer_RGB_pixel_locations, world_util.WORLD_RGB_SCALARS):
-                    rows: np.ndarray = pixels[:, 0]
-                    cols: np.ndarray = pixels[:, 1]
-
-                    # Apply the weight to the specified pixels 
-                    frame_buffer[:, rows, cols] *= weight
+                world_util.apply_color_correction(frame_buffer, bayer_RGB_pixel_locations)
 
             # Apply Dgain if requested
             if(apply_digital_gain is True):
@@ -1152,15 +1144,11 @@ def world_chunks_to_video(recording_path: str,
 
                 # Extract the dgains of the buffers 
                 buffer_dgains: np.ndarray = metadata[:, 2]
+                
+                # Apply the digital gain IN PLACE
+                world_util.apply_digital_gain(frame_buffer, buffer_dgains)
 
-                # Multiply the frames by the dgains 
-                # (Note: this does not do any allocation, so all of this stuff is very fast)
-                if(frame_buffer.ndim == 3):
-                    buffer_dgains = buffer_dgains[:, np.newaxis, np.newaxis]
-                else:
-                    buffer_dgains = buffer_dgains[:, np.newaxis, np.newaxis, np.newaxis]
-                frame_buffer *= buffer_dgains
-
+               
             # If we want to debayer the image
             if(debayer_images is True):
                 # Convert the buffer to uint8 if it has not already been done 
@@ -1169,20 +1157,9 @@ def world_chunks_to_video(recording_path: str,
                     frame_buffer = np.round(np.clip(frame_buffer, 0, 255)).astype(np.uint8)
                 assert current_color_space == "BAYER" and frame_buffer.dtype == np.uint8, f"Frame buffer must be in BAYER space and uint8 to debayer. Current format is: {current_color_space} | {frame_buffer.dtype}"
 
-                # Allocate the output buffer 
-                # for the debayering. This is the same shame as the 
-                # input buffer, but with RGB channels dimension        
-                debayered_frame_buffer: np.ndarray = np.empty( tuple( list(frame_buffer.shape) + [3] ), dtype=np.uint8)
-                
-                # Debayer the frames into the output buffer 
-                for frame_num, (input_frame, output_buffer) in enumerate(zip(frame_buffer, debayered_frame_buffer)):
-                    world_util.debayer_image(input_frame, dst=output_buffer)
-                current_color_space = 'RGB'
-                
-                # reassign frame buffer to the output buffer, debayered buffer 
-                # We will need this to apply floor and ceiling operations 
-                raw_frame_buffer = frame_buffer
-                frame_buffer = debayered_frame_buffer
+                # Debayer the frames. This is NOT an in-place operation 
+                frame_buffer = world_util.debayer(frame_buffer)
+                current_color_space = "RGB"
             
             # If we want to apply floor ceiling [LOW, HIGH] in any channel implies 
             # that entire pixel is white or black
@@ -1192,7 +1169,7 @@ def world_chunks_to_video(recording_path: str,
                 if(debayered_provenance_map is None):
                     debayered_provenance_map = world_util.generate_debayered_provenance_map(frame_buffer[0])
 
-                _clip_buffer_compiled(raw_frame_buffer, frame_buffer, debayered_provenance_map, *floor_ceiling)
+                #_clip_buffer_compiled(raw_frame_buffer, frame_buffer, debayered_provenance_map, *floor_ceiling)
 
             # Convert the frame buffer back into uint8 format
             if(frame_buffer.dtype != np.uint8): 

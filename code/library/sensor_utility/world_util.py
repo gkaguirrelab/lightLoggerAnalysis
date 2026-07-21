@@ -66,7 +66,7 @@ AGC_LIB = _load_agc_lib()
 # Function to load in the fielding functions in per dimensions. Measured and saved in MATLAB 
 def _import_fielding_functions() -> dict[tuple[int], np.ndarray]:
     # First find the path to the fielding function directory 
-    fielding_function_folder: str = os.path.join(pathlib.Path(__file__).parents[2], "code", "fieldingFunction") 
+    fielding_function_folder: str = os.path.join(pathlib.Path(__file__).parents[3], "code", "fieldingFunction") 
     assert os.path.exists(fielding_function_folder), f"Fielding function path: {fielding_function_folder} does not exist"
 
     # Find the correction maps for different image shapes 
@@ -564,68 +564,103 @@ def generate_debayered_provenance_map(debayered_image: np.ndarray,
 
     return provenance_map.astype(np.uint16, copy=False)
 
-def debayer_image(image: np.ndarray,
-                  visualize_results: bool=False,
-                  dst: np.ndarray | None=None
-                ) -> np.ndarray | tuple[np.ndarray, object]:
-    """Debayer a world camera image into an RGB image.
+
+def debayer(image_or_video: np.ndarray,
+            visualize_results: bool=False 
+        ) -> np.ndarray | tuple[np.ndarray, object]:
+    """Debayer raw world-camera Bayer data into RGB.
 
     Args:
-        image: A single-channel Bayer-pattern image.
-        visualize_results: If ``True``, display a before/after plot and
-            return the figure handle alongside the debayered image.
-        dst: Optional pre-allocated output array for in-place debayering.
+        image_or_video: A single raw Bayer frame with shape ``(rows, cols)``
+            or a raw Bayer frame buffer with shape ``(frames, rows, cols)``.
+            The input must already be in a dtype accepted by OpenCV's Bayer
+            conversion path.
+        visualize_results: When ``True``, display a before/after figure and
+            return it with the debayered result. Visualization supports only
+            a single ``(rows, cols)`` frame and asserts otherwise.
 
     Returns:
-        The debayered RGB image as a ``np.ndarray``. When
-        ``visualize_results`` is ``True``, returns a tuple of
-        ``(debayered_image, figure)``. When ``dst`` is provided and
-        ``visualize_results`` is ``False``, returns ``None`` (the result
-        is written into ``dst``).
+        The RGB image or frame buffer. When ``visualize_results`` is
+        ``True``, returns ``(debayered, figure)``.
     """
-    # Initialize a variable for the figure handle that
-    # will be used to visualize (if desired)
-    fig: object | None = None
+    unmodified_image_or_video: np.ndarray | None = None
+    if(visualize_results is True):
+        assert image_or_video.ndim == 2, (
+            f"Debayer visualization only supports a single frame with shape "
+            f"(rows, cols). Got shape {image_or_video.shape}."
+        )
+        unmodified_image_or_video = image_or_video.copy() 
 
-    # Ensure the image is correctly rounded 
-    guarded_image: np.ndarray = image if image.dtype == np.uint8 else np.clip(np.round(image), 0, 255).astype(np.uint8)
-
-    # Debayer the image according to the sensor's bayer pattern
-    # either in place, or not in place depending on input args
-    if(dst is None):
-        debayered_image: np.ndarray = cv2.cvtColor(guarded_image, cv2.COLOR_BayerRG2RGB)
+    # Allocate the output buffer 
+    # for the debayering. This is the same shame as the 
+    # input buffer, but with RGB channels dimension        
+    debayered: np.ndarray = np.empty(tuple(list(image_or_video.shape) + [3]), dtype=image_or_video.dtype)
+    
+    # If we passed in a single image, just generate that single image, 
+    # otherwise, populate the buffer 
+    if(image_or_video.ndim == 2):
+        debayered = cv2.cvtColor(image_or_video, cv2.COLOR_BayerRG2RGB) 
+    elif(image_or_video.ndim == 3):
+        for frame_num, frame in enumerate(image_or_video):
+           cv2.cvtColor(frame, cv2.COLOR_BayerRG2RGB, dst=debayered[frame_num])
     else:
-        cv2.cvtColor(guarded_image, cv2.COLOR_BayerRG2RGB, dst=dst)
+        raise Exception(f"Unsupported N Dimensions: {image_or_video.ndim}. N dimensions must be 2 or 3")
 
     # Visualize the results if desired
     if(visualize_results is True):
-        # Initialize a figure with two axes 
         fig, axes = plt.subplots(1, 2, figsize=(12, 4))
         fig.suptitle("Debayering (Before / After)", fontweight='bold', fontsize=18)
-        
-        # Left axis will be the "before"
-        # image 
-        axes[0].imshow(guarded_image, cmap="gray")
-        axes[0].set_title('Before')
 
-        # Middle axis will be the after but without 
-        # color correction 
-        axes[1].imshow( (debayered_image if dst is None else dst) )
+        axes[0].imshow(unmodified_image_or_video, cmap="gray")
+        axes[0].set_title("Before")
+        axes[0].axis("off")
+
+        axes[1].imshow(debayered)
         axes[1].set_title("After")
+        axes[1].axis("off")
 
-        # Show the plot 
-        plt.show() 
+        plt.tight_layout()
+        plt.show()
 
-        return debayered_image, fig
+        return debayered, fig
         
-    return debayered_image if dst is None else None
+    return debayered
+
+
+def debayer_image(image: np.ndarray,
+                  visualize_results: bool=False,
+                  dst: np.ndarray | None=None
+                  ) -> np.ndarray | tuple[np.ndarray, object] | None:
+    """Backward-compatible wrapper for :func:`debayer`.
+
+    Args:
+        image: A single raw Bayer frame with shape ``(rows, cols)``.
+        visualize_results: When ``True``, display a before/after figure and
+            return it with the debayered image. Visualization supports only a
+            single ``(rows, cols)`` frame and asserts otherwise.
+        dst: Optional pre-allocated RGB output array. When provided, the
+            debayered image is copied into ``dst`` and ``None`` is returned.
+
+    Returns:
+        The debayered image, ``(debayered, figure)`` when visualization is
+        requested, or ``None`` when ``dst`` is provided and visualization is
+        disabled.
+    """
+    if(dst is not None):
+        assert visualize_results is False, "dst cannot be used with visualize_results=True"
+        dst[:] = debayer(image)
+        return None
+
+    return debayer(image, visualize_results=visualize_results)
+
 
 def linearize_camera_responsivity(image_or_video: np.ndarray,
                                   original_bit_depth: int = 8,
                                   dark_noise: float = WORLD_DARK_NOISE,
                                   clipping_exponent: float = WORLD_FULL_WELL_CLIPPING_EXPONENT,
                                   dst: np.ndarray | None = None,
-                                  ) -> np.ndarray:
+                                  visualize_results: bool=False
+                                  ) -> np.ndarray | tuple[np.ndarray, object]:
     """Linearize world-camera values using the fitted full-well model.
 
     This is the Python translation of ``linearizeY`` in
@@ -635,17 +670,31 @@ def linearize_camera_responsivity(image_or_video: np.ndarray,
     expanded onto ``0`` through ``2 ** original_bit_depth - 2``.
 
     Args:
-        image: Raw camera frame or frame buffer to linearize.
+        image_or_video: Raw camera frame or frame buffer to linearize.
         original_bit_depth: Bit depth of the input image values.
         dark_noise: The measured dark offset to remove before inversion.
         clipping_exponent: The fitted soft-clipping exponent from the
             full-well calibration.
-        dst: Optional output array. When provided, the result is written
-            in-place and ``None`` is returned.
+        dst: Optional output array with the same shape as ``image_or_video``.
+            When provided, the result is written into this array and the same
+            array is returned.
+        visualize_results: When ``True``, display a before/after figure and
+            return it with the linearized result. Visualization supports only
+            a single ``(rows, cols)`` frame and asserts otherwise.
 
     Returns:
-        A rounded linearized array, or ``None`` when ``dst`` is provided.
+        A rounded linearized array, or ``(linearized, figure)`` when
+        visualization is requested.
     """
+    unmodified_image_or_video: np.ndarray | None = None
+    if(visualize_results is True):
+        assert image_or_video.ndim == 2, (
+            f"Camera responsivity linearization visualization only supports "
+            f"a single frame with shape (rows, cols). Got shape "
+            f"{image_or_video.shape}."
+        )
+        unmodified_image_or_video = image_or_video.copy() 
+
     max_sensor_value: float = float(2 ** original_bit_depth - 1)
     max_linearized_value: float = float(2 ** original_bit_depth - 2)
     smin: float = float(dark_noise)
@@ -680,59 +729,89 @@ def linearize_camera_responsivity(image_or_video: np.ndarray,
     np.round(dst, out=dst)
     np.clip(dst, 0, max_sensor_value, out=dst)
 
+    # If visualize results is true, we will print an output of what the image looks like 
+    if(visualize_results is True):
+        fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+        fig.suptitle("Full Well Correction (Before / After)", fontweight='bold', fontsize=18)
+
+        axes[0].imshow(unmodified_image_or_video, cmap="gray")
+        axes[0].set_title("Before")
+        axes[0].axis("off")
+
+        axes[1].imshow(dst, cmap="gray")
+        axes[1].set_title("After")
+        axes[1].axis("off")
+
+        plt.tight_layout()
+        plt.show()
+
+        return dst, fig
+
     return dst
 
-def apply_fielding_function(original_frame: np.ndarray, visualize_results: bool=False) -> tuple[np.ndarray, object] | np.ndarray:
-    """Apply the registered fielding correction for this frame shape.
-
-    The function looks up a multiplicative gain image from
-    ``WORLD_FIELDING_FUNCTIONS`` using ``original_frame.shape`` as the key,
-    multiplies the frame by that gain image in ``float64``, and then clips
-    and rounds the result back to ``uint8``.
+def apply_fielding_function(image_or_video: np.ndarray, 
+                            visualize_results: bool=False
+                           ) -> None | tuple[np.ndarray, object]:
+    """Apply the registered fielding correction in place.
 
     Args:
-        original_frame: Raw frame to correct. Its shape must match one of
-            the fielding maps stored in ``WORLD_FIELDING_FUNCTIONS``.
+        image_or_video: A floating-point raw Bayer frame with shape
+            ``(rows, cols)`` or frame buffer with shape
+            ``(frames, rows, cols)``. The spatial frame size must exist in
+            ``WORLD_FIELDING_FUNCTIONS``.
         visualize_results: When ``True``, display a before/after figure and
-            return that figure together with the corrected frame.
+            return it with the corrected input array. Visualization supports
+            only a single ``(rows, cols)`` frame and asserts otherwise.
 
     Returns:
-        The corrected ``uint8`` frame, or ``(frame, figure)`` when
-        ``visualize_results`` is ``True``.
+        ``None`` after in-place correction, or ``(image_or_video, figure)``
+        when visualization is requested.
     """
-    # Initialize a variable for the figure handle that
-    # will be used to visualize (if desired)
-    fig: object | None = None
+    assert image_or_video.ndim in (2, 3), (
+        f"Fielding function requires a single frame with shape (rows, cols) "
+        f"or a frame buffer with shape (frames, rows, cols). Got shape "
+        f"{image_or_video.shape}."
+    )
+    
+    unmodified_image_or_video: np.ndarray | None = None
+    if(visualize_results is True):
+        assert image_or_video.ndim == 2, (
+            f"Fielding function visualization only supports a single frame "
+            f"with shape (rows, cols). Got shape {image_or_video.shape}."
+        )
+        unmodified_image_or_video = image_or_video.copy() 
 
-    # Retrieve the fielding function for the current camera configuration
-    fielding_function: np.ndarray = WORLD_FIELDING_FUNCTIONS[original_frame.shape]
-    assert original_frame.shape == fielding_function.shape, f"Fielding function shape: {fielding_function.shape} is not equal to frame shape: {original_frame.shape}"
+    # Get the fielding function for this frame size (depending on if we passed in a frame buffer)
+    # or a single image
+    image_size: tuple = image_or_video.shape[1:3] if image_or_video.ndim == 3 else image_or_video.shape[:2]
+    fielding_function: np.ndarray = WORLD_FIELDING_FUNCTIONS[image_size]
+    assert image_size == fielding_function.shape, (
+        f"Fielding function shape: {fielding_function.shape} is not equal to "
+        f"frame shape: {image_size}"
+    )
 
     # Apply the fielding function 
-    modified_image: np.ndarray = np.clip(np.round(fielding_function.astype(np.float64) * original_frame.astype(np.float64)), 0, 255).astype(np.uint8)
+    image_or_video *= fielding_function
 
     # Visualize the results if desired 
     if(visualize_results is True):
-        # Initialize a figure with two axes 
         fig, axes = plt.subplots(1, 2, figsize=(12, 4))
-        fig.suptitle("Fielding function (Before / After)", fontweight='bold', fontsize=18)
-        
-        # Left axis will be the "before"
-        # image 
-        axes[0].imshow(original_frame, cmap="gray")
-        axes[0].set_title('Before')
+        fig.suptitle("Fielding Function (Before / After)", fontweight='bold', fontsize=18)
 
-        # Middle axis will be the after but without 
-        # color correction 
-        axes[1].imshow(modified_image)
+        axes[0].imshow(unmodified_image_or_video, cmap="gray")
+        axes[0].set_title("Before")
+        axes[0].axis("off")
+
+        axes[1].imshow(image_or_video, cmap="gray")
         axes[1].set_title("After")
+        axes[1].axis("off")
 
-        # Show the plot 
-        plt.show() 
+        plt.tight_layout()
+        plt.show()
 
-        return modified_image, fig
+        return image_or_video, fig
 
-    return modified_image
+    return None
 
 def generate_RGB_mask(original_frame: np.ndarray, marker: Literal["str", "num"]="str", visualize_results: bool=False) -> tuple[np.ndarray, object] | np.ndarray:
     """Build a Bayer-pattern lookup mask for the frame geometry.
@@ -806,7 +885,7 @@ def generate_RGB_mask(original_frame: np.ndarray, marker: Literal["str", "num"]=
     # Visualize the results if desired
     if(visualize_results is True):
         # Convert the mask to have color 
-        colored_image: np.ndarray = np.empty(original_frame.shape, dtype=np.uint8)
+        colored_image: np.ndarray = np.empty(tuple(list(original_frame.shape[:2]) + [3]), dtype=np.uint8)
         for idx, (color, pixel_coords) in enumerate(zip("RGB", (world_r_pixels, world_g_pixels, world_b_pixels))):
             rows: np.ndarray = pixel_coords[:, 0]
             cols: np.ndarray = pixel_coords[:, 1]
@@ -814,13 +893,14 @@ def generate_RGB_mask(original_frame: np.ndarray, marker: Literal["str", "num"]=
             color_vector[idx] = 255
             colored_image[rows, cols] = color_vector
 
-        # Initialize a figure with two axes 
-        fig, axes = plt.subplots(1, 1)
+        # Initialize a figure with a single axis 
+        fig, ax = plt.subplots(1, 1)
 
         # Middle axis will be the after but without 
         # color correction 
-        axes[0].imshow(colored_image)
-        axes[0].set_title(f"{original_frame.shape} Bayer RGB Pattern")
+        ax.imshow(colored_image)
+        ax.set_title(f"{original_frame.shape} Bayer RGB Pattern")
+        ax.axis("off")
 
         # Show the plot 
         plt.show() 
@@ -830,93 +910,86 @@ def generate_RGB_mask(original_frame: np.ndarray, marker: Literal["str", "num"]=
     return mask
 
 # Apply the per-color weights to the color pixels of a frame.
-def apply_color_correction(original_frame: np.ndarray, 
+def apply_color_correction(image_or_video: np.ndarray, 
+                           bayer_pixel_locations: list[np.ndarray] | None=None, 
                            visualize_results: bool=False,
-                           ) -> tuple[np.ndarray, object] | np.ndarray:
-    """Apply the calibrated world-camera RGB scaling factors.
+                           ) -> None | tuple[np.ndarray, object]:
+    """Apply calibrated Bayer-site RGB scaling factors in place.
 
-    The correction constants in ``WORLD_RGB_SCALARS`` are applied in one of
-    two ways depending on the input layout:
-
-    1. For a 2-D raw Bayer frame, the function first builds the Bayer color
-       mask and then scales only the pixels belonging to each color class.
-    2. For a 3-D RGB image, it scales each channel plane directly.
-
-    The computation is done in ``float64`` and then rounded and clipped back
-    into the 8-bit image range.
+    The correction constants in ``WORLD_RGB_SCALARS`` are applied to raw
+    Bayer samples by color class. For a frame buffer, ``bayer_pixel_locations``
+    can be precomputed once with :func:`generate_RGB_mask` and reused.
 
     Args:
-        original_frame: Either a raw Bayer image or a debayered RGB image.
-        visualize_results: When ``True``, show a before/after figure and
-            return it with the corrected frame.
+        image_or_video: A floating-point raw Bayer frame with shape
+            ``(rows, cols)`` or frame buffer with shape
+            ``(frames, rows, cols)``.
+        bayer_pixel_locations: Optional list of three ``(n, 2)`` coordinate
+            arrays for red, green, and blue Bayer sites, respectively.
+        visualize_results: When ``True``, display a before/after figure and
+            return it with the corrected input array. Visualization supports
+            only a single ``(rows, cols)`` frame and asserts otherwise.
 
     Returns:
-        The corrected frame as ``uint8``, or ``(frame, figure)`` when
-        visualization is requested.
+        ``None`` after in-place correction, or ``(image_or_video, figure)``
+        when visualization is requested.
     """
-    # Initialize a variable for the figure handle that 
-    # will be used to visualize (if desired)
-    fig: object | None = None
+    assert image_or_video.ndim in (2, 3), (
+        f"Color correction requires a single raw Bayer frame with shape "
+        f"(rows, cols) or a raw Bayer frame buffer with shape "
+        f"(frames, rows, cols). Got shape {image_or_video.shape}."
+    )
+
+    unmodified_image_or_video: np.ndarray | None = None
+    if(visualize_results is True):
+        assert image_or_video.ndim == 2, (
+            f"Color correction visualization only supports a single frame "
+            f"with shape (rows, cols). Got shape {image_or_video.shape}."
+        )
+        unmodified_image_or_video = image_or_video.copy() 
     
-    # First, we must cast the original frame to a float array 
-    # to apply float scalars 
-    # If it is already in float form, then no need to copy
-    frame_as_float: np.ndarray = original_frame.astype(np.float64)
+    # Generate tbe bayer mask if not already passedi n
+    if(bayer_pixel_locations is None): 
+        bayer_RGB_mask = generate_RGB_mask(image_or_video if image_or_video.ndim == 2 else image_or_video[0])
+        bayer_pixel_locations = [ np.argwhere(bayer_RGB_mask == color) for color in "RGB" ]
 
-    # Next, we need to generate a bayer pattern for this size of image 
-    # if the pixel locations have not been passed in
-    is_grayscale: bool = not (len(original_frame.shape) == 3)
-    mask: np.ndarray | None = None
-    if(is_grayscale is True):
-        mask = generate_RGB_mask(original_frame)
-        assert mask.shape[:2] == original_frame.shape[:2], f"Mask: {mask.shape[:2]} and original frame shape {original_frame.shape[:2]} are unequal"
+    # Apply the color correction
+    for (pixels, weight) in zip(bayer_pixel_locations, WORLD_RGB_SCALARS):
+        rows: np.ndarray = pixels[:, 0]
+        cols: np.ndarray = pixels[:, 1]
 
-    # Next, we will apply the weights 
-    for channel_idx, (color, weight) in enumerate(zip("RGB", WORLD_RGB_SCALARS)):
-        # Find the pixels that match this color 
-        if(is_grayscale is True):
-            pixels: np.ndarray = np.argwhere(mask == color)
-            rows: np.ndarray = pixels[:, 0]
-            cols: np.ndarray = pixels[:, 1]
-
-            # Apply the weight to the specified pixels 
-            frame_as_float[rows, cols] *= weight
-
-        # If debayered image, just apply to the channel number
+        # Apply the weight to the specified pixels 
+        # on either this single frame or entire video 
+        if(image_or_video.ndim == 3):
+            image_or_video[:, rows, cols] *= weight
         else:
-            frame_as_float[:, :, channel_idx] *= weight    
-
-    # Round and clip values in the 255 range and cast back to uint8
-    modified_frame: np.ndarray = np.clip(np.round(frame_as_float), 0, 255).astype(np.uint8)
+            image_or_video[rows, cols] *= weight
 
     # Visualize the results if desired 
     if(visualize_results is True):
-        # Initialize a figure with two axes 
         fig, axes = plt.subplots(1, 2, figsize=(12, 4))
-        fig.suptitle("Color correction (Before / After)", fontweight='bold', fontsize=18)
-        
-        # Left axis will be the "before"
-        # image 
-        axes[0].imshow(original_frame)
-        axes[0].set_title('Before')
+        fig.suptitle("Color Correction (Before / After)", fontweight='bold', fontsize=18)
 
-        # Middle axis will be the after but without 
-        # color correction 
-        axes[1].imshow(modified_frame)
+        axes[0].imshow(unmodified_image_or_video, cmap="gray")
+        axes[0].set_title("Before")
+        axes[0].axis("off")
+
+        axes[1].imshow(image_or_video, cmap="gray")
         axes[1].set_title("After")
+        axes[1].axis("off")
 
-        # Show the plot 
-        plt.show() 
+        plt.tight_layout()
+        plt.show()
 
-        return modified_frame, fig
+        return image_or_video, fig
 
     # Return the modified frame
-    return modified_frame
+    return None
 
 
 def apply_color_weights(original_frame: np.ndarray,
                         visualize_results: bool=False,
-                        ) -> tuple[np.ndarray, object] | np.ndarray:
+                        ) -> None | tuple[np.ndarray, object]:
     """Backward-compatible alias for :func:`apply_color_correction`.
 
     Older code in this project referred to the radiometric RGB correction
@@ -925,15 +998,91 @@ def apply_color_weights(original_frame: np.ndarray,
     and forwards the arguments unchanged.
 
     Args:
-        original_frame: Bayer or RGB frame to correct.
+        original_frame: Raw Bayer frame to correct.
         visualize_results: Whether to request the optional before/after
             figure from ``apply_color_correction``.
 
     Returns:
-        The corrected frame, or ``(frame, figure)`` when visualization is
-        enabled.
+        ``None`` after in-place correction, or ``(original_frame, figure)``
+        when visualization is enabled.
     """
     return apply_color_correction(original_frame, visualize_results=visualize_results)
+
+def apply_digital_gain(image_or_video: np.ndarray, 
+                       dgain: int | float | np.ndarray, 
+                       visualize_results: bool=False
+                    ) -> None | tuple[np.ndarray, object]:
+    """Apply world-camera digital gain in place.
+
+    Args:
+        image_or_video: A floating-point raw Bayer frame with shape
+            ``(rows, cols)`` or frame buffer with shape
+            ``(frames, rows, cols)``.
+        dgain: A scalar gain for a single frame, or a one-dimensional array
+            with one scalar gain per frame for a frame buffer.
+        visualize_results: When ``True``, display a before/after figure and
+            return it with the gain-corrected input array. Visualization
+            supports only a single ``(rows, cols)`` frame and asserts
+            otherwise.
+
+    Returns:
+        ``None`` after in-place correction, or ``(image_or_video, figure)``
+        when visualization is requested.
+    """
+    unmodified_image_or_video: np.ndarray | None = None
+    if(visualize_results is True):
+        assert image_or_video.ndim == 2, (
+            f"Digital gain visualization only supports a single frame with "
+            f"shape (rows, cols). Got shape {image_or_video.shape}."
+        )
+        unmodified_image_or_video = image_or_video.copy()
+
+    # Multiply the frames by the dgains 
+    # (Note: this does not do any allocation, so all of this stuff is very fast)
+    if(image_or_video.ndim == 2):
+        # When a single 2D RAW frame is passed, we expect a single 
+        # numeric value for the digital gain 
+        assert np.isscalar(dgain), f"When passing in a 2D image, Dgain must be a scalar"
+        
+        image_or_video *= dgain
+    
+    elif(image_or_video.ndim == 3):
+        # when a frame buffer is passed we expect the dgain to 
+        # be a 1D array of numeric values 
+        dgain = np.asarray(dgain)
+        assert dgain.ndim == 1, f"When passing in a frame buffer, Dgain must be a 1D array of numeric values, one per each frame"
+        assert dgain.shape[0] == image_or_video.shape[0], (
+            f"Dgain length {dgain.shape[0]} must equal the number of frames "
+            f"{image_or_video.shape[0]}"
+        )
+
+        # Expand the dgain 
+        dgain_expanded: np.ndarray = dgain[:, np.newaxis, np.newaxis]
+        image_or_video *= dgain_expanded
+
+    else:
+        raise Exception(f"Unsupported N dimensions: {image_or_video.ndim}")
+
+    if(visualize_results is True):
+        fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+        fig.suptitle("Digital Gain (Before / After)", fontweight='bold', fontsize=18)
+
+        axes[0].imshow(unmodified_image_or_video, cmap="gray")
+        axes[0].set_title("Before")
+        axes[0].axis("off")
+
+        axes[1].imshow(image_or_video, cmap="gray")
+        axes[1].set_title("After")
+        axes[1].axis("off")
+
+        plt.tight_layout()
+        plt.show()
+
+        return image_or_video, fig
+
+    return None
+
+
 
 # Embed a world-frame timestamp into the 8-bit image itself.
 def embed_timestamp(original_frame: np.ndarray, timestamp: np.float64, visualize_results: bool=False) -> tuple[np.ndarray, object] | np.ndarray:
