@@ -6,8 +6,8 @@ clear; close all; clc
 
 fitRGB = true;   % false = fit avg_img only; true = fit R/G/B Bayer channels
 
-dataFile = "/Users/sophiamirabal/Documents/MATLAB/projects/lightLoggerAnalysis/code/fieldingFunction/framesAndSurfacePlots/section3/selected_twilight_frames_SEC3.mat";
-avgFile  = "planetarium_average_SEC3.mat";
+dataFile = "selected_twilight_frames.mat";
+avgFile  = "planetarium_average.mat";
 
 bayerPattern = "BGGR";
 
@@ -231,12 +231,11 @@ function plotRGBProfilesAllDirections(results)
             hotspot_fit = results(ii).hotspot_fit;
             pFit = results(ii).pFit;
 
-            % Normalize using min/max of fitted 2D image
-            fitMin = min(hotspot_fit(:));
+            % Normalize relative to fitted peak only
             fitMax = max(hotspot_fit(:));
-
-            I_norm = (I - fitMin) ./ (fitMax - fitMin);
-            fit_norm = (hotspot_fit - fitMin) ./ (fitMax - fitMin);
+            
+            I_norm = I ./ fitMax;
+            fit_norm = hotspot_fit ./ fitMax;
 
             [axisVals, dataProfile] = getProfile(I_norm, pFit, direction);
             [~, fitProfile] = getProfile(fit_norm, pFit, direction);
@@ -271,11 +270,11 @@ function plotRGBProfilesAllDirections(results)
             hotspot_fit = results(ii).hotspot_fit;
             pFit = results(ii).pFit;
 
-            fitMin = min(hotspot_fit(:));
+            % Normalize relative to fitted peak only
             fitMax = max(hotspot_fit(:));
 
-            I_norm = (I - fitMin) ./ (fitMax - fitMin);
-            fit_norm = (hotspot_fit - fitMin) ./ (fitMax - fitMin);
+            I_norm = I ./ fitMax;
+            fit_norm = hotspot_fit ./ fitMax;
 
             residual_norm = I_norm - fit_norm;
 
