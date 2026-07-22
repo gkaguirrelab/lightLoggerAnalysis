@@ -75,19 +75,42 @@ print("Frame indices:", frames_idx)
 
 frames = []
 
+selected_bgr_min = 255
+selected_bgr_max = 0
+selected_gray_min = 255
+selected_gray_max = 0
+
 for idx in frames_idx:
     cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
     ret, frame = cap.read()
+
+    selected_bgr_min = min(selected_bgr_min, int(frame.min()))
+    selected_bgr_max = max(selected_bgr_max, int(frame.max()))
 
     if not ret:
         raise RuntimeError(f"Could not read frame {idx}")
 
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+    selected_gray_min = min(selected_gray_min, int(gray.min()))
+    selected_gray_max = max(selected_gray_max, int(gray.max()))
+
     frames.append(gray)
+
+print("\nSELECTED TIMESTAMPS")
+print("Decoded BGR min:", selected_bgr_min)
+print("Decoded BGR max:", selected_bgr_max)
+print("Grayscale min:", selected_gray_min)
+print("Grayscale max:", selected_gray_max)
 
 cap.release()
 
 frames = np.array(frames, dtype=np.uint8)
+
+print("\nSELECTED FRAME VALUE RANGE")
+print("Min grayscale value:", frames.min())
+print("Max grayscale value:", frames.max())
+print("Mean grayscale value:", frames.mean())
 
 savemat("selected_twilight_frames.mat", {
     "frames": frames,
