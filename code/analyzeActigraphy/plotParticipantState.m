@@ -50,10 +50,12 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
 %   'normalize_aperture_to_dark'    - Logical (default: true). Normalize aperture
 %                                     data to baseline (selected percentile) eye
 %                                     openness in 'Dark' activity recording.
-%   'dark_eyeStateData'             - File path. Which 'Dark' recording to use as the 
-%                                     normalization reference.
-%   'aperture_baseline_percentile'  - Integer. Minimum percentile used to determine
-%                                     how 'Dark' baseline is calculated.
+%   'dark_eyeStateData'             - File path or table. Dark 3d_eye_states data used
+%                                     to determine participant-specific aperture limits.
+%   'dark_blinkData'                - File path or table. Dark blink events used to
+%                                     estimate participant-specific minimum aperture.
+%   'aperture_baseline_percentile'  - Integer (default: 95). Percentile of non-blink
+%                                     Dark aperture used to estimate maximum openness.
 %   'dark_exclusion_sec'             - Scalar double (default: 60). Exclude this
 %                                     many seconds from the beginning of the Dark
 %                                     recording so normalization occurs after the
@@ -74,7 +76,7 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
 % TEMPORARY: LOCAL PATHS & CALL (SOPHIA)
 %{
     readDir = ...
-    '/Users/sophiamirabal/Downloads/timeseriesData/FLIC_0021/walkOutdoor/data';
+    '/Users/sophiamirabal/Downloads/timeseriesData/FLIC_0021/walkIndoor/data';
     darkDir = ...
     '/Users/sophiamirabal/Downloads/timeseriesData/FLIC_0021/dark/data';
     outputDir = ...
@@ -88,6 +90,7 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     blinkFile = fullfile(readDir, 'blinks.csv');
     gazeFile = fullfile(readDir, 'gaze.csv');
     darkEyeStateFile = fullfile(darkDir, '3d_eye_states.csv');
+    darkBlinkFile = fullfile(darkDir, 'blinks.csv');
 
     plotParticipantState( ...
         '', ...                       
@@ -105,6 +108,7 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
         'plot_aperture_separate', true, ...
         'normalize_aperture_to_dark', true, ...
         'dark_eyeStateData', darkEyeStateFile, ...
+        'dark_blinkData', darkBlinkFile, ...
         'aperture_baseline_percentile', 95, ...
         'include_luminance', false);
 %}
@@ -132,6 +136,7 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
         options.plot_aperture_separate = true;
         options.normalize_aperture_to_dark = true;
         options.dark_eyeStateData = [];
+        options.dark_blinkData = [];
         options.aperture_baseline_percentile = 95;
 
         options.dark_exclusion_sec = 60;
@@ -261,50 +266,184 @@ function plotParticipantState(raw_dir, processing_dir, output_dir, subject_id, a
     
     avgPupil = mean([pupilL pupilR], 2, 'omitnan');
     
-    %% Optional: normalize aperture to dark baseline
+    %% Optional: normalize aperture to participant-specific Dark recording
+    %
+    % The normalization is based on the requested equation:
+    %
+    %   proportion eye closure = 1 - (palp - palpMin) / (palpMax - palpMin)
+    %
+    % where palp is the measured eyelid aperture, palpMin is the
+    % participant-specific closed-eye aperture estimated from Dark blinks,
+    % and palpMax is the participant-specific open-eye aperture estimated
+    % from non-blink samples in the Dark recording.
+    %
+    % We retain both representations:
+    %   closure = 0 -> fully open, 1 -> closed
+    %   openness = 1 - closure -> 1 fully open, 0 closed
+    %
+    % The rest of this function has historically plotted "Eye Openness",
+    % so apertureL/apertureR remain openness values after normalization.
+
     if options.normalize_aperture_to_dark
 
         if isempty(options.dark_eyeStateData)
             error(['normalize_aperture_to_dark is true, but no dark ', ...
                 '3d_eye_states.csv path or table was supplied.']);
         end
-    
+
+        if isempty(options.dark_blinkData)
+            error(['normalize_aperture_to_dark is true, but no dark ', ...
+                'blinks.csv path or table was supplied.']);
+        end
+
         darkEye = options.dark_eyeStateData;
-    
+        darkBlink = options.dark_blinkData;
+
         if isstring(darkEye) || ischar(darkEye)
             darkEye = readtable(darkEye);
         end
-    
-        % Exclude the beginning of the Dark recording, which contains the
-        % AprilTag period. Use timestamps rather than sample count so this
-        % remains correct if the sampling rate changes.
-        darkTimeSec = (double(darkEye.timestamp_ns_) - ...
-                       double(darkEye.timestamp_ns_(1))) / 1e9;
-        useForDarkBaseline = darkTimeSec >= options.dark_exclusion_sec;
 
-        if ~any(useForDarkBaseline)
-            error(['No Dark eye-state samples remain after excluding the first ', ...
-                   num2str(options.dark_exclusion_sec), ' seconds.']);
+        if isstring(darkBlink) || ischar(darkBlink)
+            darkBlink = readtable(darkBlink);
         end
 
-        darkApertureL = darkEye.eyelidApertureLeft_mm_(useForDarkBaseline);
-        darkApertureR = darkEye.eyelidApertureRight_mm_(useForDarkBaseline);
-    
-        darkBaselineL = prctile(darkApertureL, ...
-                                options.aperture_baseline_percentile);
-        darkBaselineR = prctile(darkApertureR, ...
-                                options.aperture_baseline_percentile);
-    
-        apertureL = apertureL ./ darkBaselineL;
-        apertureR = apertureR ./ darkBaselineR;
-    
+        % Exclude the beginning of the Dark recording, which contains the
+        % AprilTag period.
+        darkTimeSec = (double(darkEye.timestamp_ns_) - ...
+                       double(darkEye.timestamp_ns_(1))) / 1e9;
+
+        useAfterDarkExclusion = darkTimeSec >= options.dark_exclusion_sec;
+
+        if ~any(useAfterDarkExclusion)
+            error(['No Dark eye-state samples remain after excluding the first ', ...
+                num2str(options.dark_exclusion_sec), ' seconds.']);
+        end
+
+        %% Identify blink samples in the Dark recording
+        % Blinks are NOT removed from aperture. Here they are specifically
+        % used to estimate the closed-eye aperture (palpMin).
+        isBlinkDark = false(height(darkEye), 1);
+
+        for i = 1:height(darkBlink)
+            mask = ...
+                darkEye.timestamp_ns_ >= darkBlink.startTimestamp_ns_(i) & ...
+                darkEye.timestamp_ns_ <= darkBlink.endTimestamp_ns_(i);
+
+            isBlinkDark = isBlinkDark | mask;
+        end
+
+        % Only use blink samples occurring after the initial Dark exclusion.
+        isBlinkDark = isBlinkDark & useAfterDarkExclusion;
+
+        if ~any(isBlinkDark)
+            error(['No Dark blink samples remain after excluding the first ', ...
+                num2str(options.dark_exclusion_sec), ' seconds.']);
+        end
+
+        %% Estimate palpMin from actual Dark blinks
+        %
+        % For each blink, find the minimum measured aperture separately for
+        % each eye. Then take the median across blink minima. This avoids
+        % defining "closed" from an arbitrary percentile of the entire
+        % recording and is more robust than using one single global minimum.
+        blinkMinL = NaN(height(darkBlink), 1);
+        blinkMinR = NaN(height(darkBlink), 1);
+
+        for i = 1:height(darkBlink)
+
+            blinkMask = ...
+                darkEye.timestamp_ns_ >= darkBlink.startTimestamp_ns_(i) & ...
+                darkEye.timestamp_ns_ <= darkBlink.endTimestamp_ns_(i) & ...
+                useAfterDarkExclusion;
+
+            if any(blinkMask)
+                blinkMinL(i) = min( ...
+                    darkEye.eyelidApertureLeft_mm_(blinkMask), [], 'omitnan');
+
+                blinkMinR(i) = min( ...
+                    darkEye.eyelidApertureRight_mm_(blinkMask), [], 'omitnan');
+            end
+        end
+
+        palpMinL = median(blinkMinL, 'omitnan');
+        palpMinR = median(blinkMinR, 'omitnan');
+
+        if ~isfinite(palpMinL) || ~isfinite(palpMinR)
+            error('Could not estimate palpMin from Dark blink aperture measurements.');
+        end
+
+        %% Estimate palpMax from non-blink Dark aperture
+        %
+        % Use the selected upper percentile after the Dark exclusion, while
+        % excluding blink samples so closed-eye values do not contribute to
+        % the open-eye reference.
+        useForDarkOpenBaseline = useAfterDarkExclusion & ~isBlinkDark;
+
+        darkOpenApertureL = ...
+            darkEye.eyelidApertureLeft_mm_(useForDarkOpenBaseline);
+
+        darkOpenApertureR = ...
+            darkEye.eyelidApertureRight_mm_(useForDarkOpenBaseline);
+
+        palpMaxL = prctile( ...
+            darkOpenApertureL, options.aperture_baseline_percentile);
+
+        palpMaxR = prctile( ...
+            darkOpenApertureR, options.aperture_baseline_percentile);
+
+        if palpMaxL <= palpMinL || palpMaxR <= palpMinR
+            error(['Invalid Dark aperture calibration: palpMax must be ', ...
+                'greater than palpMin for each eye.']);
+        end
+
+        %% Apply the requested eye-closure equation to every raw sample
+        %
+        % proportion eye closure =
+        %       1 - (palp - palpMin) / (palpMax - palpMin)
+        %
+        % IMPORTANT: this happens BEFORE the 5-second moving average.
+        % Therefore the raw normalized signal still contains the full blink
+        % measurements. Smoothing is applied later only as a temporal average.
+        closureL = 1 - ...
+            (apertureL - palpMinL) ./ (palpMaxL - palpMinL);
+
+        closureR = 1 - ...
+            (apertureR - palpMinR) ./ (palpMaxR - palpMinR);
+
+        % Limit proportions to the physically meaningful range.
+        closureL = max(0, min(1, closureL));
+        closureR = max(0, min(1, closureR));
+
+        % The existing plots/correlations use Eye Openness rather than
+        % Eye Closure. Convert back while retaining the exact requested
+        % closure equation above:
+        %
+        %   openness = 1 - closure
+        %
+        % Thus:
+        %   openness = 1 -> maximally open
+        %   openness = 0 -> closed
+        apertureL = 1 - closureL;
+        apertureR = 1 - closureR;
+
         aperture_ylabel = 'Eye Openness';
+
+        fprintf('\n----- DARK APERTURE NORMALIZATION -----\n');
+        fprintf('Left eye:  palpMin = %.3f mm, palpMax = %.3f mm\n', ...
+            palpMinL, palpMaxL);
+        fprintf('Right eye: palpMin = %.3f mm, palpMax = %.3f mm\n', ...
+            palpMinR, palpMaxR);
+        fprintf('palpMin estimated as median of per-blink minimum apertures.\n');
+
     else
+        % No normalization: aperture remains in millimeters.
+        closureL = [];
+        closureR = [];
         aperture_ylabel = 'Eye Openness (mm)';
     end
-    
+
     avgAperture = mean([apertureL apertureR], 2, 'omitnan');
-    
+
     gazeElev = gazeData.elevation_deg_;
     gazeAzim = gazeData.azimuth_deg_;
     
