@@ -51,7 +51,7 @@ close all
 dropbox_base_dir = getpref('lightLoggerAnalysis', 'dropboxBaseDir'); 
 
 % Load in the calibration data 
-calibration_data_path = fullfile(dropbox_base_dir, "FLIC_data/LightLoggerRadCal/W1P1M1/fullWellEffectCalibrationData"); 
+calibration_data_path = fullfile(dropbox_base_dir, "FLIC_data/LightLoggerRadCal/W1P1M1/fullWellEffectCalibrationData/camera_linearity_ND0_ND0p4_rgb_means.mat"); 
 load(calibration_data_path)
 data = nd04_rgb_means;
 
