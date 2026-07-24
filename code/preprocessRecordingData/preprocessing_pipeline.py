@@ -156,7 +156,7 @@ def generate_world_videos(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
                           activities_to_skip: Iterable=set(), 
                           activities_to_process: Iterable=set(), 
                           overwrite_existing: bool=False,
-                          linearize_camera_responsivitiy: bool=True, 
+                          linearize_camera_responsivity: bool=True, 
                           apply_color_weights: bool=True, 
                           apply_floor_ceiling: bool=True,
                           apply_fielding_function: bool=True, 
@@ -241,7 +241,7 @@ def generate_world_videos(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
                                            apply_digital_gain=apply_digital_gain, 
                                            apply_fielding_function=apply_fielding_function,
                                            fill_missing_frames=fill_missing_frames,
-                                           linearize_camera_responsivitiy=linearize_camera_responsivitiy, 
+                                           linearize_camera_responsivity=linearize_camera_responsivity, 
                                            convert_to_seconds=True,
                                            verbose=verbose
                                           )

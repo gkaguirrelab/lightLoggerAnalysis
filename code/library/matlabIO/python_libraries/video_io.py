@@ -1088,6 +1088,7 @@ def world_chunks_to_video(recording_path: str,
             # If we want to debayer the image
             raw_frame_buffer: np.ndarray | None = None
             if(debayer_images is True):
+                # Ensure the pixels that were saturated at the start remain saturated
                 if(raw_saturated_pixel_mask is not None):
                     frame_buffer[raw_saturated_pixel_mask] = np.inf
 
@@ -1105,8 +1106,9 @@ def world_chunks_to_video(recording_path: str,
                 debayer_saturation_threshold: float = debayer_ceiling_marker / 3
 
                 debayer_input: np.ndarray = frame_buffer * debayer_scale
-                if(apply_floor_ceiling is True):
-                    debayer_input[np.isposinf(debayer_input)] = debayer_ceiling_marker
+                
+                # We need to replace INF with a sentinel value as debayering only accepts uint16
+                debayer_input[np.isposinf(debayer_input)] = debayer_ceiling_marker
                 debayer_input = np.round(np.clip(debayer_input, 0, debayer_ceiling_marker)).astype(np.uint16)
                 assert current_color_space == "BAYER" and debayer_input.dtype == np.uint16, f"Frame buffer must be in BAYER space and uint16 to debayer. Current format is: {current_color_space} | {debayer_input.dtype}"
 
@@ -1114,9 +1116,13 @@ def world_chunks_to_video(recording_path: str,
                 # pulled up as Inf, and scale back down to the original value
                 # range. Mirrors the notebook's de-Bayer stage.
                 frame_buffer = world_util.debayer(debayer_input).astype(np.float64)
+                
+                # If we plan on doing more processing (that is, the floor ceiling saturated operation)
+                # we need to mark all the saturated pixels as INF
                 if(apply_floor_ceiling is True):
                     frame_buffer[frame_buffer >= debayer_saturation_threshold] = debayer_ceiling_marker
                     frame_buffer[frame_buffer == debayer_ceiling_marker] = np.inf
+                
                 frame_buffer = frame_buffer / debayer_scale
                 current_color_space = "RGB"
             

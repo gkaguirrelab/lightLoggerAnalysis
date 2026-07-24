@@ -1,7 +1,10 @@
 """Utility functions and constants for the world camera sensor."""
 
+from importlib import metadata
+
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
 import cv2
 import os 
 import sys
@@ -66,12 +69,12 @@ AGC_LIB = _load_agc_lib()
 # Function to load in the fielding functions in per dimensions. Measured and saved in MATLAB 
 def _import_fielding_functions() -> dict[tuple[int], np.ndarray]:
     # First find the path to the fielding function directory 
-    fielding_function_folder: str = os.path.join(pathlib.Path(__file__).parents[3], "code", "fieldingFunction") 
+    fielding_function_folder: str = os.path.join(pathlib.Path(__file__).parents[3], "data") 
     assert os.path.exists(fielding_function_folder), f"Fielding function path: {fielding_function_folder} does not exist"
 
     # Find the correction maps for different image shapes 
-    correction_maps_folder: str = os.path.join(fielding_function_folder, "correctionMaps")
-    assert os.path.exists(correction_maps_folder), f"Correction maps folder: {correction_maps_folder} does not exist"
+    correction_maps_folder: str = os.path.join(fielding_function_folder, "fieldingFunctions")
+    assert os.path.exists(correction_maps_folder), f"fieldingFunctions folder: {correction_maps_folder} does not exist"
 
     # Generate a dictionary based off of these correction maps 
     correction_filepaths: list[str] = [os.path.join(correction_maps_folder, file) for file in os.listdir(correction_maps_folder) if file.endswith(".mat")]
@@ -80,7 +83,8 @@ def _import_fielding_functions() -> dict[tuple[int], np.ndarray]:
     fielding_functions: dict[tuple[int], np.ndarray] = {}
     for filepath in correction_filepaths:
         fielding_function: dict = scipy.io.loadmat(filepath)["correctionMap"].astype(np.float64, copy=False)
-        
+
+        assert fielding_function.shape not in fielding_functions, f"There are repeat fielding functions in the directory: {correction_maps_folder}"
         fielding_functions[fielding_function.shape] = fielding_function
 
     return fielding_functions
@@ -1949,6 +1953,842 @@ def world_raw_frames_from_chunks(path_to_recording: str,
         frames.extend(np.mean(frame_chunk, axis=(1, 2)))
 
     return np.array(frames)
+
+
+def visualize_pipeline(recording_path: str,
+                        chunk_range: tuple[int | None, int | None] = (0, None)
+                       ) -> list[tuple[plt.Figure, np.ndarray]]:
+    """Run the full world-camera pipeline on sampled chunk frames and visualize every stage.
+
+    This is the reusable, well-documented form of the exploratory notebook
+    workflow. For each world chunk file in ``recording_path`` it loads the raw
+    Bayer frame buffer, selects one representative frame, pushes that frame
+    through the complete six-stage world-camera pipeline, and draws a 6-row
+    figure comparing the frame before and after each stage alongside
+    intensity-distribution histograms and zoomed saturation / fringe insets.
+
+    Pipeline stages visualized (one figure row each):
+        1. Linearize camera responsivity (raw Bayer -> float; Inf marks
+           sensor-saturated samples, which are re-marked after the operation).
+        2. Fielding-function correction (spatial nonuniformity).
+        3. Per-Bayer-site radiometric color weights.
+        4. Per-frame digital gain (the AGCDgain entry of the frame's AGC settings).
+        5. De-Bayer to RGB. The float Bayer is scaled up by 100 so fractional
+           precision survives the uint16 OpenCV round-trip, Inf is mapped to the
+           uint16 ceiling sentinel, and outputs a saturated contributor pulled up
+           are returned to Inf before scaling back down.
+        6. Floor/ceiling propagation: raw Bayer floor (0) / ceiling (Inf)
+           contributors force the debayered RGB pixel to 0 / 255 via the
+           provenance map.
+
+    Figure layout (per chunk): a 6x4 grid. Column 0 is the "before" image with
+    per-image statistics printed to its left; column 1 is a "Frame AGC Settings"
+    bar chart of this frame's AGC values (exposure columns on a log10 scale);
+    column 2 is the log-scaled intensity histogram comparing before vs. after
+    for the R/G/B channels; and column 3 is the "after" image. Every image panel
+    carries two zoomed insets -- a red "Saturation" crop and a blue "Fringe" crop
+    -- each with an optional Bayer-tinted micro-zoom that annotates individual
+    pixel values.
+
+    Chunk discovery mirrors the notebook: files in ``recording_path`` whose name
+    contains ``"world"`` and not ``"metadata"``, natural-sorted. Each is
+    ``np.load``-ed as an ``(n_frames, rows, cols)`` raw Bayer buffer.
+
+    Args:
+        recording_path: Directory containing world-camera chunk frame-buffer
+            ``.npy`` files (name contains ``"world"``, excludes ``"metadata"``),
+            each paired with a sibling ``"_metadata"`` file.
+        chunk_range: ``(start, end)`` half-open range of chunk indices to
+            visualize within the natural-sorted chunk list. ``end`` may be
+            ``None`` to run through the last chunk. Defaults to ``(0, None)``
+            (every chunk). The middle frame of each selected chunk is used, and
+            that frame's AGC settings (per ``WORLD_AGC_METADATA_COLS``) are read
+            from the chunk metadata and drive both the digital gain and the
+            "Frame AGC Settings" bar chart.
+
+    Returns:
+        A list of ``(figure, axes)`` tuples, one per visualized chunk in chunk
+        order. ``axes`` is the ``(6, 3)`` array of Matplotlib axes for that figure.
+
+    Raises:
+        AssertionError: If no world chunk (or metadata) files are found in
+            ``recording_path``, if the chunk and metadata counts differ, or if a
+            loaded chunk is not 3-dimensional. Pipeline-stage assertions also
+            propagate.
+    """
+
+    def render_pipeline_figure(sample_frame: np.ndarray, title: str, agc_settings: np.ndarray) -> tuple[plt.Figure, np.ndarray]:
+        """Run the pipeline on one raw Bayer frame and render its diagnostic figure.
+
+        Executes stages 0-6 on ``sample_frame`` using ``agc_settings`` (its
+        AGCDgain entry drives stage 4's digital gain, and the full vector is
+        drawn as the "Frame AGC Settings" bar chart) and draws the 6x4
+        before/after grid described there.
+
+        Args:
+            sample_frame: A single raw Bayer frame of shape ``(rows, cols)``.
+            title: Figure suptitle for this frame.
+            agc_settings: 1-D array of this frame's AGC values, ordered to match
+                ``WORLD_AGC_METADATA_COLS``.
+
+        Returns:
+            ``(figure, axes)`` for the rendered figure.
+        """
+        def get_image_array(image_data: np.ndarray) -> np.ndarray:
+            if(np.ma.isMaskedArray(image_data)):
+                return np.asarray(image_data.filled(np.nan))
+            return np.asarray(image_data)
+
+        def get_dtype_max_value(image_data: np.ndarray) -> tuple[int | float | None, str]:
+            image_values = get_image_array(image_data)
+            if(np.issubdtype(image_values.dtype, np.integer)):
+                dtype_max_value = np.iinfo(image_values.dtype).max
+                return dtype_max_value, str(dtype_max_value)
+            if(np.issubdtype(image_values.dtype, np.floating)):
+                dtype_max_value = np.finfo(image_values.dtype).max
+                return dtype_max_value, f"{dtype_max_value:.3g}"
+            return None, "n/a"
+
+        def pixel_mask_from_value_mask(value_mask: np.ndarray) -> np.ndarray:
+            if(value_mask.ndim == 3):
+                return np.any(value_mask[..., :3], axis=-1)
+            return value_mask
+
+        def get_zero_pixel_mask(image_data: np.ndarray) -> np.ndarray:
+            image_values = get_image_array(image_data)
+            return pixel_mask_from_value_mask(image_values == 0)
+
+        def get_inf_pixel_mask(image_data: np.ndarray) -> np.ndarray:
+            image_values = get_image_array(image_data)
+            return pixel_mask_from_value_mask(np.isinf(image_values))
+
+        def get_dtype_max_pixel_mask(image_data: np.ndarray) -> np.ndarray:
+            image_values = get_image_array(image_data)
+            dtype_max_value, _ = get_dtype_max_value(image_values)
+            if(dtype_max_value is None):
+                return np.zeros(image_values.shape[:2], dtype=bool)
+            return pixel_mask_from_value_mask(image_values == dtype_max_value)
+
+        def get_saturated_pixel_mask(image_data: np.ndarray) -> np.ndarray:
+            return (
+                get_inf_pixel_mask(image_data)
+                | get_dtype_max_pixel_mask(image_data)
+            )
+
+        def get_changed_pixel_mask(before_image: np.ndarray, after_image: np.ndarray) -> np.ndarray:
+            before_values = get_image_array(before_image)
+            after_values = get_image_array(after_image)
+            matching_values = (before_values == after_values) | (np.isnan(before_values) & np.isnan(after_values))
+            return pixel_mask_from_value_mask(~matching_values)
+
+        def get_added_saturation_pixel_mask(before_image: np.ndarray, after_image: np.ndarray) -> np.ndarray:
+            return get_saturated_pixel_mask(after_image) & ~get_saturated_pixel_mask(before_image)
+
+        def get_zoom_bounds(pixel_mask: np.ndarray, image_shape: tuple[int, ...], crop_size: int=32) -> tuple[int, int, int, int] | None:
+            rows, cols = np.where(pixel_mask)
+            if(rows.size == 0):
+                return None
+
+            height, width = image_shape[:2]
+            half_crop = crop_size // 2
+            median_row = np.median(rows)
+            median_col = np.median(cols)
+            center_pixel_idx = int(np.argmin((rows - median_row) ** 2 + (cols - median_col) ** 2))
+            center_row = int(rows[center_pixel_idx])
+            center_col = int(cols[center_pixel_idx])
+            row_start = max(0, min(center_row - half_crop, height - crop_size))
+            col_start = max(0, min(center_col - half_crop, width - crop_size))
+            row_end = min(height, row_start + crop_size)
+            col_end = min(width, col_start + crop_size)
+            return row_start, row_end, col_start, col_end
+
+        def get_pixel_crop_bounds(center_pixel: tuple[int, int] | None, image_shape: tuple[int, ...], crop_size: int=3) -> tuple[int, int, int, int] | None:
+            if(center_pixel is None):
+                return None
+
+            height, width = image_shape[:2]
+            crop_size = min(crop_size, height, width)
+            if(crop_size > 1 and crop_size % 2 == 0):
+                crop_size -= 1
+            half_crop = crop_size // 2
+            center_row, center_col = center_pixel
+            row_start = max(0, min(center_row - half_crop, height - crop_size))
+            col_start = max(0, min(center_col - half_crop, width - crop_size))
+            return row_start, row_start + crop_size, col_start, col_start + crop_size
+
+        def get_green_pixel_center(image_data: np.ndarray, zoom_bounds: tuple[int, int, int, int] | None) -> tuple[int, int] | None:
+            if(zoom_bounds is None):
+                return None
+
+            row_start, row_end, col_start, col_end = zoom_bounds
+            display_crop = image_for_display(image_data)[row_start:row_end, col_start:col_end, :3]
+            if(display_crop.size == 0):
+                return None
+
+            green_score = display_crop[..., 1] - np.maximum(display_crop[..., 0], display_crop[..., 2])
+            brightness = np.max(display_crop, axis=-1)
+            candidate_mask = (green_score > 0.05) & (brightness > 0.05)
+            if(candidate_mask.shape[0] >= 3 and candidate_mask.shape[1] >= 3):
+                interior_candidate_mask = candidate_mask.copy()
+                interior_candidate_mask[[0, -1], :] = False
+                interior_candidate_mask[:, [0, -1]] = False
+                if(np.any(interior_candidate_mask)):
+                    candidate_mask = interior_candidate_mask
+
+            if(not np.any(candidate_mask)):
+                max_green_score = np.max(green_score)
+                if(max_green_score <= 0):
+                    return None
+                candidate_mask = green_score == max_green_score
+
+            candidate_scores = green_score + 0.05 * brightness
+            candidate_scores[~candidate_mask] = -np.inf
+            crop_row, crop_col = np.unravel_index(int(np.argmax(candidate_scores)), candidate_scores.shape)
+            return row_start + int(crop_row), col_start + int(crop_col)
+
+        def get_green_fringe_pixel_center(before_image: np.ndarray, after_image: np.ndarray) -> tuple[int, int] | None:
+            after_display_image = image_for_display(after_image)[..., :3]
+            before_display_image = image_for_display(before_image)[..., :3]
+            after_green_score = after_display_image[..., 1] - np.maximum(after_display_image[..., 0], after_display_image[..., 2])
+            before_green_score = before_display_image[..., 1] - np.maximum(before_display_image[..., 0], before_display_image[..., 2])
+            brightness = np.max(after_display_image, axis=-1)
+            finite_after_mask = ~get_saturated_pixel_mask(after_image)
+            candidate_mask = finite_after_mask & (after_green_score > 0.05) & (brightness > 0.05)
+
+            if(not np.any(candidate_mask)):
+                candidate_mask = finite_after_mask & (before_green_score > 0.05)
+
+            if(not np.any(candidate_mask)):
+                candidate_scores = np.where(finite_after_mask, np.maximum(after_green_score, before_green_score), -np.inf)
+                if(not np.any(np.isfinite(candidate_scores)) or np.max(candidate_scores) <= 0):
+                    return None
+            else:
+                candidate_scores = after_green_score + 0.25 * before_green_score + 0.05 * brightness
+                candidate_scores[~candidate_mask] = -np.inf
+
+            center_row, center_col = np.unravel_index(int(np.argmax(candidate_scores)), candidate_scores.shape)
+            return int(center_row), int(center_col)
+
+        def get_zoom_bounds_around_pixel(center_pixel: tuple[int, int] | None, image_shape: tuple[int, ...], crop_size: int=32) -> tuple[int, int, int, int] | None:
+            if(center_pixel is None):
+                return None
+            pixel_mask = np.zeros(image_shape[:2], dtype=bool)
+            pixel_mask[center_pixel[0], center_pixel[1]] = True
+            return get_zoom_bounds(pixel_mask, image_shape, crop_size=crop_size)
+
+        def get_saturated_contributor_pixel_mask(raw_image: np.ndarray, debayered_image: np.ndarray) -> np.ndarray:
+            raw_saturated_pixel_mask = get_saturated_pixel_mask(raw_image)
+            provenance_map = generate_debayered_provenance_map(debayered_image)
+            contributor_rows = provenance_map[..., :, 0]
+            contributor_cols = provenance_map[..., :, 1]
+            return np.any(raw_saturated_pixel_mask[contributor_rows, contributor_cols], axis=-1)
+
+        def flatten_image_values(image_data: np.ndarray, exclude_saturated: bool=False) -> np.ndarray:
+            image_values = get_image_array(image_data)
+            if(np.ma.isMaskedArray(image_values)):
+                image_values = image_values.compressed()
+            else:
+                image_values = image_values.ravel()
+
+            valid_values = np.isfinite(image_values)
+            if(exclude_saturated is True):
+                dtype_max_value, _ = get_dtype_max_value(image_data)
+                if(dtype_max_value is not None):
+                    valid_values &= image_values != dtype_max_value
+
+            return image_values[valid_values]
+
+        def get_rgb_channel_values(image_data: np.ndarray, exclude_saturated: bool=False) -> dict[str, np.ndarray]:
+            image_values = get_image_array(image_data)
+
+            if(image_values.ndim == 2):
+                channel_values = {
+                    "R": image_values[1::2, 1::2].ravel(),
+                    "G": np.concatenate((image_values[0::2, 1::2].ravel(), image_values[1::2, 0::2].ravel())),
+                    "B": image_values[0::2, 0::2].ravel(),
+                }
+            elif(image_values.ndim == 3 and image_values.shape[-1] >= 3):
+                channel_values = {
+                    "R": image_values[..., 0].ravel(),
+                    "G": image_values[..., 1].ravel(),
+                    "B": image_values[..., 2].ravel(),
+                }
+            else:
+                raise ValueError(f"Unsupported image shape for RGB channel extraction: {image_values.shape}")
+
+            if(exclude_saturated is False):
+                return channel_values
+
+            dtype_max_value, _ = get_dtype_max_value(image_values)
+            return {
+                channel: values[np.isfinite(values) & (values != dtype_max_value if dtype_max_value is not None else True)]
+                for channel, values in channel_values.items()
+            }
+
+        def get_positive_finite_max(*image_groups: dict[str, np.ndarray]) -> float:
+            finite_value_groups = [
+                values[np.isfinite(values)]
+                for image_group in image_groups
+                for values in image_group.values()
+            ]
+            finite_values = np.concatenate(finite_value_groups) if len(finite_value_groups) > 0 else np.array([], dtype=np.float64)
+            finite_positive_values = finite_values[finite_values > 0]
+            return np.max(finite_positive_values) if finite_positive_values.size > 0 else 1
+
+        def normalize_channels_by_image_max(channel_values: dict[str, np.ndarray], image_max: float) -> dict[str, np.ndarray]:
+            return {
+                channel: values[np.isfinite(values)] / image_max
+                for channel, values in channel_values.items()
+            }
+
+        def format_scalar(value: int | float | None) -> str:
+            if(value is None):
+                return "n/a"
+            if(np.issubdtype(np.asarray(value).dtype, np.integer)):
+                return str(value)
+            return f"{value:.3g}"
+
+        def get_image_stats(image_data: np.ndarray) -> dict:
+            image_values = get_image_array(image_data)
+            nonsaturated_values = flatten_image_values(image_values, exclude_saturated=True)
+            dtype_max_value, dtype_max_label = get_dtype_max_value(image_data)
+            observed_max_value = np.max(nonsaturated_values) if nonsaturated_values.size > 0 else None
+            observed_min_value = np.min(nonsaturated_values) if nonsaturated_values.size > 0 else None
+
+            return {
+                "min_excluding_saturated": observed_min_value,
+                "max_excluding_saturated": observed_max_value,
+                "observed_max_count": int(np.count_nonzero(pixel_mask_from_value_mask(image_values == observed_max_value))) if observed_max_value is not None else 0,
+                "zero_count": int(np.count_nonzero(get_zero_pixel_mask(image_data))),
+                "inf_count": int(np.count_nonzero(get_inf_pixel_mask(image_data))),
+                "dtype_max_label": dtype_max_label,
+                "dtype_max_count": int(np.count_nonzero(get_dtype_max_pixel_mask(image_data))) if dtype_max_value is not None else 0,
+                "nan_count": int(np.count_nonzero(pixel_mask_from_value_mask(np.isnan(get_image_array(image_data))))),
+            }
+
+        def format_before_after_stats(before_image: np.ndarray, after_image: np.ndarray) -> str:
+            before_stats = get_image_stats(before_image)
+            after_stats = get_image_stats(after_image)
+            return "\n".join((
+                r"$\bf{Values\ (before\ /\ after)}$",
+                f"observed min, excluding saturation: {format_scalar(before_stats['min_excluding_saturated'])} / {format_scalar(after_stats['min_excluding_saturated'])}",
+                f"observed max, excluding saturation: {format_scalar(before_stats['max_excluding_saturated'])} / {format_scalar(after_stats['max_excluding_saturated'])}",
+                r"$\bf{Pixel\ Counts\ (before\ /\ after)}$",
+                f"zero value: {before_stats['zero_count']} / {after_stats['zero_count']}",
+                f"at observed max: {before_stats['observed_max_count']} / {after_stats['observed_max_count']}",
+                f"Inf: {before_stats['inf_count']} / {after_stats['inf_count']}",
+                f"at dtype max: {before_stats['dtype_max_count']} / {after_stats['dtype_max_count']}",
+                f"NaN: {before_stats['nan_count']} / {after_stats['nan_count']}",
+            ))
+
+        def image_for_display(image_data: np.ndarray, contaminated_contributor_mask: np.ndarray | None=None) -> np.ndarray:
+            image_values = get_image_array(image_data)
+            display_image = image_values.astype(np.float64, copy=True)
+            finite_values = flatten_image_values(image_values, exclude_saturated=True)
+            if(finite_values.size == 0):
+                display_base = np.zeros(display_image.shape[:2], dtype=np.float64)
+            else:
+                finite_min = np.min(finite_values)
+                finite_max = np.max(finite_values)
+                if(finite_max == finite_min):
+                    finite_max = finite_min + 1
+
+                display_image = np.nan_to_num(display_image, nan=finite_min, posinf=finite_max, neginf=finite_min)
+                if(display_image.ndim == 2):
+                    display_base = np.clip((display_image - finite_min) / (finite_max - finite_min), 0, 1)
+                elif(display_image.ndim == 3 and display_image.shape[-1] >= 3):
+                    display_base = np.clip(display_image[..., :3] / finite_max, 0, 1)
+                else:
+                    raise ValueError(f"Unsupported image shape for display: {image_values.shape}")
+
+            if(display_base.ndim == 2):
+                display_rgb = np.repeat(display_base[..., np.newaxis], 3, axis=-1)
+            else:
+                display_rgb = display_base.copy()
+
+            return display_rgb
+
+        def format_micro_pixel_value(value: float) -> str:
+            if(np.isnan(value)):
+                return "NaN"
+            if(np.isposinf(value)):
+                return "Inf"
+            if(np.isneginf(value)):
+                return "-Inf"
+            if(np.isclose(value, np.round(value))):
+                return str(int(np.round(value)))
+            return f"{value:.3g}"
+
+        def format_micro_pixel_channels(pixel_values: np.ndarray) -> str:
+            pixel_values = np.asarray(pixel_values)
+            if(pixel_values.ndim == 0):
+                return format_micro_pixel_value(float(pixel_values))
+            channel_names = ("R", "G", "B")
+            return "\n".join(
+                f"{channel_name}:{format_micro_pixel_value(float(channel_value))}"
+                for channel_name, channel_value in zip(channel_names, pixel_values[:3])
+            )
+
+        def get_bayer_site_label(row_index: int, col_index: int) -> str:
+            if(row_index % 2 == 0 and col_index % 2 == 0):
+                return "B"
+            if(row_index % 2 != 0 and col_index % 2 != 0):
+                return "R"
+            return "G"
+
+        def get_bayer_site_rgb(site_label: str) -> np.ndarray:
+            return {
+                "R": np.array([1.0, 0.0, 0.0]),
+                "G": np.array([0.0, 0.85, 0.0]),
+                "B": np.array([0.0, 0.25, 1.0]),
+            }[site_label]
+
+        def bayer_tinted_micro_display(display_image: np.ndarray, micro_zoom_bounds: tuple[int, int, int, int], alpha: float=0.35) -> np.ndarray:
+            micro_row_start, micro_row_end, micro_col_start, micro_col_end = micro_zoom_bounds
+            micro_display = display_image[micro_row_start:micro_row_end, micro_col_start:micro_col_end].copy()
+            for micro_row in range(micro_row_end - micro_row_start):
+                for micro_col in range(micro_col_end - micro_col_start):
+                    site_label = get_bayer_site_label(micro_row_start + micro_row, micro_col_start + micro_col)
+                    site_rgb = get_bayer_site_rgb(site_label)
+                    micro_display[micro_row, micro_col, :3] = (1 - alpha) * micro_display[micro_row, micro_col, :3] + alpha * site_rgb
+            return np.clip(micro_display, 0, 1)
+
+        def get_micro_pixel_value_labels(image_data: np.ndarray, micro_zoom_bounds: tuple[int, int, int, int]) -> np.ndarray:
+            image_values = get_image_array(image_data)
+            micro_row_start, micro_row_end, micro_col_start, micro_col_end = micro_zoom_bounds
+            micro_values = image_values[micro_row_start:micro_row_end, micro_col_start:micro_col_end]
+            if(micro_values.ndim == 3 and micro_values.shape[-1] >= 3):
+                channel_values = micro_values[..., :3].astype(np.float64, copy=False)
+                micro_labels = np.empty(channel_values.shape[:2], dtype=object)
+                for micro_row in range(channel_values.shape[0]):
+                    for micro_col in range(channel_values.shape[1]):
+                        micro_labels[micro_row, micro_col] = format_micro_pixel_channels(channel_values[micro_row, micro_col])
+                return micro_labels
+            micro_values = micro_values.astype(np.float64, copy=False)
+            micro_labels = np.empty(micro_values.shape, dtype=object)
+            for micro_row in range(micro_values.shape[0]):
+                for micro_col in range(micro_values.shape[1]):
+                    micro_labels[micro_row, micro_col] = format_micro_pixel_value(float(micro_values[micro_row, micro_col]))
+            return micro_labels
+
+        def add_micro_value_labels(image_data: np.ndarray, display_image: np.ndarray, micro_axis: plt.Axes, micro_zoom_bounds: tuple[int, int, int, int]) -> None:
+            micro_row_start, micro_row_end, micro_col_start, micro_col_end = micro_zoom_bounds
+            micro_display = display_image[micro_row_start:micro_row_end, micro_col_start:micro_col_end]
+            micro_labels = get_micro_pixel_value_labels(image_data, micro_zoom_bounds)
+            for micro_row in range(micro_labels.shape[0]):
+                for micro_col in range(micro_labels.shape[1]):
+                    pixel_display = micro_display[micro_row, micro_col]
+                    pixel_brightness = float(np.mean(pixel_display[:3])) if np.ndim(pixel_display) > 0 else float(pixel_display)
+                    text_color = "black" if pixel_brightness > 0.55 else "white"
+                    box_color = "white" if pixel_brightness > 0.55 else "black"
+                    micro_axis.text(
+                        micro_col,
+                        micro_row,
+                        micro_labels[micro_row, micro_col],
+                        ha="center",
+                        va="center",
+                        fontsize=7,
+                        fontweight="bold",
+                        color=text_color,
+                        bbox={"facecolor": box_color, "alpha": 0.45, "edgecolor": "none", "pad": 0.2},
+                    )
+
+        def get_middle_histogram_data(before_image: np.ndarray, after_image: np.ndarray) -> dict:
+            raw_before_channels = get_rgb_channel_values(before_image, exclude_saturated=True)
+            raw_after_channels = get_rgb_channel_values(after_image, exclude_saturated=True)
+            before_image_max = get_positive_finite_max(raw_before_channels)
+            after_image_max = get_positive_finite_max(raw_after_channels)
+            before_channels = normalize_channels_by_image_max(raw_before_channels, before_image_max)
+            after_channels = normalize_channels_by_image_max(raw_after_channels, after_image_max)
+            combined_values = np.concatenate(tuple(before_channels.values()) + tuple(after_channels.values()))
+
+            if(combined_values.size == 0):
+                return {"is_empty": True, "y_max": 0}
+
+            bins = np.linspace(0, 1, 65)
+            bin_centers = (bins[:-1] + bins[1:]) / 2
+
+            log_counts: dict[str, dict[str, np.ndarray]] = {"Before": {}, "After": {}}
+            all_log_counts: list[np.ndarray] = []
+            for group_name, group_channels in (("Before", before_channels), ("After", after_channels)):
+                for channel_name, values in group_channels.items():
+                    clipped_values = np.clip(values, 0, 1)
+                    counts, bin_edges = np.histogram(clipped_values, bins=bins)
+                    channel_log_counts = np.full(counts.shape, np.nan, dtype=np.float64)
+                    positive_counts = counts > 0
+                    channel_log_counts[positive_counts] = np.log10(counts[positive_counts])
+                    log_counts[group_name][channel_name] = channel_log_counts
+                    all_log_counts.append(channel_log_counts[np.isfinite(channel_log_counts)])
+
+            finite_log_counts = np.concatenate(all_log_counts) if len(all_log_counts) > 0 else np.array([], dtype=np.float64)
+            y_max = np.max(finite_log_counts) if finite_log_counts.size > 0 else 0
+
+            return {
+                "is_empty": False,
+                "x": bin_centers,
+                "log_counts": log_counts,
+                "y_max": y_max,
+            }
+
+        def plot_middle_histogram(histogram_data: dict, target_axis: plt.Axes, step_title: str, y_axis_max: float) -> None:
+            if(histogram_data["is_empty"] is True):
+                target_axis.set_title(step_title, fontsize=11, fontweight="bold")
+                target_axis.axis("off")
+                return
+
+            channel_colors = {"R": "red", "G": "green", "B": "blue"}
+            plot_styles = {"Before": "-x", "After": "-o"}
+            for group_name, channel_log_counts in histogram_data["log_counts"].items():
+                for channel_name, log_counts in channel_log_counts.items():
+                    target_axis.plot(
+                        histogram_data["x"],
+                        log_counts,
+                        plot_styles[group_name],
+                        linewidth=1.2,
+                        markersize=8,
+                        color=channel_colors[channel_name],
+                        label=f"{group_name} {channel_name}",
+                    )
+            target_axis.set_title(step_title, fontsize=11, fontweight="bold")
+            target_axis.set_xlabel("Intensity / image max, excluding saturation", fontsize=8)
+            target_axis.set_ylabel("log10(pixel count at intensity)", fontsize=8)
+            target_axis.set_xlim(0, 1)
+            target_axis.set_ylim(0, y_axis_max * 1.05 if y_axis_max > 0 else 1)
+            target_axis.tick_params(axis="both", labelsize=7)
+            target_axis.legend(fontsize=7, loc="center left", bbox_to_anchor=(1.02, 0.5), borderaxespad=0)
+
+        def plot_agc_settings(agc_settings: np.ndarray, target_axis: plt.Axes) -> None:
+            """Draw this frame's AGC settings as a labeled bar chart.
+
+            One bar per AGC setting. Exposure columns span several orders of
+            magnitude, so their bar height is ``log10`` of the value while every
+            bar is annotated with its raw (non-log) value.
+
+            The number of AGC columns has varied across recordings: newer
+            metadata carries the full ``WORLD_AGC_METADATA_COLS``, while older
+            metadata stored only ``(Again, Dgain, Exposure)``. The column labels
+            are chosen to match however many settings this frame actually has.
+
+            Args:
+                agc_settings: 1-D array of AGC values, ordered gain/exposure as
+                    in ``WORLD_AGC_METADATA_COLS`` (or the 3-column legacy layout).
+                target_axis: Axis on which to draw the bar chart.
+            """
+            values = np.asarray(agc_settings, dtype=np.float64).ravel()
+
+            # Pick column labels that match the number of settings actually
+            # present. Newer metadata has the full WORLD_AGC_METADATA_COLS; older
+            # metadata had only (Again, Dgain, Exposure).
+            if(len(values) == len(WORLD_AGC_METADATA_COLS)):
+                column_names = list(WORLD_AGC_METADATA_COLS)
+            elif(len(values) == 3):
+                column_names = ["Again", "Dgain", "Exposure"]
+            else:
+                # Unknown layout: use the leading known names, then positional
+                # labels for any extras, so labels always match the bar count.
+                column_names = [
+                    WORLD_AGC_METADATA_COLS[i] if i < len(WORLD_AGC_METADATA_COLS) else f"col{i}"
+                    for i in range(len(values))
+                ]
+
+            # Exposure columns dwarf the gains, so plot them on a log10 scale to
+            # keep every bar legible on a shared axis; gains are plotted directly.
+            is_exposure = np.array(["exposure" in name.lower() for name in column_names])
+            bar_heights = values.copy()
+            exposure_positive = is_exposure & (values > 0)
+            bar_heights[exposure_positive] = np.log10(values[exposure_positive])
+            bar_heights[is_exposure & ~(values > 0)] = 0.0
+
+            x_positions = np.arange(len(column_names))
+            bar_colors = ["tab:orange" if exposure else "tab:blue" for exposure in is_exposure]
+            bars = target_axis.bar(x_positions, bar_heights, color=bar_colors)
+
+            target_axis.set_title("Frame AGC Settings", fontsize=11, fontweight="bold")
+            target_axis.set_xticks(x_positions)
+            target_axis.set_xticklabels(column_names, rotation=45, ha="right", fontsize=7)
+            target_axis.set_ylabel("value (log10 for exposure)", fontsize=8)
+            target_axis.tick_params(axis="y", labelsize=7)
+
+            # Annotate each bar with its raw setting value, centered inside the bar.
+            for bar, value in zip(bars, values):
+                value_label = str(int(np.round(value))) if np.isclose(value, np.round(value)) else f"{value:.3g}"
+                target_axis.text(
+                    bar.get_x() + bar.get_width() / 2,
+                    bar.get_height() / 2,
+                    value_label,
+                    ha="center",
+                    va="center",
+                    rotation=90,
+                    fontsize=7,
+                    fontweight="bold",
+                    color="white",
+                )
+
+        def add_zoom_inset(image_data: np.ndarray, target_axis: plt.Axes, zoom_bounds: tuple[int, int, int, int] | None, contaminated_contributor_mask: np.ndarray | None=None, micro_zoom_bounds: tuple[int, int, int, int] | None=None, inset_bounds: tuple[float, float, float, float]=(0.03, 0.03, 0.4, 0.4), zoom_title: str="Zoom", zoom_edge_color: str="black", micro_edge_color: str="lime") -> None:
+            if(zoom_bounds is None):
+                return
+
+            row_start, row_end, col_start, col_end = zoom_bounds
+            display_image = image_for_display(image_data, contaminated_contributor_mask)
+            zoom_axis = target_axis.inset_axes(inset_bounds)
+            zoom_axis.imshow(display_image[row_start:row_end, col_start:col_end])
+            zoom_axis.set_xticks([])
+            zoom_axis.set_yticks([])
+            zoom_axis.set_title(zoom_title, fontsize=7)
+            for spine in zoom_axis.spines.values():
+                spine.set_edgecolor(zoom_edge_color)
+                spine.set_linewidth(1.5)
+
+            if(micro_zoom_bounds is not None):
+                micro_row_start, micro_row_end, micro_col_start, micro_col_end = micro_zoom_bounds
+                zoom_axis.add_patch(Rectangle(
+                    (micro_col_start - col_start - 0.5, micro_row_start - row_start - 0.5),
+                    micro_col_end - micro_col_start,
+                    micro_row_end - micro_row_start,
+                    edgecolor=micro_edge_color,
+                    facecolor="none",
+                    linewidth=1.2,
+                ))
+                micro_axis = zoom_axis.inset_axes([0.22, 0.03, 0.76, 0.76])
+                micro_axis.imshow(bayer_tinted_micro_display(display_image, micro_zoom_bounds), interpolation="nearest")
+                micro_axis.set_xticks([])
+                micro_axis.set_yticks([])
+                micro_height = micro_row_end - micro_row_start
+                micro_width = micro_col_end - micro_col_start
+                micro_axis.set_title(f"{micro_height}x{micro_width}", fontsize=9)
+                micro_axis.set_xticks(np.arange(-0.5, micro_col_end - micro_col_start, 1), minor=True)
+                micro_axis.set_yticks(np.arange(-0.5, micro_row_end - micro_row_start, 1), minor=True)
+                micro_axis.grid(which="minor", color="white", linewidth=0.4)
+                if(micro_height % 2 == 1 and micro_width % 2 == 1):
+                    center_micro_row = micro_height // 2
+                    center_micro_col = micro_width // 2
+                    micro_axis.add_patch(Rectangle(
+                        (center_micro_col - 0.5, center_micro_row - 0.5),
+                        1,
+                        1,
+                        edgecolor=micro_edge_color,
+                        facecolor="none",
+                        linewidth=1.6,
+                    ))
+                add_micro_value_labels(image_data, display_image, micro_axis, micro_zoom_bounds)
+                for spine in micro_axis.spines.values():
+                    spine.set_edgecolor(micro_edge_color)
+                    spine.set_linewidth(1.2)
+
+            target_axis.add_patch(Rectangle(
+                (col_start, row_start),
+                col_end - col_start,
+                row_end - row_start,
+                edgecolor=zoom_edge_color,
+                facecolor="none",
+                linewidth=1.5,
+            ))
+
+        def copy_image_data(image_data: np.ndarray, target_axis: plt.Axes, image_title: str, contaminated_contributor_mask: np.ndarray | None=None, zoom_bounds: tuple[int, int, int, int] | None=None, title_extra: str="", micro_zoom_bounds: tuple[int, int, int, int] | None=None, fringe_zoom_bounds: tuple[int, int, int, int] | None=None, fringe_micro_zoom_bounds: tuple[int, int, int, int] | None=None) -> None:
+            target_axis.imshow(image_for_display(image_data, contaminated_contributor_mask))
+            target_axis.set_title(f"{image_title} ({get_image_array(image_data).dtype}){title_extra}")
+            add_zoom_inset(image_data, target_axis, zoom_bounds, contaminated_contributor_mask, micro_zoom_bounds, inset_bounds=(0.01, 0.02, 0.48, 0.5), zoom_title="Saturation", zoom_edge_color="red", micro_edge_color="red")
+            add_zoom_inset(image_data, target_axis, fringe_zoom_bounds, contaminated_contributor_mask, fringe_micro_zoom_bounds, inset_bounds=(0.51, 0.02, 0.48, 0.5), zoom_title="Fringe", zoom_edge_color="blue", micro_edge_color="blue")
+            target_axis.axis("off")
+
+        fig, axes = plt.subplots(6, 4, figsize=(34, 36), gridspec_kw={"width_ratios": [1.55, 0.8, 0.8, 1.55]})
+        fig.suptitle(title, fontweight="bold", fontsize=18)
+
+        steps: list[tuple[str, np.ndarray, np.ndarray]] = []
+
+        # Pipeline constants. Saturation begins as 8-bit 255, then becomes Inf
+        # during floating-point processing so diagnostics can exclude it cleanly.
+        floor, ceiling = (0, 255)
+        debayer_ceiling_marker = 2 ** 16 - 1 # Sentiel value we set saturated INF pixels to in the debayering process because it forces uint16
+        debayer_scale = 100 # Scale and saturation threshold for post distribution change debayered images
+        debayer_saturation_threshold = debayer_ceiling_marker / 3
+
+        # Stage 0: convert the raw Bayer frame to float and mark raw saturated
+        # sensor samples as Inf before any operation changes their numeric value.
+        raw_saturated_pixel_mask = sample_frame >= 250
+        transformed_frame = sample_frame.astype(np.float64, copy=True)
+        assert transformed_frame.dtype == np.float64, f"Failed at stage 0"
+        transformed_frame[raw_saturated_pixel_mask] = np.inf
+
+        # Stage 1: invert the camera response curve. The operation returns a
+        # floating-point Bayer image; original saturated samples remain Inf.
+        linearized_before = transformed_frame.copy()
+        linearized = linearize_camera_responsivity(transformed_frame, 8)
+        linearized[raw_saturated_pixel_mask] = np.inf # We need to reply the INF here because the INFs got crushed in this operation
+        assert linearized.dtype == np.float64, f"Failed at stage 1"
+        steps.append(("Linearized Camera Response", linearized_before, linearized.copy()))
+
+        # Stage 2: apply the fielding correction in Bayer space to compensate
+        # for spatial nonuniformity before color operations and de-Bayering.
+        fielding_before = linearized.copy()
+        apply_fielding_function(linearized)
+        assert linearized.dtype == np.float64, f"Failed at stage 2"
+        steps.append(("Fielding Function", fielding_before, linearized.copy()))
+
+        # Stage 3: apply per-channel Bayer-site color weights while the image is
+        # still a single mosaiced plane.
+        color_correction_before = linearized.copy()
+        apply_color_weights(linearized)
+        assert linearized.dtype == np.float64, "Failed at stage 3"
+        steps.append(("Color Correction", color_correction_before, linearized.copy()))
+
+        # Stage 4: apply digital gain in Bayer space and restore raw saturated
+        # sites to Inf after the multiplicative gain. The digital gain is the
+        # AGCDgain entry of this frame's AGC settings.
+        digital_gain_before = linearized.copy()
+        dgain: float = float(agc_settings[WORLD_AGC_METADATA_COLS.index("AGCDgain")])
+        apply_digital_gain(linearized, dgain)
+        steps.append(("Digital Gain", digital_gain_before, linearized.copy()))
+
+        # Stage 5: de-Bayer. OpenCV needs finite uint16 input, so the float Bayer
+        # is scaled up (to preserve fractional precision), Inf is mapped to the
+        # uint16 ceiling sentinel, and the frame is converted to uint16. After
+        # interpolation, outputs a saturated contributor pulled up are returned to
+        # Inf and the image is divided back to the original floating-point scale.
+        debayer_before = linearized.copy()
+        floor_ceiling_debayer_input = debayer_before.copy()
+
+        debayer_input = debayer_before * debayer_scale
+        debayer_input[np.isposinf(debayer_input)] = debayer_ceiling_marker
+        raw_debayer_input = np.round(np.clip(debayer_input, 0, debayer_ceiling_marker)).astype(np.uint16)
+
+        debayered = debayer(raw_debayer_input).astype(np.float64)
+        debayered[debayered >= debayer_saturation_threshold] = debayer_ceiling_marker
+        debayered[debayered == debayer_ceiling_marker] = np.inf
+        debayered = debayered / debayer_scale
+        steps.append(("Debayered Image", debayer_before.copy(), debayered.copy()))
+
+        # Stage 6: propagate raw Bayer floor/ceiling contributors into the RGB
+        # de-Bayered image. The helper writes ceiling as 255, then this notebook
+        # converts that sentinel back to Inf for the diagnostic display/histogram.
+        floor_ceiling_before = debayered.copy()
+
+        apply_floor_ceiling(
+            debayered,
+            floor_ceiling_debayer_input, 
+            floor_ceiling=(floor, np.inf), # clip floor values to floor, and np.inf to the ceiling values 
+            clip_values=(floor, ceiling),
+        )
+
+        # For displaying purposes, we just sets it back to INF
+        debayered[debayered >= ceiling] = np.inf
+        floor_ceiling_changed_pixel_mask = get_changed_pixel_mask(floor_ceiling_before, debayered)
+        floor_ceiling_added_saturation_pixel_mask = get_added_saturation_pixel_mask(floor_ceiling_before, debayered)
+        floor_ceiling_added_saturation_count = int(np.count_nonzero(floor_ceiling_added_saturation_pixel_mask))
+        floor_ceiling_contaminated_contributor_mask = get_saturated_contributor_pixel_mask(floor_ceiling_debayer_input, debayered)
+        floor_ceiling_zoom_mask = floor_ceiling_added_saturation_pixel_mask if np.any(floor_ceiling_added_saturation_pixel_mask) else floor_ceiling_changed_pixel_mask
+        floor_ceiling_zoom_bounds = get_zoom_bounds(floor_ceiling_zoom_mask, debayered.shape)
+        floor_ceiling_micro_zoom_center = get_green_pixel_center(floor_ceiling_before, floor_ceiling_zoom_bounds)
+        if(floor_ceiling_micro_zoom_center is None):
+            floor_ceiling_micro_zoom_center = get_green_pixel_center(debayered, floor_ceiling_zoom_bounds)
+        floor_ceiling_micro_zoom_bounds = get_pixel_crop_bounds(floor_ceiling_micro_zoom_center, debayered.shape)
+        floor_ceiling_fringe_zoom_center = get_green_fringe_pixel_center(floor_ceiling_before, debayered)
+        floor_ceiling_fringe_zoom_bounds = get_zoom_bounds_around_pixel(floor_ceiling_fringe_zoom_center, debayered.shape)
+        floor_ceiling_fringe_micro_zoom_bounds = get_pixel_crop_bounds(floor_ceiling_fringe_zoom_center, debayered.shape)
+    
+        steps.append(("Floor / Ceiling Propagation", floor_ceiling_before, debayered.copy()))
+
+        # Build middle-panel histograms after all stage images are captured so
+        # every adjacent after/before handoff can be checked for consistency.
+        histogram_data_by_step: list[dict] = [get_middle_histogram_data(before_image, after_image) for _, before_image, after_image in steps]
+        for previous_idx, (previous_histogram_data, next_histogram_data) in enumerate(zip(histogram_data_by_step[:-1], histogram_data_by_step[1:])):
+            if(previous_histogram_data["is_empty"] is True or next_histogram_data["is_empty"] is True):
+                continue
+
+            for channel_name in ("R", "G", "B"):
+                previous_after = previous_histogram_data["log_counts"]["After"][channel_name]
+                next_before = next_histogram_data["log_counts"]["Before"][channel_name]
+                assert np.array_equal(previous_after, next_before, equal_nan=True), (
+                    f"Middle plot mismatch: after line for {steps[previous_idx][0]} does not match "
+                    f"before line for {steps[previous_idx + 1][0]} in {channel_name}."
+                )
+        shared_y_axis_max = max(histogram_data["y_max"] for histogram_data in histogram_data_by_step)
+        before_contributor_masks_by_step = [None for _ in steps]
+        after_contributor_masks_by_step = [None for _ in steps]
+        after_contributor_masks_by_step[-2] = floor_ceiling_contaminated_contributor_mask
+        before_contributor_masks_by_step[-1] = floor_ceiling_contaminated_contributor_mask
+        after_contributor_masks_by_step[-1] = floor_ceiling_contaminated_contributor_mask
+        # Use the final floor/ceiling diagnostic crop for every image panel so
+        # the same physical location can be compared across the full pipeline.
+        zoom_bounds_by_step = [floor_ceiling_zoom_bounds for _ in steps]
+        micro_zoom_bounds_by_step = [floor_ceiling_micro_zoom_bounds for _ in steps]
+        fringe_zoom_bounds_by_step = [floor_ceiling_fringe_zoom_bounds for _ in steps]
+        fringe_micro_zoom_bounds_by_step = [floor_ceiling_fringe_micro_zoom_bounds for _ in steps]
+        after_title_extras_by_step = ["" for _ in steps]
+        after_title_extras_by_step[-1] = f"\n{floor_ceiling_added_saturation_count} new saturated pixels"
+
+        # Render each processing row: before image, distribution comparison, and
+        # after image. Every image panel receives the same diagnostic zoom.
+        for row_idx, ((step_title, before_image, after_image), histogram_data, before_contributor_mask, after_contributor_mask, zoom_bounds, micro_zoom_bounds, fringe_zoom_bounds, fringe_micro_zoom_bounds, after_title_extra) in enumerate(zip(steps, histogram_data_by_step, before_contributor_masks_by_step, after_contributor_masks_by_step, zoom_bounds_by_step, micro_zoom_bounds_by_step, fringe_zoom_bounds_by_step, fringe_micro_zoom_bounds_by_step, after_title_extras_by_step)):
+            copy_image_data(before_image, axes[row_idx, 0], "Before", before_contributor_mask, zoom_bounds, micro_zoom_bounds=micro_zoom_bounds, fringe_zoom_bounds=fringe_zoom_bounds, fringe_micro_zoom_bounds=fringe_micro_zoom_bounds)
+            copy_image_data(after_image, axes[row_idx, 3], "After", after_contributor_mask, zoom_bounds, after_title_extra, micro_zoom_bounds=micro_zoom_bounds, fringe_zoom_bounds=fringe_zoom_bounds, fringe_micro_zoom_bounds=fringe_micro_zoom_bounds)
+            axes[row_idx, 0].text(
+                -0.04,
+                0.5,
+                format_before_after_stats(before_image, after_image),
+                transform=axes[row_idx, 0].transAxes,
+                fontsize=7,
+                va="center",
+                ha="right",
+            )
+            plot_agc_settings(agc_settings, axes[row_idx, 1])
+            plot_middle_histogram(histogram_data, axes[row_idx, 2], step_title, shared_y_axis_max)
+
+        plt.tight_layout()
+
+        plt.show()
+        return fig, axes
+
+
+    # Discover the world-camera chunk frame-buffer files, natural-sorted and
+    # excluding the sibling "_metadata" files.
+    chunk_paths: list[str] = natsorted([
+        os.path.join(recording_path, filename)
+        for filename in os.listdir(recording_path)
+        if "world" in filename and "metadata" not in filename
+    ])
+    assert len(chunk_paths) > 0, f"No world chunk files found in: {recording_path}"
+
+    # Gather the sibling metadata files
+    metadata_paths: list[str] = natsorted([
+        os.path.join(recording_path, filename)
+        for filename in os.listdir(recording_path)
+        if "world" in filename and "metadata" in filename
+    ])
+    assert len(metadata_paths), f"No metadata chunk files found in: {recording_path}"
+
+    assert len(metadata_paths) == len(chunk_paths), f"Metadata and chunks do not have the same length in: {recording_path}"
+
+    # Splice out the desired chunk ranges 
+    start, end = chunk_range
+    end = end if end is not None else len(chunk_paths)
+
+    # Pair the chunks and their metadata together 
+    chunks_and_metadata: list[tuple[str]] = [(chunk_path, metadata_path) for chunk_path, metadata_path in zip(chunk_paths, metadata_paths)][start:end]
+
+    # Render one figure per chunk and collect the handles for the caller.
+    figures: list[tuple[plt.Figure, np.ndarray]] = []
+    for chunk_index, (chunk_path, metadata_path) in enumerate(chunks_and_metadata):
+        # Each chunk file holds a raw Bayer frame buffer of shape
+        # (n_frames, rows, cols).
+        chunk: np.ndarray = np.load(chunk_path)
+        assert chunk.ndim == 3, f"Expected a (frames, rows, cols) chunk. Got shape {chunk.shape} from {chunk_path}"
+        metadata: np.ndarray = np.load(metadata_path)
+
+        # Pick the frame to visualize: default is just the middle
+        selected_index: int = len(chunk) // 2
+        assert 0 <= selected_index < len(chunk), f"selected frame index {selected_index} out of range for chunk of length {len(chunk)}"
+        sample_frame: np.ndarray = chunk[selected_index]
+        # AGC settings for this frame: the metadata columns after the leading
+        # timestamp, ordered to match WORLD_AGC_METADATA_COLS.
+        agc_settings: np.ndarray = metadata[selected_index, 1:1 + len(WORLD_AGC_METADATA_COLS)]
+
+        # Compose a descriptive title and render this frame through the pipeline.
+        chunk_title: str = f"{os.path.basename(recording_path.rstrip('/'))} Chunk: {chunk_index + 1} / {len(chunks_and_metadata)}"
+        figures.append(render_pipeline_figure(sample_frame, chunk_title, agc_settings))
+
+    return figures
+
 
 def main():
     """Run the command-line entry point."""
