@@ -14,26 +14,26 @@ fps = cap.get(cv2.CAP_PROP_FPS)
 print("FPS:", fps)
 
 # THROUGHOUT VIDEO
-times_sec = [
-    366, 372,   # 6:06, 6:12
-    393, 401,   # 6:33, 6:41
-    427, 435,   # 7:07, 7:15
-    456, 466,   # 7:36, 7:46
-    488, 498,   # 8:08, 8:18
-    518, 528,   # 8:38, 8:48
-    550, 560,   # 9:10, 9:20
-    582, 592,   # 9:42, 9:52
-    614, 624,   # 10:14, 10:24
-    646, 656,   # 10:46, 10:56
-    678, 686,   # 11:18, 11:26
-    708, 718,   # 11:48, 11:58
-    742, 752,   # 12:22, 12:32
-    774, 784,   # 12:54, 13:04
-    806, 814,   # 13:26, 13:34
-    836, 846,   # 13:56, 14:06
-    868, 878,   # 14:28, 14:38
-    912, 920    # 15:12, 15:20
-]
+# times_sec = [
+#     366, 372,   # 6:06, 6:12
+#     393, 401,   # 6:33, 6:41
+#     427, 435,   # 7:07, 7:15
+#     456, 466,   # 7:36, 7:46
+#     488, 498,   # 8:08, 8:18
+#     518, 528,   # 8:38, 8:48
+#     550, 560,   # 9:10, 9:20
+#     582, 592,   # 9:42, 9:52
+#     614, 624,   # 10:14, 10:24
+#     646, 656,   # 10:46, 10:56
+#     678, 686,   # 11:18, 11:26
+#     708, 718,   # 11:48, 11:58
+#     742, 752,   # 12:22, 12:32
+#     774, 784,   # 12:54, 13:04
+#     806, 814,   # 13:26, 13:34
+#     836, 846,   # 13:56, 14:06
+#     868, 878,   # 14:28, 14:38
+#     912, 920    # 15:12, 15:20
+# ]
 
 # SUSPECTED ROTATIONAL PERIOD NO. 1 (6-7 MIN)
 # times_sec = [
@@ -62,32 +62,55 @@ times_sec = [
 # ]
 
 # SUSPECTED ROTATIONAL PERIOD NO. 4 (12-13 MIN)
-# times_sec = [
-#     734, 735, 736, 737, 738, 739, 740, 741, 742, 743, 744,
-#     745, 746, 747, 748, 749, 750, 751, 752, 753, 754, 755,
-#     756, 757, 758, 759, 760, 766, 767, 768, 769, 770, 771, 
-#     772, 773, 774, 775, 776, 777, 778, 779, 780, 781, 782,
-#     783, 784, 785, 786, 787, 788, 789, 790, 791, 792
-# ]
+times_sec = [
+    734, 735, 736, 737, 738, 739, 740, 741, 742, 743, 744,
+    745, 746, 747, 748, 749, 750, 751, 752, 753, 754, 755,
+    756, 757, 758, 759, 760, 766, 767, 768, 769, 770, 771, 
+    772, 773, 774, 775, 776, 777, 778, 779, 780, 781, 782,
+    783, 784, 785, 786, 787, 788, 789, 790, 791, 792
+]
 
 frames_idx = [round(t * fps) for t in times_sec]
 print("Frame indices:", frames_idx)
 
 frames = []
 
+selected_bgr_min = 255
+selected_bgr_max = 0
+selected_gray_min = 255
+selected_gray_max = 0
+
 for idx in frames_idx:
     cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
     ret, frame = cap.read()
+
+    selected_bgr_min = min(selected_bgr_min, int(frame.min()))
+    selected_bgr_max = max(selected_bgr_max, int(frame.max()))
 
     if not ret:
         raise RuntimeError(f"Could not read frame {idx}")
 
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+    selected_gray_min = min(selected_gray_min, int(gray.min()))
+    selected_gray_max = max(selected_gray_max, int(gray.max()))
+
     frames.append(gray)
+
+print("\nSELECTED TIMESTAMPS")
+print("Decoded BGR min:", selected_bgr_min)
+print("Decoded BGR max:", selected_bgr_max)
+print("Grayscale min:", selected_gray_min)
+print("Grayscale max:", selected_gray_max)
 
 cap.release()
 
 frames = np.array(frames, dtype=np.uint8)
+
+print("\nSELECTED FRAME VALUE RANGE")
+print("Min grayscale value:", frames.min())
+print("Max grayscale value:", frames.max())
+print("Mean grayscale value:", frames.mean())
 
 savemat("selected_twilight_frames.mat", {
     "frames": frames,
@@ -98,3 +121,12 @@ savemat("selected_twilight_frames.mat", {
 
 print("Saved selected_twilight_frames.mat")
 print("frames shape:", frames.shape)
+
+# Save one individual frame as a .npy file
+frame_to_save = frames[0]
+
+np.save("fielding_frame_734sec.npy", frame_to_save)
+
+print("Saved fielding_frame_734sec.npy")
+print("Frame shape:", frame_to_save.shape)
+print("Frame dtype:", frame_to_save.dtype)
