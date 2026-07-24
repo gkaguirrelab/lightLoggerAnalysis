@@ -790,7 +790,8 @@ def world_chunks_to_video(recording_path: str,
                           embed_timestamps: bool=False,
                           verbose: bool=False,
                           start_end: tuple[int | float] = (0, float("inf")),
-                          floor_ceiling: tuple[int] = (0, 255)
+                          floor_ceiling: tuple[int] = (0, 255), 
+                          raw_inf_threshold: int | float=250
                         ) -> None: 
     
     ###########################
@@ -842,9 +843,6 @@ def world_chunks_to_video(recording_path: str,
     """
     if(fill_missing_frames and not convert_to_seconds):
         raise Exception("Haven't handled this case. This will generate millions of extra frames")
-
-    if(apply_floor_ceiling):
-        assert debayer_images is True, f"To apply floor ceiling, currently only works with debayered images due to our algorithm."
 
     assert output_path.endswith(".avi"), f"Output path: {output_path} must end in .avi"
 
@@ -1042,7 +1040,7 @@ def world_chunks_to_video(recording_path: str,
             if(apply_floor_ceiling is True):
                 floor, ceiling = floor_ceiling
 
-                raw_saturated_pixel_mask = frame_buffer >= ceiling
+                raw_saturated_pixel_mask = frame_buffer >= raw_inf_threshold
                 frame_buffer[raw_saturated_pixel_mask] = np.inf
 
             # Linearize the recording data to account for the full well effect of the camera
@@ -1093,22 +1091,33 @@ def world_chunks_to_video(recording_path: str,
                 if(raw_saturated_pixel_mask is not None):
                     frame_buffer[raw_saturated_pixel_mask] = np.inf
 
-                # Convert the buffer to uint8 if it has not already been done 
-                # clipping and rounding as needed 
-                if(frame_buffer.dtype != np.uint16):
-                    debayer_ceiling_marker: int = 2 ** 16 - 1
-
-                    # Replace INF that occurred before with a uint16 sentinel
-                    # that OpenCV can debayer. Raw zeros remain zeros here.
-                    if(apply_floor_ceiling is True):
-                        frame_buffer[np.isposinf(frame_buffer)] = debayer_ceiling_marker
-
-                    frame_buffer = np.round(np.clip(frame_buffer, 0, debayer_ceiling_marker)).astype(np.uint16)
-                assert current_color_space == "BAYER" and frame_buffer.dtype == np.uint16, f"Frame buffer must be in BAYER space and uint16 to debayer. Current format is: {current_color_space} | {frame_buffer.dtype}"
-
-                # Debayer the frames. This is NOT an in-place operation 
+                # Preserve the float Bayer image (with Inf ceiling / 0 floor
+                # markers) before de-Bayering so the floor/ceiling propagation
+                # below can consult the true raw contributors.
                 raw_frame_buffer: np.ndarray = frame_buffer
-                frame_buffer = world_util.debayer(frame_buffer)
+
+                # OpenCV's debayer needs finite uint16 input. Scale the float
+                # Bayer values up first so their fractional precision survives the
+                # round-trip through uint16, map Inf to the uint16 ceiling
+                # sentinel, then clip / round / convert. Raw zeros remain zero.
+                debayer_scale: int = 100
+                debayer_ceiling_marker: int = 2 ** 16 - 1
+                debayer_saturation_threshold: float = debayer_ceiling_marker / 3
+
+                debayer_input: np.ndarray = frame_buffer * debayer_scale
+                if(apply_floor_ceiling is True):
+                    debayer_input[np.isposinf(debayer_input)] = debayer_ceiling_marker
+                debayer_input = np.round(np.clip(debayer_input, 0, debayer_ceiling_marker)).astype(np.uint16)
+                assert current_color_space == "BAYER" and debayer_input.dtype == np.uint16, f"Frame buffer must be in BAYER space and uint16 to debayer. Current format is: {current_color_space} | {debayer_input.dtype}"
+
+                # Debayer, then re-mark any output that a saturated contributor
+                # pulled up as Inf, and scale back down to the original value
+                # range. Mirrors the notebook's de-Bayer stage.
+                frame_buffer = world_util.debayer(debayer_input).astype(np.float64)
+                if(apply_floor_ceiling is True):
+                    frame_buffer[frame_buffer >= debayer_saturation_threshold] = debayer_ceiling_marker
+                    frame_buffer[frame_buffer == debayer_ceiling_marker] = np.inf
+                frame_buffer = frame_buffer / debayer_scale
                 current_color_space = "RGB"
             
             # If we want to apply floor ceiling [LOW, HIGH] that implies 
@@ -1120,14 +1129,20 @@ def world_chunks_to_video(recording_path: str,
                 if(debayered_provenance_map is None):
                     debayered_provenance_map = world_util.generate_debayered_provenance_map(frame_buffer[0])
 
-                # Apply the floor / ceiling algorithm IN PLACE
+                # Apply the floor / ceiling algorithm IN PLACE. raw_frame_buffer
+                # is the float Bayer image, so Inf is the ceiling sentinel.
                 world_util.apply_floor_ceiling(
                     frame_buffer,
                     raw_frame_buffer,
                     debayered_provenance_map,
-                    (floor_ceiling[0], 2 ** 16 - 1),
+                    (floor_ceiling[0], np.inf),
                     floor_ceiling,
                 )
+
+                # Any pixel still marked Inf was flagged as saturated by the
+                # debayer saturation threshold but had no floor/ceiling raw
+                # contributor to resolve it; treat it as saturated -> ceiling.
+                frame_buffer[np.isposinf(frame_buffer)] = floor_ceiling[1]
 
             # Convert the frame buffer back into uint8 format
             if(frame_buffer.dtype != np.uint8): 
