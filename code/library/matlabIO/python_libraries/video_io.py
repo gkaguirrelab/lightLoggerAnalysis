@@ -351,8 +351,11 @@ def extract_frames_from_video(video_path: str,
     # Initialize array to hold frames 
     # post extraction
     video_frame_shape: tuple[int] = inspect_video_framesize(video_path)
-    extracted_frame_shape: tuple[int] = video_frame_shape if is_grayscale is False else tuple(list(video_frame_shape) + [3])
-    extracted_frames: np.ndarray = np.empty(extracted_frame_shape, dtype=np.uint8)
+    extracted_frame_shape: tuple[int] = video_frame_shape if is_grayscale is True else tuple(list(video_frame_shape) + [3])
+    extracted_frames: np.ndarray = np.empty((len(frames_idx), *extracted_frame_shape), dtype=np.uint8)
+
+
+    print(f"Expected frames shape: {extracted_frames.shape}")
 
     # Open the video via cv2 
     video_stream: cv2.VideoCapture = cv2.VideoCapture(video_path)
@@ -380,6 +383,8 @@ def extract_frames_from_video(video_path: str,
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         else:
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        
+        print(f"Frame shape")
 
         # Save the extracted frame 
         extracted_frames[extracted_frame_idx] = frame
