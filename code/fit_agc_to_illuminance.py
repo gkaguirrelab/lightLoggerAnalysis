@@ -57,12 +57,6 @@ def fit_agc_to_illuminance(video_paths, recording_paths):
     recording paths so individual recordings can easily be included
     or excluded from calibration.
 
-    NOTE
-    ----
-    The video path is retained as part of the interface because the
-    final procedure is intended to operate on a selectable set of
-    environmental video recordings. The AGC metadata itself is loaded
-    from the associated raw recording chunks.
     """
 
     if len(video_paths) != len(recording_paths):
@@ -75,8 +69,6 @@ def fit_agc_to_illuminance(video_paths, recording_paths):
 
     results_by_recording = []
 
-
-    # =================================================================
     # LOOP THROUGH RECORDINGS
     # =================================================================
 
@@ -93,17 +85,8 @@ def fit_agc_to_illuminance(video_paths, recording_paths):
                 f"Recording directory does not exist:\n{recording_path}"
             )
 
-        # =============================================================
         # CAMERA / AGC
         # =============================================================
-
-        # This demo recording uses the older world-metadata format:
-        #
-        # timestamp, Again, Dgain, exposure
-        #
-        # The current world_util contains a newer five-setting metadata
-        # definition, so temporarily use the legacy column definition while
-        # loading this recording.
 
         original_metadata_cols = world_util.WORLD_AGC_METADATA_COLS
 
@@ -141,7 +124,6 @@ def fit_agc_to_illuminance(video_paths, recording_paths):
         camera_time_relative = camera_time - camera_time[0]
 
 
-        # =============================================================
         # INSPECT CAMERA METADATA
         # =============================================================
 
@@ -153,7 +135,7 @@ def fit_agc_to_illuminance(video_paths, recording_paths):
         print("Digital gain range:",  np.nanmin(digital_gain), np.nanmax(digital_gain))
         print("Exposure range:", np.nanmin(exposure), np.nanmax(exposure))
 
-        # =============================================================
+
         # CALCULATE CAMERA LIGHT SCORE
         # =============================================================
 
@@ -170,7 +152,7 @@ def fit_agc_to_illuminance(video_paths, recording_paths):
 
         print("Camera score range:", np.nanmin(camera_score), np.nanmax(camera_score))
 
-        # =============================================================
+
         # PLOT AGC PARAMETERS
         # =============================================================
 
@@ -203,7 +185,7 @@ def fit_agc_to_illuminance(video_paths, recording_paths):
         plt.tight_layout()
         plt.show()
 
-        # =============================================================
+  
         # PLOT CAMERA LIGHT SCORE
         # =============================================================
 
@@ -223,7 +205,7 @@ def fit_agc_to_illuminance(video_paths, recording_paths):
         plt.tight_layout()
         plt.show()
 
-        # =============================================================
+
         # MINISPECT
         # =============================================================
 
@@ -246,7 +228,7 @@ def fit_agc_to_illuminance(video_paths, recording_paths):
         print("--------------")
         print("Number of parsed chunks:", len(ms_chunks))
 
-        # =============================================================
+
         # INSPECT FIRST MINISPECT CHUNK
         # =============================================================
 
@@ -282,7 +264,7 @@ def fit_agc_to_illuminance(video_paths, recording_paths):
                 )
             )
 
-        # =============================================================
+
         # COMBINE / FLATTEN AS MINISPECT CHUNKS
         # =============================================================
 
@@ -340,7 +322,7 @@ def fit_agc_to_illuminance(video_paths, recording_paths):
             np.nanmax(as_time_relative)
         )
 
-        # =============================================================
+
         # OPTIONAL DATAFRAME FOR EASIER INSPECTION
         # =============================================================
 
@@ -357,7 +339,6 @@ def fit_agc_to_illuminance(video_paths, recording_paths):
         print(as_df.describe())
 
 
-        # =============================================================
         # PLOT RAW AS CHANNELS
         # =============================================================
 
@@ -386,7 +367,7 @@ def fit_agc_to_illuminance(video_paths, recording_paths):
         plt.figure(figsize=(11, 5))
 
         plt.plot(camera_time_relative, camera_score)
-        
+
         plt.xlabel("Time from recording start (s)")
         plt.ylabel("Camera light score")
         plt.title("Camera light score")
