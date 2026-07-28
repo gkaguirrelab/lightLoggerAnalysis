@@ -5,21 +5,179 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 # Pi_util / parse_chunks
-sys.path.append(
-    "/Users/sophiamirabal/Documents/MATLAB/projects/"
-    "lightLogger/raspberry_pi_firmware/utility"
-)
+sys.path.append("/Users/sophiamirabal/Documents/MATLAB/projects/" "lightLogger/raspberry_pi_firmware/utility")
 
 # world_util
-sys.path.append(
-    "/Users/sophiamirabal/Documents/MATLAB/projects/"
-    "lightLoggerAnalysis/code/library/sensor_utility"
-)
+sys.path.append("/Users/sophiamirabal/Documents/MATLAB/projects/" "lightLoggerAnalysis/code/library/sensor_utility")
 
 from Pi_util import parse_chunks
 import world_util
 
+### HELPER FUNCTION 
+def zscore_signal(x):
+    """
+    Normalize a signal to mean 0 and standard deviation 1. This allows us to compare temporal shape even though the camera
+    score and minispect channel have different units / scales.
+    """
+    x = np.asarray(x, dtype=float)
 
+    mean_x = np.nanmean(x)
+    std_x = np.nanstd(x)
+
+    if std_x == 0:
+        raise ValueError("Cannot z-score a signal with zero variance.")
+
+    return (x - mean_x) / std_x
+
+### HELPER FUNCTION 
+def lowpass_first_order(time, signal, tau):
+    """
+    Apply a first-order low-pass filter to an irregularly sampled signal.
+    """
+    time = np.asarray(time, dtype=float)
+    signal = np.asarray(signal, dtype=float)
+
+    filtered = np.full(signal.shape, np.nan, dtype=float)
+
+    valid = np.isfinite(time) & np.isfinite(signal)
+
+    if np.sum(valid) < 2:
+        return filtered
+
+    t = time[valid]
+    x = signal[valid]
+
+    y = np.empty_like(x)
+
+    # Initialize filter at first observed value
+    y[0] = x[0]
+
+    for ii in range(1, len(x)):
+        dt = t[ii] - t[ii - 1]
+
+        if dt <= 0:
+            y[ii] = y[ii - 1]
+            continue
+
+        # Exact update for first-order exponential low-pass
+        alpha = 1.0 - np.exp(-dt / tau)
+        y[ii] = (y[ii - 1] + alpha * (x[ii] - y[ii - 1]))
+
+    filtered[valid] = y
+    return filtered
+
+### HELPER FUNCTION 
+def characterize_lowpass_filter(camera_time, camera_score, ms_time, ms_signal, 
+                                lag_range=(-10, 10), tau_range=(0.1, 20),
+                                n_lags=201,n_taus=100):
+    """
+    Find the first-order low-pass time constant and temporal lag that
+    best relate a minispect channel to the camera light score.
+
+    The model is: camera_score ~= delayed lowpass(minispect_signal)
+
+    The comparison is performed after z-scoring both signals so their
+    different physical units do not affect the temporal comparison.
+    """
+
+    camera_time = np.asarray(camera_time, dtype=float)
+    camera_score = np.asarray(camera_score, dtype=float)
+
+    ms_time = np.asarray(ms_time, dtype=float)
+    ms_signal = np.asarray(ms_signal, dtype=float)
+
+
+    # REMOVE INVALID VALUES
+    # -------------------------------------------------------------
+    valid_camera = (np.isfinite(camera_time) & np.isfinite(camera_score))
+    valid_ms = (np.isfinite(ms_time) & np.isfinite(ms_signal))
+
+    camera_time = camera_time[valid_camera]
+    camera_score = camera_score[valid_camera]
+
+    ms_time = ms_time[valid_ms]
+    ms_signal = ms_signal[valid_ms]
+
+    # SORT BY TIME
+    # -------------------------------------------------------------
+    camera_order = np.argsort(camera_time)
+    camera_time = camera_time[camera_order]
+    camera_score = camera_score[camera_order]
+
+    ms_order = np.argsort(ms_time)
+    ms_time = ms_time[ms_order]
+    ms_signal = ms_signal[ms_order]
+
+    # Normalize because the units / magnitudes are different.
+    camera_z = zscore_signal(camera_score)
+    ms_z = zscore_signal(ms_signal)
+
+    # PUT CAMERA SCORE ON THE MINISPECT TIMEBASE
+    # -------------------------------------------------------------
+    camera_on_ms_time = np.interp(ms_time, camera_time, camera_z, left=np.nan, right=np.nan)
+
+    # CANDIDATE FILTER PARAMETERS
+    # -------------------------------------------------------------
+    candidate_lags = np.linspace(lag_range[0], lag_range[1], n_lags)
+    candidate_taus = np.linspace(tau_range[0], tau_range[1], n_taus)
+
+    correlations = np.full((len(candidate_taus), len(candidate_lags)), np.nan)
+
+    # TEST EACH LOW-PASS TIME CONSTANT + LAG
+    # -------------------------------------------------------------
+    for tau_idx, tau in enumerate(candidate_taus):
+        filtered_ms = lowpass_first_order(ms_time, ms_z, tau)
+
+        for lag_idx, lag in enumerate(candidate_lags):
+
+            # Positive lag means camera response occurs AFTER the minispect change.
+            # Therefore, camera(t) should match minispect(t - lag).
+            predicted_camera = np.interp(ms_time - lag, ms_time, filtered_ms, left=np.nan, right=np.nan)
+
+            valid = (np.isfinite(camera_on_ms_time) & np.isfinite(predicted_camera))
+
+            if np.sum(valid) < 3:
+                continue
+
+            correlations[tau_idx, lag_idx] = np.corrcoef(camera_on_ms_time[valid], predicted_camera[valid])[0, 1]
+
+    # FIND BEST PARAMETERS
+    # -------------------------------------------------------------
+    best_flat_idx = np.nanargmax(correlations)
+
+    best_tau_idx, best_lag_idx = np.unravel_index(best_flat_idx, correlations.shape)
+
+    best_tau = candidate_taus[best_tau_idx]
+    best_lag = candidate_lags[best_lag_idx]
+    best_correlation = correlations[best_tau_idx, best_lag_idx]
+
+    # GENERATE BEST-FIT PREDICTION
+    # -------------------------------------------------------------
+    best_filtered_ms = lowpass_first_order(ms_time, ms_z, best_tau)
+    best_prediction = np.interp(ms_time - best_lag, ms_time, best_filtered_ms, left=np.nan, right=np.nan)
+
+    # Correlation without any filtering or lag correction
+    valid_raw = (np.isfinite(camera_on_ms_time) & np.isfinite(ms_z))
+    raw_correlation = np.corrcoef(camera_on_ms_time[valid_raw], ms_z[valid_raw])[0, 1]
+
+    return {
+        "best_tau": best_tau,
+        "best_lag": best_lag,
+        "best_correlation": best_correlation,
+        "raw_correlation": raw_correlation,
+
+        "candidate_lags": candidate_lags,
+        "candidate_taus": candidate_taus,
+        "correlations": correlations,
+
+        "ms_time": ms_time,
+        "camera_on_ms_time": camera_on_ms_time,
+        "ms_z": ms_z,
+        "best_filtered_ms": best_filtered_ms,
+        "best_prediction": best_prediction
+    }
+
+### MAIN
 def fit_agc_to_illuminance(video_paths, recording_paths):
     """
     Fit camera AGC settings to environmental illuminance.
@@ -345,12 +503,7 @@ def fit_agc_to_illuminance(video_paths, recording_paths):
         plt.figure(figsize=(11, 6))
 
         for column_number in range(as_values.shape[1]):
-
-            plt.plot(
-                as_time_relative,
-                as_values[:, column_number],
-                label=f"AS {column_number}"
-            )
+            plt.plot(as_time_relative, as_values[:, column_number], label=f"AS {column_number}")
 
         plt.xlabel("Time from AS recording start (s)")
         plt.ylabel("AS sensor value")
@@ -361,21 +514,97 @@ def fit_agc_to_illuminance(video_paths, recording_paths):
         plt.show()
 
         # =============================================================
-        # PLOT CAMERA LIGHT SCORE AGAIN FOR COMPARISON
+        # EXPERIMENT: CHARACTERIZE AGC TEMPORAL RESPONSE
         # =============================================================
 
+        # Before converting the minispect data to illuminance, pick one minispect channel and 
+        # characterize how its temporal changes relate to the camera light score.
+        #
+        # For this initial experiment, I use AS channel 0.
+        #
+        # This does NOT assume that AS 0 is illuminance. I use it
+        # only to characterize the temporal filtering / lag of the AGC.
+
+        as_channel_index = 0
+        ms_signal = as_values[:, as_channel_index]
+
+        filter_result = characterize_lowpass_filter(camera_time, camera_score, as_time, ms_signal,
+                                                    lag_range=(-10, 10), tau_range=(0.1, 20),
+                                                    n_lags=201, n_taus=100)
+
+        print("\n======================================")
+        print("AGC TEMPORAL FILTER RESULT")
+        print("======================================")
+
+        print("Minispect channel:", as_channel_index)
+        print("Raw correlation:", filter_result["raw_correlation"])
+        print("Best low-pass time constant (tau):", filter_result["best_tau"], "seconds")
+        print("Best temporal lag:", filter_result["best_lag"], "seconds")
+        print("Best correlation after filtering / lag:", filter_result["best_correlation"])
+
+        # PLOT RAW NORMALIZED SIGNALS
         plt.figure(figsize=(11, 5))
+        plt.plot(filter_result["ms_time"] - filter_result["ms_time"][0], filter_result["ms_z"], label=f"Minispect AS {as_channel_index}")
+        plt.plot(filter_result["ms_time"] - filter_result["ms_time"][0], filter_result["camera_on_ms_time"], label="Camera light score")
 
-        plt.plot(camera_time_relative, camera_score)
+        plt.xlabel("Time (s)")
+        plt.ylabel("Normalized value (z-score)")
+        plt.title("Raw minispect channel vs camera light score")
 
-        plt.xlabel("Time from recording start (s)")
-        plt.ylabel("Camera light score")
-        plt.title("Camera light score")
+        plt.legend()
         plt.grid()
-
         plt.tight_layout()
         plt.show()
 
+        # PLOT BEST FILTERED / DELAYED RESULT
+        plt.figure(figsize=(11, 5))
+        plt.plot(filter_result["ms_time"] - filter_result["ms_time"][0], filter_result["camera_on_ms_time"], label="Observed camera light score")
+        plt.plot(filter_result["ms_time"] - filter_result["ms_time"][0], filter_result["best_prediction"],
+            label=(f"Filtered AS {as_channel_index} "f"(tau={filter_result['best_tau']:.2f} s, "f"lag={filter_result['best_lag']:.2f} s)"))
+
+        plt.xlabel("Time (s)")
+        plt.ylabel("Normalized value (z-score)")
+        plt.title("Camera score vs best low-pass minispect prediction")
+
+        plt.legend()
+        plt.grid()
+        plt.tight_layout()
+        plt.show()
+
+        # PLOT CORRELATION VS LAG AT BEST TAU
+        best_tau_idx = np.argmin(np.abs(filter_result["candidate_taus"] - filter_result["best_tau"]))
+        correlations_at_best_tau = (filter_result["correlations"][best_tau_idx, :])
+
+        plt.figure(figsize=(9, 5))
+        plt.plot(filter_result["candidate_lags"], correlations_at_best_tau)
+        plt.axvline(filter_result["best_lag"], linestyle="--",label=(f"Best lag = " f"{filter_result['best_lag']:.2f} s"))
+
+        plt.xlabel("Camera lag relative to minispect (s)")
+        plt.ylabel("Correlation")
+        plt.title("Correlation vs temporal lag " "at best low-pass time constant")
+
+        plt.legend()
+        plt.grid()
+        plt.tight_layout()
+        plt.show()
+
+        # PLOT TAU / LAG SEARCH
+        plt.figure(figsize=(9, 6))
+        plt.imshow(filter_result["correlations"], aspect="auto", origin="lower",
+            extent=[
+                filter_result["candidate_lags"][0],
+                filter_result["candidate_lags"][-1],
+                filter_result["candidate_taus"][0],
+                filter_result["candidate_taus"][-1]
+            ])
+
+        plt.colorbar(label="Correlation")
+        plt.xlabel("Camera lag relative to minispect (s)")
+        plt.ylabel("Low-pass time constant tau (s)")
+        plt.title("Search for AGC temporal filter parameters")
+
+        plt.tight_layout()
+        plt.show()
 
         # =============================================================
         # TODO: CONVERT AS COUNTS TO ABSOLUTE ILLUMINANCE
