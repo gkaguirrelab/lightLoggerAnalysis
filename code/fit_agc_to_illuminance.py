@@ -14,7 +14,46 @@ sys.path.append("/Users/sophiamirabal/Documents/MATLAB/projects/" "lightLoggerAn
 from Pi_util import parse_chunks
 import world_util
 
-# HELPER FUNCTION (applying kernel)
+### HELPER FUNCTION
+def ms_counts_to_illuminance(ms_counts):
+    """
+    Convert minispect AS counts to illuminance (lux) using the
+    PR670-derived calibration coefficients from msCounts2Illuminance.m.
+    """
+
+    illum_to_ms = np.array([
+        [1.1271, -0.7119],
+        [1.0908, -0.4812],
+        [1.0483, -0.0754],
+        [1.0315,  0.0243],
+        [1.0048,  0.1469],
+        [0.9945,  0.0861],
+        [0.9526,  0.6394],
+        [0.9257,  0.2689],
+        [0.9793,  0.6655]
+    ])
+
+    if np.any(ms_counts[:, :9] <= 0):
+        raise ValueError("Minispect counts must be strictly positive for log10 conversion.")
+
+    # Calibration exists for F1-F8 + Clear. NIR (AS_9) is not used.
+    ms_log = np.log10(ms_counts[:, :9])
+
+    illuminance_by_channel = np.full_like(ms_log, np.nan, dtype=float)
+
+    for ch in range(9):
+        m = illum_to_ms[ch, 0]
+        b = illum_to_ms[ch, 1]
+
+        log10_illum = (ms_log[:, ch] - b) / m
+        illuminance_by_channel[:, ch] = 10 ** log10_illum
+
+    # Same operation as MATLAB mean(..., 2, 'omitnan')
+    illuminance = np.nanmean(illuminance_by_channel, axis=1)
+
+    return illuminance
+
+### HELPER FUNCTION
 def apply_empirical_kernel(ms_time, ms_signal, kernel_mat_path):
     """
     Apply the AGC-derived empirical kernel to a minispect signal.
@@ -42,7 +81,7 @@ def apply_empirical_kernel(ms_time, ms_signal, kernel_mat_path):
 
     return t_uniform, filtered
 
-# HELPER
+### HELPER FUNCTION
 def characterize_empirical_kernel(camera_time, camera_score, ms_time, ms_signal,
                                   kernel_mat_path, lag_range=(-10, 10),
                                   n_lags=201):
@@ -186,12 +225,15 @@ def characterize_lowpass_filter(camera_time, camera_score, ms_time, ms_signal,
                                 n_lags=201,n_taus=100):
     """
     Find the first-order low-pass time constant and temporal lag that
-    best relate a minispect channel to the camera light score.
+    best relate environmental illuminance to the camera light score.
 
-    The model is: camera_score ~= delayed lowpass(minispect_signal)
+    The model is:
 
-    The comparison is performed after z-scoring both signals so their
-    different physical units do not affect the temporal comparison.
+        camera_score ~= delayed lowpass(illuminance)
+
+    The comparison is performed after z-scoring both signals so that
+    the temporal relationship can be characterized independently of
+    their different physical units and magnitudes.
     """
 
     camera_time = np.asarray(camera_time, dtype=float)
@@ -319,11 +361,12 @@ def fit_agc_to_illuminance(video_paths, recording_paths):
     8. Correct for this lag.
     9. Pool valid observations across recordings.
 
-    Finally, fit:
+    Finally, characterize the relationship:
 
-        illuminance = f(camera_score)
+        camera_score ~= f(filtered_illuminance)
 
-    and return the fitted calibration parameters.
+    and use the fitted relationship to derive a model that estimates
+    environmental illuminance from the recent history of camera AGC settings.
 
     The function accepts iterables of video paths and corresponding
     recording paths so individual recordings can easily be included
@@ -627,27 +670,102 @@ def fit_agc_to_illuminance(video_paths, recording_paths):
         plt.tight_layout()
         plt.show()
 
-        # =============================================================
-        # EXPERIMENT: CHARACTERIZE AGC TEMPORAL RESPONSE
+        # CHARACTERIZE AGC TEMPORAL RESPONSE USING CALIBRATED ILLUMINANCE
         # =============================================================
 
-        # Before converting the minispect data to illuminance, pick one minispect channel and 
-        # characterize how its temporal changes relate to the camera light score.
-        #
-        # For this initial experiment, I use AS channel 0.
-        #
-        # This does NOT assume that AS 0 is illuminance. I use it
-        # only to characterize the temporal filtering / lag of the AGC.
+        # Convert the minispect AS measurements to environmental illuminance
+        # using the PR670-derived calibration. The calibration contains
+        # coefficients for F1-F8 + Clear; NIR is not included.
 
-        as_channel_index = 8
-        ms_signal = as_values[:, as_channel_index]
+        # Convert F1-F8 + Clear minispect measurements to calibrated illuminance
+        # using the PR670-derived coefficients.
+        illuminance = ms_counts_to_illuminance(as_values)
+        ms_signal = illuminance
+
+        print("\nCALIBRATED ILLUMINANCE")
+        print("----------------------")
+        print("Number of samples:", len(illuminance))
+        print("Illuminance range:", np.nanmin(illuminance), "to", np.nanmax(illuminance), "lux")
+        print("Mean illuminance:", np.nanmean(illuminance), "lux")
+        print("Median illuminance:", np.nanmedian(illuminance), "lux")
+
+        plt.figure(figsize=(11, 5))
+        plt.plot(as_time_relative, illuminance)
+        plt.xlabel("Time from minispect recording start (s)")
+        plt.ylabel("Illuminance (lux)")
+        plt.title("Calibrated minispect illuminance")
+        plt.grid()
+        plt.tight_layout()
+        plt.show()
 
         filter_result = characterize_lowpass_filter(camera_time, camera_score, as_time, ms_signal,
                                                     lag_range=(-10, 10), tau_range=(0.1, 20),
                                                     n_lags=201, n_taus=100)
 
+        # Apply the best-fitting temporal filter to illuminance in lux
+        filtered_illuminance = lowpass_first_order(
+            as_time,
+            illuminance,
+            filter_result["best_tau"]
+        )
+
+        # SCATTER: ABSOLUTE CAMERA LIGHT SCORE VS FILTERED ILLUMINANCE
+        # =============================================================
+
+        # Put the absolute camera light score onto the minispect timebase.
+        # camera_time and as_time are already expressed in the same
+        # recording-clock units, so interpolate directly using them.
+        camera_score_on_as_time = np.interp(
+            as_time,
+            camera_time,
+            camera_score,
+            left=np.nan,
+            right=np.nan
+        )
+
+        # Keep only time points where both measurements are valid.
+        valid_scatter = (
+            np.isfinite(camera_score_on_as_time) &
+            np.isfinite(filtered_illuminance)
+        )
+
+        scatter_camera_score = camera_score_on_as_time[valid_scatter]
+        scatter_illuminance = filtered_illuminance[valid_scatter]
+
+        print("\nABSOLUTE SCATTER DATA")
+        print("---------------------")
+        print("Number of paired time points:", len(scatter_camera_score))
+        print(
+            "Camera light score range:",
+            np.min(scatter_camera_score),
+            "to",
+            np.max(scatter_camera_score)
+        )
+        print(
+            "Filtered illuminance range:",
+            np.min(scatter_illuminance),
+            "to",
+            np.max(scatter_illuminance),
+            "lux"
+        )
+
+        plt.figure(figsize=(7, 6))
+        plt.scatter(
+            scatter_camera_score,
+            scatter_illuminance,
+            s=12,
+            alpha=0.5
+        )
+
+        plt.xlabel("Camera light score")
+        plt.ylabel("Filtered illuminance (lux)")
+        plt.title("Absolute camera light score vs filtered illuminance")
+        plt.grid()
+        plt.tight_layout()
+        plt.show()
 
         # APPLY AGC-DERIVED EMPIRICAL KERNEL
+        # =============================================================
 
         kernel_mat_path = (
             "/Users/sophiamirabal/Documents/MATLAB/projects/"
@@ -681,7 +799,9 @@ def fit_agc_to_illuminance(video_paths, recording_paths):
         print("AGC TEMPORAL FILTER RESULT")
         print("======================================")
 
-        print("Minispect channel:", as_channel_index)
+        print("Minispect input: calibrated illuminance (lux)")
+        print("Illuminance range:", np.min(illuminance), np.max(illuminance))
+        
         print("Raw correlation:", filter_result["raw_correlation"])
         print("Best low-pass time constant (tau):", filter_result["best_tau"], "seconds")
         print("Best temporal lag:", filter_result["best_lag"], "seconds")
@@ -689,11 +809,11 @@ def fit_agc_to_illuminance(video_paths, recording_paths):
 
         # PLOT RAW NORMALIZED SIGNALS
         plt.figure(figsize=(11, 5))
-        plt.plot(filter_result["ms_time"] - filter_result["ms_time"][0], filter_result["ms_z"], label=f"Minispect AS {as_channel_index}")
+        plt.plot(filter_result["ms_time"] - filter_result["ms_time"][0], filter_result["ms_z"], label="Calibrated illuminance (z-scored)")
         plt.plot(filter_result["ms_time"] - filter_result["ms_time"][0], filter_result["camera_on_ms_time"], label="Camera light score")
         plt.xlabel("Time (s)")
         plt.ylabel("Normalized value (z-score)")
-        plt.title("Raw minispect channel vs camera light score")
+        plt.title("Calibrated illuminance vs camera light score (normalized)")
         plt.legend()
         plt.grid()
         plt.tight_layout()
@@ -703,10 +823,10 @@ def fit_agc_to_illuminance(video_paths, recording_paths):
         plt.figure(figsize=(11, 5))
         plt.plot(filter_result["ms_time"] - filter_result["ms_time"][0], filter_result["camera_on_ms_time"], label="Observed camera light score")
         plt.plot(filter_result["ms_time"] - filter_result["ms_time"][0], filter_result["best_prediction"],
-            label=(f"Filtered AS {as_channel_index} "f"(tau={filter_result['best_tau']:.2f} s, "f"lag={filter_result['best_lag']:.2f} s)"))
+            label=(f"Filtered calibrated illuminance "f"(tau={filter_result['best_tau']:.2f} s, "f"lag={filter_result['best_lag']:.2f} s)"))
         plt.xlabel("Time (s)")
         plt.ylabel("Normalized value (z-score)")
-        plt.title("Camera score vs best low-pass minispect prediction")
+        plt.title("Camera score vs best low-pass illuminance prediction")
         plt.legend()
         plt.grid()
         plt.tight_layout()
@@ -729,7 +849,6 @@ def fit_agc_to_illuminance(video_paths, recording_paths):
             right=np.nan
         )
 
-                # =============================================================
         # QUANTIFY EXPONENTIAL VS EMPIRICAL KERNEL
         # =============================================================
 
@@ -835,92 +954,26 @@ def fit_agc_to_illuminance(video_paths, recording_paths):
         plt.tight_layout()
         plt.show()
 
-        # =============================================================
-        # TODO: CONVERT AS COUNTS TO ABSOLUTE ILLUMINANCE
-        # =============================================================
-
-        # Existing lightLoggerAnalysis code performs:
-        #
-        #     illuminance = msCounts2Illuminance(ms_values)
-        #
-        # We still need to confirm / port the Python equivalent of that
-        # calibration before calculating Geoff's illuminance-vs-camera-score
-        # relationship.
-        #
-        # illuminance = ...
-
+        print("light score:", light_score_interp.shape)
+        print("filtered illuminance:", filtered_illuminance.shape)
 
         # =============================================================
-        # TODO: ALIGN CAMERA SCORE AND ILLUMINANCE
+        # TODO: FIT CAMERA LIGHT SCORE VS FILTERED ILLUMINANCE
         # =============================================================
 
-        # Once illuminance is available:
+        # Next step across multiple recordings:
         #
-        # 1. Put camera score and illuminance on a shared time grid.
-        # 2. Test a range of temporal offsets.
-        # 3. Compute the correlation at every offset.
-        # 4. Select the lag that maximizes the correlation.
-
-
-        # =============================================================
-        # TODO: CROSS-CORRELATE ACROSS TEMPORAL OFFSETS
-        # =============================================================
-
-        # Example future structure:
+        # 1. Use one shared fitted time constant for all recordings.
+        # 2. Apply that temporal filter to illuminance in physical units (lux).
+        # 3. Sparsely sample paired observations (e.g. once per second).
+        # 4. Plot:
         #
-        # candidate_lags = np.arange(-10, 10.01, 0.05)
-        # correlations = np.full(candidate_lags.shape, np.nan)
+        #       x = filtered illuminance (lux)
+        #       y = camera light score
         #
-        # for ii, lag in enumerate(candidate_lags):
-        #
-        #     shifted_camera_time = camera_time_relative + lag
-        #
-        #     interpolated_camera_score = np.interp(
-        #         as_time_relative,
-        #         shifted_camera_time,
-        #         camera_score,
-        #         left=np.nan,
-        #         right=np.nan
-        #     )
-        #
-        #     valid = (
-        #         np.isfinite(interpolated_camera_score) &
-        #         np.isfinite(illuminance)
-        #     )
-        #
-        #     correlations[ii] = np.corrcoef(
-        #         interpolated_camera_score[valid],
-        #         illuminance[valid]
-        #     )[0, 1]
-        #
-        #
-        # best_idx = np.nanargmax(correlations)
-        # best_lag = candidate_lags[best_idx]
-
-
-        # =============================================================
-        # TODO: PLOT CORRELATION VS LAG
-        # =============================================================
-
-        # plt.figure()
-        # plt.plot(candidate_lags, correlations)
-        # plt.axvline(best_lag, linestyle="--")
-        # plt.xlabel("Temporal offset (s)")
-        # plt.ylabel("Correlation")
-        # plt.title("Camera score vs illuminance: lag search")
-        # plt.grid()
-        # plt.show()
-
-
-        # =============================================================
-        # TODO: PLOT ALIGNED CAMERA SCORE AND ILLUMINANCE
-        # =============================================================
-
-
-        # =============================================================
-        # TODO: FIT ILLUMINANCE ~= f(CAMERA SCORE)
-        # =============================================================
-
+        # 5. Fit a linear relationship and report slope and intercept.
+        # 6. Use the inverse relationship to estimate environmental
+        #    illuminance from the recent history of camera AGC settings.
 
         # =============================================================
         # SAVE CURRENT RESULTS FOR THIS RECORDING
@@ -946,7 +999,9 @@ def fit_agc_to_illuminance(video_paths, recording_paths):
             "as_values": as_values,
             "as_dataframe": as_df,
 
-            "filter_result": filter_result
+            "illuminance": illuminance,
+            "filter_result": filter_result,
+            "empirical_result": empirical_result
         }
 
         results_by_recording.append(
