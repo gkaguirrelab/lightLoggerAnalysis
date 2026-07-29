@@ -3,6 +3,7 @@ import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from scipy.io import loadmat
 
 # Pi_util / parse_chunks
 sys.path.append("/Users/sophiamirabal/Documents/MATLAB/projects/" "lightLogger/raspberry_pi_firmware/utility")
@@ -12,6 +13,119 @@ sys.path.append("/Users/sophiamirabal/Documents/MATLAB/projects/" "lightLoggerAn
 
 from Pi_util import parse_chunks
 import world_util
+
+# HELPER FUNCTION (applying kernel)
+def apply_empirical_kernel(ms_time, ms_signal, kernel_mat_path):
+    """
+    Apply the AGC-derived empirical kernel to a minispect signal.
+    """
+
+    mat = loadmat(kernel_mat_path)
+
+    kernel_time = np.squeeze(mat["commonKernelTime"]).astype(float)
+    kernel = np.squeeze(mat["meanKernel"]).astype(float)
+
+    # Put minispect signal on the kernel's 4-Hz timebase.
+    dt_kernel = np.median(np.diff(kernel_time))
+    t_uniform = np.arange(ms_time[0], ms_time[-1], dt_kernel)
+    ms_uniform = np.interp(t_uniform, ms_time, ms_signal)
+
+    # Convert continuous kernel values to discrete convolution weights.
+    kernel_weights = kernel / np.sum(kernel)
+
+    # Pad with the initial signal value so the filter does not assume
+    # that the minispect signal was zero before the recording began.
+    n_kernel = len(kernel_weights)
+    padded_signal = np.pad(ms_uniform, (n_kernel - 1, 0), mode="edge")
+
+    filtered = np.convolve(padded_signal, kernel_weights, mode="valid")
+
+    return t_uniform, filtered
+
+# HELPER
+def characterize_empirical_kernel(camera_time, camera_score, ms_time, ms_signal,
+                                  kernel_mat_path, lag_range=(-10, 10),
+                                  n_lags=201):
+    """
+    Apply the AGC-derived empirical kernel and find the temporal lag
+    that maximizes correlation with the observed camera light score.
+    """
+
+    empirical_time, empirical_prediction = apply_empirical_kernel(
+        ms_time, ms_signal, kernel_mat_path
+    )
+
+    # Normalize observed and predicted signals.
+    camera_z = zscore_signal(camera_score)
+    empirical_z = zscore_signal(empirical_prediction)
+
+    # Put observed camera score onto the empirical kernel timebase.
+    camera_on_empirical_time = np.interp(
+        empirical_time,
+        camera_time,
+        camera_z,
+        left=np.nan,
+        right=np.nan
+    )
+
+    candidate_lags = np.linspace(lag_range[0], lag_range[1], n_lags)
+    correlations = np.full(len(candidate_lags), np.nan)
+
+    for lag_idx, lag in enumerate(candidate_lags):
+
+        # Same sign convention used by characterize_lowpass_filter().
+        predicted_camera = np.interp(
+            empirical_time - lag,
+            empirical_time,
+            empirical_z,
+            left=np.nan,
+            right=np.nan
+        )
+
+        valid = (
+            np.isfinite(camera_on_empirical_time) &
+            np.isfinite(predicted_camera)
+        )
+
+        if np.sum(valid) < 3:
+            continue
+
+        correlations[lag_idx] = np.corrcoef(
+            camera_on_empirical_time[valid],
+            predicted_camera[valid]
+        )[0, 1]
+
+    best_idx = np.nanargmax(correlations)
+    best_lag = candidate_lags[best_idx]
+    best_correlation = correlations[best_idx]
+
+    best_prediction = np.interp(
+        empirical_time - best_lag,
+        empirical_time,
+        empirical_z,
+        left=np.nan,
+        right=np.nan
+    )
+
+    valid = (
+        np.isfinite(camera_on_empirical_time) &
+        np.isfinite(best_prediction)
+    )
+
+    rmse = np.sqrt(np.mean(
+        (camera_on_empirical_time[valid] - best_prediction[valid]) ** 2
+    ))
+
+    return {
+        "time": empirical_time,
+        "camera": camera_on_empirical_time,
+        "prediction": best_prediction,
+        "best_lag": best_lag,
+        "best_correlation": best_correlation,
+        "rmse": rmse,
+        "candidate_lags": candidate_lags,
+        "correlations": correlations
+    }
 
 ### HELPER FUNCTION 
 def zscore_signal(x):
@@ -525,12 +639,43 @@ def fit_agc_to_illuminance(video_paths, recording_paths):
         # This does NOT assume that AS 0 is illuminance. I use it
         # only to characterize the temporal filtering / lag of the AGC.
 
-        as_channel_index = 0
+        as_channel_index = 8
         ms_signal = as_values[:, as_channel_index]
 
         filter_result = characterize_lowpass_filter(camera_time, camera_score, as_time, ms_signal,
                                                     lag_range=(-10, 10), tau_range=(0.1, 20),
                                                     n_lags=201, n_taus=100)
+
+
+        # APPLY AGC-DERIVED EMPIRICAL KERNEL
+
+        kernel_mat_path = (
+            "/Users/sophiamirabal/Documents/MATLAB/projects/"
+            "lightLoggerAnalysis/misc/agc_simulation/"
+            "agc_empirical_kernels.mat"
+        )
+
+        empirical_result = characterize_empirical_kernel(
+            camera_time,
+            camera_score,
+            as_time,
+            ms_signal,
+            kernel_mat_path,
+            lag_range=(-10, 10),
+            n_lags=201
+        )
+
+        # Calculate RMSE for the existing exponential model so that
+        # it can be compared directly with the empirical kernel.
+
+        valid_exp = (np.isfinite(filter_result["camera_on_ms_time"]) & np.isfinite(filter_result["best_prediction"]))
+
+        exponential_rmse = np.sqrt(np.mean(
+            (
+                filter_result["camera_on_ms_time"][valid_exp] -
+                filter_result["best_prediction"][valid_exp]
+            ) ** 2
+        ))
 
         print("\n======================================")
         print("AGC TEMPORAL FILTER RESULT")
@@ -546,11 +691,9 @@ def fit_agc_to_illuminance(video_paths, recording_paths):
         plt.figure(figsize=(11, 5))
         plt.plot(filter_result["ms_time"] - filter_result["ms_time"][0], filter_result["ms_z"], label=f"Minispect AS {as_channel_index}")
         plt.plot(filter_result["ms_time"] - filter_result["ms_time"][0], filter_result["camera_on_ms_time"], label="Camera light score")
-
         plt.xlabel("Time (s)")
         plt.ylabel("Normalized value (z-score)")
         plt.title("Raw minispect channel vs camera light score")
-
         plt.legend()
         plt.grid()
         plt.tight_layout()
@@ -561,11 +704,102 @@ def fit_agc_to_illuminance(video_paths, recording_paths):
         plt.plot(filter_result["ms_time"] - filter_result["ms_time"][0], filter_result["camera_on_ms_time"], label="Observed camera light score")
         plt.plot(filter_result["ms_time"] - filter_result["ms_time"][0], filter_result["best_prediction"],
             label=(f"Filtered AS {as_channel_index} "f"(tau={filter_result['best_tau']:.2f} s, "f"lag={filter_result['best_lag']:.2f} s)"))
-
         plt.xlabel("Time (s)")
         plt.ylabel("Normalized value (z-score)")
         plt.title("Camera score vs best low-pass minispect prediction")
+        plt.legend()
+        plt.grid()
+        plt.tight_layout()
+        plt.show()
 
+        # PLOT EXPONENTIAL VS EMPIRICAL-KERNEL PREDICTIONS
+        plt.figure(figsize=(11, 5))
+        # Observed camera score on empirical-kernel timebase
+        plt.plot(
+            empirical_result["time"] - empirical_result["time"][0],
+            empirical_result["camera"],
+            label="Observed camera light score"
+        )
+        # Put exponential prediction onto the empirical-kernel timebase
+        exponential_on_empirical_time = np.interp(
+            empirical_result["time"],
+            filter_result["ms_time"],
+            filter_result["best_prediction"],
+            left=np.nan,
+            right=np.nan
+        )
+
+                # =============================================================
+        # QUANTIFY EXPONENTIAL VS EMPIRICAL KERNEL
+        # =============================================================
+
+        observed = empirical_result["camera"]
+        empirical_pred = empirical_result["prediction"]
+        exponential_pred = exponential_on_empirical_time
+
+        valid = (
+            np.isfinite(observed) &
+            np.isfinite(empirical_pred) &
+            np.isfinite(exponential_pred)
+        )
+
+        observed = observed[valid]
+        empirical_pred = empirical_pred[valid]
+        exponential_pred = exponential_pred[valid]
+
+        # Correlation
+        r_exponential = np.corrcoef(observed, exponential_pred)[0, 1]
+        r_empirical = np.corrcoef(observed, empirical_pred)[0, 1]
+
+        # RMSE
+        rmse_exponential = np.sqrt(np.mean((observed - exponential_pred) ** 2))
+        rmse_empirical = np.sqrt(np.mean((observed - empirical_pred) ** 2))
+
+        # Mean absolute error
+        mae_exponential = np.mean(np.abs(observed - exponential_pred))
+        mae_empirical = np.mean(np.abs(observed - empirical_pred))
+
+        print("\n======================================")
+        print("MODEL COMPARISON ON SAME SAMPLES")
+        print("======================================")
+
+        print(
+            f"Single exponential: "
+            f"r = {r_exponential:.4f}, "
+            f"RMSE = {rmse_exponential:.4f}, "
+            f"MAE = {mae_exponential:.4f}"
+        )
+
+        print(
+            f"Empirical AGC kernel: "
+            f"r = {r_empirical:.4f}, "
+            f"RMSE = {rmse_empirical:.4f}, "
+            f"MAE = {mae_empirical:.4f}"
+        )
+
+        print(
+            f"RMSE improvement = "
+            f"{100 * (rmse_exponential - rmse_empirical) / rmse_exponential:.2f}%"
+        )
+
+        print(
+            f"MAE improvement = "
+            f"{100 * (mae_exponential - mae_empirical) / mae_exponential:.2f}%"
+        )
+
+        plt.plot(
+            empirical_result["time"] - empirical_result["time"][0],
+            exponential_on_empirical_time,
+            label="Single exponential prediction"
+        )
+        plt.plot(
+            empirical_result["time"] - empirical_result["time"][0],
+            empirical_result["prediction"],
+            label="AGC-derived empirical-kernel prediction"
+        )
+        plt.xlabel("Time (s)")
+        plt.ylabel("Normalized value (z-score)")
+        plt.title("Camera score prediction: exponential vs AGC-derived kernel")
         plt.legend()
         plt.grid()
         plt.tight_layout()
@@ -574,15 +808,12 @@ def fit_agc_to_illuminance(video_paths, recording_paths):
         # PLOT CORRELATION VS LAG AT BEST TAU
         best_tau_idx = np.argmin(np.abs(filter_result["candidate_taus"] - filter_result["best_tau"]))
         correlations_at_best_tau = (filter_result["correlations"][best_tau_idx, :])
-
         plt.figure(figsize=(9, 5))
         plt.plot(filter_result["candidate_lags"], correlations_at_best_tau)
         plt.axvline(filter_result["best_lag"], linestyle="--",label=(f"Best lag = " f"{filter_result['best_lag']:.2f} s"))
-
         plt.xlabel("Camera lag relative to minispect (s)")
         plt.ylabel("Correlation")
         plt.title("Correlation vs temporal lag " "at best low-pass time constant")
-
         plt.legend()
         plt.grid()
         plt.tight_layout()
@@ -597,12 +828,10 @@ def fit_agc_to_illuminance(video_paths, recording_paths):
                 filter_result["candidate_taus"][0],
                 filter_result["candidate_taus"][-1]
             ])
-
         plt.colorbar(label="Correlation")
         plt.xlabel("Camera lag relative to minispect (s)")
         plt.ylabel("Low-pass time constant tau (s)")
         plt.title("Search for AGC temporal filter parameters")
-
         plt.tight_layout()
         plt.show()
 
@@ -715,7 +944,9 @@ def fit_agc_to_illuminance(video_paths, recording_paths):
             "as_time": as_time,
             "as_time_relative": as_time_relative,
             "as_values": as_values,
-            "as_dataframe": as_df
+            "as_dataframe": as_df,
+
+            "filter_result": filter_result
         }
 
         results_by_recording.append(
