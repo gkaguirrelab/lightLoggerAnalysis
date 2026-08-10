@@ -1929,7 +1929,9 @@ def world_metadata_from_chunks(recording_path: str,
         metadata[:, 0] /= ( 10 ** 9) 
 
     # Make a dataframe so that the columns are clearly labeled
-    metadata: pd.DataFrame = pd.DataFrame(metadata, columns=["timestamp"] + list(WORLD_AGC_METADATA_COLS))
+    # NOTE: Legacy columns are timestamp, AG, DG, EXP 
+    #       Modern columns are WORLD_AGC_METADATA_COLS
+    metadata: pd.DataFrame = pd.DataFrame(metadata, columns=["timestamp"] + (list(WORLD_AGC_METADATA_COLS) if metadata.shape[-1] == 6 else ["Again", "Dgain", "exposure"]))
 
     return metadata
 

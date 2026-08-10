@@ -62,6 +62,10 @@ function module = import_pyfile(path)
     setitem(module_name, module);
     spec.loader.exec_module(module);
 
+    % Reacquire the executed module so MATLAB builds its proxy after Python
+    % has populated the module's functions and other attributes.
+    module = py.importlib.import_module(module_name);
+
     % Return the imported module
     return ;
 

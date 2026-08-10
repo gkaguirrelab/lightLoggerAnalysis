@@ -279,7 +279,7 @@ function figureHandles = analyze_ms_linearity_data(calibration_metadata, measure
         [rows, cols] = find_min_figsize(n_detector_channels);
         % channeels we care about, coeffs(slope, intercept)
         if cc ==1
-            illum_to_MS = nan((n_detector_channels - 1), 2);
+              illum_to_MS = nan((n_detector_channels - 1), 2);
         end
 
 

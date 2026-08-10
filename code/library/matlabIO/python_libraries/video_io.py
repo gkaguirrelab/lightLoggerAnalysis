@@ -324,6 +324,87 @@ def inspect_video_frame_count(video_path: str) -> int:
     # Return the number of frames 
     return frame_num
 
+
+def mesaure_video_saturation(
+    video_path: str,
+    verbose: bool=False,
+) -> np.ndarray:
+    """Measure the proportion of saturated pixels in every video frame.
+
+    A grayscale pixel is saturated when its value equals 255. A color pixel
+    is saturated when any of its channels equals 255. Each returned value is
+    the number of saturated spatial pixels divided by the total number of
+    spatial pixels in that frame, so values range from 0.0 to 1.0.
+
+    Args:
+        video_path: Path to the video file to measure.
+        verbose: If True, display frame-level measurement progress.
+
+    Returns:
+        One-dimensional floating-point array containing the saturated-pixel
+        proportion for each decoded frame, in frame order.
+    """
+    assert os.path.exists(video_path), f"Video path: {video_path} does not exist"
+
+    # Open the video stream and fail immediately if OpenCV cannot decode the
+    # requested container.
+    video_stream: cv2.VideoCapture = cv2.VideoCapture(video_path)
+    if(not video_stream.isOpened()):
+        raise RuntimeError(f"Could not open video: {video_path}")
+
+    # Retrieve the expected frame count once and preallocate the complete
+    # output vector so no resizing is needed while the video is decoded.
+    num_frames: int = inspect_video_frame_count(video_path)
+    frame_saturation: np.ndarray = np.empty(num_frames, dtype=float)
+    frame_iterator: Iterable = (
+        tqdm(
+            range(num_frames),
+            desc="Measuring video saturation",
+            unit="frame",
+            leave=False,
+        )
+        if verbose is True
+        else range(num_frames)
+    )
+
+    try:
+        # Read sequentially and write each result directly into its frame-index
+        # location in the preallocated output vector.
+        for frame_num in frame_iterator:
+            success: bool
+            frame: np.ndarray | None
+            success, frame = video_stream.read()
+
+            # Returning a partially initialized vector would hide a corrupt or
+            # incorrectly reported video, so fail if any expected frame is lost.
+            if(not success or frame is None):
+                raise RuntimeError(
+                    f"Could not read frame {frame_num} of {num_frames} from: "
+                    f"{video_path}"
+                )
+
+            # Count spatial pixels rather than channel values. For color video,
+            # one or more saturated channels make that pixel saturated once.
+            frame_height: int = frame.shape[0]
+            frame_width: int = frame.shape[1]
+            num_pixels_in_frame: int = frame_height * frame_width
+            saturated_pixel_mask: np.ndarray = (
+                frame == 255
+                if frame.ndim == 2
+                else np.any(frame == 255, axis=-1)
+            )
+            num_saturated_pixels: int = int(np.count_nonzero(saturated_pixel_mask))
+            saturated_pixel_proportion: float = (
+                num_saturated_pixels / num_pixels_in_frame
+            )
+            frame_saturation[frame_num] = saturated_pixel_proportion
+    finally:
+        # Always release the decoder, including when frame processing raises.
+        video_stream.release()
+
+    return frame_saturation
+
+
 def extract_frames_from_video(video_path: str, 
                               frames_idx: Iterable, 
                               is_grayscale: bool=False
@@ -894,22 +975,76 @@ def world_chunks_to_video(recording_path: str,
     # Define the iterator we will use to iterate over the chunks 
     start_chunk: int = start_end[0]
     end_chunk: int = start_end[1] if start_end[1] != float("inf") else len(chunks_paths)
-    chunk_iterator: Iterable = range(start_chunk, end_chunk) if verbose is False else tqdm(range(start_chunk, end_chunk), desc="Processing chunks", leave=True)
+    selected_chunk_indices: list[int] = list(range(start_chunk, end_chunk))
+    chunk_iterator: Iterable = selected_chunk_indices if verbose is False else tqdm(selected_chunk_indices, desc="Processing chunks", leave=True)
 
-    # We should gather some information about the chunk sizes here. 
-    # We know that all chunks before the last chunk will be the same size, 
-    # with the last chunk potentially being smaller than the others. 
-    # Therefore, we can allocate arrays based on the size of the first chunk, 
-    # then just access slices of this if we need to for other things 
-    # For instance, we can do this with the final 
-    # Use read-only memmaps here because we only need lightweight metadata about the
-    # first chunk: shape, dtype, and total byte size. This avoids eagerly loading an
-    # entire first chunk into normal process RAM just to size the shared-memory
-    # buffers. The memmap object is cheap to create and does not read the full array
-    # contents unless they are actually accessed.
+    # World metadata has a recording-level schema. Older recordings store:
+    #     timestamp, Again, Dgain, Exposure
+    # Newer recordings store:
+    #     timestamp, then the full world_util.WORLD_AGC_METADATA_COLS vector
+    # The number of metadata rows can vary from chunk to chunk, but the number
+    # and meaning of columns should remain fixed within a recording.
+    legacy_world_metadata_cols: tuple[str, str, str, str] = ("timestamp", "Again", "Dgain", "Exposure")
+    full_world_metadata_cols: tuple[str, ...] = tuple(getattr(world_util, "WORLD_METADATA_COLS", ("timestamp",) + tuple(world_util.WORLD_AGC_METADATA_COLS)))
+    full_world_metadata_col_count: int = len(full_world_metadata_cols)
+    supported_world_metadata_col_counts: set[int] = {len(legacy_world_metadata_cols), full_world_metadata_col_count}
+
+    # Use the first selected chunk to identify the recording's metadata schema
+    # and array dtypes. This is intentionally a one-time schema decision: if a
+    # later chunk has a different column count, that indicates malformed or
+    # mixed-source chunk files rather than a layout we need to support.
     first_metadata_matrix_path, first_frame_buffer_path = chunks_paths[start_chunk]
     first_metadata: np.ndarray = np.load(first_metadata_matrix_path, mmap_mode='r')
     first_frame_buffer: np.ndarray = np.load(first_frame_buffer_path, mmap_mode='r')
+
+    assert first_metadata.ndim == 2, f"World metadata must be 2D. Path: {first_metadata_matrix_path}, shape: {first_metadata.shape}"
+    assert first_metadata.shape[1] in supported_world_metadata_col_counts, (
+        f"Unexpected world metadata column count {first_metadata.shape[1]} for {first_metadata_matrix_path}. "
+        f"Expected {len(legacy_world_metadata_cols)} legacy columns {legacy_world_metadata_cols} or "
+        f"{full_world_metadata_col_count} full columns {full_world_metadata_cols}."
+    )
+
+    recording_metadata_col_count: int = first_metadata.shape[1]
+    metadata_dtype: np.dtype = first_metadata.dtype
+    frame_dtype: np.dtype = first_frame_buffer.dtype
+    target_metadata_shape: tuple[int, int] = first_metadata.shape
+    target_frame_buffer_shape: tuple[int, ...] = first_frame_buffer.shape
+
+    # The shared-memory loader reuses fixed-size buffers for every chunk. To
+    # avoid the broadcast error that started this thread, scan the selected
+    # chunk headers and size those buffers to the largest row count we will see.
+    # Opening with mmap_mode='r' reads NumPy headers and exposes shape/dtype
+    # without pulling each full frame buffer into RAM.
+    for chunk_num in selected_chunk_indices:
+        metadata_matrix_path, frame_buffer_path = chunks_paths[chunk_num]
+        chunk_metadata: np.ndarray = np.load(metadata_matrix_path, mmap_mode='r')
+        chunk_frame_buffer: np.ndarray = np.load(frame_buffer_path, mmap_mode='r')
+
+        assert chunk_metadata.ndim == 2, f"World metadata must be 2D. Path: {metadata_matrix_path}, shape: {chunk_metadata.shape}"
+        assert chunk_metadata.shape[1] == recording_metadata_col_count, (
+            f"World metadata column count changed within recording from {recording_metadata_col_count} "
+            f"to {chunk_metadata.shape[1]}. Path: {metadata_matrix_path}"
+        )
+
+        assert chunk_metadata.dtype == metadata_dtype, (
+            f"World metadata dtype changed from {metadata_dtype} to {chunk_metadata.dtype}. "
+            f"Path: {metadata_matrix_path}"
+        )
+
+        assert chunk_frame_buffer.dtype == frame_dtype, (
+            f"World frame-buffer dtype changed from {frame_dtype} to {chunk_frame_buffer.dtype}. "
+            f"Path: {frame_buffer_path}"
+        )
+        assert chunk_frame_buffer.shape[1:] == target_frame_buffer_shape[1:], (
+            f"World frame shape changed from {target_frame_buffer_shape[1:]} to {chunk_frame_buffer.shape[1:]}. "
+            f"Path: {frame_buffer_path}"
+        )
+
+        target_metadata_shape = (max(target_metadata_shape[0], chunk_metadata.shape[0]), recording_metadata_col_count)
+        target_frame_buffer_shape = (max(target_frame_buffer_shape[0], chunk_frame_buffer.shape[0]),) + target_frame_buffer_shape[1:]
+
+    full_world_metadata_dgain_col: int = full_world_metadata_cols.index("AGCDgain")
+    legacy_world_metadata_dgain_col: int = legacy_world_metadata_cols.index("Dgain")
     
 
     # Next, we should allocate some shared memory buffers. 
@@ -919,8 +1054,10 @@ def world_chunks_to_video(recording_path: str,
     # This is the main fixed memory cost of the overlap strategy: enough shared memory
     # for 2 full metadata chunks and 2 full frame chunks. In exchange, the loader can
     # read the next chunk while the main process transforms/writes the current one.
-    metadata_shms: list[shared_memory.SharedMemory] = [shared_memory.SharedMemory(create=True, size=first_metadata.nbytes) for _ in range(2)]
-    frame_shms: list[shared_memory.SharedMemory] = [shared_memory.SharedMemory(create=True, size=first_frame_buffer.nbytes) for _ in range(2)]
+    metadata_buffer_nbytes: int = int(np.prod(target_metadata_shape)) * np.dtype(metadata_dtype).itemsize
+    frame_buffer_nbytes: int = int(np.prod(target_frame_buffer_shape)) * np.dtype(frame_dtype).itemsize
+    metadata_shms: list[shared_memory.SharedMemory] = [shared_memory.SharedMemory(create=True, size=metadata_buffer_nbytes) for _ in range(2)]
+    frame_shms: list[shared_memory.SharedMemory] = [shared_memory.SharedMemory(create=True, size=frame_buffer_nbytes) for _ in range(2)]
     free_buffer_queue: mp.Queue = mp.Queue()
     ready_buffer_queue: mp.Queue = mp.Queue()
     stop_event: object = mp.Event()
@@ -935,11 +1072,11 @@ def world_chunks_to_video(recording_path: str,
     # chunk reads or shipping large arrays through multiprocessing queues.
     loader_process: mp.Process = mp.Process(target=_load_world_chunk_shared_memory,
                                             args=(chunks_paths,
-                                                  list(range(start_chunk, end_chunk)),
-                                                  first_metadata.shape,
-                                                  first_metadata.dtype,
-                                                  first_frame_buffer.shape,
-                                                  first_frame_buffer.dtype,
+                                                  selected_chunk_indices,
+                                                  target_metadata_shape,
+                                                  metadata_dtype,
+                                                  target_frame_buffer_shape,
+                                                  frame_dtype,
                                                   [shm.name for shm in metadata_shms],
                                                   [shm.name for shm in frame_shms],
                                                   free_buffer_queue,
@@ -981,18 +1118,15 @@ def world_chunks_to_video(recording_path: str,
             # slice down to the valid region for this chunk. This is effectively
             # zero-copy at retrieval time: we are not duplicating the shared-memory
             # contents, only creating a local ndarray wrapper around them.
-            metadata: np.ndarray = np.ndarray(first_metadata.shape, dtype=first_metadata.dtype, buffer=metadata_shms[buffer_num].buf)[:metadata_len]
+            metadata: np.ndarray = np.ndarray(target_metadata_shape, dtype=metadata_dtype, buffer=metadata_shms[buffer_num].buf)[:metadata_len]
             
-            # Then, we will read in the timestamps and frame buffer for this chunk 
-            # World timestamps are in nanoseconds and thus must be converted to seconds 
-            # This line does allocate a fresh contiguous float64 timestamp vector,
-            # because we are converting units and standardizing dtype for downstream
-            # math. That cost is usually small compared with the frame-buffer copy and
-            # frame processing work.
-            t_vector: np.ndarray = np.ascontiguousarray(metadata[:, 0], dtype=np.float64) if convert_to_seconds is False else np.ascontiguousarray(metadata[:, 0], dtype=np.float64) / (10 ** 9) 
+            # Then, read the timestamps and frame buffer for this chunk. World
+            # timestamps are in nanoseconds and thus must be converted to seconds.
+            t_vector: np.ndarray = np.ascontiguousarray(metadata[:, 0], dtype=np.float64) if convert_to_seconds is False else np.ascontiguousarray(metadata[:, 0], dtype=np.float64) / (10 ** 9)
+
             # Like `metadata`, this is a direct view into the ready shared-memory slot.
             # No disk I/O occurs here and no additional full chunk copy is made yet.
-            frame_buffer: np.ndarray = np.ndarray(first_frame_buffer.shape, dtype=first_frame_buffer.dtype, buffer=frame_shms[buffer_num].buf)[:frame_buffer_len]
+            frame_buffer: np.ndarray = np.ndarray(target_frame_buffer_shape, dtype=frame_dtype, buffer=frame_shms[buffer_num].buf)[:frame_buffer_len]
             
             # Let's keep track of the current colorspace the video is in 
             current_color_space: Literal['BAYER', 'RGB', 'BGR'] = 'BAYER'
@@ -1078,8 +1212,11 @@ def world_chunks_to_video(recording_path: str,
             if(apply_digital_gain is True):
                 assert frame_buffer.dtype == np.float64, f"Frame buffer dtype must be float64 to apply dgain. Current dtype is {frame_buffer.dtype}"
 
-                # Extract the dgains of the buffers 
-                buffer_dgains: np.ndarray = metadata[:, 2]
+                # The two supported world metadata schemas name the digital gain
+                # column differently. The schema is fixed for this recording, so
+                # select the column index from the recording-level column count.
+                recording_dgain_col: int = full_world_metadata_dgain_col if recording_metadata_col_count == full_world_metadata_col_count else legacy_world_metadata_dgain_col
+                buffer_dgains: np.ndarray = metadata[:, recording_dgain_col]
                 
                 # Apply the digital gain IN PLACE
                 world_util.apply_digital_gain(frame_buffer, buffer_dgains)
@@ -1191,7 +1328,7 @@ def world_chunks_to_video(recording_path: str,
             
             # Find the total elapsed time in seconds between the two chunks 
             time_between_chunks: float = current_chunk_start_time - previous_chunk_end_time
-            assert time_between_chunks >= 0, f"Time btween chunks is somehow negative, Chunk 1: {previous_chunk_end_time}, Chunk 2: {current_chunk_start_time}"
+            assert time_between_chunks >= 0, f"Time between chunks is somehow negative, Chunk 1: {previous_chunk_end_time}, Chunk 2: {current_chunk_start_time}"
 
             # Calculate the number of missed frames as the elapsed time divided 
             # by the seconds per frame, minus one frame as we have to count the current frame 

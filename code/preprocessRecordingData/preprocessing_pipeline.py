@@ -3141,7 +3141,9 @@ def generate_tag_task_start_ends(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndo
                                  dst_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoorVideos2026",
                                  task_length_seconds: float = 4 * 60,
                                  subjects_to_skip: Iterable= set(),
+                                 subjects_to_process: Iterable= set(),
                                  activities_to_skip: Iterable= set(),
+                                 activities_to_process: Iterable= set(),
                                  overwrite_existing: bool=False, 
                                  verbose: bool=False, 
                                 ) -> dict[str, dict[str, bool]]:
@@ -3155,7 +3157,9 @@ def generate_tag_task_start_ends(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndo
         dst_dir: Path-like input for dst dir.
         task_length_seconds: Input value for task length seconds.
         subjects_to_skip: Input value for subjects to skip.
+        subjects_to_process: Subject IDs to include. An empty iterable includes all.
         activities_to_skip: Input value for activities to skip.
+        activities_to_process: Activity names to include. An empty iterable includes all.
         overwrite_existing: Input value for overwrite existing.
         verbose: Input value for verbose.
 
@@ -3166,7 +3170,11 @@ def generate_tag_task_start_ends(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndo
                                           for subject_name in os.listdir(src_dir) 
                                           if re.fullmatch(r"FLIC_\d+", subject_name) 
                                           and os.path.isdir(os.path.join(src_dir, subject_name))
-                                          if _extract_num_from_id(subject_name) not in subjects_to_skip
+                                          and _is_desired_item(
+                                              _extract_num_from_id(subject_name),
+                                              subjects_to_process,
+                                              subjects_to_skip,
+                                          )
                                          ]
                                         ) 
     assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
@@ -3180,25 +3188,21 @@ def generate_tag_task_start_ends(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndo
         # Retrieve the subject path and subject name
         subject_path: str = subject_paths[subject_num]
         subject_id: str = os.path.basename(subject_path)
-        subject_id_number: int = int(re.search("\d+", subject_id).group())
-
-        # Skip subjects we are not interested in examining 
-        if(subject_id_number in subjects_to_skip):
-            continue
 
         # Iterate over the activites for this subject 
         activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in natsorted(os.listdir(subject_path))
                                       if os.path.isdir(os.path.join(subject_path, filename))
+                                      and _is_desired_item(
+                                          filename,
+                                          activities_to_process,
+                                          activities_to_skip,
+                                      )
                                      ]
         activities_iterator: Iterable = range(len(activites_paths)) if verbose is False else tqdm(range(len(activites_paths)), desc="Processing Activities", leave=False)
         for activity_num in activities_iterator:
             # Retrieve the activity path and activity name
             activity_path: str = activites_paths[activity_num]
             activity_name: str = os.path.basename(activity_path)
-
-            # Skip desired activites 
-            if(activity_name in activities_to_skip):
-                continue 
 
             # Skip already created files if we want to skip them 
             tag_task_output_path: str = os.path.join(dst_dir, subject_id, activity_name, "tag_task_start_end.mat")
