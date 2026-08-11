@@ -22,11 +22,15 @@ from scipy.optimize import OptimizeResult, least_squares
 from tqdm.auto import tqdm
 
 THIS_FILE: Path = Path(__file__).resolve()
-LIGHT_LOGGER_ANALYSIS_ROOT: Path = THIS_FILE.parents[3]
+FIT_AGC_TO_ILLUMINANCE_DIR: Path = THIS_FILE.parent
+LIGHT_LOGGER_ANALYSIS_ROOT: Path = THIS_FILE.parents[2]
 PROJECTS_ROOT: Path = LIGHT_LOGGER_ANALYSIS_ROOT.parent
 LIGHT_LOGGER_ROOT: Path = PROJECTS_ROOT / "lightLogger"
 PI_UTILITY_DIR: Path = LIGHT_LOGGER_ROOT / "raspberry_pi_firmware" / "utility"
 SENSOR_UTILITY_DIR: Path = LIGHT_LOGGER_ANALYSIS_ROOT / "code" / "library" / "sensor_utility"
+CACHED_PROCESSING_DATA_DIR: Path = (
+    FIT_AGC_TO_ILLUMINANCE_DIR / "cached_processing_data"
+)
 VIDEO_IO_UTILITY_DIR: Path = (
     LIGHT_LOGGER_ANALYSIS_ROOT / "code" / "library" / "matlabIO" / "python_libraries"
 )
@@ -35,9 +39,14 @@ AGC_KERNEL_MAT_PATH: Path = (
     LIGHT_LOGGER_ANALYSIS_ROOT / "misc" / "agc_simulation" / "agc_empirical_kernels.mat"
 )
 FRAME_SATURATION_DATA_PATH: Path = (
-    LIGHT_LOGGER_ANALYSIS_ROOT
-    / "testoutput"
+    CACHED_PROCESSING_DATA_DIR
     / "frame_saturation_calibration_data.npz"
+)
+ILLUMINANCE_DIAGNOSTICS_OUTPUT_DIR: Path = (
+    CACHED_PROCESSING_DATA_DIR / "illuminance_channel_diagnostics"
+)
+LINEAR_SCALE_MAT_OUTPUT_PATH: Path = (
+    FIT_AGC_TO_ILLUMINANCE_DIR / "camera_agc_illuminance_linear_scale.mat"
 )
 
 for import_path in (PI_UTILITY_DIR, SENSOR_UTILITY_DIR, VIDEO_IO_UTILITY_DIR):
@@ -2549,7 +2558,7 @@ def _plot_frame_saturation_calibration(
     derivative is calculated within each complete video before these filters
     are applied. A saturation threshold of ``None`` retains all points.
     The displayed untransformed x/y vectors are also written to a MATLAB
-    struct on the user's Desktop.
+    struct beside the MATLAB fitting routine.
     """
 
     if (
@@ -2575,12 +2584,11 @@ def _plot_frame_saturation_calibration(
 
     figure: Any
     axes: np.ndarray
-    figure, axes = plt.subplots(1, 2, figsize=(20, 8))
+    figure, axes = plt.subplots(3, 2, figsize=(20, 22))
     axes_flat: np.ndarray = axes.ravel()
-    activity_figure: Any
-    activity_axes: np.ndarray
-    activity_figure, activity_axes = plt.subplots(1, 2, figsize=(20, 8))
-    activity_axes_flat: np.ndarray = activity_axes.ravel()
+    diagnostic_axes_flat: np.ndarray = axes_flat[0:2]
+    activity_axes_flat: np.ndarray = axes_flat[2:4]
+    high_correlation_axes_flat: np.ndarray = axes_flat[4:6]
 
     # Calculate the camera-score change separately within each complete video.
     # This preserves video boundaries and avoids threshold-induced jumps.
@@ -2735,11 +2743,42 @@ def _plot_frame_saturation_calibration(
     )
     derivative_colormap: Colormap = plt.get_cmap("RdBu_r")
 
-    # All panels use identical opaque filled circles. The top row uses
-    # continuous diagnostic colors; the bottom row highlights selected
-    # subject/activity combinations.
+    selected_recordings: list[dict[str, Any]] = [
+        recording_result
+        for recording_result in results_by_recording
+        if np.isfinite(recording_result["model_result"]["best_correlation"])
+        and recording_result["model_result"]["best_correlation"]
+        >= minimum_correlation
+    ]
+    selected_recording_indices: dict[int, int] = {
+        id(recording_result): recording_index
+        for recording_index, recording_result in enumerate(selected_recordings)
+    }
+    high_correlation_colors: list[tuple[float, float, float]] = (
+        _distinct_activity_colors(len(selected_recordings))
+    )
+    activity_markers: tuple[str, ...] = (
+        "o",
+        "s",
+        "^",
+        "D",
+        "v",
+        "P",
+        "X",
+        "<",
+        ">",
+        "*",
+    )
+
+    # All panels use the same display mask for a given recording. The first
+    # row uses continuous diagnostic colors, the second row highlights focal
+    # activity groups, and the third row shows the correlation-qualified
+    # calibration subset by recording and primary gain control.
     read_legend_labels: set[str] = set()
     sit_biopond_legend_labels: set[str] = set()
+    agc_type_legend_labels: set[str] = set()
+    high_correlation_camera_scores: list[np.ndarray] = []
+    high_correlation_illuminance: list[np.ndarray] = []
     for recording_index, recording_result in enumerate(results_by_recording):
         camera_score: np.ndarray = point_camera_score_arrays[recording_index]
         filtered_illuminance: np.ndarray = np.asarray(
@@ -2753,7 +2792,7 @@ def _plot_frame_saturation_calibration(
             recording_index
         ]
         display_valid: np.ndarray = display_masks[recording_index]
-        axes_flat[0].scatter(
+        diagnostic_axes_flat[0].scatter(
             camera_score[display_valid],
             filtered_illuminance[display_valid],
             c=saturation_percent[display_valid],
@@ -2765,7 +2804,7 @@ def _plot_frame_saturation_calibration(
             edgecolors="none",
             linewidths=0.0,
         )
-        axes_flat[1].scatter(
+        diagnostic_axes_flat[1].scatter(
             camera_score[display_valid],
             filtered_illuminance[display_valid],
             c=camera_score_derivative[display_valid],
@@ -2850,6 +2889,113 @@ def _plot_frame_saturation_calibration(
                 linewidths=0.0,
                 zorder=sit_zorder,
             )
+
+            selected_index: int | None = selected_recording_indices.get(
+                id(recording_result)
+            )
+            if selected_index is not None:
+                if (
+                    "analog_gain" in recording_result
+                    and "digital_gain" in recording_result
+                ):
+                    primary_gain: str | None = _primary_gain_control(
+                        recording_result["analog_gain"],
+                        recording_result["digital_gain"],
+                    )
+                else:
+                    primary_gain = None
+
+                if primary_gain is None:
+                    agc_type_color = "0.45"
+                    agc_type_label = "AGC type unavailable"
+                elif primary_gain == "analog":
+                    agc_type_color = "red"
+                    agc_type_label = "Analog-gain primary"
+                else:
+                    agc_type_color = "black"
+                    agc_type_label = "Digital-gain primary"
+                agc_type_display_label: str | None = (
+                    agc_type_label
+                    if agc_type_label not in agc_type_legend_labels
+                    else None
+                )
+                agc_type_legend_labels.add(agc_type_label)
+                recording_label: str = _recording_name_from_path(
+                    recording_result["recording_path"]
+                )
+                high_correlation_axes_flat[0].scatter(
+                    camera_score[display_valid],
+                    filtered_illuminance[display_valid],
+                    color=high_correlation_colors[selected_index],
+                    marker=activity_markers[
+                        selected_index % len(activity_markers)
+                    ],
+                    s=48,
+                    alpha=0.8,
+                    edgecolors="white",
+                    linewidths=0.25,
+                    label=recording_label,
+                )
+                high_correlation_axes_flat[1].scatter(
+                    camera_score[display_valid],
+                    filtered_illuminance[display_valid],
+                    color=agc_type_color,
+                    s=24,
+                    alpha=0.35,
+                    label=agc_type_display_label,
+                )
+                high_correlation_camera_scores.append(
+                    camera_score[display_valid]
+                )
+                high_correlation_illuminance.append(
+                    filtered_illuminance[display_valid]
+                )
+
+    nonempty_high_correlation_scores: list[np.ndarray] = [
+        camera_score
+        for camera_score in high_correlation_camera_scores
+        if camera_score.size > 0
+    ]
+    nonempty_high_correlation_illuminance: list[np.ndarray] = [
+        illuminance
+        for illuminance in high_correlation_illuminance
+        if illuminance.size > 0
+    ]
+    if len(nonempty_high_correlation_scores) > 0:
+        combined_high_correlation_camera_score: np.ndarray = np.concatenate(
+            nonempty_high_correlation_scores
+        )
+        combined_high_correlation_illuminance: np.ndarray = np.concatenate(
+            nonempty_high_correlation_illuminance
+        )
+        line_fit: dict[str, Any] = fit_illuminance_on_camera_score(
+            combined_high_correlation_camera_score,
+            combined_high_correlation_illuminance,
+        )
+        slope: float = line_fit["slope"]
+        intercept: float = line_fit["intercept"]
+        if np.isfinite(slope):
+            score_fit: np.ndarray = np.geomspace(
+                float(np.min(combined_high_correlation_camera_score)),
+                float(np.max(combined_high_correlation_camera_score)),
+                200,
+            )
+            illuminance_fit: np.ndarray = intercept + slope * score_fit
+            positive_fit: np.ndarray = (
+                np.isfinite(illuminance_fit) & (illuminance_fit > 0)
+            )
+            for ax in high_correlation_axes_flat:
+                ax.plot(
+                    score_fit[positive_fit],
+                    illuminance_fit[positive_fit],
+                    color="tab:blue",
+                    linewidth=2.5,
+                    label=(
+                        "Shared calibration fit: "
+                        f"illuminance = {intercept:.4g} "
+                        f"+ {slope:.4g} x score"
+                    ),
+                )
     # Fit one shifted reciprocal model to the correlation-qualified activities.
     # This retains the original raw-lux Huber objective and affine intercept;
     # only the added denominator offset differs from the original model.
@@ -2907,7 +3053,7 @@ def _plot_frame_saturation_calibration(
             positive_fit: np.ndarray = (
                 np.isfinite(illuminance_fit) & (illuminance_fit > 0)
             )
-            for ax in axes_flat:
+            for ax in diagnostic_axes_flat:
                 ax.plot(
                     score_fit[positive_fit],
                     illuminance_fit[positive_fit],
@@ -2916,27 +3062,28 @@ def _plot_frame_saturation_calibration(
                     zorder=4,
                 )
 
-    figure_title: str = (
-        "Camera AGC Product vs Filtered Illuminance "
-        "(shifted reciprocal AGC fit)"
-    )
+    figure_title: str = "Camera AGC Product vs Filtered Illuminance Diagnostics"
     if maximum_saturation_percent is not None:
         figure_title += f" (saturation <= {maximum_saturation_percent:g}%)"
     figure.suptitle(figure_title, fontsize=16)
-    axes_flat[0].set_title("Frame Spatial Saturation")
-    axes_flat[1].set_title("Camera AGC Product First Derivative")
-    activity_figure_title: str = "Read and SitBiopond Activity Highlights"
-    if maximum_saturation_percent is not None:
-        activity_figure_title += (
-            f" (saturation <= {maximum_saturation_percent:g}%)"
-        )
-    activity_figure.suptitle(activity_figure_title, fontsize=16)
+    diagnostic_axes_flat[0].set_title("Frame Spatial Saturation")
+    diagnostic_axes_flat[1].set_title("Camera AGC Product First Derivative")
     activity_axes_flat[0].set_title("Read Activities")
     activity_axes_flat[1].set_title("SitBiopond Activities")
+    high_correlation_axes_flat[0].set_title(
+        f"Correlation >= {minimum_correlation:.2f}: Activities by Name"
+    )
+    high_correlation_axes_flat[1].set_title(
+        f"Correlation >= {minimum_correlation:.2f}: Activities by AGC Type"
+    )
     if len(read_legend_labels) > 0:
         _set_legend_top_right(activity_axes_flat[0], fontsize=9)
     if len(sit_biopond_legend_labels) > 0:
         _set_legend_top_right(activity_axes_flat[1], fontsize=9)
+    if len(selected_recordings) > 0:
+        _set_legend_top_right(high_correlation_axes_flat[0], fontsize=8)
+    if len(agc_type_legend_labels) > 0:
+        _set_legend_top_right(high_correlation_axes_flat[1], fontsize=9)
     displayed_camera_score: np.ndarray = (
         np.concatenate(retained_camera_score_arrays)
         if len(retained_camera_score_arrays) > 0
@@ -2949,11 +3096,8 @@ def _plot_frame_saturation_calibration(
     )
     # Export exactly the displayed point cloud in its untransformed units.
     # MATLAB receives one scalar struct with no fit or recording metadata.
-    linear_scale_output_path: Path = (
-        Path.home() / "Desktop" / "camera_agc_illuminance_linear_scale.mat"
-    )
     savemat(
-        os.fspath(linear_scale_output_path),
+        os.fspath(LINEAR_SCALE_MAT_OUTPUT_PATH),
         {
             "linear_scale_data": {
                 "x_linear_scale": displayed_camera_score,
@@ -2964,7 +3108,7 @@ def _plot_frame_saturation_calibration(
         oned_as="column",
     )
 
-    for ax in itertools.chain(axes_flat, activity_axes_flat):
+    for ax in axes_flat:
         ax.set_xlabel("Camera AGC product (log scale)")
         ax.set_ylabel("Filtered illuminance (lux, log scale)")
         ax.set_xscale("log")
@@ -3000,7 +3144,7 @@ def _plot_frame_saturation_calibration(
     )
     saturation_colorbar: Any = figure.colorbar(
         saturation_mappable,
-        ax=axes_flat[0],
+        ax=diagnostic_axes_flat[0],
         pad=0.02,
     )
     saturation_colorbar.set_label("Frame spatial saturation (%)")
@@ -3016,7 +3160,7 @@ def _plot_frame_saturation_calibration(
     )
     derivative_colorbar: Any = figure.colorbar(
         derivative_mappable,
-        ax=axes_flat[1],
+        ax=diagnostic_axes_flat[1],
         pad=0.02,
     )
     derivative_colorbar.set_label(
@@ -3024,10 +3168,8 @@ def _plot_frame_saturation_calibration(
     )
 
     figure.tight_layout(rect=(0, 0, 1, 0.95))
-    activity_figure.tight_layout(rect=(0, 0, 1, 0.95))
     _draw_figure_now(figure)
-    _draw_figure_now(activity_figure)
-    return axes, activity_axes
+    return axes, activity_axes_flat
 
 
 def _save_frame_saturation_calibration_data(
@@ -3086,8 +3228,9 @@ def plot_frame_saturation_from_processed_data(
     Plot frame saturation calibration from previously processed recording data.
 
     The plotted linear-scale values are written to
-    ``~/Desktop/camera_agc_illuminance_linear_scale.mat`` as the fields
-    ``x_linear_scale`` and ``y_linear_scale`` of ``linear_scale_data``.
+    ``code/fitAGCtoIlluminance/camera_agc_illuminance_linear_scale.mat``
+    as the fields ``x_linear_scale`` and ``y_linear_scale`` of
+    ``linear_scale_data``.
 
     Args:
         processed_data_path: NumPy archive written by
@@ -3100,7 +3243,7 @@ def plot_frame_saturation_from_processed_data(
             start of every recording before plotting and fitting.
 
     Returns:
-        Diagnostic axes and separate activity-highlight axes.
+        Dashboard axes and the activity-highlight row axes.
     """
 
     source_path: Path = Path(processed_data_path).expanduser()
@@ -3355,7 +3498,7 @@ def _plot_all_recordings_diagnostics(
     Plot combined diagnostics across all recordings in one dashboard figure.
     """
 
-    figure, axes = plt.subplots(3, 3, figsize=(18, 13))
+    figure, axes = plt.subplots(4, 3, figsize=(18, 17))
     axes_flat: np.ndarray = axes.ravel()
     figure.suptitle("All Videos", fontsize=16)
 
@@ -3405,6 +3548,15 @@ def _plot_all_recordings_diagnostics(
             model_result["correlations"],
             label=label,
         )
+        saturation_percent: np.ndarray = (
+            np.asarray(recording_result["video_saturation"], dtype=float)
+            * 100.0
+        )
+        axes_flat[9].plot(
+            recording_result["saturation_time_relative"],
+            saturation_percent,
+            label=label,
+        )
 
     axes_flat[0].set_title("Camera AGC product")
     axes_flat[0].set_xlabel("Time (s)")
@@ -3443,6 +3595,12 @@ def _plot_all_recordings_diagnostics(
     axes_flat[8].tick_params(axis="x", rotation=45, labelsize=7)
     axes_flat[8].set_ylabel("Brightness-oriented AGC-product correlation")
     axes_flat[8].set_title("Empirical-model correlation")
+    axes_flat[9].set_title("World video saturation")
+    axes_flat[9].set_xlabel("Time since video start (s)")
+    axes_flat[9].set_ylabel("Saturated pixels (%)")
+    axes_flat[9].set_ylim(-10.0, 110.0)
+    axes_flat[10].axis("off")
+    axes_flat[11].axis("off")
 
     for ax in axes_flat:
         ax.grid()
@@ -3494,13 +3652,13 @@ def fit_agc_to_illuminance(
     10. Pool sparse filtered illuminance / camera-score observations.
     11. Robustly fit illuminance = intercept + slope * camera_score.
     12. Summarize each recording by subject ID and activity and plot the
-        shared empirical-kernel model across all recordings.
-    13. Plot the calibration observations with correlation >= 0.9, coloring
-        analog-gain-primary activities red and digital-gain-primary ones black.
-    14. Color every usable recording's individual calibration points by the
-        nearest frame's spatial saturation and plot every recording's
-        saturation time series in a standalone comparison. Save the unfiltered
-        point data so thresholded versions can be plotted without reprocessing.
+        shared empirical-kernel model across all recordings, including video
+        saturation time series.
+    13. Build one calibration-selection dashboard with saturation-colored
+        points, AGC-derivative-colored points, focal read / sitBiopond
+        highlights, and the correlation-qualified calibration subset.
+    14. Save the unfiltered point data so thresholded versions can be plotted
+        without reprocessing.
 
     Diagnostic runs additionally repeat the shared temporal model with the
     legacy nine-channel average, save both activity point clouds per recording,
@@ -3522,11 +3680,11 @@ def fit_agc_to_illuminance(
     eight-channel illuminance against the legacy nine-channel calculation for
     every recording. Full vectors are written beneath
     ``illuminance_diagnostics_output_dir``; when omitted, the default is
-    ``testoutput/illuminance_channel_diagnostics`` under the project root.
+    ``code/fitAGCtoIlluminance/cached_processing_data/illuminance_channel_diagnostics``.
     Plot-ready frame saturation data are saved to
     ``frame_saturation_data_output_path``; when omitted, the default is
-    ``testoutput/frame_saturation_calibration_data.npz`` under the project
-    root. Use :func:`plot_frame_saturation_from_processed_data` to apply a
+    ``code/fitAGCtoIlluminance/cached_processing_data/frame_saturation_calibration_data.npz``.
+    Use :func:`plot_frame_saturation_from_processed_data` to apply a
     saturation threshold later without rerunning this workflow.
     Every supplied recording path is processed and included in the saturation
     comparison plots.
@@ -3679,9 +3837,7 @@ def fit_agc_to_illuminance(
             diagnostic_output_dir: Path = (
                 Path(illuminance_diagnostics_output_dir)
                 if illuminance_diagnostics_output_dir is not None
-                else LIGHT_LOGGER_ANALYSIS_ROOT
-                / "testoutput"
-                / "illuminance_channel_diagnostics"
+                else ILLUMINANCE_DIAGNOSTICS_OUTPUT_DIR
             )
             diagnostic_output_path = (
                 diagnostic_output_dir
@@ -3999,7 +4155,7 @@ def fit_agc_to_illuminance(
     # finished, which made a slow combined plot look like a hang. Each stage
     # reports itself, and tqdm.write is used for messages so they print
     # above the bar instead of corrupting it.
-    number_of_finalization_steps: int = 8 if illuminance_diagnostics else 7
+    number_of_finalization_steps: int = 6 if illuminance_diagnostics else 5
     finalization_progress: Any = tqdm(
         total=number_of_finalization_steps,
         desc="Finalizing",
@@ -4018,7 +4174,8 @@ def fit_agc_to_illuminance(
     finalization_progress.update(1)
 
     # Per-recording dashboards are created above. This dashboard shows the
-    # across-recording relationships and shared empirical fit in one figure.
+    # across-recording relationships, shared empirical fit, and video
+    # saturation time series in one figure.
     finalization_progress.set_postfix_str("combined dashboard")
     shared_model_result["diagnostic_axes"] = _plot_all_recordings_diagnostics(
         usable_recordings,
@@ -4027,20 +4184,9 @@ def fit_agc_to_illuminance(
     )
     finalization_progress.update(1)
 
-    # Isolate the activities whose filtered illuminance tracks camera score
-    # strongly, then distinguish analog- and digital-driven gain variation.
-    finalization_progress.set_postfix_str("high-correlation calibration")
-    shared_model_result["high_correlation_axes"] = (
-        _plot_high_correlation_calibration(
-            usable_recordings,
-            minimum_correlation=0.9,
-        )
-    )
-    finalization_progress.update(1)
-
-    # Render continuous diagnostics and categorical activity highlights in
-    # separate figures so their legends and color scales do not compete.
-    finalization_progress.set_postfix_str("frame-saturation calibration")
+    # Render point-selection diagnostics, focal activity highlights, and the
+    # correlation-qualified calibration subset in one dashboard.
+    finalization_progress.set_postfix_str("calibration selection diagnostics")
     (
         shared_model_result["frame_saturation_axes"],
         shared_model_result["activity_highlight_axes"],
@@ -4082,14 +4228,6 @@ def fit_agc_to_illuminance(
             )
         )
         finalization_progress.update(1)
-
-    # Finish the plotting sequence with a standalone comparison of every
-    # recording, expressed as percent saturated pixels over time.
-    finalization_progress.set_postfix_str("saturation comparison")
-    shared_model_result["saturation_comparison_axis"] = (
-        _plot_all_video_saturation(results_by_recording)
-    )
-    finalization_progress.update(1)
 
     # One row per recording keyed by subject ID and activity, holding the
     # shared-model correlation and the center-panel calibration line. Errored
