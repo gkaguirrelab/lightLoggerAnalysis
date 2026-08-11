@@ -17,7 +17,7 @@ from matplotlib.axes import Axes
 from matplotlib.cm import ScalarMappable
 from matplotlib.colors import Colormap, Normalize, TwoSlopeNorm
 from numpy.lib.npyio import NpzFile
-from scipy.io import loadmat
+from scipy.io import loadmat, savemat
 from scipy.optimize import OptimizeResult, least_squares
 from tqdm.auto import tqdm
 
@@ -2404,19 +2404,152 @@ def _plot_high_correlation_calibration(
     return axes
 
 
+def _fit_shifted_reciprocal_illuminance(
+    camera_agc_product: np.ndarray,
+    illuminance: np.ndarray,
+) -> dict[str, float | int]:
+    """
+    Robustly fit an affine shifted reciprocal model using Huber loss.
+
+    The model is ``illuminance = intercept + numerator / (product + offset)``.
+    As in the original reciprocal fit, residuals are measured in untransformed
+    lux and the intercept is unconstrained. The numerator and denominator
+    offset are constrained to be nonnegative.
+    """
+
+    camera_agc_product = np.asarray(camera_agc_product, dtype=float)
+    illuminance = np.asarray(illuminance, dtype=float)
+    if camera_agc_product.shape != illuminance.shape:
+        raise ValueError(
+            "Camera AGC product and illuminance must have matching shapes."
+        )
+
+    # Log-scale plotting and reciprocal modeling both require positive paired
+    # observations, so remove unusable values before estimating parameters.
+    valid: np.ndarray = (
+        np.isfinite(camera_agc_product)
+        & (camera_agc_product > 0)
+        & np.isfinite(illuminance)
+        & (illuminance > 0)
+    )
+    valid_product: np.ndarray = camera_agc_product[valid]
+    valid_illuminance: np.ndarray = illuminance[valid]
+    n_samples: int = int(valid_product.size)
+    empty_fit: dict[str, float | int] = {
+        "intercept": np.nan,
+        "numerator": np.nan,
+        "denominator_offset": np.nan,
+        "r_squared": np.nan,
+        "residual_scale": np.nan,
+        "n_samples": n_samples,
+    }
+    if n_samples < 2 or np.ptp(valid_product) == 0:
+        return empty_fit
+
+    # Scale the large AGC products before nonlinear optimization. In scaled
+    # coordinates the model is intercept + beta / (product + gamma).
+    product_scale: float = float(np.median(valid_product))
+    scaled_product: np.ndarray = valid_product / product_scale
+    initial_coefficients: np.ndarray = np.polyfit(
+        1.0 / scaled_product,
+        valid_illuminance,
+        deg=1,
+    )
+    initial_beta: float = max(float(initial_coefficients[0]), 0.0)
+    initial_intercept: float = float(initial_coefficients[1])
+    initial_gamma: float = 0.0
+    initial_prediction: np.ndarray = (
+        initial_intercept + initial_beta / scaled_product
+    )
+
+    # Match the original fit by estimating the Huber transition from residuals
+    # in lux, before adding the denominator offset to the model.
+    initial_residual: np.ndarray = initial_prediction - valid_illuminance
+    residual_median: float = float(np.median(initial_residual))
+    median_absolute_deviation: float = float(
+        np.median(np.abs(initial_residual - residual_median))
+    )
+    residual_scale: float = 1.4826 * median_absolute_deviation
+    if residual_scale == 0:
+        residual_scale = np.sqrt(np.finfo(float).eps) * max(
+            float(np.max(np.abs(valid_illuminance))),
+            1.0,
+        )
+
+    def _shifted_reciprocal_residuals(
+        parameters: np.ndarray,
+    ) -> np.ndarray:
+        """Return raw-lux residuals for the shifted reciprocal model."""
+
+        intercept: float = float(parameters[0])
+        beta: float = float(parameters[1])
+        gamma: float = float(parameters[2])
+        return (
+            intercept
+            + beta / (scaled_product + gamma)
+            - valid_illuminance
+        )
+
+    fit_result: OptimizeResult = least_squares(
+        _shifted_reciprocal_residuals,
+        x0=np.array(
+            [initial_intercept, initial_beta, initial_gamma],
+            dtype=float,
+        ),
+        bounds=(
+            np.array([-np.inf, 0.0, 0.0], dtype=float),
+            np.array([np.inf, np.inf, np.inf], dtype=float),
+        ),
+        loss="huber",
+        f_scale=residual_scale,
+        x_scale="jac",
+    )
+    fitted_intercept: float = float(fit_result.x[0])
+    fitted_beta: float = float(fit_result.x[1])
+    fitted_gamma: float = float(fit_result.x[2])
+    fitted_illuminance: np.ndarray = (
+        fitted_intercept
+        + fitted_beta / (scaled_product + fitted_gamma)
+    )
+    residual_sum_squares: float = float(
+        np.sum((valid_illuminance - fitted_illuminance) ** 2)
+    )
+    total_sum_squares: float = float(
+        np.sum((valid_illuminance - np.mean(valid_illuminance)) ** 2)
+    )
+    r_squared: float = (
+        1.0 - residual_sum_squares / total_sum_squares
+        if total_sum_squares > 0
+        else np.nan
+    )
+    return {
+        "intercept": fitted_intercept,
+        "numerator": fitted_beta * product_scale,
+        "denominator_offset": fitted_gamma * product_scale,
+        "r_squared": r_squared,
+        "residual_scale": residual_scale,
+        "n_samples": n_samples,
+    }
+
+
 def _plot_frame_saturation_calibration(
     results_by_recording: Sequence[dict[str, Any]],
     minimum_correlation: float = 0.9,
     maximum_saturation_percent: float | None = None,
-) -> np.ndarray:
+    initial_samples_to_exclude: int = 0,
+) -> tuple[np.ndarray, np.ndarray]:
     """
-    Plot calibration points by saturation and camera-score derivative.
+    Plot calibration points by diagnostics and selected activity groups.
 
     Points above ``maximum_saturation_percent`` are excluded from both the
-    scatters and robust contextual reciprocal-AGC fit. Both plot axes use
-    logarithmic scales, so nonpositive camera products and illuminance values
-    are omitted. The derivative is calculated within each complete video
-    before this threshold is applied. A value of ``None`` retains all points.
+    scatters and robust contextual shifted-reciprocal AGC fit. Both axes
+    use logarithmic scales, so nonpositive camera products and illuminance
+    values are omitted. The first ``initial_samples_to_exclude`` observations
+    from each recording are also omitted from both plotting and fitting. The
+    derivative is calculated within each complete video before these filters
+    are applied. A saturation threshold of ``None`` retains all points.
+    The displayed untransformed x/y vectors are also written to a MATLAB
+    struct on the user's Desktop.
     """
 
     if (
@@ -2430,11 +2563,24 @@ def _plot_frame_saturation_calibration(
         raise ValueError(
             "maximum_saturation_percent must be between 0 and 100."
         )
+    if isinstance(initial_samples_to_exclude, bool) or not isinstance(
+        initial_samples_to_exclude,
+        (int, np.integer),
+    ):
+        raise TypeError("initial_samples_to_exclude must be an integer.")
+    if initial_samples_to_exclude < 0:
+        raise ValueError(
+            "initial_samples_to_exclude must be greater than or equal to 0."
+        )
 
     figure: Any
     axes: np.ndarray
     figure, axes = plt.subplots(1, 2, figsize=(20, 8))
     axes_flat: np.ndarray = axes.ravel()
+    activity_figure: Any
+    activity_axes: np.ndarray
+    activity_figure, activity_axes = plt.subplots(1, 2, figsize=(20, 8))
+    activity_axes_flat: np.ndarray = activity_axes.ravel()
 
     # Calculate the camera-score change separately within each complete video.
     # This preserves video boundaries and avoids threshold-induced jumps.
@@ -2462,7 +2608,7 @@ def _plot_frame_saturation_calibration(
             camera_score_derivative = np.gradient(camera_score)
         point_derivative_arrays.append(camera_score_derivative)
 
-    # Build one mask per recording. Both panels use these exact observations,
+    # Build one mask per recording. All panels use these exact observations,
     # while each panel's marker color is controlled by only its own metric.
     display_masks: list[np.ndarray] = []
     retained_camera_score_arrays: list[np.ndarray] = []
@@ -2507,6 +2653,14 @@ def _plot_frame_saturation_calibration(
             display_valid &= (
                 saturation_percent <= maximum_saturation_percent
             )
+
+        # Apply the index-based start exclusion independently to every video.
+        # Clipping naturally handles recordings shorter than the requested N.
+        excluded_sample_count: int = min(
+            initial_samples_to_exclude,
+            display_valid.size,
+        )
+        display_valid[:excluded_sample_count] = False
         display_masks.append(display_valid)
         if np.any(display_valid):
             retained_camera_score_arrays.append(
@@ -2581,8 +2735,11 @@ def _plot_frame_saturation_calibration(
     )
     derivative_colormap: Colormap = plt.get_cmap("RdBu_r")
 
-    # Both panels use identical opaque filled circles and no recording-level
-    # color. Saturation colors the left; score derivative colors the right.
+    # All panels use identical opaque filled circles. The top row uses
+    # continuous diagnostic colors; the bottom row highlights selected
+    # subject/activity combinations.
+    read_legend_labels: set[str] = set()
+    sit_biopond_legend_labels: set[str] = set()
     for recording_index, recording_result in enumerate(results_by_recording):
         camera_score: np.ndarray = point_camera_score_arrays[recording_index]
         filtered_illuminance: np.ndarray = np.asarray(
@@ -2621,10 +2778,81 @@ def _plot_frame_saturation_calibration(
             linewidths=0.0,
         )
 
-    # Fit illuminance as an affine function of reciprocal AGC product for the
-    # correlation-qualified activities. The points remain positioned by the
-    # natural product, so evaluating the fit over that product produces the
-    # expected inverse curve on the log-log axes.
+        if np.any(display_valid):
+            subject_id: str
+            activity: str
+            subject_id, activity = _recording_identity_from_path(
+                recording_result["recording_path"]
+            )
+
+            # Highlight subjects 1029 and 1034 among the read recordings.
+            # Every non-read activity remains a black background observation.
+            if activity != "read":
+                read_color: str = "black"
+                read_label: str = "Non-read activities"
+                read_zorder: int = 1
+            elif subject_id in {"1029", "1034"}:
+                read_color = "tab:red"
+                read_label = "1029 and 1034 read"
+                read_zorder = 3
+            else:
+                read_color = "tab:blue"
+                read_label = "Other read activities"
+                read_zorder = 2
+            read_display_label: str | None = (
+                read_label
+                if read_label not in read_legend_labels
+                else None
+            )
+            read_legend_labels.add(read_label)
+            activity_axes_flat[0].scatter(
+                camera_score[display_valid],
+                filtered_illuminance[display_valid],
+                color=read_color,
+                label=read_display_label,
+                marker="o",
+                s=78,
+                alpha=1.0,
+                edgecolors="none",
+                linewidths=0.0,
+                zorder=read_zorder,
+            )
+
+            # Apply the same grouping to sitBiopond, with subject 1034 as the
+            # red focal recording and every other sitBiopond recording blue.
+            if activity != "sitBiopond":
+                sit_color: str = "black"
+                sit_label: str = "Non-sitBiopond activities"
+                sit_zorder: int = 1
+            elif subject_id == "1034":
+                sit_color = "tab:red"
+                sit_label = "1034 sitBiopond"
+                sit_zorder = 3
+            else:
+                sit_color = "tab:blue"
+                sit_label = "Other sitBiopond activities"
+                sit_zorder = 2
+            sit_display_label: str | None = (
+                sit_label
+                if sit_label not in sit_biopond_legend_labels
+                else None
+            )
+            sit_biopond_legend_labels.add(sit_label)
+            activity_axes_flat[1].scatter(
+                camera_score[display_valid],
+                filtered_illuminance[display_valid],
+                color=sit_color,
+                label=sit_display_label,
+                marker="o",
+                s=78,
+                alpha=1.0,
+                edgecolors="none",
+                linewidths=0.0,
+                zorder=sit_zorder,
+            )
+    # Fit one shifted reciprocal model to the correlation-qualified activities.
+    # This retains the original raw-lux Huber objective and affine intercept;
+    # only the added denominator offset differs from the original model.
     pooled_camera_scores: list[np.ndarray] = []
     pooled_illuminance: list[np.ndarray] = []
     for recording_index, recording_result in enumerate(results_by_recording):
@@ -2649,15 +2877,23 @@ def _plot_frame_saturation_calibration(
             pooled_camera_scores
         )
         combined_illuminance: np.ndarray = np.concatenate(pooled_illuminance)
-        reciprocal_camera_score: np.ndarray = 1.0 / combined_camera_score
-        reciprocal_fit: dict[str, Any] = fit_illuminance_on_camera_score(
-            reciprocal_camera_score,
-            combined_illuminance,
+        shifted_reciprocal_fit: dict[str, float | int] = (
+            _fit_shifted_reciprocal_illuminance(
+                combined_camera_score,
+                combined_illuminance,
+            )
         )
-        reciprocal_slope: float = float(reciprocal_fit["slope"])
-        reciprocal_intercept: float = float(reciprocal_fit["intercept"])
-        if np.isfinite(reciprocal_slope) and np.isfinite(
-            reciprocal_intercept
+        fitted_intercept: float = float(
+            shifted_reciprocal_fit["intercept"]
+        )
+        numerator: float = float(shifted_reciprocal_fit["numerator"])
+        denominator_offset: float = float(
+            shifted_reciprocal_fit["denominator_offset"]
+        )
+        if (
+            np.isfinite(fitted_intercept)
+            and np.isfinite(numerator)
+            and np.isfinite(denominator_offset)
         ):
             score_fit: np.ndarray = np.geomspace(
                 float(np.min(combined_camera_score)),
@@ -2665,7 +2901,8 @@ def _plot_frame_saturation_calibration(
                 200,
             )
             illuminance_fit: np.ndarray = (
-                reciprocal_intercept + reciprocal_slope / score_fit
+                fitted_intercept
+                + numerator / (score_fit + denominator_offset)
             )
             positive_fit: np.ndarray = (
                 np.isfinite(illuminance_fit) & (illuminance_fit > 0)
@@ -2676,16 +2913,30 @@ def _plot_frame_saturation_calibration(
                     illuminance_fit[positive_fit],
                     color="tab:blue",
                     linewidth=2.5,
+                    zorder=4,
                 )
 
     figure_title: str = (
-        "Camera AGC Product vs Filtered Illuminance (reciprocal AGC fit)"
+        "Camera AGC Product vs Filtered Illuminance "
+        "(shifted reciprocal AGC fit)"
     )
     if maximum_saturation_percent is not None:
         figure_title += f" (saturation <= {maximum_saturation_percent:g}%)"
     figure.suptitle(figure_title, fontsize=16)
     axes_flat[0].set_title("Frame Spatial Saturation")
     axes_flat[1].set_title("Camera AGC Product First Derivative")
+    activity_figure_title: str = "Read and SitBiopond Activity Highlights"
+    if maximum_saturation_percent is not None:
+        activity_figure_title += (
+            f" (saturation <= {maximum_saturation_percent:g}%)"
+        )
+    activity_figure.suptitle(activity_figure_title, fontsize=16)
+    activity_axes_flat[0].set_title("Read Activities")
+    activity_axes_flat[1].set_title("SitBiopond Activities")
+    if len(read_legend_labels) > 0:
+        _set_legend_top_right(activity_axes_flat[0], fontsize=9)
+    if len(sit_biopond_legend_labels) > 0:
+        _set_legend_top_right(activity_axes_flat[1], fontsize=9)
     displayed_camera_score: np.ndarray = (
         np.concatenate(retained_camera_score_arrays)
         if len(retained_camera_score_arrays) > 0
@@ -2696,7 +2947,24 @@ def _plot_frame_saturation_calibration(
         if len(retained_illuminance_arrays) > 0
         else np.array([], dtype=float)
     )
-    for ax in axes_flat:
+    # Export exactly the displayed point cloud in its untransformed units.
+    # MATLAB receives one scalar struct with no fit or recording metadata.
+    linear_scale_output_path: Path = (
+        Path.home() / "Desktop" / "camera_agc_illuminance_linear_scale.mat"
+    )
+    savemat(
+        os.fspath(linear_scale_output_path),
+        {
+            "linear_scale_data": {
+                "x_linear_scale": displayed_camera_score,
+                "y_linear_scale": displayed_illuminance,
+            }
+        },
+        do_compression=True,
+        oned_as="column",
+    )
+
+    for ax in itertools.chain(axes_flat, activity_axes_flat):
         ax.set_xlabel("Camera AGC product (log scale)")
         ax.set_ylabel("Filtered illuminance (lux, log scale)")
         ax.set_xscale("log")
@@ -2756,8 +3024,10 @@ def _plot_frame_saturation_calibration(
     )
 
     figure.tight_layout(rect=(0, 0, 1, 0.95))
+    activity_figure.tight_layout(rect=(0, 0, 1, 0.95))
     _draw_figure_now(figure)
-    return axes
+    _draw_figure_now(activity_figure)
+    return axes, activity_axes
 
 
 def _save_frame_saturation_calibration_data(
@@ -2810,9 +3080,14 @@ def plot_frame_saturation_from_processed_data(
     processed_data_path: str | os.PathLike[str] = FRAME_SATURATION_DATA_PATH,
     maximum_saturation_percent: float | None = 40.0,
     minimum_correlation: float = 0.9,
-) -> np.ndarray:
+    initial_samples_to_exclude: int = 0,
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Plot frame saturation calibration from previously processed recording data.
+
+    The plotted linear-scale values are written to
+    ``~/Desktop/camera_agc_illuminance_linear_scale.mat`` as the fields
+    ``x_linear_scale`` and ``y_linear_scale`` of ``linear_scale_data``.
 
     Args:
         processed_data_path: NumPy archive written by
@@ -2821,9 +3096,11 @@ def plot_frame_saturation_from_processed_data(
             display and fit. Use ``None`` to retain every processed point.
         minimum_correlation: Minimum recording-level model correlation used
             when fitting the contextual robust calibration line.
+        initial_samples_to_exclude: Number of observations to omit from the
+            start of every recording before plotting and fitting.
 
     Returns:
-        Two axes containing saturation- and derivative-colored observations.
+        Diagnostic axes and separate activity-highlight axes.
     """
 
     source_path: Path = Path(processed_data_path).expanduser()
@@ -2894,6 +3171,7 @@ def plot_frame_saturation_from_processed_data(
         results_by_recording,
         minimum_correlation=minimum_correlation,
         maximum_saturation_percent=maximum_saturation_percent,
+        initial_samples_to_exclude=initial_samples_to_exclude,
     )
 
 
@@ -3760,10 +4038,13 @@ def fit_agc_to_illuminance(
     )
     finalization_progress.update(1)
 
-    # Render frame saturation in its own figure so its continuous color scale
-    # and larger markers are not constrained by the categorical subplots.
+    # Render continuous diagnostics and categorical activity highlights in
+    # separate figures so their legends and color scales do not compete.
     finalization_progress.set_postfix_str("frame-saturation calibration")
-    shared_model_result["frame_saturation_axis"] = (
+    (
+        shared_model_result["frame_saturation_axes"],
+        shared_model_result["activity_highlight_axes"],
+    ) = (
         _plot_frame_saturation_calibration(
             usable_recordings,
             minimum_correlation=0.9,
