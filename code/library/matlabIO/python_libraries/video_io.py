@@ -7,10 +7,12 @@ OCR-based event detection.
 """
 
 import numpy as np
+import pandas as pd
 import cv2
 import warnings
 import time
 import queue
+import matlab
 from natsort import natsorted
 from typing import Literal, Iterable
 import os
@@ -968,10 +970,6 @@ def world_chunks_to_video(recording_path: str,
         video_writer.release()
         return 
 
-    # Iterate over the chunks for this sensor 
-    previous_chunk_end_time: float = 0 
-    current_chunk_start_time: float = 0 
-
     # Define the iterator we will use to iterate over the chunks 
     start_chunk: int = start_end[0]
     end_chunk: int = start_end[1] if start_end[1] != float("inf") else len(chunks_paths)
@@ -1009,6 +1007,7 @@ def world_chunks_to_video(recording_path: str,
     frame_dtype: np.dtype = first_frame_buffer.dtype
     target_metadata_shape: tuple[int, int] = first_metadata.shape
     target_frame_buffer_shape: tuple[int, ...] = first_frame_buffer.shape
+    selected_real_frame_count: int = 0
 
     # The shared-memory loader reuses fixed-size buffers for every chunk. To
     # avoid the broadcast error that started this thread, scan the selected
@@ -1040,8 +1039,35 @@ def world_chunks_to_video(recording_path: str,
             f"Path: {frame_buffer_path}"
         )
 
+        selected_real_frame_count += len(chunk_metadata)
         target_metadata_shape = (max(target_metadata_shape[0], chunk_metadata.shape[0]), recording_metadata_col_count)
         target_frame_buffer_shape = (max(target_frame_buffer_shape[0], chunk_frame_buffer.shape[0]),) + target_frame_buffer_shape[1:]
+
+    # If there are no frames in the selected chunks, there is nothing for the writer to consume.
+    if selected_real_frame_count == 0:
+        frame_distribution: np.ndarray = np.empty(0, dtype=bool)
+
+    # When missing-frame filling is disabled, every selected output slot corresponds directly to a captured frame.
+    elif fill_missing_frames is False:
+        frame_distribution = np.ones(selected_real_frame_count, dtype=bool)
+
+    # Otherwise, generate the complete recording layout and slice out the part that belongs to the requested chunk range.
+    else:
+        full_frame_distribution: np.ndarray = world_util.generate_real_dummy_frame_distribution(recording_path)
+        full_real_frame_positions: np.ndarray = np.flatnonzero(full_frame_distribution)
+
+        # Count the real frames in earlier chunks so we can locate the first selected frame in the complete distribution.
+        real_frames_before_selection: int = sum(np.load(metadata_path, mmap_mode="r").shape[0] for metadata_path, _ in chunks_paths[:start_chunk])
+        assert real_frames_before_selection + selected_real_frame_count <= len(full_real_frame_positions), "Frame distribution contains fewer real frames than the selected metadata chunks"
+
+        # Begin exactly on the first selected real frame so a partial export never starts with dummy frames caused by an earlier gap. End immediately after the last selected real frame.
+        distribution_start: int = int(full_real_frame_positions[real_frames_before_selection])
+        last_selected_real_frame: int = real_frames_before_selection + selected_real_frame_count - 1
+        distribution_end: int = int(full_real_frame_positions[last_selected_real_frame]) + 1
+        frame_distribution = full_frame_distribution[distribution_start:distribution_end]
+
+    # Advance this cursor once for every dummy or real frame written to the output video.
+    distribution_index: int = 0
 
     full_world_metadata_dgain_col: int = full_world_metadata_cols.index("AGCDgain")
     legacy_world_metadata_dgain_col: int = legacy_world_metadata_cols.index("Dgain")
@@ -1320,39 +1346,10 @@ def world_chunks_to_video(recording_path: str,
             if(embed_timestamps is True):
                 raise NotImplementedError()
 
-            # Retrieve the current chunk start time 
-            current_chunk_start_time = t_vector[0]
-
-            # Before we write the frames for this chunk, we must write the dummy frame (if desired)
-            # for those frames between the previous chunk and the current chunk 
-            
-            # Find the total elapsed time in seconds between the two chunks 
-            time_between_chunks: float = current_chunk_start_time - previous_chunk_end_time
-            assert time_between_chunks >= 0, f"Time between chunks is somehow negative, Chunk 1: {previous_chunk_end_time}, Chunk 2: {current_chunk_start_time}"
-
-            # Calculate the number of missed frames as the elapsed time divided 
-            # by the seconds per frame, minus one frame as we have to count the current frame 
-            # as captured during this interval 
-            missed_frames: int = 0 if chunk_num == start_end[0] or fill_missing_frames is False else int( (time_between_chunks / (1/FPS ) ) -  1) 
-            if(missed_frames > 5 * FPS):
-                warnings.warn(f"Missed {missed_frames} between chunks. This may be unnaturally large")
-            missing_timestamps: np.ndarray = np.linspace(previous_chunk_end_time + (1/FPS), current_chunk_start_time, missed_frames, endpoint=False)
-
-            # Write the number of missing frames in between as the previous frame 
-            for missing_timestamp in missing_timestamps:
-                missing_frame: np.ndarray = world_util.embed_timestamp(dummy_frame, missing_timestamp) if embed_timestamps is True else dummy_frame
-                assert missing_frame.dtype == np.uint8 and ( len(missing_frame.shape) == 3 if debayer_images is True else len(missing_frame.shape) == 2 ) 
-                video_writer.write(missing_frame)
-
-            # Initialize variables to track the previous timestamp 
-            # We will use this delta with the current timestamp 
-            # to track dropped frames and add dummy frames in the meantime
-            previous_timestamp: float = t_vector[0]
-
             # Write frames to the video 
             frame_iterator: Iterable = range(len(frame_buffer)) if verbose is False else tqdm(range(len(frame_buffer)), desc="Processing frames", leave=False)
             for frame_num in frame_iterator:
-                timestamp, frame = t_vector[frame_num], frame_buffer[frame_num]
+                frame: np.ndarray = frame_buffer[frame_num]
 
                 # Assert the frame is of the appropriate type after transformation 
                 try:
@@ -1362,41 +1359,28 @@ def world_chunks_to_video(recording_path: str,
                     video_writer.release()
                     return 
 
-                # Otherwise, let's calculate the time delta between the current timestamp and the previous timestamp 
-                time_between_frames: float = timestamp - previous_timestamp
-                assert time_between_frames >= 0, f"Time between frames is somehow negative. Frame 1: {previous_timestamp}, Frame 2: {timestamp}"
+                # False entries before the next real frame represent timestamp gaps, so write one black dummy frame for each of them.
+                while distribution_index < len(frame_distribution) and not frame_distribution[distribution_index]:
+                    assert dummy_frame.dtype == np.uint8 and (len(dummy_frame.shape) == 3 if debayer_images is True else len(dummy_frame.shape) == 2)
+                    video_writer.write(dummy_frame)
+                    distribution_index += 1
 
-                # Calculate the number of missed frames as the elapsed time divided 
-                # by the seconds per frame, minus one frame as we have to count the current frame 
-                # as captured during this interval 
-                missed_frames: int = 0 if frame_num == 0 or fill_missing_frames is False else int( (time_between_frames / (1/FPS ) ) -  1) 
-                if(missed_frames > 5 * FPS):
-                    warnings.warn(f"Missed {missed_frames} frames between frames. This may be unaturally large")
-                missing_timestamps: np.ndarray = np.linspace(previous_timestamp + (1/FPS), timestamp, missed_frames, endpoint=False)
-
-                # Write the number of missing frames in between as the previous frame 
-                for missing_timestamp in missing_timestamps:
-                    missing_frame: np.ndarray = world_util.embed_timestamp(dummy_frame, missing_timestamp) if embed_timestamps is True else dummy_frame
-                    
-                    assert missing_frame.dtype == np.uint8 and ( len(missing_frame.shape) == 3 if debayer_images is True else len(missing_frame.shape) == 2 )
-                    video_writer.write(missing_frame)
+                # After consuming the dummy entries, the current distribution entry must be the slot for this captured frame.
+                assert distribution_index < len(frame_distribution) and frame_distribution[distribution_index], "Frame distribution does not contain a real slot for the current captured frame"
                 
                 # Write the current frame 
                 assert frame.dtype == np.uint8 and ( len(frame.shape) == 3 if debayer_images is True else len(frame.shape) == 2 )
                 video_writer.write(frame)
-
-                # Save the current timestamp as the previous timestamp
-                # so we can reference it for the next frame 
-                previous_timestamp = timestamp 
-            
-            # Save the end time of this chunk 
-            previous_chunk_end_time = t_vector[-1]
+                distribution_index += 1
 
             # Now that we are done processing this buffer, we can 
             # send it back to load another chunk 
             # This handoff point is what prevents the loader from overwriting a buffer
             # while the main process is still reading from it.
             free_buffer_queue.put(buffer_num)
+
+        # Every distribution entry should correspond to exactly one frame written above.
+        assert distribution_index == len(frame_distribution), f"Consumed {distribution_index} of {len(frame_distribution)} frame-distribution entries"
 
     # In any case of the function, 
     # we want to close the subprocess 
@@ -1418,6 +1402,138 @@ def world_chunks_to_video(recording_path: str,
         video_writer.release()
 
     return 
+
+def camera_scores_to_illuminance(camera_scores: np.ndarray, matlab_engine: object | None=None) -> np.ndarray:
+    """Fit and evaluate camera scores with the shared MATLAB implementation."""
+    # Start a MATLAB engine if one was not supplied by the caller.
+    need_to_initialize_matlab: bool = matlab_engine is None
+    if(need_to_initialize_matlab):
+        import matlab.engine
+        matlab_engine = matlab.engine.start_matlab()
+
+    # Add the shared fitting function's directory to the MATLAB path.
+    fit_directory: str = os.path.join(light_logger_analysis_dir_path, "code", "fitAGCtoIlluminance")
+    matlab_engine.addpath(fit_directory, nargout=0)
+
+    # Send the complete frame-aligned score vector through the exact MATLAB fit once.
+    try:
+        matlab_camera_scores: matlab.double = matlab.double(np.asarray(camera_scores, dtype=np.float64).reshape(1, -1).tolist())
+        matlab_illuminance: object = matlab_engine.fitCameraAGCToIlluminance(matlab_camera_scores, nargout=1)
+
+    finally:
+        # If we initialized the MATLAB engine here, quit it
+        if(need_to_initialize_matlab):
+            matlab_engine.quit()
+
+    return np.asarray(matlab_illuminance, dtype=np.float64).reshape(-1)
+
+
+def video_to_illuminance(path_to_video: str, path_to_raw: str, chunk_size: int=100, result_as_mean: bool=True, verbose: bool=False) -> np.ndarray:
+    """Convert a processed world video from linearized sensor values to lux.
+
+    The processed world video supplies linearized sensor values, while the
+    matching raw recording supplies analog gain, digital gain, and exposure.
+    Their product is converted to the illuminance represented by the camera's
+    AGC target. Every nonsaturated RGB channel value is then expressed relative
+    to the linearized target and converted to illuminance. The result can retain
+    these complete illuminance-valued frames or reduce each frame to its mean.
+    Dummy frames remain ``NaN``.
+
+    This assumes ``path_to_video`` was generated by the standard world-video
+    preprocessing pipeline with camera-response linearization enabled. A raw
+    or conventionally gamma-encoded video does not have the linear sensor
+    values required by this calculation.
+
+    Args:
+        path_to_video: Processed ``W.avi`` corresponding to ``path_to_raw``.
+        path_to_raw: Raw ``GKA`` recording directory containing world chunks,
+            metadata, and ``config.pkl``.
+        chunk_size: Number of video frames decoded per batch.
+        result_as_mean: Whether to return one mean illuminance per frame. When
+            ``False``, return every RGB frame with each channel expressed in lux.
+        verbose: Whether to show batch-level progress.
+
+    Returns:
+        A ``(frames,)`` float array of mean lux values when ``result_as_mean`` is
+        ``True``. Otherwise, a ``(frames, rows, columns, 3)`` float array in lux.
+        Dummy frames, fully saturated frames, and saturated spatial pixels are
+        represented by ``NaN``.
+    """
+    # Validate the batch size before loading any video or recording data.
+    if(chunk_size <= 0):
+        raise ValueError(f"chunk_size must be positive. Got {chunk_size}.")
+
+    # Load the frame-aligned AGC metadata from the video's matching raw recording.
+    num_frames: int = inspect_video_frame_count(path_to_video)
+    metadata: pd.DataFrame | np.ndarray = world_util.world_metadata_from_chunks(path_to_raw, verbose=verbose)
+
+    # Each metadata row must correspond directly to one real or dummy video frame.
+    if(len(metadata) != num_frames):
+        raise ValueError(f"Video has {num_frames} frames, but the frame-aligned world metadata contains {len(metadata)} rows.")
+
+    # Select the three AGC values used by the camera score for either metadata schema.
+    modern_score_columns: tuple[str, str, str] = ("cameraAgain", "AGCDgain", "cameraExposure")
+    legacy_score_columns: tuple[str, str, str] = ("Again", "Dgain", "exposure")
+    if(all(column in metadata.columns for column in modern_score_columns)):
+        score_columns = modern_score_columns
+    elif(all(column in metadata.columns for column in legacy_score_columns)):
+        score_columns = legacy_score_columns
+    else:
+        raise ValueError(f"World metadata does not contain a supported analog gain, digital gain, and exposure schema. Columns: {list(metadata.columns)}")
+
+    # Dummy frames are identified directly by NaN values in their AGC metadata columns.
+    metadata_settings: np.ndarray = metadata.loc[:, score_columns].to_numpy(dtype=np.float64)
+    real_frame_mask: np.ndarray = np.all(np.isfinite(metadata_settings), axis=1)
+
+    # Calculate camera scores for real frames and leave dummy-frame scores as NaN.
+    camera_scores: np.ndarray = np.full(num_frames, np.nan, dtype=np.float64)
+    camera_scores[real_frame_mask] = np.prod(metadata_settings[real_frame_mask], axis=1)
+
+    # Convert every camera score with the exact fitting procedure shared with the MATLAB analysis script.
+    reference_illuminance: np.ndarray = camera_scores_to_illuminance(camera_scores)
+
+    # Map the raw AGC target through the same response linearization already applied to the video.
+    linearized_agc_target: float = float(world_util.linearize_camera_responsivity(np.array([world_util.WORLD_AGC_DEFAULT_TARGET], dtype=np.float64), original_bit_depth=8)[0])
+
+    # Allocate either one scalar per frame or a complete RGB illuminance video.
+    video_frame_shape: tuple[int, int] = inspect_video_framesize(path_to_video)
+    result_shape: tuple[int, ...] = (num_frames,) if result_as_mean else (num_frames, *video_frame_shape, 3)
+    illuminance_values: np.ndarray = np.full(result_shape, np.nan, dtype=np.float64)
+    chunk_starts: Iterable = range(0, num_frames, chunk_size)
+
+    # Wrap the chunk iterator with progress reporting only when requested.
+    if(verbose is True):
+        chunk_starts = tqdm(chunk_starts, total=(num_frames + chunk_size - 1) // chunk_size, desc="Converting video to illuminance", unit="chunk", leave=False)
+
+    # Decode and process bounded frame batches so the full video is never held in memory.
+    for start in chunk_starts:
+        end: int = min(start + chunk_size, num_frames)
+        chunk_frames: np.ndarray = extract_frames_from_video(path_to_video, list(range(start, end)), is_grayscale=False)
+
+        # Map each local decoded frame back to its global video and metadata index.
+        for local_frame_idx, frame_idx in enumerate(range(start, end)):
+            # Dummy frames have no camera measurement and remain NaN in the output.
+            if(not real_frame_mask[frame_idx]):
+                continue
+
+            # Convert the already-linearized RGB frame to float without applying another response correction.
+            frame: np.ndarray = chunk_frames[local_frame_idx]
+
+            # Exclude a spatial pixel when any of its RGB channels is saturated.
+            nonsaturated_pixel_mask: np.ndarray = np.all(frame < 255, axis=-1)
+
+            # A completely saturated frame cannot provide a spatial illuminance estimate.
+            if(not np.any(nonsaturated_pixel_mask)):
+                continue
+
+            # Convert each nonsaturated RGB channel from linearized sensor units to absolute illuminance.
+            illuminance_frame: np.ndarray = np.full(frame.shape, np.nan, dtype=np.float64)
+            illuminance_frame[nonsaturated_pixel_mask] = reference_illuminance[frame_idx] * frame[nonsaturated_pixel_mask].astype(np.float64) / linearized_agc_target
+
+            # Return either the complete illuminance frame or its mean over all valid RGB values.
+            illuminance_values[frame_idx] = float(np.nanmean(illuminance_frame)) if result_as_mean else illuminance_frame
+
+    return illuminance_values
 
 
 def find_events(video_path: str,

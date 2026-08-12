@@ -59,16 +59,10 @@
 % below and then added to the plot. There is generally good agreement in
 % the form of these data.
 
-% Load the environmental data provided by Zach.
+% Run the shared fit and retrieve the cleaned environmental calibration data.
 analysisDir = fileparts(mfilename('fullpath'));
-load(fullfile(analysisDir, "camera_agc_illuminance_linear_scale.mat"));
-x_data = linear_scale_data.x_linear_scale;
-y_data = linear_scale_data.y_linear_scale;
-
-% Clean the data to ensure no zeros or negative values
-valid_idx = (x_data > 0) & (y_data > 0);
-sensitivity = x_data(valid_idx);
-illuminance = y_data(valid_idx);
+addpath(analysisDir);
+[~, best_p, sensitivity, illuminance] = fitCameraAGCToIlluminance([]);
 
 % Transform the data into log10 space
 log_x = log10(sensitivity);
@@ -79,18 +73,6 @@ log_y = log10(illuminance);
 % p(3) = m2 (slope 2), p(4) = xb (breakpoint in log10 space)
 piecewise_model = @(p, x) (x < p(4)) .* (p(1) .* x + p(2)) + ...
                           (x >= p(4)) .* (p(1) * p(4) + p(2) + p(3) .* (x - p(4)));
-
-% Objective function calculates the Sum of Absolute Errors (SAE / L1 Norm)
-% This ignores extreme outliers that would otherwise skew a squared-error fit.
-robust_func = @(p) sum(abs(log_y - piecewise_model(p, log_x)));
-
-% Provide initial guesses [m1, c1, m2, xb]
-mid_x = mean(log_x);
-initial_guess = [-0.5, 5, -1.5, mid_x]; 
-
-% Run the optimization using fminsearch
-options = optimset('MaxFunEvals', 10000, 'MaxIter', 10000);
-best_p = fminsearch(robust_func, initial_guess, options);
 
 % Extract optimized parameters
 m1 = best_p(1); c1 = best_p(2); m2 = best_p(3); xb = best_p(4);

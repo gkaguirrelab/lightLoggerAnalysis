@@ -8,6 +8,7 @@ from matplotlib.patches import Rectangle
 import cv2
 import os 
 import sys
+import warnings
 import pathlib
 from typing import Literal
 import pandas as pd
@@ -114,6 +115,9 @@ WORLD_CAMERA_CUSTOM_MODES: list[dict] = [
 ]
 
 WORLD_AGC_DEFAULT_TARGET: int = 127
+
+# Full-precision parameters [low-light slope, intercept, high-light slope, log10 breakpoint] from fitCameraAGCToIlluminance.m.
+CAMERA_AGC_ILLUMINANCE_PIECEWISE_FIT: tuple[float, float, float, float] = (-0.7811573674394614, 6.7241559168747713, -2.6098980163147898, 5.0864014693721744)
 
 # These contrast tables currently contain settings measured for an AGC
 # target of 127. Additional targets can be added as sibling keys.
@@ -1821,6 +1825,69 @@ def world_timestamps_from_chunks(recording_path: str,
         One-dimensional NumPy array of world-frame timestamps.
     """
     return world_metadata_from_chunks(recording_path, convert_to_seconds, verbose)["timestamp"].to_numpy()
+
+
+def generate_real_dummy_frame_distribution(path_to_video: str) -> np.ndarray:
+    """Identify the real and missing frames in a chunked world recording.
+
+    The returned array describes the frame sequence that a constant-frame-rate video needs in order to preserve the timing of the captured world frames. Every captured frame is represented by ``True``. Timestamp gaps large enough to imply dropped frames insert one or more ``False`` entries before the next captured frame.
+
+    Args:
+        path_to_video: Recording directory containing ``config.pkl`` and the world metadata chunks.
+
+    Returns:
+        One-dimensional Boolean array where ``True`` denotes a captured frame and ``False`` denotes a dummy frame needed to fill a timestamp gap.
+    """
+    # Read the nominal frame rate from the recording config. This is the cadence we expect the timestamps to follow.
+    config_filepath: str = os.path.join(path_to_video, "config.pkl")
+    assert os.path.exists(config_filepath), f"Config filepath does not exist: {config_filepath}"
+    with open(config_filepath, "rb") as config_file:
+        config_data: dict = dill.load(config_file)
+
+    recording_fps: float = config_data["sensors"]["W"]["sensor_mode"]["fps"]
+    assert recording_fps > 0, f"World camera FPS must be positive. Got: {recording_fps}"
+    frame_period_seconds: float = 1 / recording_fps
+
+    # Natural sorting keeps the timestamps in recording order when chunk numbers reach multiple digits.
+    metadata_paths: list[str] = natsorted([os.path.join(path_to_video, filename) for filename in os.listdir(path_to_video) if filename.startswith("world") and "metadata" in filename])
+    assert len(metadata_paths) > 0, f"0 world metadata chunks found @ {path_to_video}"
+
+    # Load only the timestamp column from each nonempty chunk. The source timestamps are nanoseconds, so convert them to seconds to match the writer's original calculation.
+    timestamp_chunks: list[np.ndarray] = []
+    for metadata_path in metadata_paths:
+        metadata: np.ndarray = np.load(metadata_path, mmap_mode="r")
+        assert metadata.ndim == 2 and metadata.shape[1] > 0, f"World metadata must be a 2D array with a timestamp column. Path: {metadata_path}, shape: {metadata.shape}"
+        if len(metadata) > 0:
+            timestamp_chunks.append(np.asarray(metadata[:, 0], dtype=np.float64) / (10 ** 9)) # convert to seconds
+
+    # An empty recording has no real or dummy frames to describe.
+    if len(timestamp_chunks) == 0:
+        return np.empty(0, dtype=bool)
+
+    # Concatenating the timestamps lets the loop detect gaps both within chunks and across chunk boundaries.
+    timestamps: np.ndarray = np.concatenate(timestamp_chunks)
+
+    # Build the writing plan in timestamp order. False entries are inserted before the real frame whose timestamp revealed the gap.
+    frame_distribution: list[bool] = []
+    previous_timestamp: float | None = None
+    for timestamp in timestamps:
+        if previous_timestamp is not None:
+            # Work out how many nominal frame periods fit between the two captured frames. Subtract one because the current timestamp belongs to a real frame that is appended below.
+            time_between_frames: float = timestamp - previous_timestamp
+            assert time_between_frames >= 0, f"World frame timestamps must be nondecreasing. Previous: {previous_timestamp}, current: {timestamp}"
+            missing_frame_count: int = max(0, int((time_between_frames / frame_period_seconds) - 1))
+
+            if missing_frame_count > 5 * recording_fps:
+                warnings.warn(f"Missed {missing_frame_count} frames between world frames. This may be unnaturally large")
+
+            # Every missing frame becomes a False entry immediately before the next real frame.
+            frame_distribution.extend([False] * missing_frame_count)
+
+        # Every timestamp came from captured metadata, so it always contributes one real frame.
+        frame_distribution.append(True)
+        previous_timestamp = timestamp
+
+    return np.array(frame_distribution, dtype=bool)
 
 # Given a recording path, return all frame metadata.
 def world_metadata_from_chunks(recording_path: str, 

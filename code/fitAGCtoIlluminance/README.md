@@ -21,6 +21,10 @@ quantity that will be available during ordinary video processing.
 - `fitEmpircalAGCtoIlluminance.m`: MATLAB routine that loads
   `camera_agc_illuminance_linear_scale.mat`, fits a robust piecewise
   log-log relationship, plots the result, and reports a conversion equation.
+- `fitCameraAGCToIlluminance.m`: Shared MATLAB function containing the exact
+  robust piecewise fitting procedure and conversion. It is called by both the
+  MATLAB plotting script and Python's `video_to_illuminance` through the MATLAB
+  Engine API.
 - `camera_agc_illuminance_linear_scale.mat`: Linear-scale x/y point cloud used
   by the MATLAB fitting routine. This file is intentionally stored at the top
   level of this analysis directory, not in the cache subfolder.
@@ -75,6 +79,35 @@ The Python diagnostic dashboard also shows a correlation-qualified contextual
 fit restricted to recordings with shared-model correlation at least 0.9. This
 contextual fit helps inspect the most temporally coherent recordings, but it
 does not change which points are written to `camera_agc_illuminance_linear_scale.mat`.
+
+## Applying the Fit to Video
+
+`video_to_illuminance` in
+`code/library/matlabIO/python_libraries/video_io.py` applies the final fit to a
+processed `W.avi` and its matching raw `GKA` directory. For each captured
+frame, it:
+
+1. Multiplies analog gain, digital gain, and exposure from the raw world
+   metadata.
+2. Converts that camera score to the illuminance represented by the AGC target
+   using the fitted continuous two-slope log-log equation.
+3. Computes the mean nonsaturated sensor value in the processed, linearized
+   RGB frame.
+4. Divides that mean by the linearized camera target and scales the fitted
+   frame illuminance by the resulting relative-intensity factor.
+
+Each valid RGB channel is converted to illuminance before any spatial
+reduction. By default, the result is one spatially averaged illuminance estimate
+in lux per video frame. Passing `result_as_mean=False` instead returns the full
+`(frames, rows, columns, 3)` array with every RGB channel expressed in lux.
+Inserted dummy frames, completely saturated frames, and saturated spatial
+pixels are represented by `NaN`. The function requires the standard processed
+world video with camera response linearization enabled; it is not valid for a
+raw or gamma-encoded video. The camera-score conversion is performed by
+`fitCameraAGCToIlluminance.m`, so video processing and the MATLAB diagnostic
+script always use the same fitting procedure and calibration point cloud. The
+linearized AGC target is calculated at runtime by passing the raw target of 127
+through `world_util.linearize_camera_responsivity`.
 
 ## Current Included Recordings
 
