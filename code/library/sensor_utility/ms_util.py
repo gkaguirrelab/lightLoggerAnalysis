@@ -8,9 +8,10 @@ loading, and accelerometer timestamp generation.
 
 import os
 import numpy as np 
+from pathlib import Path
 from natsort import natsorted 
 from tqdm.auto import tqdm
-from typing import Iterable
+from typing import Any, Iterable
 import sys
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -55,6 +56,87 @@ MS_NAMES_AND_CHANNELS: dict[str, int] = {sensor_name: num_channels
                                          for sensor_name, num_channels 
                                          in zip(MS_SENSOR_NAMES, (MS_AS_CHANNELS, MS_TS_CHANNELS, MS_LS_CHANNELS, MS_TEMP_CHANNELS))
                                         }
+
+
+def _write_illuminance_channel_diagnostics(output_path: str | os.PathLike[str], matlab_diagnostics: Any, timestamps: np.ndarray | None) -> None:
+    """Write the eight- and nine-channel diagnostic calculations to an archive."""
+    available: bool = bool(np.asarray(matlab_diagnostics["available"]).squeeze())
+    if(not available):
+        raise RuntimeError("MATLAB could not calculate the nine-channel illuminance diagnostics.")
+
+    raw_counts: np.ndarray = np.asarray(matlab_diagnostics["raw_counts"], dtype=float)
+    illuminance_by_channel: np.ndarray = np.asarray(matlab_diagnostics["illuminance_by_channel"], dtype=float)
+    lux_8_channels: np.ndarray = np.asarray(matlab_diagnostics["lux_8_channels"], dtype=float).reshape(-1)
+    lux_9_channels: np.ndarray = np.asarray(matlab_diagnostics["lux_9_channels"], dtype=float).reshape(-1)
+    difference_lux: np.ndarray = np.asarray(matlab_diagnostics["difference_8_minus_9_lux"], dtype=float).reshape(-1)
+    maximum_absolute_difference_lux: float = float(np.asarray(matlab_diagnostics["maximum_absolute_difference_lux"]).squeeze())
+    maximum_relative_difference: float = float(np.asarray(matlab_diagnostics["maximum_relative_difference"]).squeeze())
+    exactly_identical: bool = bool(np.asarray(matlab_diagnostics["exactly_identical"]).squeeze())
+    numerically_identical: bool = bool(np.asarray(matlab_diagnostics["numerically_identical"]).squeeze())
+    comparison_tolerance_lux: float = float(np.asarray(matlab_diagnostics["comparison_tolerance_lux"]).squeeze())
+
+    timestamp_array: np.ndarray = np.full(lux_8_channels.shape, np.nan, dtype=float) if timestamps is None else np.asarray(timestamps, dtype=float).reshape(-1)
+    if(timestamp_array.size != lux_8_channels.size):
+        raise ValueError("Diagnostic timestamps and illuminance vectors must have the same length.")
+
+    destination: Path = Path(output_path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(destination, timestamp=timestamp_array, raw_counts_8_channels=raw_counts[:, :8], converted_lux_per_channel_8_channels=illuminance_by_channel[:, :8], average_lux_8_channels=lux_8_channels, raw_counts_9_channels=raw_counts[:, :9], converted_lux_per_channel_9_channels=illuminance_by_channel[:, :9], average_lux_9_channels=lux_9_channels, difference_8_minus_9_lux=difference_lux, maximum_absolute_difference_lux=maximum_absolute_difference_lux, maximum_relative_difference=maximum_relative_difference, exactly_identical=exactly_identical, numerically_identical=numerically_identical, comparison_tolerance_lux=comparison_tolerance_lux)
+
+
+def ms_counts_to_illuminance(ms_counts: np.ndarray, diagnostics: bool=False, diagnostics_output_path: str | os.PathLike[str] | None=None, timestamps: np.ndarray | None=None, matlab_engine: object | None=None) -> np.ndarray:
+    """Convert minispect AS_0-AS_7 counts to illuminance using MATLAB."""
+    import matlab
+
+    # Validate and select the eight production spectral channels.
+    ms_counts = np.asarray(ms_counts, dtype=float)
+    if(ms_counts.ndim != 2 or ms_counts.shape[1] < 8):
+        raise ValueError(f"Minispect counts must be a 2-D array with at least 8 channels. Got shape {ms_counts.shape}.")
+    selected_counts: np.ndarray = ms_counts[:, :8]
+
+    # Preserve the sample timeline while excluding values that cannot enter the logarithmic calibration.
+    valid_samples: np.ndarray = np.all(np.isfinite(selected_counts) & (selected_counts > 0), axis=1)
+    illuminance: np.ndarray = np.full(len(ms_counts), np.nan, dtype=float)
+    if(not np.any(valid_samples)):
+        return illuminance
+    if(diagnostics and ms_counts.shape[1] < 9):
+        raise ValueError("Nine-channel diagnostics require at least 9 minispect channels.")
+
+    # Reuse a caller-owned MATLAB session when available, otherwise create one for this conversion.
+    need_to_initialize_engine: bool = matlab_engine is None
+    if(need_to_initialize_engine):
+        import matlab.engine as matlab_engine_module
+        matlab_engine = matlab_engine_module.start_matlab()
+        matlab_engine.tbUseProject("lightLoggerAnalysis", nargout=0)
+
+    # Diagnostics additionally require AS_8 for the legacy nine-channel comparison.
+    matlab_input_counts: np.ndarray = ms_counts[valid_samples] if diagnostics else selected_counts[valid_samples]
+    matlab_counts: matlab.double = matlab.double(matlab_input_counts.tolist())
+    if(diagnostics):
+        converted_illuminance: Any
+        matlab_diagnostics: Any
+
+        try:
+            converted_illuminance, matlab_diagnostics = matlab_engine.msCounts2Illuminance(matlab_counts, "diagnostics", True, "verbose", False, nargout=2)
+
+        finally:
+            if(need_to_initialize_engine):
+                matlab_engine.quit()
+
+        if(diagnostics_output_path is not None):
+            valid_timestamps: np.ndarray | None = None if timestamps is None else np.asarray(timestamps)[valid_samples]
+            _write_illuminance_channel_diagnostics(diagnostics_output_path, matlab_diagnostics, valid_timestamps)
+
+    else:
+        try:
+            converted_illuminance = matlab_engine.msCounts2Illuminance(matlab_counts, nargout=1)
+
+        finally:
+            if(need_to_initialize_engine):
+                matlab_engine.quit()
+
+    illuminance[valid_samples] = np.asarray(converted_illuminance, dtype=float).reshape(-1)
+    return illuminance
 
 
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""

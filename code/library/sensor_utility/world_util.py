@@ -1838,13 +1838,21 @@ def generate_real_dummy_frame_distribution(path_to_video: str) -> np.ndarray:
     Returns:
         One-dimensional Boolean array where ``True`` denotes a captured frame and ``False`` denotes a dummy frame needed to fill a timestamp gap.
     """
-    # Read the nominal frame rate from the recording config. This is the cadence we expect the timestamps to follow.
-    config_filepath: str = os.path.join(path_to_video, "config.pkl")
-    assert os.path.exists(config_filepath), f"Config filepath does not exist: {config_filepath}"
-    with open(config_filepath, "rb") as config_file:
-        config_data: dict = dill.load(config_file)
+    # Accept either the GKA recording directory itself or its parent activity directory.
+    gka_path: str = os.path.join(path_to_video, "GKA")
+    if(not os.path.exists(os.path.join(path_to_video, "config.pkl")) and os.path.isdir(gka_path)):
+        path_to_video = gka_path
 
-    recording_fps: float = config_data["sensors"]["W"]["sensor_mode"]["fps"]
+    # Read the nominal frame rate from the recording config, or use the standard 120 FPS fallback when it is unavailable.
+    config_filepath: str = os.path.join(path_to_video, "config.pkl")
+    if(os.path.exists(config_filepath)):
+        with open(config_filepath, "rb") as config_file:
+            config_data: dict = dill.load(config_file)
+        recording_fps: float = config_data["sensors"]["W"]["sensor_mode"]["fps"]
+    else:
+        warnings.warn(f"Config filepath does not exist: {config_filepath}. Assuming world-camera FPS is {WORLD_CAM_FPS}.", RuntimeWarning)
+        recording_fps = WORLD_CAM_FPS
+
     assert recording_fps > 0, f"World camera FPS must be positive. Got: {recording_fps}"
     frame_period_seconds: float = 1 / recording_fps
 
@@ -1917,12 +1925,22 @@ def world_metadata_from_chunks(recording_path: str,
         ``pandas.DataFrame`` with columns ``["timestamp", "Again",
         "Dgain", "exposure"]`` in frame order.
     """
+    # Accept either the GKA recording directory itself or its parent activity directory.
+    gka_path: str = os.path.join(recording_path, "GKA")
+    if(not os.path.exists(os.path.join(recording_path, "config.pkl")) and os.path.isdir(gka_path)):
+        recording_path = gka_path
+
+    # Read the configured frame rate, or use the standard 120 FPS fallback when the config file is unavailable.
     config_filepath: str = os.path.join(recording_path, "config.pkl")
-    assert os.path.exists(config_filepath), f"Config filepath does not exist: {config_filepath}"
-    config_data: dict | None = None
-    with open(config_filepath, 'rb') as f:
-        config_data = dill.load(f)
-    recording_fps: float = config_data['sensors']['W']['sensor_mode']['fps']
+    if(os.path.exists(config_filepath)):
+        with open(config_filepath, 'rb') as config_file:
+            config_data: dict = dill.load(config_file)
+        recording_fps: float = config_data['sensors']['W']['sensor_mode']['fps']
+    else:
+        warnings.warn(f"Config filepath does not exist: {config_filepath}. Assuming world-camera FPS is {WORLD_CAM_FPS}.", RuntimeWarning)
+        recording_fps = WORLD_CAM_FPS
+
+    assert recording_fps > 0, f"World camera FPS must be positive. Got: {recording_fps}"
     frame_period_ns: float = (10 ** 9) / recording_fps
 
     # First, let's find the world metadata chunks

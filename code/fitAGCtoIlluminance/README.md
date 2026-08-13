@@ -91,10 +91,11 @@ frame, it:
    metadata.
 2. Converts that camera score to the illuminance represented by the AGC target
    using the fitted continuous two-slope log-log equation.
-3. Computes the mean nonsaturated sensor value in the processed, linearized
-   RGB frame.
-4. Divides that mean by the linearized camera target and scales the fitted
-   frame illuminance by the resulting relative-intensity factor.
+3. Divides each nonsaturated value in the processed, linearized RGB frame by
+   the linearized camera target and scales the fitted frame illuminance by the
+   resulting relative-intensity factor.
+4. Optionally averages the resulting per-channel illuminance values to produce
+   one estimate per video frame.
 
 Each valid RGB channel is converted to illuminance before any spatial
 reduction. By default, the result is one spatially averaged illuminance estimate
@@ -108,6 +109,22 @@ raw or gamma-encoded video. The camera-score conversion is performed by
 script always use the same fitting procedure and calibration point cloud. The
 linearized AGC target is calculated at runtime by passing the raw target of 127
 through `world_util.linearize_camera_responsivity`.
+
+The function also loads minispect chunks from the matching raw GKA recording,
+selects the production spectral channels `AS_0-AS_7`, and converts their counts
+with `ms_util.ms_counts_to_illuminance`. This shared helper is also used during
+fitting and delegates calibration to MATLAB's `msCounts2Illuminance.m`. The
+function returns `(camera_illuminance, camera_t, ms_illuminance, ms_t)`, with
+each sensor retaining its native timestamps and sample rate. For a segmented
+video, MS samples are restricted to the selected camera interval. Passing
+`visualize_results=True` plots finite camera and MS samples against these real
+timestamps through `video_io.plot_video_illuminance`.
+
+When the processed video is a `tag` or `task` segment, `video_to_illuminance`
+loads the sibling `tag_task_start_end.mat` file and selects the matching field
+from its `tag_task_start_end` struct. These frame ranges are stored as
+one-based, inclusive MATLAB indices and are converted to a zero-based Python
+slice before the raw metadata are aligned with the segmented video.
 
 ## Current Included Recordings
 

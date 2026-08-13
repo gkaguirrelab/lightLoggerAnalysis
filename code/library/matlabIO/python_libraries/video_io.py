@@ -7,12 +7,12 @@ OCR-based event detection.
 """
 
 import numpy as np
+import matlab
 import pandas as pd
 import cv2
 import warnings
 import time
 import queue
-import matlab
 from natsort import natsorted
 from typing import Literal, Iterable
 import os
@@ -23,6 +23,7 @@ import dill
 import pathlib
 import sys
 from scipy.signal import find_peaks
+from scipy.io import loadmat
 import pytesseract
 import matplotlib.pyplot as plt
 import re
@@ -34,12 +35,21 @@ from numba import njit, prange
 # Import utility libraries
 light_logger_analysis_dir_path: str = os.path.expanduser("~/Documents/MATLAB/projects/lightLoggerAnalysis")
 world_util_path: str = os.path.join(light_logger_analysis_dir_path, "code", "library", "sensor_utility")
-for path in (light_logger_analysis_dir_path, world_util_path):
+light_logger_dir_path: str = os.path.join(os.path.dirname(light_logger_analysis_dir_path), "lightLogger")
+pi_utility_path: str = os.path.join(light_logger_dir_path, "raspberry_pi_firmware", "utility")
+for path in (light_logger_analysis_dir_path, world_util_path, pi_utility_path):
     assert os.path.exists(path), f"Expected path: {path} does not exist"
     sys.path.append(path)
 
 # Import world camera utility library
 import world_util
+from ms_util import ms_counts_to_illuminance
+
+
+def _resolve_gka_path(recording_path: str) -> str:
+    """Return the GKA recording directory for a GKA or activity-level path."""
+    gka_path: str = os.path.join(recording_path, "GKA")
+    return gka_path if os.path.isdir(gka_path) else recording_path
 
 def group_sensors_files(recording_path: str) -> dict[str, list[tuple]]:
     """Pair per-sensor chunk metadata files with their data payloads.
@@ -437,9 +447,6 @@ def extract_frames_from_video(video_path: str,
     extracted_frame_shape: tuple[int] = video_frame_shape if is_grayscale is True else tuple(list(video_frame_shape) + [3])
     extracted_frames: np.ndarray = np.empty((len(frames_idx), *extracted_frame_shape), dtype=np.uint8)
 
-
-    print(f"Expected frames shape: {extracted_frames.shape}")
-
     # Open the video via cv2 
     video_stream: cv2.VideoCapture = cv2.VideoCapture(video_path)
 
@@ -466,8 +473,6 @@ def extract_frames_from_video(video_path: str,
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         else:
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        
-        print(f"Frame shape")
 
         # Save the extracted frame 
         extracted_frames[extracted_frame_idx] = frame
@@ -1405,6 +1410,7 @@ def world_chunks_to_video(recording_path: str,
 
 def camera_scores_to_illuminance(camera_scores: np.ndarray, matlab_engine: object | None=None) -> np.ndarray:
     """Fit and evaluate camera scores with the shared MATLAB implementation."""
+
     # Start a MATLAB engine if one was not supplied by the caller.
     need_to_initialize_matlab: bool = matlab_engine is None
     if(need_to_initialize_matlab):
@@ -1428,7 +1434,65 @@ def camera_scores_to_illuminance(camera_scores: np.ndarray, matlab_engine: objec
     return np.asarray(matlab_illuminance, dtype=np.float64).reshape(-1)
 
 
-def video_to_illuminance(path_to_video: str, path_to_raw: str, chunk_size: int=100, result_as_mean: bool=True, verbose: bool=False) -> np.ndarray:
+def _load_ms_counts_and_timestamps(recording_path: str) -> tuple[np.ndarray, np.ndarray]:
+    """Load and flatten minispect AS values and timestamps from raw chunks."""
+    # Import the chunk parser only when minispect data are requested.
+    from Pi_util import parse_chunks
+
+    # Parse only minispect chunks from the resolved GKA recording directory.
+    gka_path: str = _resolve_gka_path(recording_path)
+    ms_chunks: list[dict] = parse_chunks(gka_path, convert_time_units=True, convert_to_float=True, chunk_ranges={"M": (0, None)})
+
+    # Retain nonempty AS arrays whose values and timestamps have matching lengths.
+    as_pairs: list[tuple[np.ndarray, np.ndarray]] = [(chunk["M"]["v"]["AS"], chunk["M"]["t"]["AS"]) for chunk in ms_chunks if len(chunk["M"]["v"]["AS"]) > 0]
+    if(len(as_pairs) == 0):
+        raise RuntimeError(f"No minispect AS data were found in: {gka_path}")
+    if(any(len(as_values) != len(as_time) for as_values, as_time in as_pairs)):
+        raise ValueError("AS value and timestamp lengths do not match within a minispect chunk.")
+
+    # Concatenate the chunks while preserving their native MS sampling timeline.
+    as_values: np.ndarray = np.vstack([as_values for as_values, _ in as_pairs])
+    as_time: np.ndarray = np.concatenate([as_time for _, as_time in as_pairs]).astype(np.float64)
+    return as_values, as_time
+
+
+def plot_video_illuminance(camera_illuminance: np.ndarray, camera_t: np.ndarray, ms_illuminance: np.ndarray, ms_t: np.ndarray) -> tuple[plt.Figure, plt.Axes]:
+    """Plot finite camera and minispect illuminance samples against time."""
+    # Normalize each input to a one-dimensional vector and validate paired lengths.
+    camera_illuminance = np.asarray(camera_illuminance, dtype=np.float64)
+    camera_t = np.asarray(camera_t, dtype=np.float64).reshape(-1)
+    ms_illuminance = np.asarray(ms_illuminance, dtype=np.float64).reshape(-1)
+    ms_t = np.asarray(ms_t, dtype=np.float64).reshape(-1)
+    if(camera_illuminance.ndim != 1):
+        raise ValueError(f"camera_illuminance must be one-dimensional for plotting. Got shape {camera_illuminance.shape}.")
+    if(len(camera_illuminance) != len(camera_t)):
+        raise ValueError("Camera illuminance and timestamp vectors must have the same length.")
+    if(len(ms_illuminance) != len(ms_t)):
+        raise ValueError("MS illuminance and timestamp vectors must have the same length.")
+
+    # Temporarily exclude zero camera values because virtual foveation uses black frames and fill for invalid gaze or blink periods.
+    zero_camera_samples: np.ndarray = np.isfinite(camera_illuminance) & (camera_illuminance == 0)
+    if(np.any(zero_camera_samples)):
+        warnings.warn(f"Excluding {int(np.sum(zero_camera_samples))} zero-valued camera illuminance samples from this plot because virtual foveation currently represents invalid gaze, blink, or blank-frame periods with black pixels. The returned camera illuminance values are unchanged.", RuntimeWarning)
+
+    # Remove zero and nonfinite camera samples and nonfinite MS samples before passing data to Matplotlib.
+    valid_camera_samples: np.ndarray = np.isfinite(camera_t) & np.isfinite(camera_illuminance) & (camera_illuminance > 0)
+    valid_ms_samples: np.ndarray = np.isfinite(ms_t) & np.isfinite(ms_illuminance)
+
+    # Plot both sensor signals on their measured timelines with independent samples preserved.
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.plot(camera_t[valid_camera_samples], camera_illuminance[valid_camera_samples], linewidth=1, label="Camera")
+    ax.plot(ms_t[valid_ms_samples], ms_illuminance[valid_ms_samples], linewidth=1, label="Minispect")
+    ax.set_title("Camera and minispect illuminance")
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("Illuminance (lux)")
+    ax.grid(alpha=0.3)
+    ax.legend()
+    fig.tight_layout()
+    return fig, ax
+
+
+def video_to_illuminance(path_to_video: str, path_to_raw: str, chunk_size: int=100, result_as_mean: bool=True, verbose: bool=False, visualize_results: bool=False, matlab_engine: object | None=None) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Convert a processed world video from linearized sensor values to lux.
 
     The processed world video supplies linearized sensor values, while the
@@ -1437,12 +1501,17 @@ def video_to_illuminance(path_to_video: str, path_to_raw: str, chunk_size: int=1
     AGC target. Every nonsaturated RGB channel value is then expressed relative
     to the linearized target and converted to illuminance. The result can retain
     these complete illuminance-valued frames or reduce each frame to its mean.
-    Dummy frames remain ``NaN``.
+    The matching minispect AS_0-AS_7 channels are independently converted to
+    illuminance on their native sampling timeline. Dummy camera frames remain
+    ``NaN``.
 
     This assumes ``path_to_video`` was generated by the standard world-video
     preprocessing pipeline with camera-response linearization enabled. A raw
     or conventionally gamma-encoded video does not have the linear sensor
-    values required by this calculation.
+    values required by this calculation. Segmented videos must contain either
+    ``tag`` or ``task`` in their filename and have a sibling
+    ``tag_task_start_end.mat`` file containing the corresponding MATLAB-indexed
+    inclusive frame range.
 
     Args:
         path_to_video: Processed ``W.avi`` corresponding to ``path_to_raw``.
@@ -1452,24 +1521,66 @@ def video_to_illuminance(path_to_video: str, path_to_raw: str, chunk_size: int=1
         result_as_mean: Whether to return one mean illuminance per frame. When
             ``False``, return every RGB frame with each channel expressed in lux.
         verbose: Whether to show batch-level progress.
+        visualize_results: Whether to display the camera and minispect
+            illuminance vectors after conversion. This requires
+            ``result_as_mean=True``.
+        matlab_engine: Optional caller-owned MATLAB engine to reuse. Engines
+            created by this function are closed before it returns.
 
     Returns:
-        A ``(frames,)`` float array of mean lux values when ``result_as_mean`` is
-        ``True``. Otherwise, a ``(frames, rows, columns, 3)`` float array in lux.
-        Dummy frames, fully saturated frames, and saturated spatial pixels are
-        represented by ``NaN``.
+        ``(camera_illuminance, camera_t, ms_illuminance, ms_t)``. Camera
+        illuminance is a ``(frames,)`` float array of mean lux values when
+        ``result_as_mean`` is ``True`` or a ``(frames, rows, columns, 3)``
+        float array otherwise. Each timestamp vector corresponds to its
+        sensor's illuminance output. Invalid samples and camera dummy or
+        saturated values are ``NaN``.
     """
     # Validate the batch size before loading any video or recording data.
     if(chunk_size <= 0):
         raise ValueError(f"chunk_size must be positive. Got {chunk_size}.")
+    if(visualize_results and not result_as_mean):
+        raise ValueError("visualize_results requires result_as_mean=True.")
+
+    # Initialize the MATLAB engine if one was not supplied by the caller.
+    need_to_initialize_engine: bool = matlab_engine is None
+    if(need_to_initialize_engine):
+        import matlab.engine
+        matlab_engine = matlab.engine.start_matlab()
+        matlab_engine.tbUseProject("lightLoggerAnalysis", nargout=0)
 
     # Load the frame-aligned AGC metadata from the video's matching raw recording.
     num_frames: int = inspect_video_frame_count(path_to_video)
     metadata: pd.DataFrame | np.ndarray = world_util.world_metadata_from_chunks(path_to_raw, verbose=verbose)
 
-    # Each metadata row must correspond directly to one real or dummy video frame.
+    # Segment the full-recording metadata when the input video contains only the tag or task interval.
     if(len(metadata) != num_frames):
-        raise ValueError(f"Video has {num_frames} frames, but the frame-aligned world metadata contains {len(metadata)} rows.")
+        video_name: str = os.path.basename(path_to_video).lower()
+        contains_tag: bool = "tag" in video_name
+        contains_task: bool = "task" in video_name
+        assert contains_tag != contains_task, f"Segmented video filename must contain exactly one of 'tag' or 'task': {path_to_video}"
+
+        # Load the start/end pair selected by the video filename from the sibling MATLAB struct.
+        segment_name: str = "tag" if contains_tag else "task"
+        segment_path: str = os.path.join(os.path.dirname(path_to_video), "tag_task_start_end.mat")
+        if(not os.path.exists(segment_path)):
+            raise FileNotFoundError(f"Segment metadata does not exist: {segment_path}")
+        segment_struct: object = loadmat(segment_path, squeeze_me=True, struct_as_record=False)["tag_task_start_end"]
+        matlab_start_end: np.ndarray = np.asarray(getattr(segment_struct, segment_name), dtype=np.int64).reshape(-1)
+        if(matlab_start_end.size != 2):
+            raise ValueError(f"Expected two {segment_name} frame indices in {segment_path}. Got: {matlab_start_end}")
+
+        # Convert MATLAB's one-based inclusive range to Python's zero-based half-open slice.
+        matlab_start: int = int(matlab_start_end[0])
+        matlab_end: int = int(matlab_start_end[1])
+        python_start: int = matlab_start - 1
+        python_end: int = matlab_end
+        if(matlab_start < 1 or matlab_end < matlab_start or python_end > len(metadata)):
+            raise ValueError(f"Invalid MATLAB frame range [{matlab_start}, {matlab_end}] for metadata with {len(metadata)} rows.")
+        metadata = metadata.iloc[python_start:python_end].reset_index(drop=True)
+
+    # The complete or segmented metadata must now correspond directly to the video frames.
+    if(len(metadata) != num_frames):
+        raise ValueError(f"Video has {num_frames} frames, but the selected world metadata contains {len(metadata)} rows.")
 
     # Select the three AGC values used by the camera score for either metadata schema.
     modern_score_columns: tuple[str, str, str] = ("cameraAgain", "AGCDgain", "cameraExposure")
@@ -1489,8 +1600,26 @@ def video_to_illuminance(path_to_video: str, path_to_raw: str, chunk_size: int=1
     camera_scores: np.ndarray = np.full(num_frames, np.nan, dtype=np.float64)
     camera_scores[real_frame_mask] = np.prod(metadata_settings[real_frame_mask], axis=1)
 
-    # Convert every camera score with the exact fitting procedure shared with the MATLAB analysis script.
-    reference_illuminance: np.ndarray = camera_scores_to_illuminance(camera_scores)
+    # Load minispect counts and restrict them to the same time interval as the selected camera metadata.
+    as_values: np.ndarray | None = None
+    as_time: np.ndarray | None = None
+    as_values, as_time = _load_ms_counts_and_timestamps(path_to_raw)
+    camera_time: np.ndarray = metadata["timestamp"].to_numpy(dtype=np.float64)
+    finite_camera_time: np.ndarray = camera_time[np.isfinite(camera_time)]
+    if(len(finite_camera_time) == 0):
+        raise ValueError("Selected camera metadata do not contain any finite timestamps.")
+    ms_time_mask: np.ndarray = np.isfinite(as_time) & (as_time >= finite_camera_time[0]) & (as_time <= finite_camera_time[-1])
+    selected_as_values: np.ndarray = as_values[ms_time_mask]
+    selected_as_time: np.ndarray = as_time[ms_time_mask]
+
+    # Share one MATLAB session across the camera-score fit and minispect count conversion.
+    try:
+        reference_illuminance: np.ndarray = camera_scores_to_illuminance(camera_scores, matlab_engine=matlab_engine)
+        ms_illuminance: np.ndarray = ms_counts_to_illuminance(selected_as_values, matlab_engine=matlab_engine)
+    finally:
+        # Close only the MATLAB engine initialized by this function.
+        if(need_to_initialize_engine):
+            matlab_engine.quit()
 
     # Map the raw AGC target through the same response linearization already applied to the video.
     linearized_agc_target: float = float(world_util.linearize_camera_responsivity(np.array([world_util.WORLD_AGC_DEFAULT_TARGET], dtype=np.float64), original_bit_depth=8)[0])
@@ -1523,7 +1652,8 @@ def video_to_illuminance(path_to_video: str, path_to_raw: str, chunk_size: int=1
             nonsaturated_pixel_mask: np.ndarray = np.all(frame < 255, axis=-1)
 
             # A completely saturated frame cannot provide a spatial illuminance estimate.
-            if(not np.any(nonsaturated_pixel_mask)):
+            # OR a completely 0 frame is likely a propogated dummy frame
+            if(not np.any(nonsaturated_pixel_mask) or not np.any(frame > 0)):
                 continue
 
             # Convert each nonsaturated RGB channel from linearized sensor units to absolute illuminance.
@@ -1533,7 +1663,12 @@ def video_to_illuminance(path_to_video: str, path_to_raw: str, chunk_size: int=1
             # Return either the complete illuminance frame or its mean over all valid RGB values.
             illuminance_values[frame_idx] = float(np.nanmean(illuminance_frame)) if result_as_mean else illuminance_frame
 
-    return illuminance_values
+    # Optionally display the two finite illuminance signals on their native timestamp vectors.
+    if(visualize_results):
+        plot_video_illuminance(illuminance_values, camera_time, ms_illuminance, selected_as_time)
+        plt.show()
+
+    return illuminance_values, camera_time, ms_illuminance, selected_as_time
 
 
 def find_events(video_path: str,
