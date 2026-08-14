@@ -610,7 +610,7 @@ def debayer(image_or_video: np.ndarray,
     # for the debayering. This is the same shame as the 
     # input buffer, but with RGB channels dimension        
     debayered: np.ndarray = np.empty(tuple(list(image_or_video.shape) + [3]), dtype=image_or_video.dtype)
-    
+
     # If we passed in a single image, just generate that single image, 
     # otherwise, populate the buffer 
     if(image_or_video.ndim == 2):
@@ -1896,6 +1896,105 @@ def generate_real_dummy_frame_distribution(path_to_video: str) -> np.ndarray:
         previous_timestamp = timestamp
 
     return np.array(frame_distribution, dtype=bool)
+
+def world_frame_to_visual_angle(world_frame: np.ndarray, matlab_engine: object | None=None) -> np.ndarray:
+    """Map each raw world-camera pixel to azimuth and elevation in degrees.
+
+    The frame values are not used; its spatial dimensions define the pixel
+    coordinates evaluated with the calibrated fisheye model. The returned
+    array has shape ``(rows, columns, 2)``, where the final axis contains
+    ``[azimuth_degrees, elevation_degrees]`` for the corresponding input
+    pixel.
+
+    Args:
+        world_frame: Raw Bayer ``(rows, columns)`` or spatially equivalent
+            ``(rows, columns, channels)`` world-camera frame.
+
+    Returns:
+        A float64 array with shape ``(rows, columns, 2)`` containing the
+        calibrated visual-angle coordinate at every spatial pixel.
+    """
+    # The calibration applies only to full-size raw world-camera coordinates.
+    world_frame = np.asarray(world_frame)
+    if(world_frame.ndim not in (2, 3)):
+        raise ValueError(f"world_frame must have shape (rows, columns) or (rows, columns, channels). Got {world_frame.shape}.")
+
+    rows: int = int(world_frame.shape[0])
+    columns: int = int(world_frame.shape[1])
+    expected_shape: tuple[int, int] = (480, 640)
+    if((rows, columns) != expected_shape):
+        raise ValueError(f"world_frame spatial shape must match the calibrated raw camera shape {expected_shape}. Got {(rows, columns)}.")
+
+    # Match MATLAB's one-based [x, y] image coordinates at every pixel center.
+    x_coordinates: np.ndarray | None = None
+    y_coordinates: np.ndarray | None = None
+    x_coordinates, y_coordinates = np.meshgrid(np.arange(1, columns + 1, dtype=np.float64), np.arange(1, rows + 1, dtype=np.float64))
+    sensor_points: np.ndarray = np.column_stack((x_coordinates.reshape(-1), y_coordinates.reshape(-1)))
+
+    # Resolve and validate the MATLAB function and calibration paths before starting MATLAB.
+    project_root: pathlib.Path = pathlib.Path(__file__).resolve().parents[3]
+    intrinsics_path: pathlib.Path = project_root / "data" / "intrinsics_calibration.mat"
+    if(not intrinsics_path.is_file()):
+        raise FileNotFoundError(f"World-camera intrinsics calibration does not exist: {intrinsics_path}")
+
+    # Load the calibrated fisheye object and call the shared MATLAB conversion.
+    need_to_initialize_engine: bool = matlab_engine is None
+    if(need_to_initialize_engine):
+        import matlab.engine as matlab_engine_module
+        matlab_engine = matlab_engine_module.start_matlab()
+        matlab_engine.tbUseProject('lightLoggerAnalysis', nargout=0)
+
+    # Generate the visual field points.
+    try:
+        calibration_data: dict = matlab_engine.load(os.fspath(intrinsics_path), "camera_intrinsics_calibration", nargout=1)
+        calibration_results: object = calibration_data["camera_intrinsics_calibration"]["results"]
+        fisheye_intrinsics: object = matlab_engine.getfield(calibration_results, "Intrinsics", nargout=1)
+        visual_field_points: object = matlab_engine.anglesFromIntrinsics(matlab.double(sensor_points.tolist()), fisheye_intrinsics, nargout=1)
+    finally:
+        if(need_to_initialize_engine):
+            matlab_engine.quit()
+
+    # Reshape so they are the same shape as the world frame
+    return np.asarray(visual_field_points, dtype=np.float64).reshape(rows, columns, 2)
+
+def world_frame_visual_angle_to_steradians(world_frame_visual_angle: np.ndarray) -> np.ndarray:
+    """Convert a visual-angle coordinate image into steradians per pixel.
+
+    Args:
+        world_frame_visual_angle: Float array shaped ``(rows, columns, 2)``.
+            The final axis must contain ``[azimuth_degrees,
+            elevation_degrees]`` as returned by
+            :func:`world_frame_to_visual_angle`.
+
+    Returns:
+        A float64 array shaped ``(rows, columns)`` containing the local solid
+        angle subtended by each spatial pixel in steradians.
+
+    Notes:
+        The input gives angular coordinates at pixel centers rather than
+        pixel corners. Solid angle is therefore evaluated from finite
+        differences of the corresponding unit-direction field. Summing the
+        result approximates the full calibrated camera field of view.
+    """
+    # Validate the azimuth/elevation image before calculating spatial derivatives.
+    visual_angle: np.ndarray = np.asarray(world_frame_visual_angle, dtype=np.float64)
+    if(visual_angle.ndim != 3 or visual_angle.shape[2] != 2):
+        raise ValueError(f"world_frame_visual_angle must have shape (rows, columns, 2). Got {visual_angle.shape}.")
+
+    # Convert each azimuth/elevation coordinate into its 3-D unit viewing direction.
+    azimuth: np.ndarray = np.deg2rad(visual_angle[:, :, 0])
+    elevation: np.ndarray = np.deg2rad(visual_angle[:, :, 1])
+    cos_elevation: np.ndarray = np.cos(elevation)
+    unit_directions: np.ndarray = np.stack((cos_elevation * np.sin(azimuth), -np.sin(elevation), cos_elevation * np.cos(azimuth)), axis=-1)
+
+    # The cross product of the row and column direction derivatives is the local spherical-area Jacobian.
+    edge_order: int = 2 if visual_angle.shape[0] >= 3 and visual_angle.shape[1] >= 3 else 1
+    direction_change_per_row: np.ndarray = np.gradient(unit_directions, axis=0, edge_order=edge_order)
+    direction_change_per_column: np.ndarray = np.gradient(unit_directions, axis=1, edge_order=edge_order)
+    steradians_per_pixel: np.ndarray = np.linalg.norm(np.cross(direction_change_per_column, direction_change_per_row), axis=-1)
+
+    return steradians_per_pixel
+
 
 # Given a recording path, return all frame metadata.
 def world_metadata_from_chunks(recording_path: str, 
