@@ -1,1 +1,1 @@
-Stored here are results of various calibration operations. These files are subsequently used in the processing pipeline of recordings using the light logger.
+Stored here are results of various calibration operations. These parameters are subsequently used in the processing pipeline of recordings using the light logger.
