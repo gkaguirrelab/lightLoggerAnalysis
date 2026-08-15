@@ -1,0 +1,14 @@
+Data collected using the IMX219 camera are passed through a pre-processing pipeline. The routines in this directory were used to characterize the properties of the camera needed to create this pipeline.
+
+We have configured the IMX219 to save RAW, 8-bit images (640x480). Camera sensitivity is under the control of a custom automatic gain control that operates upon the mean sensor value across each image frame, adjusting analog and digital gain, and exposure time. The camera chip is behind a fisheye lens, which produces both spatial variation in image intensity and image distortion. The chip has R, G, and B sensors, which differ in their radiometric sensitivity.
+
+The processing pipeline adjusts the data to account for these properties of the measurement. In order of application, we characterize:
+
+defineFullWellCapacityEffect -- The camera chip reports sensor values that are linearly related to photon capture within each photodiode well. There is a roll-off in this linear function, however, at high sensor values which we attribute to a "full well capacity" effect. To characterize this effect, we measured camera sensor values across an ~1.4 log unit range. This routine analyzes these measurements, and demonstrates that the sensor values are well described by a saturating exponential function. This function is then used to implement a a linearization function that transforms raw sensor values to a linearized form. In practice, this adjusts the original value range of 16-254 to the linearized range of 0-254 (removing the dark value).
+
+defineFlatFieldingFunction -- 
+
+defineRadiometricCorrection -- The R, G, and B channels on the camera chip are created by placing each pixel behind a transmittance filter that limits the spectral sensitivity of that class of photodiode. The sensor values reported by the chip across the channel classes do not necessarily reflect the relative radiometric intensity of light falling upon the sensor for each class. To correct for this, we...
+
+defineAGCToMeanLuminance -- The camera chip reports 8 bit sensor values. These values reflect variation in radiance across the scene around the set-point of the automatic gain control. Before linearization, a sensor value of 127 represents the mid-point of the sensor range and is the set-point target of the AGC. The linearization step maps 127 --> 57. We wish to express the sensor values in absolute radiometric units, instead of relative sensor values. In this routine we characterize how AGC settings are related to the mean luminance of the field to which the camera is exposed. With knowledge of this relationship, we can use the AGC settings to identify the set-point of the camera in units of luminance, and then interpret each pixel as absolute luminance using: AGC mean luminance * (pixel value / 57).
+
