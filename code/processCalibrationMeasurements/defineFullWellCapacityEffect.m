@@ -3,18 +3,18 @@
 % sensor values to a linearized form, with a physical interpretation of the
 % relative sensor values.
 %
-% Using the light sphere, Zach placed a 0.4 ND filter in the
-% optical path (along with the IR filter), set the CombiLED to the half-on
-% background, and measured the AGC values the provided a mean image
-% intensity (across all classes of pixels) of 127. The camera was then
-% locked to these AGC settings. Then, he obtained images of the interior of
-% the sphere with the CombiLED set to settings of 0.1:0.1:1. Next, the 0.4
-% ND filter was removed, and the measurement was again made for settings
-% between 0.1 and 1 (importantly, with the AGC values still locked to those
-% values obtained with the 0.4 ND filter). Zach then processed the data to
-% provide the mean R, G, and B channel value at each CombiLED setting level
-% for each of the two ND filter conditions (0 and 0.4). These data are
-% provided in the file "camera_linearity_ND0_ND0p4_rgb_means.mat".
+% Using the light sphere, Zach placed a 0.4 ND filter in the optical path
+% (along with the IR filter), set the CombiLED to the half-on background,
+% and measured the AGC values the provided a mean image intensity (across
+% all classes of pixels) of 127. The camera was then locked to these AGC
+% settings. Then, he obtained images of the interior of the sphere with the
+% CombiLED set to settings of 0.1:0.1:1. Next, the 0.4 ND filter was
+% removed, and the measurement was again made for settings between 0.1 and
+% 1 (importantly, with the AGC values still locked to those values obtained
+% with the 0.4 ND filter). Zach then processed the data to provide the mean
+% R, G, and B channel value at each CombiLED setting level for each of the
+% two ND filter conditions (0 and 0.4). These data are provided in the file
+% "camera_linearity_ND0_ND0p4_rgb_means.mat".
 %
 % This routine models the data present in the file. Examination of the
 % camera sensor values with increasing light input reveals a soft roll-off
@@ -45,21 +45,24 @@
 % increased ability to represent higher levels of illumination, with some
 % reduction in precision for lower levels.
 
+% Housekeeping
 clear
 close all
 
 % Load in the calibration data 
-project_dir = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));
-calibration_data_path = fullfile(project_dir, "data", "camera_linearity_ND0_ND0p4_rgb_means.mat"); 
-load(calibration_data_path)
+dataFileName = fullfile(...
+    tbLocateProject('lightLoggerAnalysis'),...
+    'data',...
+    'camera_linearity_ND0_ND0p4_rgb_means.mat');
+load(dataFileName)
 data = nd04_rgb_means;
 
 % Loop through the R, G, and B sensors and assemble the full measurement
-% set 
+% set.
 y = [];
 for channel = 1:3
-    y = [y; data.ND0.rgb_mean(:,channel); ...
-        data.ND0p4.rgb_mean(:,channel)];
+    y = [y; data.ND0p4.rgb_mean(:,channel); ...
+        data.ND0.rgb_mean(:,channel)];
 end
 
 % Define the objective
