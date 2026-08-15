@@ -2,10 +2,10 @@
 % to the R, G, and B channels so that the sensor values reflect the
 % radiometric power of the light source.
 %
-% The PR670 was used to measure the SPD of a cloudy sky, and the same time
-% that the IMX219 camera was used to collect images. We separately obtained
-% the tabular spectral sensitivity functions of the R, G, and B channels of
-% the camera chip.
+% The PR670 was used to measure the SPD of a cloudy sky, at the same time
+% that the IMX219 camera was used to collect images of the sky. We
+% separately obtained the tabular spectral sensitivity functions of the R,
+% G, and B channels of the camera chip.
 %
 % These measurements are processed below to yield the needed corrections.
 
@@ -29,7 +29,7 @@ dataFileName = fullfile(...
 load(dataFileName,'T');
 
 % Load the IMX219 image(s) of the cloudy sky
-% LOAD THE DATA. WHAT WE WANT IS THE RAW IMAGES FROM THIS MEASUREMENT
+% FIND THE DATA. WHAT WE WANT IS THE RAW IMAGES FROM THIS MEASUREMENT
 
 % Process the data to extract the R, G, and B sensor values from within the
 % region of the image that contains the cloudy sky. 
@@ -58,11 +58,20 @@ assert(wls(1) == T.wls(1));
 assert(wls(end) == T.wls(endIdx));
 assert(diff(wls(1:2)) == diff(T.wls(1:2)));
 
+% Set up a figure
+figure
+plot(wls,radiance,'.k');
+hold on
+xlabel('wavelength [nm]');
+ylabel('radiance [w/m^2/sr/nm]');
+
 % Loop through the channels
 channelNames = {'red','green','blue'};
 for ii = 1:3
     thisChannelSensitivity = T.(channelNames{ii})(1:endIdx);
-    predictedSensorValue(ii) = radiance' * thisChannelSensitivity;
+    thisChannelSensitivityNormed = thisChannelSensitivity ./ max(thisChannelSensitivity);
+    predictedSensorValue(ii) = radiance' * thisChannelSensitivityNormed;
+    plot(T.wls(1:endIdx),thisChannelSensitivityNormed*predictedSensorValue(ii)/100,['-' channelNames{ii}(1)]);
 end
 
 % Normalize the predicted sensor values to the blue channel
@@ -79,7 +88,7 @@ radiometricCorrectionRGB = radiometricCorrectionRGB * k;
 
 % Save the radiometric correction to the "derived" directory
 saveFileName = fullfile(...
-    tbLocateProject('lightLoggerAnalysis'),...
+    tbLocateProjectSilent('lightLoggerAnalysis'),...
     'derived',...
     'radiometricCorrectionRGB.mat');
 readme = ['Created by defineRadiometricWeights.\n'...
