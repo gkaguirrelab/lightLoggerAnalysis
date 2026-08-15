@@ -43,7 +43,9 @@
 %
 % We find a clipping exponent of 5.3918. With linearization, we gain an
 % increased ability to represent higher levels of illumination, with some
-% reduction in precision for lower levels.
+% reduction in precision for lower levels. This result is saved in the
+% top-level "derived" folder for subsequent use in pre-processing of camera
+% recordings.
 
 % Housekeeping
 clear
@@ -142,7 +144,19 @@ title('Linear sensor interpretation');
 box off
 a = gca();
 a.XTick = 0:50:250;
-foo=1;
+
+% Save the exponent of the fit in the "derived" directory for use in the
+% linearization stage, and some other things
+saveFileName = fullfile(...
+    tbLocateProject('lightLoggerAnalysis'),...
+    'derived',...
+    'nonLinearClippingExponent.mat');
+clippingExponent = p(1);
+linearizedSetPoint = idxCen;
+readme = ['Created by defineFullWellCapacityEffect.\n'...
+    'clippingExponent -- the exponent of the soft non-linear function that\ndefines the roll-off of sensor values with higher light levels.\n',...
+    'linearizedSetPoint -- the sensor value in the linearized values that reflects\nthe set point of the automatic gain control (127 in the original sensor values).\n'];
+save(saveFileName,'readme','clippingExponent','linearizedSetPoint');
 
 
 %% Local function to implement algebraic soft-clipping
