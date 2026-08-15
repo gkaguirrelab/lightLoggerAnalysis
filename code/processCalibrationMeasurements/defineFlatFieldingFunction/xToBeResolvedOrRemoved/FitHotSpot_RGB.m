@@ -20,9 +20,9 @@ if fitRGB
     frames = double(frames);
     nFrames = size(frames, 1);
 
-    [avg_R, avg_G, avg_B] = makeBayerChannelAverages(frames, bayerPattern);
+    [avgR, avgG, avgB] = makeBayerChannelAverages(frames, bayerPattern);
 
-    imageSet = {avg_R, avg_G, avg_B};
+    imageSet = {avgR, avgG, avgB};
     imageNames = {'R channel', 'G channel', 'B channel'};
     saveName = "hotspot_fit_results_RGB.mat";
 
@@ -95,7 +95,7 @@ end
 save(saveName, "results", "fitRGB")
 
 if fitRGB
-    save(saveName, "results", "fitRGB", "avg_R", "avg_G", "avg_B", ...
+    save(saveName, "results", "fitRGB", "avgR", "avgG", "avgB", ...
         "times_sec", "frames_idx", "fps", "-append")
 end
 
