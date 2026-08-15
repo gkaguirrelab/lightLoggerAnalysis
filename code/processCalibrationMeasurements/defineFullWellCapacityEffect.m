@@ -35,11 +35,14 @@
 %
 % Running this routine fits the entire dataset with a single non-linear
 % function. The exponential ("n") parameter of the fit is the only free
-% parameter that is of consequence for the non-linearity. We then implement
+% parameter that is of consequence for the non-linearity. We then call
 % a linearization function that transforms raw sensor values to a
 % linearized form. In practice, this adjusts the original value range of
 % 16-254 to the linearized range of 0-254 (removing the dark value). Raw
-% sensor values of >254 are set to 255.
+% sensor values of >254 are set to 255. The linearization function lives
+% within the utilities sub-folder and is called:
+%
+%       linearizeIMX219SensorCounts
 %
 % We find a clipping exponent of 5.3918. With linearization, we gain an
 % increased ability to represent higher levels of illumination, with some
@@ -53,7 +56,7 @@ close all
 
 % Load in the calibration data 
 dataFileName = fullfile(...
-    tbLocateProject('lightLoggerAnalysis'),...
+    tbLocateProjectSilent('lightLoggerAnalysis'),...
     'data',...
     'camera_linearity_ND0_ND0p4_rgb_means.mat');
 load(dataFileName)
@@ -114,7 +117,7 @@ box off
 
 % Plot the inverse gamma function
 nexttile
-yLinear = linearizeY(y(idxSort), p(1));
+yLinear = linearizeIMX219SensorCounts(y(idxSort), p(1));
 plot(y(idxSort),yLinear,'-k','LineWidth',2);
 xlabel('Raw sensor value');
 ylabel('Linearized sensor value');
@@ -148,7 +151,7 @@ a.XTick = 0:50:250;
 % Save the exponent of the fit in the "derived" directory for use in the
 % linearization stage, and some other things
 saveFileName = fullfile(...
-    tbLocateProject('lightLoggerAnalysis'),...
+    tbLocateProjectSilent('lightLoggerAnalysis'),...
     'derived',...
     'nonLinearClippingExponent.mat');
 clippingExponent = p(1);
@@ -210,31 +213,3 @@ yFit = myClippedVal(x,p);
 
 end
 
-
-%% Local function that implements the inverse
-function yLinear = linearizeY(y, n)
-
-% Define the minimum dark value
-Smin = 8*2;
-
-% Define the fixed asymptotic value
-Smax = 2^8-1 - Smin;
-
-% Subtract the baseline offset
-yPrime = y - Smin;
-
-% Calculate the unclipped, linear portion (a * x)
-ax = yPrime ./ (1 - (yPrime ./ Smax).^n).^(1./n);
-
-% Calculate the maximum possible value of ax
-yMax = Smax - 1;
-aMax = yMax ./ (1 - (yMax ./ Smax).^n).^(1./n);
-
-% We scale the linearized y so that it maps the 0-254 original range to
-% 0-254 on the output side. Any input values that were larger than 254 get
-% mapped to 255.
-yLinear = (ax ./ aMax) .* (2^8-2);
-yLinear(isinf(yLinear)) = (2^8-1);
-yLinear = round(yLinear);
-
-end
