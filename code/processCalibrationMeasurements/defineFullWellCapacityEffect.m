@@ -101,7 +101,7 @@ plot([0 1],[127 127],':k');
 plot([1 1],[0 127],':k');
 ylim([0 255]);
 ylabel('8-bit Sensor value');
-xlabel('Relative illuminance [AU]');
+xlabel('Relative mean luminance [AU]');
 legend({'fit',...
     sprintf('R, relative nd = %2.2f',p(3)),...
     sprintf('G, relative nd = %2.2f',p(4)),...
@@ -123,7 +123,7 @@ a.XTick = 0:50:250;
 box off
 title('Linearization function');
 
-% Plot the interpretation of illuminance vs. linearized sensor value
+% Plot the interpretation of luminance vs. linearized sensor value
 nexttile
 plot(yLinear,xRel(idxSort),'.k','LineWidth',2);
 hold on
@@ -137,7 +137,7 @@ plot([0 idxCen],[1 1],':k');
 text(idxCen,0.5,sprintf('<-- %d',idxCen));
 xlim([0 255]);
 xlabel('Linearized sensor value');
-ylabel('Relative illuminance [AU]');
+ylabel('Relative luminance [AU]');
 title('Linear sensor interpretation');
 box off
 a = gca();
