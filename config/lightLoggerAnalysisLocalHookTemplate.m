@@ -44,7 +44,7 @@ setpref(projectName,'dataBaseDir',fullfile(dropboxBaseDir,'FLIC_data'));
 
 % Set the default cal directory to this project
 calLocalData = fullfile(tbLocateProject(projectName),'cal');
-setpref('combiLEDToolbox','CalDataFolder',calLocalData);
+setpref(projectName,'CalDataFolder',calLocalData);
 
 % Find the light logger directory 
 light_logger_path = tbLocateProject('lightLogger');
