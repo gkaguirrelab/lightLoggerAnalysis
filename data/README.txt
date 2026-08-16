@@ -16,4 +16,6 @@ Directory contents:
 
 - camera_agc_illuminance_linear_scale.mat: The output of an analysis of empirical light logger recordings. Recordings from multiple tasks / subjects were analyzed to find the low-pass temporal filter that best related environmental illuminance (as recorded by the minispect) to camera sensitivity (the product of the AGC settings). These data are plotted by the routine defineAGCToMeanLuminance.m to be compared to measurements made within the light integrating sphere. We would like to replace this data file with a call to a routine that processes the files.
 
-- CloudySkySPD_37degSolarElevation.mat: Geoff used the PR670 to make a measurement of the cloudy sky outside of Goddard Labs when the sun was at 37° elevation. Separately, the IMX219 camera was used to record a video of the sky.
+- CloudySkySPD_37degSolarElevation.mat: Geoff used the PR670 to make a measurement of the cloudy sky outside of Goddard Labs when the sun was at 37° elevation. Separately, the IMX219 camera was used to record a video of the sky (Zach is looking for these raw images). These measurements are used in the calculation of the radiometric correction of the RGB channels in the function defineRadiometricWeights.
+
+- fisheyeLensCalibration: Directory that contains the images and "session file" used by the matlab camera calibration app to derive the intrinsics for the world camera lens. Additional details available in the readme file within this directory.
