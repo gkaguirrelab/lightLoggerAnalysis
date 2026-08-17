@@ -6,14 +6,13 @@ Directory contents:
 
 - camera_linearity_ND0_ND0p4_rgb_means.mat: full-well capacity effect calibration data. We measured the CombiLED with the IR filter in the optical pathway, made measurements at 0 and 0.4 NDF with AGC set for 0.4 NDF, 0.5 contrast, and 127 value, then measured both NDFs across a variety of CombiLED setting levels. We fit a correction with fitFullWellCapacityEffect.m and derived an exponent from this. This is the data used to do that fitting.
 
-- cloudySkySPD_37degSolarElevation.mat: Geoff used the PR670 to make a measurement of the cloudy sky outside of Goddard Labs when the sun was at 37° elevation. Separately, the IMX219 camera was used to record a video of the sky (Zach is looking for these raw images). These measurements are used in the calculation of the radiometric correction of the RGB channels in the function defineRadiometricWeights.
-
 - fisheyeLensCalibration/: Directory that contains the images and "session file" used by the matlab camera calibration app to derive the intrinsics for the world camera lens. Additional details available in the readme file within this directory.
 
 - flatFieldingFunction/: Directory that contains a README and images derived from recordings made in the Fels Planetarium.
 
 - IMX219_spectralSensitivity.mat: spectral sensitivity functions for the three channels (RGB) of the IMX camera chip. These values (provided by the first author) correspond to Figure 18 of the paper Pagnutti 2017 J. Electron. Imaging 26(1), 013014.
 
+- radiometricCorrectionRGB/: Directory that contains measurements used to derive the RGB radiometric correction in defineRadiometricWeights.m. This includes CloudySkySPD_37degSolarElevation.mat, Geoff's PR670 measurement of the cloudy sky outside Goddard Labs when the sun was at 37° elevation, along with IMX219 cloudy-sky frame material. The source of this cloudy sky measurement and the example frames taken from it, can be found in DropBox under FLIC_data/lightLoggerRadCal/W1P1M1/radiometricCorrectionRGB.
 
 
 
