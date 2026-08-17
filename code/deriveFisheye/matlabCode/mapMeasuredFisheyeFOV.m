@@ -15,11 +15,10 @@ function mapFisheyeFOV(v, fisheyeIntrinsics)
 %
 % Examples:
 %{
-    mapFisheyeFOV(v, fisheyeIntrinsics)
-%}
-
-    data = load('/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_admin/Equipment/ArduCam B0392 IMX219 Wide Angle M12/intrinsics_calibration/intrinsics_calibration.mat');
-    fisheyeIntrinsics = camera_intrinsics_calibration.results.Intrinsics  
+    project_root = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));
+    intrinsics_path = fullfile(project_root, "derived", "arducamB0392cameraInstrinsics.mat");
+    intrinsics_data = load(intrinsics_path, "arducamB0392cameraInstrinsics");
+    fisheyeIntrinsics = intrinsics_data.arducamB0392cameraInstrinsics.results.Intrinsics;
     mapFisheyeFOV(v, fisheyeIntrinsics)
 %}
 

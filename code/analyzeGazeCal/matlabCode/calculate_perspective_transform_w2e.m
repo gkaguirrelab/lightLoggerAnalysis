@@ -32,8 +32,11 @@ function perspective_projection = calculate_perspective_transform_w2e(world_came
     % Set the subject ID
     subjectID = "FLIC_2002"; 
 
-	% Load in the world camera intrinscis 
-    world_camera_intrinsics = load("/Users/zacharykelly/Documents/MATLAB/projects/lightLoggerAnalysis/data/intrinsics_calibration.mat");
+	% Load in the world camera intrinscis
+    project_root = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));
+    intrinsics_path = fullfile(project_root, "derived", "arducamB0392cameraInstrinsics.mat");
+    intrinsics_data = load(intrinsics_path, "arducamB0392cameraInstrinsics");
+    world_camera_intrinsics = intrinsics_data.arducamB0392cameraInstrinsics.results.Intrinsics;
 
     % Load in the target positions in their intended angle form 
     target_pos_ang_intended = load(sprintf("/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_data/lightLogger/scriptedIndoorOutdoor/%s/gazeCalibration/temporalFrequency/%s_gazeCal_runData.mat", subjectID, subjectID)).taskData.gaze_target_positions_deg;
@@ -60,7 +63,7 @@ function perspective_projection = calculate_perspective_transform_w2e(world_came
     assert(size(target_pos_ang_intended, 1) == size(target_pos_screen, 1));  
 
     % Convert the screen pixel coordinates into [N x azimuth x elevation]
-    pixel_azimuth_elevation = anglesFromIntrinsics(target_pos_screen, world_camera_intrinsics.camera_intrinsics_calibration.results.Intrinsics);
+    pixel_azimuth_elevation = anglesFromIntrinsics(target_pos_screen, world_camera_intrinsics);
     geometric_transform = fitgeotform2d( pixel_azimuth_elevation, target_pos_ang_intended, 'projective');
 
     % initialize return struct

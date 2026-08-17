@@ -10,4 +10,4 @@ Using the collected calibration data, we computed and exported the camera’s in
 
 The images and calibration calculation can be displayed in matlab using the command `cameraCalibrator('intrinsics_calibration_session.mat')`.
 
-The resulting camera intrinsics file is saved in the derived folder as `arducamB0392_cameraInstrinsics.mat`.
+The resulting camera intrinsics file is saved in the derived folder as `arducamB0392cameraInstrinsics.mat`.

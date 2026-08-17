@@ -153,8 +153,9 @@ function generateVirtuallyFoveatedVideos(subjectIDs, options)
         assert(isfile(path_to_world_video) && isfile(path_to_world_t), sprintf("Problem with %s or %s", path_to_world_video, path_to_world_t));
         world_t = load_world_timestamps(path_to_world_t);
 
-        % Load in the camera intrinscis of the world camera 
-        path_to_intrinsics = "~/Documents/MATLAB/projects/lightLoggerAnalysis/data/intrinsics_calibration.mat"; 
+        % Load in the camera intrinscis of the world camera
+        project_root = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));
+        path_to_intrinsics = fullfile(project_root, "derived", "arducamB0392cameraInstrinsics.mat");
 
         if(options.verbose)
             fprintf("\twith intrinsics:\n");
@@ -306,7 +307,8 @@ function [pupil_t, gaze_angles] = load_gaze_angles(path, intrinsics_path)
 
     gaze_angles_px = [gx, gy];
 
-    intr = load(intrinsics_path).camera_intrinsics_calibration.results.Intrinsics;
+    intrinsics_data = load(intrinsics_path, "arducamB0392cameraInstrinsics");
+    intr = intrinsics_data.arducamB0392cameraInstrinsics.results.Intrinsics;
     gaze_angles = anglesFromIntrinsics(gaze_angles_px, intr);
 end
 

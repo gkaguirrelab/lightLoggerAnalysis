@@ -17,8 +17,11 @@ subjectIDs = {"2001", "2002", "2003", "2004", "2005", "2006"};
 for ii = 6:6 % numel(subjectIDs)
     subjectID = "FLIC_" + subjectIDs{ii}
     
-    % Load in the world camera intrinscis 
-    world_camera_intrinsics = load("/Users/zacharykelly/Documents/MATLAB/projects/lightLoggerAnalysis/data/intrinsics_calibration.mat");
+    % Load in the world camera intrinscis
+    project_root = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));
+    intrinsics_path = fullfile(project_root, "derived", "arducamB0392cameraInstrinsics.mat");
+    intrinsics_data = load(intrinsics_path, "arducamB0392cameraInstrinsics");
+    world_camera_intrinsics = intrinsics_data.arducamB0392cameraInstrinsics.results.Intrinsics;
 
     % Load in the target positions in their intended angle form 
     target_pos_ang_intended = load(sprintf("/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_data/lightLogger/scriptedIndoorOutdoor/%s/gazeCalibration/temporalFrequency/%s_gazeCal_runData.mat", subjectID, subjectID)).taskData.gaze_target_positions_deg;

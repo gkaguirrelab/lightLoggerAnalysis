@@ -67,26 +67,16 @@ def _load_agc_lib():
 
 AGC_LIB = _load_agc_lib()
 
-# Function to load in the fielding functions in per dimensions. Measured and saved in MATLAB 
+# Function to load in the fielding functions per dimension. Measured and saved in MATLAB.
 def _import_fielding_functions() -> dict[tuple[int], np.ndarray]:
-    # First find the path to the fielding function directory 
-    fielding_function_folder: str = os.path.join(pathlib.Path(__file__).parents[3], "data") 
-    assert os.path.exists(fielding_function_folder), f"Fielding function path: {fielding_function_folder} does not exist"
-
-    # Find the correction maps for different image shapes 
-    correction_maps_folder: str = os.path.join(fielding_function_folder, "fieldingFunctions")
-    assert os.path.exists(correction_maps_folder), f"fieldingFunctions folder: {correction_maps_folder} does not exist"
-
-    # Generate a dictionary based off of these correction maps 
-    correction_filepaths: list[str] = [os.path.join(correction_maps_folder, file) for file in os.listdir(correction_maps_folder) if file.endswith(".mat")]
-    assert len(correction_filepaths) > 0, f"No correction files found at path: {correction_maps_folder}"
+    project_root: pathlib.Path = pathlib.Path(__file__).resolve().parents[3]
+    derived_filepath: pathlib.Path = project_root / "derived" / "flatFieldingFunction.mat"
+    assert derived_filepath.exists(), f"Fielding function file not found at {derived_filepath}"
 
     fielding_functions: dict[tuple[int], np.ndarray] = {}
-    for filepath in correction_filepaths:
-        fielding_function: dict = scipy.io.loadmat(filepath)["correctionMap"].astype(np.float64, copy=False)
+    fielding_function: np.ndarray = scipy.io.loadmat(derived_filepath)["correctionMap"].astype(np.float64, copy=False)
 
-        assert fielding_function.shape not in fielding_functions, f"There are repeat fielding functions in the directory: {correction_maps_folder}"
-        fielding_functions[fielding_function.shape] = fielding_function
+    fielding_functions[fielding_function.shape] = fielding_function
 
     return fielding_functions
 
@@ -1933,7 +1923,7 @@ def world_frame_to_visual_angle(world_frame: np.ndarray, matlab_engine: object |
 
     # Resolve and validate the MATLAB function and calibration paths before starting MATLAB.
     project_root: pathlib.Path = pathlib.Path(__file__).resolve().parents[3]
-    intrinsics_path: pathlib.Path = project_root / "data" / "intrinsics_calibration.mat"
+    intrinsics_path: pathlib.Path = project_root / "derived" / "arducamB0392cameraInstrinsics.mat"
     if(not intrinsics_path.is_file()):
         raise FileNotFoundError(f"World-camera intrinsics calibration does not exist: {intrinsics_path}")
 
@@ -1946,8 +1936,8 @@ def world_frame_to_visual_angle(world_frame: np.ndarray, matlab_engine: object |
 
     # Generate the visual field points.
     try:
-        calibration_data: dict = matlab_engine.load(os.fspath(intrinsics_path), "camera_intrinsics_calibration", nargout=1)
-        calibration_results: object = calibration_data["camera_intrinsics_calibration"]["results"]
+        calibration_data: dict = matlab_engine.load(os.fspath(intrinsics_path), "arducamB0392cameraInstrinsics", nargout=1)
+        calibration_results: object = calibration_data["arducamB0392cameraInstrinsics"]["results"]
         fisheye_intrinsics: object = matlab_engine.getfield(calibration_results, "Intrinsics", nargout=1)
         visual_field_points: object = matlab_engine.anglesFromIntrinsics(matlab.double(sensor_points.tolist()), fisheye_intrinsics, nargout=1)
     finally:

@@ -34,8 +34,10 @@ function visualFieldPoints = anglesFromIntrinsics(sensorPoints, fisheyeIntrinsic
 %
 % Examples:
 %{
-    intr = load('/path/to/intrinsics_calibration.mat');
-    intr = intr.camera_intrinsics_calibration.results.Intrinsics;
+    project_root = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));
+    intrinsics_path = fullfile(project_root, "derived", "arducamB0392cameraInstrinsics.mat");
+    intrinsics_data = load(intrinsics_path, "arducamB0392cameraInstrinsics");
+    intr = intrinsics_data.arducamB0392cameraInstrinsics.results.Intrinsics;
 
     sensorPoints = [240 240; 300 220; 180 260];
     visualFieldPoints = anglesFromIntrinsics(sensorPoints, intr);
