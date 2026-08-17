@@ -419,7 +419,8 @@ def mesaure_video_saturation(
 
 def extract_frames_from_video(video_path: str, 
                               frames_idx: Iterable, 
-                              is_grayscale: bool=False
+                              is_grayscale: bool=False,
+                              verbose: bool=False
                             ) -> np.ndarray:
     """Extract specific frames from a video by their indices.
 
@@ -431,6 +432,7 @@ def extract_frames_from_video(video_path: str,
         frames_idx: Iterable of frame indices to extract.
         is_grayscale: If True, converts frames to grayscale; otherwise
             converts from BGR to RGB.
+        verbose: If True, displays a progress bar.
 
     Returns:
         Numpy array of extracted frames with dtype uint8.
@@ -450,11 +452,21 @@ def extract_frames_from_video(video_path: str,
     # Open the video via cv2 
     video_stream: cv2.VideoCapture = cv2.VideoCapture(video_path)
 
-    # Stream the frames in from the vidoe 
-    extracted_frame_idx: int = 0 
-    while(extracted_frame_idx < len(frames_idx)):
+    # Stream the frames in from the video.
+    extracted_frame_iterator: Iterable = enumerate(frames_idx)
+    if(verbose is True):
+        extracted_frame_iterator = tqdm(
+            extracted_frame_iterator,
+            total=len(frames_idx),
+            desc="Extracting frames",
+            unit="frame",
+            leave=False,
+        )
+
+    extracted_frame_count: int = 0 
+    for extracted_frame_idx, frame_idx in extracted_frame_iterator:
         # Jump the the target frame in the stream
-        video_stream.set(cv2.CAP_PROP_POS_FRAMES, frames_idx[extracted_frame_idx])
+        video_stream.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
 
         # Attempt to read in a video 
         # from the stream 
@@ -465,7 +477,7 @@ def extract_frames_from_video(video_path: str,
         # end the loop with error 
         if(not ret): 
             video_stream.release() 
-            raise RuntimeError(f"Could not extract frame idx: {frames_idx[extracted_frame_idx]}")
+            raise RuntimeError(f"Could not extract frame idx: {frame_idx}")
 
         # if we want a grayscale video, 
         # convert to grayscale
@@ -478,10 +490,10 @@ def extract_frames_from_video(video_path: str,
         extracted_frames[extracted_frame_idx] = frame
 
         # Increment the number of extracted frames 
-        extracted_frame_idx += 1 
+        extracted_frame_count += 1 
     
     # Assert that we extracted all of the correct frames 
-    assert extracted_frame_idx == len(extracted_frames), f"Error: Incorrect number of frames extracted: {extracted_frame_idx} compared to target: {len(extracted_frames)}"
+    assert extracted_frame_count == len(extracted_frames), f"Error: Incorrect number of frames extracted: {extracted_frame_count} compared to target: {len(extracted_frames)}"
 
     # Release the video stream 
     video_stream.release() 
