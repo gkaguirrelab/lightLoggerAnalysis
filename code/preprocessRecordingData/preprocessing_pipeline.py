@@ -26,8 +26,9 @@ light_loger_analysis_dir: str = str(pathlib.Path(__file__).parents[2])
 video_util_path: str = os.path.join(light_loger_analysis_dir, "code", "library", "matlabIO", "python_libraries")
 virtual_foveation_util_path: str = os.path.join(light_loger_analysis_dir, "code", "applyVirtualFoveation", "pythonCode")
 spd_util_path: str = os.path.join(light_loger_analysis_dir, "code", "analyzeSPD", "pythonCode")
+sensor_utility_path: str = os.path.join(light_loger_analysis_dir, "code", "library", "sensor_utility")
 
-custom_library_paths: list[str] = (light_loger_analysis_dir, video_util_path, virtual_foveation_util_path, spd_util_path)
+custom_library_paths: list[str] = (light_loger_analysis_dir, video_util_path, virtual_foveation_util_path, spd_util_path, sensor_utility_path)
 assert all(os.path.exists(path) for path in custom_library_paths)
 
 for path in custom_library_paths:
@@ -37,6 +38,7 @@ for path in custom_library_paths:
 import video_io 
 import virtual_foveation
 import spd_util
+import world_util
 
 
 def _write_chunk_with_blocking_retry(fd, chunk: bytes, save_path: pathlib.Path, verbose: bool, retry_delay_seconds: float=5.0) -> None:
@@ -2622,6 +2624,119 @@ def rename_world_recordings(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOut
 
     return 
 
+
+def _extract_agc_columns_from_metadata(metadata: pd.DataFrame) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Extract analog gain, digital gain, and exposure from known metadata schemas."""
+
+    legacy_columns: tuple[str, str, str] = ("Again", "Dgain", "exposure")
+    modern_columns: tuple[str, str, str] = ("cameraAgain", "AGCDgain", "cameraExposure")
+
+    if(all(column in metadata.columns for column in legacy_columns)):
+        analog_gain_column, digital_gain_column, exposure_column = legacy_columns
+    elif(all(column in metadata.columns for column in modern_columns)):
+        analog_gain_column, digital_gain_column, exposure_column = modern_columns
+    else:
+        raise ValueError(f"World metadata does not contain supported AGC columns. Columns: {list(metadata.columns)}")
+
+    analog_gain: np.ndarray = metadata[analog_gain_column].to_numpy(dtype=float)
+    digital_gain: np.ndarray = metadata[digital_gain_column].to_numpy(dtype=float)
+    exposure: np.ndarray = metadata[exposure_column].to_numpy(dtype=float)
+
+    return analog_gain, digital_gain, exposure
+
+
+def _plot_agc_metadata_by_activity(agc_metadata_by_activity: dict[str, dict[str, dict]],
+                                   activity_names: Iterable[str],
+                                   subject_ids: Iterable[int],
+                                   output_dir: str | None=None,
+                                   output_filetype: Literal["png", "pdf", "svg"]="png",
+                                   close_figures: bool | None=None
+                                  ) -> list[plt.Figure]:
+    """Create one AGC diagnostic figure per activity, with one subplot per subject."""
+
+    if(close_figures is None):
+        close_figures = output_dir is not None
+
+    if(output_dir is not None):
+        os.makedirs(output_dir, exist_ok=True)
+
+    subject_labels: list[str] = [f"FLIC_{subject_id}" for subject_id in subject_ids]
+    figures: list[plt.Figure] = []
+
+    for activity_name in activity_names:
+        subject_count: int = len(subject_labels)
+        if(subject_count == 0):
+            continue
+
+        column_count: int = min(4, max(1, math.ceil(math.sqrt(subject_count))))
+        row_count: int = math.ceil(subject_count / column_count)
+        fig, axes = plt.subplots(row_count, column_count, figsize=(4.8 * column_count, 2.9 * row_count), squeeze=False)
+        axes_flat: np.ndarray = axes.ravel()
+        activity_metadata: dict[str, dict] = agc_metadata_by_activity.get(activity_name, {})
+
+        for subplot_num, subject_label in enumerate(subject_labels):
+            axis_left: plt.Axes = axes_flat[subplot_num]
+            subject_entry: dict = activity_metadata.get(subject_label, {})
+            metadata: pd.DataFrame | None = subject_entry.get("metadata")
+            error_message: str | None = subject_entry.get("error")
+
+            axis_left.set_title(subject_label, fontsize=9, fontweight="bold")
+            if(metadata is None or len(metadata) == 0):
+                axis_left.text(0.5, 0.5, error_message or "No AGC metadata", ha="center", va="center", fontsize=8, wrap=True)
+                axis_left.set_xticks([])
+                axis_left.set_yticks([])
+                continue
+
+            try:
+                analog_gain, digital_gain, exposure = _extract_agc_columns_from_metadata(metadata)
+                timestamp: np.ndarray = metadata["timestamp"].to_numpy(dtype=float)
+                finite_timestamp: np.ndarray = timestamp[np.isfinite(timestamp)]
+                if(len(finite_timestamp) > 0):
+                    x_values: np.ndarray = timestamp - finite_timestamp[0]
+                    x_label: str = "Time (s)"
+                else:
+                    x_values = np.arange(len(metadata))
+                    x_label = "Frame"
+
+                axis_right: plt.Axes = axis_left.twinx()
+                again_line = axis_left.plot(x_values, analog_gain, color="tab:red", linewidth=0.8, label="AGain")[0]
+                dgain_line = axis_left.plot(x_values, digital_gain, color="lightcoral", linewidth=0.8, label="Dgain")[0]
+                exposure_line = axis_right.plot(x_values, exposure, color="tab:blue", linewidth=0.8, label="Exposure")[0]
+
+                axis_left.tick_params(axis="both", labelsize=7)
+                axis_left.tick_params(axis="y", colors="tab:red")
+                axis_right.tick_params(axis="y", labelsize=7, colors="tab:blue")
+                axis_left.set_xlabel(x_label, fontsize=8)
+                axis_left.set_ylabel("AGain / Dgain", fontsize=8, color="tab:red")
+                axis_right.set_ylabel("Exposure", fontsize=8, color="tab:blue")
+                axis_left.grid(True, alpha=0.25)
+                axis_left.legend([again_line, dgain_line, exposure_line],
+                                 [again_line.get_label(), dgain_line.get_label(), exposure_line.get_label()],
+                                 loc="best",
+                                 fontsize=7)
+            except Exception as e:
+                axis_left.text(0.5, 0.5, f"AGC plot error:\n{e}", ha="center", va="center", fontsize=8, wrap=True)
+                axis_left.set_xticks([])
+                axis_left.set_yticks([])
+
+        for unused_axis in axes_flat[subject_count:]:
+            unused_axis.axis("off")
+
+        fig.suptitle(f"{activity_name} AGC Metadata", fontsize=14, fontweight="bold")
+        fig.tight_layout(rect=(0, 0, 1, 0.95))
+
+        if(output_dir is not None):
+            safe_activity_name: str = re.sub(r"[^A-Za-z0-9_.-]+", "_", activity_name).strip("_")
+            output_path: str = os.path.join(output_dir, f"{safe_activity_name}_agc_metadata.{output_filetype}")
+            fig.savefig(output_path, dpi=200)
+
+        figures.append(fig)
+        if(close_figures is True):
+            plt.close(fig)
+
+    return figures
+
+
 def verify_data_integrity(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026",
                           subjects_to_skip: Iterable=set(),
                           subjects_to_process: Iterable=set(),
@@ -2630,7 +2745,11 @@ def verify_data_integrity(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
                           verbose: bool=False,
                           target_fps: int =120,
                           target_world_size: tuple[int, int] = (480, 640),
-                          target_sensors: set[Literal["M", "W"]] = set("MW")
+                          target_sensors: set[Literal["M", "W"]] = set("MW"),
+                          plot_agc_metadata: bool=True,
+                          agc_plot_output_dir: str | None=None,
+                          agc_plot_filetype: Literal["png", "pdf", "svg"]="png",
+                          close_agc_plots: bool | None=None
                          ) -> tuple[bool, dict]:
     """
     Performs sanity checks on raw recording folders to ensure that both GKA and
@@ -2648,6 +2767,11 @@ def verify_data_integrity(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
       target_fps             expected world-camera recording FPS
       target_world_size      expected world-camera frame size as (height, width)
       target_sensors         expected GKA sensors
+      plot_agc_metadata      create one AGC yy-axis diagnostic figure per activity
+      agc_plot_output_dir    optional directory where AGC figures are saved
+      agc_plot_filetype      file type used when saving AGC figures
+      close_agc_plots        close AGC figures after creation; defaults to True
+                             when saving to disk and False otherwise
 
     Returns:
       A tuple of (problems_detected, integrity_issues). The second item is a
@@ -2679,6 +2803,7 @@ def verify_data_integrity(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
     # Save a dictionary that stores integrity issues
     problems_detected: bool = False
     integrity_issues: dict[int, dict] = {}
+    agc_metadata_by_activity: dict[str, dict[str, dict]] = {activity_name: {} for activity_name in activity_names_to_check}
 
     # Now, let's iterate over all the subject paths 
     subject_iterator: Iterable = subject_ids_to_check if verbose is False else tqdm(subject_ids_to_check, desc="Processing Subjects", leave=True)
@@ -2703,6 +2828,8 @@ def verify_data_integrity(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
         for activity_name in activities_iterator:
             # Initialize an entry for this activitiy
             integrity_issues[subject_id_number]["activities"][activity_name] = {"meta_problems": [], "GKA": [], "Neon": []}
+            if(plot_agc_metadata is True):
+                agc_metadata_by_activity.setdefault(activity_name, {})[subject_id] = {"metadata": None, "error": None}
 
             # Get the path to this activity
             activity_path: str = os.path.join(subject_path, activity_name)
@@ -2782,6 +2909,15 @@ def verify_data_integrity(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
                         integrity_issues[subject_id_number]["activities"][activity_name]["GKA"].append(f"GKA config missing expected key: {e}")
                         problems_detected = True
 
+            if(plot_agc_metadata is True and os.path.isdir(gka_folder_path) and len(gka_folder_contents) > 0):
+                try:
+                    agc_metadata_by_activity[activity_name][subject_id]["metadata"] = world_util.world_metadata_from_chunks(activity_path, convert_to_seconds=True, verbose=False)
+                except Exception as e:
+                    error_message: str = f"GKA AGC metadata could not be read: {e}"
+                    agc_metadata_by_activity[activity_name][subject_id]["error"] = error_message
+                    integrity_issues[subject_id_number]["activities"][activity_name]["GKA"].append(error_message)
+                    problems_detected = True
+
 
             # Construct the path to the Neon folder
             neon_folder_path: str = os.path.join(activity_path, "Neon")
@@ -2846,6 +2982,14 @@ def verify_data_integrity(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
                     print(f"{subject_id} | {activity_name}: OK")
                 else:
                     print(f"{subject_id} | {activity_name}: PROBLEMS")
+
+    if(plot_agc_metadata is True):
+        _plot_agc_metadata_by_activity(agc_metadata_by_activity,
+                                       activity_names_to_check,
+                                       subject_ids_to_check,
+                                       output_dir=agc_plot_output_dir,
+                                       output_filetype=agc_plot_filetype,
+                                       close_figures=close_agc_plots)
 
     return problems_detected, integrity_issues
 

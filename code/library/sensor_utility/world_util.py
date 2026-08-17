@@ -1986,6 +1986,42 @@ def world_frame_visual_angle_to_steradians(world_frame_visual_angle: np.ndarray)
     return steradians_per_pixel
 
 
+def world_camera_field_of_view_steradians(matlab_engine: object | None=None) -> float:
+    """Calculate the calibrated world camera's total field of view in steradians.
+
+    This independently integrates the fisheye model over the rectangular
+    sensor boundary. It does not use the per-pixel visual-angle or steradian
+    maps, so it can validate their summed solid angle.
+
+    Args:
+        matlab_engine: Optional caller-owned MATLAB engine to reuse.
+
+    Returns:
+        Total calibrated camera field of view in steradians.
+    """
+    project_root: pathlib.Path = pathlib.Path(__file__).resolve().parents[3]
+    intrinsics_path: pathlib.Path = project_root / "derived" / "arducamB0392cameraInstrinsics.mat"
+    if(not intrinsics_path.is_file()):
+        raise FileNotFoundError(f"World-camera intrinsics calibration does not exist: {intrinsics_path}")
+
+    need_to_initialize_engine: bool = matlab_engine is None
+    if(need_to_initialize_engine):
+        import matlab.engine as matlab_engine_module
+        matlab_engine = matlab_engine_module.start_matlab()
+        matlab_engine.tbUseProject('lightLoggerAnalysis', nargout=0)
+
+    try:
+        calibration_data: dict = matlab_engine.load(os.fspath(intrinsics_path), "arducamB0392cameraInstrinsics", nargout=1)
+        calibration_results: object = calibration_data["arducamB0392cameraInstrinsics"]["results"]
+        fisheye_intrinsics: object = matlab_engine.getfield(calibration_results, "Intrinsics", nargout=1)
+        solid_angle: object = matlab_engine.calculateFisheyeSolidAngle(fisheye_intrinsics, nargout=1)
+    finally:
+        if(need_to_initialize_engine):
+            matlab_engine.quit()
+
+    return float(solid_angle)
+
+
 # Given a recording path, return all frame metadata.
 def world_metadata_from_chunks(recording_path: str, 
                                  convert_to_seconds: bool=True,
@@ -2004,8 +2040,7 @@ def world_metadata_from_chunks(recording_path: str,
     the AGC-setting columns are filled with ``NaN``.
 
     Args:
-        recording_path: Recording directory containing ``config.pkl`` and
-            ``world*_metadata*.npy`` files.
+        recording_path: Recording directory containing the ``GKA`` directory.
         convert_to_seconds: Whether to convert timestamps from nanoseconds
             since boot into seconds.
         verbose: Whether to show progress while loading the metadata chunks.
@@ -2014,13 +2049,13 @@ def world_metadata_from_chunks(recording_path: str,
         ``pandas.DataFrame`` with columns ``["timestamp", "Again",
         "Dgain", "exposure"]`` in frame order.
     """
-    # Accept either the GKA recording directory itself or its parent activity directory.
+    # Resolve chunks from the recording's required GKA subdirectory.
     gka_path: str = os.path.join(recording_path, "GKA")
-    if(not os.path.exists(os.path.join(recording_path, "config.pkl")) and os.path.isdir(gka_path)):
-        recording_path = gka_path
+    if(not os.path.isdir(gka_path)):
+        raise FileNotFoundError(f"Recording path must contain a GKA directory: {gka_path}")
 
     # Read the configured frame rate, or use the standard 120 FPS fallback when the config file is unavailable.
-    config_filepath: str = os.path.join(recording_path, "config.pkl")
+    config_filepath: str = os.path.join(gka_path, "config.pkl")
     if(os.path.exists(config_filepath)):
         with open(config_filepath, 'rb') as config_file:
             config_data: dict = dill.load(config_file)
@@ -2033,13 +2068,13 @@ def world_metadata_from_chunks(recording_path: str,
     frame_period_ns: float = (10 ** 9) / recording_fps
 
     # First, let's find the world metadata chunks
-    world_metadata_chunks: list[str] = natsorted([os.path.join(recording_path, filename)
-                                                  for filename in os.listdir(recording_path)
+    world_metadata_chunks: list[str] = natsorted([os.path.join(gka_path, filename)
+                                                  for filename in os.listdir(gka_path)
                                                   if filename.startswith("world")
                                                   and "metadata" in filename
                                                  ]
                                             )
-    assert len(world_metadata_chunks) > 0, f"0 world metadata chunks found @ {recording_path}"
+    assert len(world_metadata_chunks) > 0, f"0 world metadata chunks found @ {gka_path}"
     
     # Once we have them, let's iterate over the paths 
     metadata: list[np.ndarray] | np.ndarray = []

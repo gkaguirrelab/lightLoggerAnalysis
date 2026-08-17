@@ -46,10 +46,12 @@ import world_util
 from ms_util import ms_counts_to_illuminance
 
 
-def _resolve_gka_path(recording_path: str) -> str:
-    """Return the GKA recording directory for a GKA or activity-level path."""
+def _gka_path_from_recording_path(recording_path: str) -> str:
+    """Return the required GKA subdirectory of a recording path."""
     gka_path: str = os.path.join(recording_path, "GKA")
-    return gka_path if os.path.isdir(gka_path) else recording_path
+    if(not os.path.isdir(gka_path)):
+        raise FileNotFoundError(f"Recording path must contain a GKA directory: {gka_path}")
+    return gka_path
 
 def group_sensors_files(recording_path: str) -> dict[str, list[tuple]]:
     """Pair per-sensor chunk metadata files with their data payloads.
@@ -1451,8 +1453,8 @@ def _load_ms_counts_and_timestamps(recording_path: str) -> tuple[np.ndarray, np.
     # Import the chunk parser only when minispect data are requested.
     from Pi_util import parse_chunks
 
-    # Parse only minispect chunks from the resolved GKA recording directory.
-    gka_path: str = _resolve_gka_path(recording_path)
+    # Parse minispect chunks from the recording's required GKA subdirectory.
+    gka_path: str = _gka_path_from_recording_path(recording_path)
     ms_chunks: list[dict] = parse_chunks(gka_path, convert_time_units=True, convert_to_float=True, chunk_ranges={"M": (0, None)})
 
     # Retain nonempty AS arrays whose values and timestamps have matching lengths.
@@ -1535,8 +1537,8 @@ def video_to_illuminance(path_to_video: str,
 
     Args:
         path_to_video: Processed ``W.avi`` corresponding to ``path_to_raw``.
-        path_to_raw: Raw ``GKA`` recording directory containing world chunks,
-            metadata, and ``config.pkl``.
+        path_to_raw: Recording directory containing the raw ``GKA``
+            subdirectory.
         chunk_size: Number of video frames decoded per batch.
         result_as_mean: Whether to return one mean illuminance per frame. When
             ``False``, return every RGB frame with each channel expressed in lux.

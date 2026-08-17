@@ -3513,7 +3513,7 @@ def fit_agc_to_illuminance(
         # Load the world-camera AGC metadata needed to reconstruct the
         # camera-side brightness score.
         metadata: pd.DataFrame = world_util.world_metadata_from_chunks(
-            recording_path,
+            os.path.dirname(recording_path.rstrip(os.sep)),
             convert_to_seconds=True,
             verbose=False,
         )
