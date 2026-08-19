@@ -17,6 +17,7 @@ close all
 dataFileName = fullfile(...
     tbLocateProjectSilent('lightLoggerAnalysis'),...
     'data',...
+    'radiometricCorrectionRGB',...
     'cloudySkySPD_37degSolarElevation.mat');
 load(dataFileName,'radiance','wls');
 
@@ -28,26 +29,81 @@ dataFileName = fullfile(...
     'IMX219_spectralSensitivity.mat');
 load(dataFileName,'T');
 
-% Load the IMX219 image(s) of the cloudy sky
-% FIND THE DATA. WHAT WE WANT IS THE RAW IMAGES FROM THIS MEASUREMENT
+% Identify the location of the IMX219 image(s) of the cloudy sky.
+dataFileName = fullfile(...
+    tbLocateProjectSilent('lightLoggerAnalysis'),...
+    'data',...
+    'radiometricCorrectionRGB',...
+    'rawFrames',...
+    '*.tiff');
+fileSet = dir(dataFileName);
 
-% Process the data to extract the R, G, and B sensor values from within the
-% region of the image that contains the cloudy sky. 
+% Define a crop region from  these images that includes just the sky.
+cropRegionLRTB = [211,410,151,300];
+cropMask = zeros(480,640);
+cropMask(cropRegionLRTB(3):cropRegionLRTB(4),cropRegionLRTB(1):cropRegionLRTB(2))=1;
 
-% CURRENTLY, THESE ARE THE VALUES ZACH POSTED TO SLACK
-sensorValues = [146.07803403 223.66871456 177.44678639];
-
-% Linearize the raw sensor values. To do so, we load the the derived,
-% nonLinearClippingExponent, and then call the linearization function
+% Prepare to linearize the raw sensor values. To do so, we load the the
+% derived, nonLinearClippingExponent, and then call the linearization
+% function
 paramFileName = fullfile(...
     tbLocateProjectSilent('lightLoggerAnalysis'),...
     'derived',...
     'nonLinearClippingExponent.mat');
 load(paramFileName,'clippingExponent');
-sensorValuesLinear = linearizeIMX219SensorCounts(sensorValues,clippingExponent);
+
+% Prepare to correct for the fielding function
+paramFileName = fullfile(...
+    tbLocateProjectSilent('lightLoggerAnalysis'),...
+    'derived',...
+    'flatFieldingFunction.mat');
+load(paramFileName,'correctionMap');
+
+% What is the Bayer pattern in these data?
+bayerPattern = "BGGR";
+
+% Loop through the images
+pixelValsRGB = {[],[],[]};
+for ii = 1:length(fileSet)
+
+    % Load the image
+    fileName = fullfile(fileSet(ii).folder,fileSet(ii).name);
+    I = double(imread(fileName));    
+
+    % Retain only the first channel, as this is a raw image and the other
+    % channels are simply a copy of this one. CAN REMOVE THIS AFTER ZACH
+    % SAVES THESE FILES AS GRAYSCALE
+    I = I(:,:,1);
+
+    % Linearize
+    linearI = linearizeIMX219SensorCounts(I,clippingExponent);
+
+    % Correct for the fielding function
+    linearFlatI = linearI .* correctionMap;
+
+    % Set values outside the crop zone to nan
+    outside = ~cropMask;
+    linearFlatI(outside)=nan;
+
+    % Obtain the R, G, and B components
+    imageVals = {};
+    [imageVals{1}, imageVals{2}, imageVals{3}] = ...
+        splitBayerFrame(linearFlatI, bayerPattern);
+
+    % Store the non-nan R, G, and B pixel values in the growing array
+    for cc=1:3
+        theseVals = imageVals{cc};
+        theseVals = theseVals(~isnan(theseVals));
+        pixelValsRGB{cc} = [pixelValsRGB{cc}; theseVals(:)];
+    end
+end
+
+% Take the mean of the pixel values within each channel (R,G,B) across
+% images and pixels within the region of interest
+sensorValues = cellfun(@(x) mean(x),pixelValsRGB);
 
 % Normalize the sensor values to the blue channel
-sensorValuesLinearNormed = sensorValuesLinear / sensorValuesLinear(3);
+sensorValuesNormed = sensorValues / sensorValues(3);
 
 % Obtain the relative predicted channel values based upon the cloudy sky
 % SPD. We first need to match up the wavelength support of the two
@@ -79,12 +135,15 @@ predictedSensorValueNormed = predictedSensorValue / predictedSensorValue(3);
 
 % Calculate the radiometric correction that must be applied to the observed
 % sensor values to have them match the predicted sensor values
-radiometricCorrectionRGB = predictedSensorValueNormed ./  sensorValuesLinearNormed;
+radiometricCorrectionRGB = predictedSensorValueNormed ./  sensorValuesNormed;
 
 % We further adjust this triplet so that the mean sensor value (across RGB)
 % is unchanged by this operation
 k = 3/sum(radiometricCorrectionRGB);
 radiometricCorrectionRGB = radiometricCorrectionRGB * k;
+
+% Report the correction to the console
+fprintf('The radiometric correction tuple (RGB) is: [%2.2f, %2.2f, %2.2f]\n',radiometricCorrectionRGB);
 
 % Save the radiometric correction to the "derived" directory
 saveFileName = fullfile(...
