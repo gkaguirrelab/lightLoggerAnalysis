@@ -5,20 +5,35 @@
 clear
 close all
 
-% We hard-code here the AGC settings that were recorded after the camera
-% reached steady state while being exposed to the all-on settings of the
-% combiLED, in the presence of neutral filters on the optical path
-% of varying density.
-%% @ZACH -- Change this from being hard-coded to loading
-agcData.ndf = [0,1,2,3,4,5];
-agcData.DGain = [1.00E+00	1	1.58E+00	5.96E+00	7.98E+00	10];
-agcData.AGain = [1.00E+00	1.80281687	10.666	10.666	10.666	10.666];
-agcData.Exposure = [1.47E+03	8333	8333	8333	8333	8333];
+% Load the full-precision fixed AGC settings used for the 0.25 contrast
+% calibration from the shared Python world-camera utility module. Each
+% Python tuple is ordered as analog gain, digital gain, and exposure.
+% These values should remain:
+%   NDF       = [0,          1,          2,          3,          4,          5]
+%   AGain     = [1,          1.80281687, 10.666,     10.666,     10.666,     10.666]
+%   DGain     = [1,          1,          1.58156674, 5.96331605, 7.97561560, 10]
+%   Exposure  = [1466,       8333,       8333,       8333,       8333,       8333]
+%   AGC score = [1466,       15022.87298, 140569.30074, 530018.20667, 708870.94394, 888797.78]
+addpath(getpref("lightLoggerAnalysis", "light_logger_libraries_matlab"));
+world_util = import_pyfile(getpref("lightLoggerAnalysis", "world_util_path"));
+world_agc_target = double(py.getattr(world_util, "WORLD_AGC_DEFAULT_TARGET"));
+get_ndf_settings = py.getattr(world_util, "get_world_contrast_level_ndf_settings");
+world_settings_by_ndf = get_ndf_settings(0.25, world_agc_target);
+get_ndf_setting = py.getattr(world_settings_by_ndf, "__getitem__");
+
+agcData.ndf = 0:5;
+agcData.AGain = zeros(size(agcData.ndf));
+agcData.DGain = zeros(size(agcData.ndf));
+agcData.Exposure = zeros(size(agcData.ndf));
+for ii = 1:numel(agcData.ndf)
+    fixed_settings = double(get_ndf_setting(py.float(agcData.ndf(ii))));
+    agcData.AGain(ii) = fixed_settings(1);
+    agcData.DGain(ii) = fixed_settings(2);
+    agcData.Exposure(ii) = fixed_settings(3);
+end
 
 % Derive a "camera score" by obtaining the product of the AGC settings
-for ii = 1:length(agcData.ndf)
-    cameraScore(ii) = agcData.DGain(ii)*agcData.AGain(ii)*agcData.Exposure(ii);
-end
+cameraScore = agcData.DGain .* agcData.AGain .* agcData.Exposure;
 
 % Load the XYZ fundamentals (these live in the PsychToolbox, which is
 % placed on the matlab path when we invoke the CombiLEDToolbox)

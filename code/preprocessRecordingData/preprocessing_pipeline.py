@@ -3610,6 +3610,231 @@ def transfer_light_logger_recordings(src_dir: str="/Volumes/T7 Shield",
     return 
 
 
+def _plot_rerecording_frequency(rerecording_statistics: pd.DataFrame,
+                                output_dir: str | None=None,
+                                output_filetype: Literal["png", "pdf", "svg"]="png",
+                                close_figures: bool | None=None
+                               ) -> list[plt.Figure]:
+    """Plot recording counts by activity and the overall re-recording rate."""
+
+    if(close_figures is None):
+        close_figures = output_dir is not None
+
+    if(output_dir is not None):
+        os.makedirs(output_dir, exist_ok=True)
+
+    figures: list[plt.Figure] = []
+    activity_names: list[str] = natsorted(rerecording_statistics["recording_name"].unique())
+
+    # First, make one subplot per activity showing the number of recordings
+    # collected for each subject
+    if(len(activity_names) > 0):
+        column_count: int = min(3, max(1, math.ceil(math.sqrt(len(activity_names)))))
+        row_count: int = math.ceil(len(activity_names) / column_count)
+        activity_fig, axes = plt.subplots(row_count,
+                                          column_count,
+                                          figsize=(5 * column_count, 3.5 * row_count),
+                                          squeeze=False
+                                         )
+        axes_flat: np.ndarray = axes.ravel()
+
+        for activity_num, activity_name in enumerate(activity_names):
+            axis: plt.Axes = axes_flat[activity_num]
+            activity_statistics: pd.DataFrame = rerecording_statistics[
+                rerecording_statistics["recording_name"] == activity_name
+            ].sort_values("subjectID")
+            subject_labels: list[str] = [str(subject_id) for subject_id in activity_statistics["subjectID"]]
+            recording_counts: list[int] = activity_statistics["num_recordings"].tolist()
+
+            axis.bar(subject_labels, recording_counts, color="tab:blue")
+            axis.set_title(activity_name, fontweight="bold")
+            axis.set_xlabel("Subject ID")
+            axis.set_ylabel("Number of Recordings")
+            axis.tick_params(axis="x", labelrotation=45)
+            axis.grid(axis="y", alpha=0.25)
+            axis.set_ylim(0, max(recording_counts) + 0.5)
+            axis.set_yticks(range(0, max(recording_counts) + 1))
+
+        for unused_axis in axes_flat[len(activity_names):]:
+            unused_axis.axis("off")
+
+        activity_fig.suptitle("Number of Recordings by Subject and Activity", fontsize=14, fontweight="bold")
+        activity_fig.tight_layout(rect=(0, 0, 1, 0.96))
+
+        if(output_dir is not None):
+            output_path: str = os.path.join(output_dir, f"rerecording_frequency_by_activity.{output_filetype}")
+            activity_fig.savefig(output_path, dpi=200)
+
+        figures.append(activity_fig)
+
+    # Next, show the percentage of subject/activity recordings that have
+    # more than one recording attempt
+    pie_fig, pie_axis = plt.subplots(figsize=(7, 6))
+    single_recording_count: int = int((rerecording_statistics["num_recordings"] == 1).sum())
+    multiple_recording_count: int = int((rerecording_statistics["num_recordings"] > 1).sum())
+
+    if(single_recording_count + multiple_recording_count > 0):
+        _, _, percentage_labels = pie_axis.pie(
+            [single_recording_count, multiple_recording_count],
+            labels=[f"One recording (n={single_recording_count})",
+                    f"More than one recording (n={multiple_recording_count})"],
+            colors=["tab:blue", "tab:orange"],
+            autopct=lambda percentage: f"{percentage:.1f}%" if percentage > 0 else "",
+            startangle=90
+        )
+        for percentage_label in percentage_labels:
+            percentage_label.set_fontweight("bold")
+
+        pie_axis.axis("equal")
+    else:
+        pie_axis.text(0.5, 0.5, "No recording data", ha="center", va="center")
+        pie_axis.set_xticks([])
+        pie_axis.set_yticks([])
+
+    pie_axis.set_title("Percentage of Recordings with Multiple Attempts", fontsize=14, fontweight="bold")
+    pie_fig.tight_layout()
+
+    if(output_dir is not None):
+        output_path: str = os.path.join(output_dir, f"rerecording_frequency_summary.{output_filetype}")
+        pie_fig.savefig(output_path, dpi=200)
+
+    figures.append(pie_fig)
+
+    if(close_figures is True):
+        for fig in figures:
+            plt.close(fig)
+    else:
+        plt.show()
+
+    return figures
+
+
+def analyze_rerecording_frequency(api_key: str,
+                                  api_url = "https://api.cloud.pupil-labs.com/v2",
+                                  workspace_id: str="default",
+                                  subjects_to_process: Iterable=set(),
+                                  subjects_to_skip: Iterable=set(),
+                                  activities_to_process: Iterable=set(),
+                                  activities_to_skip: Iterable=set(),
+                                  verbose: bool=False,
+                                  plot_output_dir: str | None=None,
+                                  plot_filetype: Literal["png", "pdf", "svg"]="png",
+                                  close_plots: bool | None=None
+                                 ) -> pd.DataFrame:
+    """Analyze how often Pupil Cloud activities had to be re-recorded.
+
+    Args:
+        api_key: Pupil Cloud API key.
+        api_url: Base URL for the Pupil Cloud API.
+        workspace_id: Identifier for workspace id.
+        subjects_to_process: Subject IDs to include. An empty iterable includes
+            all subjects not listed in ``subjects_to_skip``.
+        subjects_to_skip: Subject IDs to exclude.
+        activities_to_process: Activity names to include. An empty iterable
+            includes all activities not listed in ``activities_to_skip``.
+        activities_to_skip: Activity names to exclude.
+        verbose: Show progress bars while processing subjects and activities.
+        plot_output_dir: Optional directory where the figures are saved.
+        plot_filetype: File type used when saving figures.
+        close_plots: Close figures after creation. Defaults to True when saving
+            to disk and False otherwise.
+
+    Returns:
+        A dataframe with one row per subject and activity. ``num_recordings``
+        is the total number of recording attempts, including the first.
+    """
+    # First, we will get a list of all the recordings on pupil cloud
+    recordings_list_url: str = f"{api_url}/workspaces/{workspace_id}/recordings"
+    r: object = requests.get(recordings_list_url, stream=True, headers={"api-key": api_key})
+    r.raise_for_status()
+    r_json: object = r.json()
+    r_result: object = r_json["result"]
+
+    # Now, let's deconstruct the recording names into an easily parasable hashmap
+    parsed_recording_map: dict[int, dict[str, set[int]]] = {}
+    for recording_result in r_result:
+        # Find the recording name
+        recording_name: str = recording_result["name"]
+
+        # If the recording name does not contain FLIC,
+        # output a warning and skip
+        if("FLIC" not in recording_name):
+            warnings.warn(f"Recording on cloud: {recording_name} does not contain FLIC")
+            continue
+
+        # Let's break the recording name down into the desired fields
+
+        # First, we will find the subject ID
+        try:
+            subject_id: int = int(re.search(r"^FLIC_(\d+)", recording_name).group(1))
+        except:
+            warnings.warn(f"Recording name: {recording_name} has no subject_id, Skipping...")
+            continue
+
+        # Find the activity
+        try:
+            activity_name: str = re.search(r"^FLIC_\d+_([A-Za-z]+)", recording_name).group(1)
+        except:
+            warnings.warn(f"Recording name: {recording_name} has no activity name, Skipping...")
+            continue
+
+        # Find the recording number
+        try:
+            recording_number: int = int(re.search(r"_(\d+)$", recording_name).group(1))
+        except:
+            warnings.warn(f"Recording name: {recording_name} has no recording number, Skipping...")
+            continue
+
+        # Store all unique recording numbers for each subject and activity
+        if(subject_id not in parsed_recording_map):
+            parsed_recording_map[subject_id] = {activity_name: set([recording_number])}
+        elif(activity_name not in parsed_recording_map[subject_id]):
+            parsed_recording_map[subject_id][activity_name] = set([recording_number])
+        else:
+            parsed_recording_map[subject_id][activity_name].add(recording_number)
+
+    # Now, let's iterate over all of the subjects and collect their statistics
+    subjects_to_analyze: list[int] = natsorted([
+        subject
+        for subject in parsed_recording_map
+        if _is_desired_item(subject, subjects_to_process, subjects_to_skip)
+    ])
+    rerecording_statistics: list[dict] = []
+    subject_iterator: Iterable = range(len(subjects_to_analyze)) if verbose is False else tqdm(range(len(subjects_to_analyze)), desc="Processing Subjects", leave=True)
+    for subject_num in subject_iterator:
+        subject_id: int = subjects_to_analyze[subject_num]
+        subject_recordings: dict[str, set[int]] = parsed_recording_map[subject_id]
+
+        # Filter the recordings for this subject
+        activities_to_analyze: list[str] = natsorted([
+            activity
+            for activity in subject_recordings
+            if _is_desired_item(activity, activities_to_process, activities_to_skip)
+        ])
+        activities_iterator: Iterable = range(len(activities_to_analyze)) if verbose is False else tqdm(range(len(activities_to_analyze)), desc="Processing Activities", leave=False)
+        for activity_num in activities_iterator:
+            activity_name: str = activities_to_analyze[activity_num]
+            recording_numbers: set[int] = subject_recordings[activity_name]
+
+            rerecording_statistics.append({"subjectID": subject_id,
+                                           "recording_name": activity_name,
+                                           "num_recordings": len(recording_numbers)
+                                          })
+
+    rerecording_statistics_df: pd.DataFrame = pd.DataFrame(rerecording_statistics,
+                                                           columns=["subjectID", "recording_name", "num_recordings"]
+                                                          )
+
+    # Plot the results while preserving the dataframe as the function output
+    _plot_rerecording_frequency(rerecording_statistics_df,
+                                output_dir=plot_output_dir,
+                                output_filetype=plot_filetype,
+                                close_figures=close_plots
+                               )
+
+    return rerecording_statistics_df
+
+
 def download_pupil_cloud_recordings(api_key: str,
                                     dst_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026", 
                                     api_url = "https://api.cloud.pupil-labs.com/v2",

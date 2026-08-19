@@ -26,6 +26,49 @@ import ms_util
 import pupil_util
 
 
+def _world_agc_settings_from_metadata(metadata: np.ndarray) -> dict[str, np.ndarray]:
+    """Extract world-camera AGC settings from legacy or modern metadata."""
+
+    empty_settings: dict[str, np.ndarray] = {
+        setting: np.array([], dtype=np.float64)
+        for setting in world_util.WORLD_AGC_METADATA_COLS
+    }
+
+    if(len(metadata.shape) == 1 or metadata.shape[1] == 1):
+        return empty_settings
+
+    legacy_agc_cols: tuple[str, str, str] = ("Again", "Dgain", "exposure")
+    modern_agc_cols: tuple[str, ...] = tuple(world_util.WORLD_AGC_METADATA_COLS)
+
+    if(metadata.shape[1] == 1 + len(modern_agc_cols)):
+        return {
+            setting: np.ascontiguousarray(metadata[:, 1 + setting_col_num])
+            for setting_col_num, setting in enumerate(modern_agc_cols)
+        }
+
+    if(metadata.shape[1] == 1 + len(legacy_agc_cols)):
+        legacy_settings: dict[str, np.ndarray] = {
+            setting: np.ascontiguousarray(metadata[:, 1 + setting_col_num])
+            for setting_col_num, setting in enumerate(legacy_agc_cols)
+        }
+        return {
+            "cameraAgain": legacy_settings["Again"],
+            "AGCDgain": legacy_settings["Dgain"],
+            "cameraExposure": legacy_settings["exposure"],
+            "AGCAgain": np.array([], dtype=np.float64),
+            "AGCExposure": np.array([], dtype=np.float64),
+            "Again": legacy_settings["Again"],
+            "Dgain": legacy_settings["Dgain"],
+            "exposure": legacy_settings["exposure"],
+        }
+
+    raise ValueError(
+        f"Unsupported world metadata column count {metadata.shape[1]}. "
+        f"Expected timestamp plus legacy columns {legacy_agc_cols} or "
+        f"modern columns {modern_agc_cols}."
+    )
+
+
 @njit(parallel=True)
 def _clip_buffer_compiled(raw_frame_buffer: np.ndarray,
                           debayered_frame_buffer: np.ndarray,
@@ -380,9 +423,7 @@ def world_chunk_parser(chunk_paths: tuple[str],
 
         # Initialize empty settings dict 
         # Save this as a settings dict 
-        chunk_dict['W']['settings'] = { setting: np.array([], dtype=np.float64)
-                                        for setting in world_util.WORLD_AGC_METADATA_COLS
-                                        }
+        chunk_dict['W']['settings'] = _world_agc_settings_from_metadata(np.array([], dtype=np.float64))
 
         return chunk_dict
     
@@ -398,9 +439,7 @@ def world_chunk_parser(chunk_paths: tuple[str],
     assert len(t) == len(v), "Length of metadata vector must match length of value vector"
 
     # Extract the AGC metadata (if it exists). 
-    chunk_dict['W']['settings'] = { setting: np.array([], dtype=np.float64) if len(metadata.shape) == 1 or metadata.shape[1] == 1 else np.ascontiguousarray(metadata[:, 1+setting_col_num])
-                                    for setting_col_num, setting in enumerate(world_util.WORLD_AGC_METADATA_COLS) 
-                                    }
+    chunk_dict['W']['settings'] = _world_agc_settings_from_metadata(metadata)
 
     # Apply the desired transformations 
     # Convert time units to seconds 
