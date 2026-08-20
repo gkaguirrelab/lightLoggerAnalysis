@@ -28,10 +28,10 @@ by the camera: `cameraAgain`, `AGCDgain`, and `cameraExposure`.
 
 | Folder | AGC state | `cameraAgain` | `AGCDgain` | `cameraExposure` |  |
 | --- | ---: | ---: | ---: | ---: | :---: |
-| `AGCstate1` | 1 | 1 | 1 | 39 | Yes |
-| `AGCstate2` | 2 | 1 | 1 | 4180 | Yes |
-| `AGCstate3` | 3 | 1 | 1 | 8290 | Yes |
-| `AGCstate4` | 4 | 5.5652174949645996 | 1 | 8290 | Yes |
-| `AGCstate5` | 5 | 10.666666984558105 | 1 | 8290 | Yes |
+| `AGCstate1` | 1 | 1 | 1 | 39 |  |
+| `AGCstate2` | 2 | 1 | 1 | 4180 |  |
+| `AGCstate3` | 3 | 1 | 1 | 8290 |  |
+| `AGCstate4` | 4 | 5.5652174949645996 | 1 | 8290 |  |
+| `AGCstate5` | 5 | 10.666666984558105 | 1 | 8290 |
 
 The applied camera settings were fixed within each AGC-state recording.
