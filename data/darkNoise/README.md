@@ -7,7 +7,7 @@ state, because the effective camera noise depends on analog gain, digital gain,
 and exposure.
 
 Each `AGCstate*` folder contains a stack of TIFF dark frames acquired with the
-camera covered. These frames should be processed within each AGC state, not
+camera covered with both the lens cap and a black shroud, and the entire room in darkness. The frames are linearly spaced through the recording. These frames should be processed within each AGC state, not
 pooled across AGC states.
 
 ## Dropbox Location of Raw Data 
@@ -15,19 +15,23 @@ pooled across AGC states.
 Dropbox location:
 
 ```text
-FLIC_admin/Equipment/ArduCam B0392 IMX219 Wide Angle M12/darkNoiseCalibrations/AGCstate1
+FLIC_admin/Equipment/ArduCam B0392 IMX219 Wide Angle M12/darkNoiseCalibrations
 ```
 
-## AGC States
+## Recorded Camera Settings
 
-The AGC states used for these measurements are:
+The settings below were read from every row of the world-camera metadata in
+the raw dark-noise recordings. The six metadata columns, in order, are
+`timestamp`, `cameraAgain`, `AGCDgain`, `cameraExposure`, `AGCAgain`, and
+`AGCExposure`. The table reports the three settings that were actually applied
+by the camera: `cameraAgain`, `AGCDgain`, and `cameraExposure`.
 
-| Folder | AGC state | Analog gain | Digital gain | Exposure |
-| --- | ---: | ---: | ---: | ---: |
-| `AGCstate0` | 0 | 1.00000000 | 1.00000000 | 1466 |
-| `AGCstate1` | 1 | 1.80281687 | 1.00000000 | 8333 |
-| `AGCstate2` | 2 | 10.66600000 | 1.58156674 | 8333 |
-| `AGCstate3` | 3 | 10.66600000 | 5.96331605 | 8333 |
-| `AGCstate4` | 4 | 10.66600000 | 7.97561560 | 8333 |
-| `AGCstate5` | 5 | 10.66600000 | 10.00000000 | 8333 |
+| Folder | AGC state | `cameraAgain` | `AGCDgain` | `cameraExposure` |  |
+| --- | ---: | ---: | ---: | ---: | :---: |
+| `AGCstate1` | 1 | 1 | 1 | 39 | Yes |
+| `AGCstate2` | 2 | 1 | 1 | 4180 | Yes |
+| `AGCstate3` | 3 | 1 | 1 | 8290 | Yes |
+| `AGCstate4` | 4 | 5.5652174949645996 | 1 | 8290 | Yes |
+| `AGCstate5` | 5 | 10.666666984558105 | 1 | 8290 | Yes |
 
+The applied camera settings were fixed within each AGC-state recording.
