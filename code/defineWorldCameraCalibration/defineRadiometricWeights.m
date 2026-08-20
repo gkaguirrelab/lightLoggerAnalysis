@@ -70,11 +70,6 @@ for ii = 1:length(fileSet)
     fileName = fullfile(fileSet(ii).folder,fileSet(ii).name);
     I = double(imread(fileName));    
 
-    % Retain only the first channel, as this is a raw image and the other
-    % channels are simply a copy of this one. CAN REMOVE THIS AFTER ZACH
-    % SAVES THESE FILES AS GRAYSCALE
-    I = I(:,:,1);
-
     % Linearize
     linearI = linearizeIMX219SensorCounts(I,clippingExponent);
 
