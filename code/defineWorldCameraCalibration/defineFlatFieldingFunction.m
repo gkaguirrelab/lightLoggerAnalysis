@@ -11,23 +11,12 @@
 % Housekeeping
 clear; close all; clc
 
-% Load the Python world-camera utility library
-addpath(getpref("lightLoggerAnalysis", "light_logger_libraries_matlab"));
-world_util = import_pyfile(getpref("lightLoggerAnalysis", "world_util_path"));
-numpy = py.importlib.import_module('numpy');
-
 % Load the parameters needed to linearize the raw sensor values
 paramFileName = fullfile(...
     tbLocateProjectSilent('lightLoggerAnalysis'),...
     'derived',...
     'nonLinearClippingExponent.mat');
 load(paramFileName,'clippingExponent');
-
-paramFileName = fullfile(...
-    tbLocateProjectSilent('lightLoggerAnalysis'),...
-    'derived',...
-    'darkSignalValue.mat');
-load(paramFileName,'darkSignalValue');
 
 % Identify the raw frames from the Fels Planetarium recording
 dataFileName = fullfile(...
@@ -48,7 +37,7 @@ channelOrder = {'r','g','b'};
 % Call local function to obtain the average across frames for each of the
 % channels
 avgImageByChannel = makeBayerChannelAverages(...
-    fileSet,bayerPattern,world_util,numpy,clippingExponent,darkSignalValue);
+    fileSet,bayerPattern,clippingExponent);
 
 % Loop over the channels and fit a flattened Gaussian
 results = struct();
@@ -121,7 +110,7 @@ save(saveFileName,'readme',...
 % Load and linearize the raw frames, and obtain the average across frames
 % for each Bayer channel
 function avgImageByChannel = makeBayerChannelAverages(...
-    fileSet,bayerPattern,world_util,numpy,clippingExponent,darkSignalValue)
+    fileSet,bayerPattern,clippingExponent)
 
 nFrames = length(fileSet);
 
@@ -129,13 +118,9 @@ for k = 1:nFrames
 
     % Load and linearize the raw frame
     fileName = fullfile(fileSet(k).folder,fileSet(k).name);
-    rawFrame = imread(fileName);
-    linearFrame = double(world_util.linearize_camera_responsivity(...
-        numpy.array(rawFrame),...
-        pyargs(...
-        'original_bit_depth',int32(8),...
-        'dark_noise',darkSignalValue,...
-        'clipping_exponent',clippingExponent)));
+    rawFrame = double(imread(fileName));
+    linearFrame = linearizeIMX219SensorCounts(...
+        rawFrame,clippingExponent);
 
     % Separate the Bayer channels
     [R, G, B] = splitBayerFrame(linearFrame, bayerPattern);

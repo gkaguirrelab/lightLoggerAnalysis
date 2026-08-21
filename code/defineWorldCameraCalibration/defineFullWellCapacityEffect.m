@@ -39,9 +39,10 @@
 % a linearization function that transforms raw sensor values to a
 % linearized form. In practice, this adjusts the original value range of
 % 16-254 to the linearized range of 0-254 (removing the dark value). Raw
-% sensor values of >254 are set to 255. Linearization is performed by the
-% Python function world_util.linearize_camera_responsivity, which is the
-% single source of truth for this operation.
+% sensor values of >254 are set to 255. The linearization function lives
+% within the utilities sub-folder and is called:
+%
+%       linearizeIMX219SensorCounts
 %
 % We find a clipping exponent of 5.3918. With linearization, we gain an
 % increased ability to represent higher levels of illumination, with some
@@ -52,11 +53,6 @@
 % Housekeeping
 clear
 close all
-
-% Load the Python world-camera utility library
-addpath(getpref("lightLoggerAnalysis", "light_logger_libraries_matlab"));
-world_util = import_pyfile(getpref("lightLoggerAnalysis", "world_util_path"));
-numpy = py.importlib.import_module('numpy');
 
 % Load in the calibration data 
 dataFileName = fullfile(...
@@ -121,9 +117,7 @@ box off
 
 % Plot the inverse gamma function
 nexttile
-yLinear = double(world_util.linearize_camera_responsivity(...
-    numpy.array(y(idxSort)),...
-    pyargs('clipping_exponent',p(1))));
+yLinear = linearizeIMX219SensorCounts(y(idxSort), p(1));
 plot(y(idxSort),yLinear,'-k','LineWidth',2);
 xlabel('Raw sensor value');
 ylabel('Linearized sensor value');
