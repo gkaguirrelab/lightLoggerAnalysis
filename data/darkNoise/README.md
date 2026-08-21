@@ -6,7 +6,7 @@ to estimate the camera dark signal and dark noise separately for each AGC
 state, because the effective camera noise depends on analog gain, digital gain,
 and exposure.
 
-Each `AGCstate*` folder contains a stack of TIFF dark frames acquired with the
+Each `AGCstate*_AGain-*_DGain-*_E-*` folder contains a stack of TIFF dark frames acquired with the
 camera covered with both the lens cap and a black shroud, and the entire room in darkness. The frames are linearly spaced through the recording. These frames should be processed within each AGC state, not
 pooled across AGC states.
 
@@ -26,12 +26,12 @@ the raw dark-noise recordings. The six metadata columns, in order, are
 `AGCExposure`. The table reports the three settings that were actually applied
 by the camera: `cameraAgain`, `AGCDgain`, and `cameraExposure`.
 
-| Folder | AGC state | `cameraAgain` | `AGCDgain` | `cameraExposure` |  |
-| --- | ---: | ---: | ---: | ---: | :---: |
-| `AGCstate1` | 1 | 1 | 1 | 39 |  |
-| `AGCstate2` | 2 | 1 | 1 | 4180 |  |
-| `AGCstate3` | 3 | 1 | 1 | 8290 |  |
-| `AGCstate4` | 4 | 5.5652174949645996 | 1 | 8290 |  |
-| `AGCstate5` | 5 | 10.666666984558105 | 1 | 8290 |
+| Folder | AGC state | `cameraAgain` | `AGCDgain` | `cameraExposure` |
+| --- | ---: | ---: | ---: | ---: |
+| `AGCstate1_AGain-1_DGain-1_E-39` | 1 | 1 | 1 | 39 |
+| `AGCstate2_AGain-1_DGain-1_E-4180` | 2 | 1 | 1 | 4180 |
+| `AGCstate3_AGain-1_DGain-1_E-8290` | 3 | 1 | 1 | 8290 |
+| `AGCstate4_AGain-5.5652174949645996_DGain-1_E-8290` | 4 | 5.5652174949645996 | 1 | 8290 |
+| `AGCstate5_AGain-10.666666984558105_DGain-1_E-8290` | 5 | 10.666666984558105 | 1 | 8290 |
 
 The applied camera settings were fixed within each AGC-state recording.
