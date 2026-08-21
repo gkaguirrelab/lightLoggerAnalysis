@@ -2,31 +2,42 @@
 
 % This is an analysis of camera images collected using the Fels Planetarium
 % dome. A full description of the manner of data collection is described in
-% the readme.md within this directory. The collected video underwent sensor
-% value linearization and a set of 36 individual frames were selected.
-% These frames (along with their indices within the source video) were then
-% saved in a matlab data file (linearizedPlanetariumVideoFrames.mat). This
-% routine loads the frames, averages them, separates out the R, G, and B
-% channels, fits a flattened 2D Gaussian function, and then uses this fit
-% to generate and save a derived correction function that imposes a flat
-% intensity field.
+% the readme.md within this directory. Raw frames were selected from each of
+% four camera-rotation periods. This routine loads and linearizes the raw
+% frames, averages them, separates out the R, G, and B channels, fits a
+% flattened 2D Gaussian function, and then uses this fit to generate and
+% save a derived correction function that imposes a flat intensity field.
 
 % Housekeeping
 clear; close all; clc
 
-% Load the selected video frames from the Fels Planetarium recording
+% Load the Python world-camera utility library
+addpath(getpref("lightLoggerAnalysis", "light_logger_libraries_matlab"));
+world_util = import_pyfile(getpref("lightLoggerAnalysis", "world_util_path"));
+numpy = py.importlib.import_module('numpy');
+
+% Load the parameters needed to linearize the raw sensor values
+paramFileName = fullfile(...
+    tbLocateProjectSilent('lightLoggerAnalysis'),...
+    'derived',...
+    'nonLinearClippingExponent.mat');
+load(paramFileName,'clippingExponent');
+
+paramFileName = fullfile(...
+    tbLocateProjectSilent('lightLoggerAnalysis'),...
+    'derived',...
+    'darkSignalValue.mat');
+load(paramFileName,'darkSignalValue');
+
+% Identify the raw frames from the Fels Planetarium recording
 dataFileName = fullfile(...
     tbLocateProjectSilent('lightLoggerAnalysis'),...
     'data',...
     'flatFieldingFunction',...
-    'linearizedPlanetariumVideoFrames.mat');
-load(dataFileName,'frames')
-
-% Convert the frames from integer to floating point
-frames = double(frames);
-
-% How many frames do we have?
-nFrames = size(frames, 1);
+    'rawFrames',...
+    '**',...
+    '*.tiff');
+fileSet = dir(dataFileName);
 
 % What is the Bayer pattern in these data?
 bayerPattern = "BGGR";
@@ -36,7 +47,8 @@ channelOrder = {'r','g','b'};
 
 % Call local function to obtain the average across frames for each of the
 % channels
-avgImageByChannel = makeBayerChannelAverages(frames, bayerPattern);
+avgImageByChannel = makeBayerChannelAverages(...
+    fileSet,bayerPattern,world_util,numpy,clippingExponent,darkSignalValue);
 
 % Loop over the channels and fit a flattened Gaussian
 results = struct();
@@ -106,15 +118,27 @@ save(saveFileName,'readme',...
 
 %% LOCAL FUNCTIONS
 
-% Obtain the average across frames for each Bayer channel
-function avgImageByChannel = makeBayerChannelAverages(frames, bayerPattern)
+% Load and linearize the raw frames, and obtain the average across frames
+% for each Bayer channel
+function avgImageByChannel = makeBayerChannelAverages(...
+    fileSet,bayerPattern,world_util,numpy,clippingExponent,darkSignalValue)
 
-nFrames = size(frames, 1);
+nFrames = length(fileSet);
 
 for k = 1:nFrames
 
-    rawFrame = squeeze(frames(k,:,:));
-    [R, G, B] = splitBayerFrame(rawFrame, bayerPattern);
+    % Load and linearize the raw frame
+    fileName = fullfile(fileSet(k).folder,fileSet(k).name);
+    rawFrame = imread(fileName);
+    linearFrame = double(world_util.linearize_camera_responsivity(...
+        numpy.array(rawFrame),...
+        pyargs(...
+        'original_bit_depth',int32(8),...
+        'dark_noise',darkSignalValue,...
+        'clipping_exponent',clippingExponent)));
+
+    % Separate the Bayer channels
+    [R, G, B] = splitBayerFrame(linearFrame, bayerPattern);
 
     if k == 1
         sum_R = zeros(size(R));
