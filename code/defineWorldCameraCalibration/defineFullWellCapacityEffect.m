@@ -52,7 +52,6 @@
 
 % Housekeeping
 clear
-close all
 
 % Load in the calibration data 
 dataFileName = fullfile(...

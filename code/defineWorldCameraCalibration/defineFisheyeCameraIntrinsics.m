@@ -7,7 +7,6 @@
 
 % Housekeeping
 clear
-close all
 
 % Path to the matlab camera calibration app session file
 sessionFileName = fullfile(...

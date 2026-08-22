@@ -9,7 +9,7 @@
 % save a derived correction function that imposes a flat intensity field.
 
 % Housekeeping
-clear; close all; clc
+clear
 
 % Load the parameters needed to linearize the raw sensor values
 paramFileName = fullfile(...
