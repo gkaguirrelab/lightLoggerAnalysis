@@ -22,9 +22,8 @@ Smin = darkSignal;
 % Define the fixed asymptotic value
 Smax = 2^8-1 - Smin;
 
-% Force all image pixels to be within the min max range
+% Force all image pixels to above the min value
 y(y<Smin) = Smin;
-y(y>Smax) = Smax;
 
 % Subtract the baseline offset
 yPrime = y - Smin;

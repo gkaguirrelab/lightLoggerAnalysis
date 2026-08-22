@@ -7,10 +7,8 @@
 % dark signal is the same across all recording states, we simply save the
 % single dark single value into the derived parameters directory.
 
-
 % Housekeeping
 clear
-close all
 
 % Define the set of sensor conditions under which the measurements were
 % made. The labels are listed in natural state-number order.
