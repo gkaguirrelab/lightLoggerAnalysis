@@ -18,4 +18,4 @@ Record the digital-gain (`DGain`) value associated with each frame below.
 | `indoor_2.tiff` | `FLIC_2001` `walkIndoor` | 5.982647368887896 |
 | `outdoor_1.tiff` | `FLIC_2001` `walkOutdoor` | 1.0 |
 | `outdoor_2.tiff` | `FLIC_2001` `walkOutdoor` | 1.0 |
-| `planetarium_1.tiff` | Planetarium recording | __________ |
+| `planetarium_1.tiff` | Planetarium recording | 4.2608509465799225 |
