@@ -76,7 +76,8 @@ myObj = @(p) norm(y-myFitFunc(p));
 p0 = [4,5.7,0,0,0.4];
 
 % Search
-[p,fVal] = fmincon(myObj,p0);
+options = optimoptions('fmincon', 'Display', 'off');
+[p,fVal] = fmincon(myObj,p0,[],[],[],[],[],[],[],options);
 
 % Create x support that describes multiples of light intensity relative to
 % the light intensity that evokes a sensor value of 127.
@@ -95,7 +96,7 @@ tiledlayout(1,3)
 nexttile
 [~,idxSort] = sort(xRel);
 plot(xRel(idxSort),yFit(idxSort),'-','Color',[0.5,0.5,0.5],'LineWidth',1.5);
-hold
+hold on
 chanColors = {'r','g','b'};
 for channel = 1:3
     chanIdx = (channel-1)*20+1:channel*20;

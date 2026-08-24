@@ -28,7 +28,7 @@ load('T_xyz1931.mat','T_xyz1931','S_xyz1931');
 % Next, load the "maxSpectrum" calibration files and extract for each the
 % luminance of the sphere interior. The combiLED was set to the half-on
 % settings, so we account for this as well.
-settings = 0.5;
+settings = 0.25;
 calDataFolder = getpref('lightLoggerAnalysis','CalDataFolder');
 for ii = 1:length(agcData.ndf)
     thisCalFile = sprintf('CombiLED-A_cassette-ND%d_sphere_maxSpectrum.mat',agcData.ndf(ii));
@@ -88,8 +88,6 @@ end
 % The minispect illuminance is related to the average scene luminance by a
 % factor of pi.
 
-%% I don't understand how this works. I can't find this function
-%[~, best_p, sensitivity, illuminance] = fitCameraAGCToIlluminance([]);
 dataFileName = fullfile(...
     tbLocateProjectSilent('lightLoggerAnalysis'),...
     'data',...

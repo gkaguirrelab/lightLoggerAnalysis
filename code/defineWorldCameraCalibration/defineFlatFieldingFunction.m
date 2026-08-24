@@ -18,13 +18,12 @@ paramFileName = fullfile(...
     'nonLinearClippingExponent.mat');
 load(paramFileName,'clippingExponent');
 
-% Define the historical frame selection. We recovered these 36 times and
-% video-frame indices from linearizedPlanetariumVideoFrames.mat, then added
-% the same time list to the period extraction notebook as
-% "throughoutVideo". The notebook writes frames in list order using
-% zero-based names (0.tiff, 1.tiff, ...), so TIFF k-1 corresponds to entry
-% k below. The selection is hard-coded here so that this routine has no
-% dependency upon the historical MAT file or the four period directories.
+% Sophia selected 36 frames from throughout the recording (after the AGC
+% reached steady state) that correspond to the camera in different
+% rotational orientations. The time (in integer seconds) and the
+% corresponding frame index is given. These frames were extracted by hand
+% using python code from the assembled raw video (after filling in the gaps
+% between chunks) and then saved in the data directory.
 fps = 180;
 selectedTimesSec = [...
     366 372 393 401 427 435 456 466 488 498 518 528 ...
@@ -44,8 +43,7 @@ throughoutVideoRoot = fullfile(...
     tbLocateProjectSilent('lightLoggerAnalysis'),...
     'data',...
     'flatFieldingFunction',...
-    'rawFrames',...
-    'throughoutVideo');
+    'rawFrames');
 nSelectedFrames = length(selectedTimesSec);
 rawFrameFileNames = cell(1,nSelectedFrames);
 for ii = 1:nSelectedFrames

@@ -10,4 +10,4 @@ defineFullWellCapacityEffect
 defineFlatFieldingFunction
 defineRadiometricWeights
 % defineFisheyeCameraIntrinsics -- This is run in an interactive GUI
-% defineAGCToMeanLuminance -- Zach needs to expunge Python code
+defineAGCToMeanLuminance
