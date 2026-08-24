@@ -11,7 +11,6 @@
 
 % Housekeeping
 clear
-close all
 
 % Load the SPD of the cloudy sky
 dataFileName = fullfile(...
@@ -115,6 +114,7 @@ plot(wls,radiance,'.k');
 hold on
 xlabel('wavelength [nm]');
 ylabel('radiance [w/m^2/sr/nm]');
+title('SPD of cloudy sky and weighted channel sensitivity functions');
 
 % Loop through the channels
 channelNames = {'red','green','blue'};

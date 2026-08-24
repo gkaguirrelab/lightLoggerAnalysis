@@ -2,8 +2,9 @@
 % custom AGC settings we use to control the sensitivity of the IMX219
 % camera, the illuminance to which the camera is exposed, and the mean
 % luminance of each pixel in the camera array.
+
+% Housekeeping
 clear
-close all
 
 % Use the full-precision fixed AGC settings for the 0.25 contrast
 % calibration. These values should remain:
