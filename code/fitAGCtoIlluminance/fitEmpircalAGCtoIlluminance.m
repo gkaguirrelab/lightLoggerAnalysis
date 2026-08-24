@@ -39,7 +39,8 @@
 % measures the light sensitivity of the camera at each point in time. In
 % separate code, we estimated the properties of a low-pass temporal filter
 % that transforms the illuminance values into the camera score. This
-% previous stage of analysis is implemented in fit_agc_to_illuminance_util.py.
+% previous stage of analysis is run from
+% deriveEmpircalAGCAndIlluminance.py.
 
 % The data that we load here corresponds to the camera score (x) and the
 % temporally filtered illuminance values (y, in units of lux).

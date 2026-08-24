@@ -83,7 +83,7 @@ end
 % separate code, we estimated the properties of a low-pass temporal filter
 % that transforms the illuminance values into the camera score. This
 % previous stage of analysis is implemented in
-% fit_agc_to_illuminance_util.py.
+% deriveEmpircalAGCAndIlluminance.py.
 
 % The minispect illuminance is related to the average scene luminance by a
 % factor of pi.
@@ -91,10 +91,10 @@ end
 dataFileName = fullfile(...
     tbLocateProjectSilent('lightLoggerAnalysis'),...
     'data',...
-    'camera_agc_illuminance_linear_scale.mat');
+    'empircalAGC.mat');
 load(dataFileName);
-empiricalCameraScore = linear_scale_data.x_linear_scale;
-empiricalMeanLuminance = linear_scale_data.y_linear_scale / pi;
+empiricalCameraScore = empiralAGC.cameraScoreLinear;
+empiricalMeanLuminance = empiralAGC.msIlluminance / pi;
 
 % Plot the empirical measurements in log space
 figure;

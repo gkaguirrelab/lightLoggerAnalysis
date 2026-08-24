@@ -502,6 +502,75 @@ def extract_frames_from_video(video_path: str,
 
     return extracted_frames
 
+
+def find_frame_index(video_path: str,
+                     target: np.ndarray,
+                     chunk_size: int=1000,
+                     verbose: bool=False
+                    ) -> int | None:
+    """Return the index of an exact frame match within a video.
+
+    The video is searched in batches using :func:`destruct_video`
+    so that only ``chunk_size`` decoded frames are held in memory at once.
+    Two-dimensional targets are matched against grayscale frames, while
+    three-dimensional targets are matched against RGB frames.
+
+    Args:
+        video_path: Path to the video to search.
+        target: Target grayscale or RGB frame.
+        chunk_size: Maximum number of frames to extract per search batch.
+        verbose: Whether to display chunk-level search progress.
+
+    Returns:
+        Zero-based global video frame index of the first exact match, or
+        ``None`` when the frame is not found.
+    """
+    target = np.asarray(target)
+    if(target.ndim not in (2, 3)):
+        raise ValueError(
+            "frame must be a two-dimensional grayscale or three-dimensional RGB frame."
+        )
+    if(chunk_size <= 0):
+        raise ValueError(f"chunk_size must be positive. Got {chunk_size}.")
+
+    frame_count: int = inspect_video_frame_count(video_path)
+    video_frame_size: tuple[int, int] = inspect_video_framesize(video_path)
+    expected_frame_shape: tuple[int, ...] = (
+        video_frame_size
+        if target.ndim == 2
+        else (*video_frame_size, 3)
+    )
+
+    if(target.shape != expected_frame_shape):
+        raise ValueError(
+            f"Target shape {target.shape} does not match expected video frame shape {expected_frame_shape}."
+        )
+
+    chunk_starts: Iterable = range(0, frame_count, chunk_size)
+    if(verbose is True):
+        chunk_starts = tqdm(
+            chunk_starts,
+            total=(frame_count + chunk_size - 1) // chunk_size,
+            desc="Searching video",
+            unit="chunk",
+            leave=False,
+        )
+
+    for chunk_start in chunk_starts:
+        chunk_stop: int = min(chunk_start + chunk_size, frame_count)
+        frames: np.ndarray = destruct_video(
+            video_path,
+            start_frame=chunk_start,
+            end_frame=chunk_stop,
+            is_grayscale=target.ndim == 2,
+        )
+
+        for local_index, candidate_frame in enumerate(frames):
+            if(np.array_equal(candidate_frame, target)):
+                return chunk_start + local_index
+
+    return None
+
 def destruct_video(video_path: str, start_frame: int=0, end_frame: int=float("inf"),
                    is_grayscale: bool=False, q: queue.Queue=None, stop_event: object=None,
                    verbose: bool=False,
@@ -1577,7 +1646,10 @@ def video_to_illuminance(path_to_video: str,
 
     # Load the frame-aligned AGC metadata from the video's matching raw recording.
     num_frames: int = inspect_video_frame_count(path_to_video)
-    metadata: pd.DataFrame | np.ndarray = world_util.world_metadata_from_chunks(path_to_raw, verbose=verbose)
+    metadata: pd.DataFrame | np.ndarray = world_util.world_metadata_from_chunks(
+        _gka_path_from_recording_path(path_to_raw),
+        verbose=verbose,
+    )
 
     # Determine whether this is a tag segment, task segment, or complete recording.
     video_name: str = os.path.basename(path_to_video).lower()

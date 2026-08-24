@@ -18,20 +18,23 @@ quantity that will be available during ordinary video processing.
   converting minispect AS counts to illuminance, applying the temporal AGC
   response model, measuring world-video saturation, selecting usable points,
   and writing cached processing data.
+- `../defineWorldCameraCalibration/deriveEmpircalAGCAndIlluminance.py`: Runnable
+  entry point that optionally invokes the raw processing workflow and writes
+  the final MATLAB calibration data from the processed-data cache.
 - `fitEmpircalAGCtoIlluminance.m`: MATLAB routine that loads
-  `camera_agc_illuminance_linear_scale.mat`, fits a robust piecewise
+  `data/empircalAGC.mat`, fits a robust piecewise
   log-log relationship, plots the result, and reports a conversion equation.
 - `fitCameraAGCToIlluminance.m`: Shared MATLAB function containing the exact
   robust piecewise fitting procedure and conversion. It is called by both the
   MATLAB plotting script and Python's `video_to_illuminance` through the MATLAB
   Engine API.
-- `camera_agc_illuminance_linear_scale.mat`: Linear-scale x/y point cloud used
-  by the MATLAB fitting routine. This file is intentionally stored at the top
-  level of this analysis directory, not in the cache subfolder.
+- `../../data/empircalAGC.mat`: Linear-scale point cloud used by the MATLAB
+  fitting routine. It contains the `empiralAGC` struct with the fields
+  `cameraScoreLinear` and `msIlluminance`.
 - `fit_agc_to_illuminance_processing.ipynb`: Formal Python processing notebook
   that selects recordings, runs the empirical AGC-kernel processing fit, writes
-  cached data, renders the calibration-selection dashboard, and generates
-  `camera_agc_illuminance_linear_scale.mat`.
+  cached data, and renders the calibration-selection dashboard. The runnable
+  derivation script now owns the final MATLAB export.
 - `cached_processing_data/`: Generated data that allow downstream plotting and
   diagnostics without reprocessing all raw recordings.
 
@@ -61,14 +64,15 @@ For each raw `GKA` recording, `fit_agc_to_illuminance_util.py`:
 7. Saves plot-ready cached point clouds so saturation thresholds and display
    choices can be revisited without rerunning the full video/sensor workflow.
 
-The formal notebook `fit_agc_to_illuminance_processing.ipynb` is the intended
-entry point for running this Python stage of the analysis. It records the
-recording-selection scope, invokes `fit_agc_to_illuminance`, and then reloads
-the cached point cloud to produce the final linear-scale `.mat` file for the
-MATLAB model fit.
+The formal notebook `fit_agc_to_illuminance_processing.ipynb` records the
+recording-selection scope and diagnostics used to develop the analysis. The
+runnable entry point is now
+`../defineWorldCameraCalibration/deriveEmpircalAGCAndIlluminance.py`. With no
+arguments it reloads the checked-in cache and produces the final linear-scale
+MATLAB file; optional raw `GKA` paths rebuild the cache first.
 
 The final linear-scale `.mat` export is produced by
-`plot_frame_saturation_from_processed_data`. The current export keeps points
+`deriveEmpircalAGCAndIlluminance.py`. The current export keeps points
 that are finite, positive, below or equal to 40% frame spatial saturation, and
 not among the first 100 cached samples of a recording. These exported points
 are then loaded by `fitEmpircalAGCtoIlluminance.m`, transformed into log10
@@ -78,7 +82,7 @@ objective.
 The Python diagnostic dashboard also shows a correlation-qualified contextual
 fit restricted to recordings with shared-model correlation at least 0.9. This
 contextual fit helps inspect the most temporally coherent recordings, but it
-does not change which points are written to `camera_agc_illuminance_linear_scale.mat`.
+does not change which points are written to `data/empircalAGC.mat`.
 
 ## Applying the Fit to Video
 
@@ -128,7 +132,7 @@ slice before the raw metadata are aligned with the segmented video.
 
 ## Current Included Recordings
 
-The current `camera_agc_illuminance_linear_scale.mat` file includes
+The current `data/empircalAGC.mat` file includes
 point-filtered data from 111 processed recordings, spanning 17 subjects and
 10 activities:
 

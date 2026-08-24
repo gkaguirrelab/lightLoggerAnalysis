@@ -2911,7 +2911,7 @@ def verify_data_integrity(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
 
             if(plot_agc_metadata is True and os.path.isdir(gka_folder_path) and len(gka_folder_contents) > 0):
                 try:
-                    agc_metadata_by_activity[activity_name][subject_id]["metadata"] = world_util.world_metadata_from_chunks(activity_path, convert_to_seconds=True, verbose=False)
+                    agc_metadata_by_activity[activity_name][subject_id]["metadata"] = world_util.world_metadata_from_chunks(gka_folder_path, convert_to_seconds=True, verbose=False)
                 except Exception as e:
                     error_message: str = f"GKA AGC metadata could not be read: {e}"
                     agc_metadata_by_activity[activity_name][subject_id]["error"] = error_message

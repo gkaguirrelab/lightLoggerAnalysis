@@ -586,6 +586,67 @@ def group_sensors_files(recording_path: str) -> dict[str, list[tuple]]:
            }
 
 
+def find_frame_index(raw_chunks_path: str,
+                     target: np.ndarray,
+                     verbose: bool=False
+                    ) -> int | None:
+    """Return the global raw-frame index of the first exact target match.
+
+    World frame chunks are searched in natural filename order. Each chunk is
+    memory-mapped individually so the complete recording is never loaded into
+    memory at once. The returned index counts only frames actually present in
+    the raw chunks; it does not include synthetic frames representing timestamp
+    gaps.
+
+    Args:
+        raw_chunks_path: Directory containing paired world metadata and frame
+            chunk files.
+        target: Target raw grayscale or color frame.
+        verbose: Whether to display chunk-level search progress.
+
+    Returns:
+        Zero-based global raw-frame index of the first exact match, or ``None``
+        when the target is not found.
+    """
+    target = np.asarray(target)
+    if(target.ndim not in (2, 3)):
+        raise ValueError(
+            "target must be a two-dimensional grayscale or three-dimensional color frame."
+        )
+    if(not os.path.isdir(raw_chunks_path)):
+        raise FileNotFoundError(f"Raw chunks path does not exist: {raw_chunks_path}")
+
+    world_chunks: list[tuple[str, str]] = group_sensors_files(raw_chunks_path)["W"]
+    if(len(world_chunks) == 0):
+        raise FileNotFoundError(f"No world frame chunks found in: {raw_chunks_path}")
+
+    chunk_iterator = world_chunks
+    if(verbose is True):
+        chunk_iterator = tqdm(
+            world_chunks,
+            desc="Searching raw world chunks",
+            unit="chunk",
+            leave=False,
+        )
+
+    global_frame_offset: int = 0
+    for _, frame_chunk_path in chunk_iterator:
+        frames: np.ndarray = np.load(frame_chunk_path, mmap_mode="r")
+        if(frames.ndim != target.ndim + 1 or frames.shape[1:] != target.shape):
+            raise ValueError(
+                f"Target shape {target.shape} does not match raw chunk frame shape {frames.shape[1:]} "
+                f"in {frame_chunk_path}."
+            )
+
+        for local_index, candidate_frame in enumerate(frames):
+            if(np.array_equal(candidate_frame, target)):
+                return global_frame_offset + local_index
+
+        global_frame_offset += len(frames)
+
+    return None
+
+
 def find_chunks_by_timestamp(recording_path: str,
                              sensor_name: str, 
                              timestamp_range: tuple[float | None] = (0, None)

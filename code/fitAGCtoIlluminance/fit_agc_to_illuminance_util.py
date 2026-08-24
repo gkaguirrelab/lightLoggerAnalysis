@@ -43,9 +43,11 @@ FRAME_SATURATION_DATA_PATH: Path = (
 ILLUMINANCE_DIAGNOSTICS_OUTPUT_DIR: Path = (
     CACHED_PROCESSING_DATA_DIR / "illuminance_channel_diagnostics"
 )
-LINEAR_SCALE_MAT_OUTPUT_PATH: Path = (
-    FIT_AGC_TO_ILLUMINANCE_DIR / "camera_agc_illuminance_linear_scale.mat"
+EMPIRCAL_AGC_MAT_OUTPUT_PATH: Path = (
+    LIGHT_LOGGER_ANALYSIS_ROOT / "data" / "empircalAGC.mat"
 )
+# Backward-compatible alias for notebooks that used the former constant name.
+LINEAR_SCALE_MAT_OUTPUT_PATH: Path = EMPIRCAL_AGC_MAT_OUTPUT_PATH
 
 for import_path in (PI_UTILITY_DIR, SENSOR_UTILITY_DIR, VIDEO_IO_UTILITY_DIR):
     import_path_str: str = os.fspath(import_path)
@@ -2337,6 +2339,7 @@ def _plot_frame_saturation_calibration(
     minimum_correlation: float = 0.9,
     maximum_saturation_percent: float | None = None,
     initial_samples_to_exclude: int = 0,
+    mat_output_path: str | os.PathLike[str] = EMPIRCAL_AGC_MAT_OUTPUT_PATH,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     Plot calibration points by diagnostics and selected activity groups.
@@ -2348,8 +2351,9 @@ def _plot_frame_saturation_calibration(
     from each recording are also omitted from both plotting and fitting. The
     derivative is calculated within each complete video before these filters
     are applied. A saturation threshold of ``None`` retains all points.
-    The displayed untransformed x/y vectors are also written to a MATLAB
-    struct beside the MATLAB fitting routine.
+    The displayed untransformed camera score and minispect illuminance vectors
+    are also written to ``mat_output_path`` as the ``empiralAGC`` MATLAB
+    struct.
     """
 
     if (
@@ -2886,13 +2890,16 @@ def _plot_frame_saturation_calibration(
         else np.array([], dtype=float)
     )
     # Export exactly the displayed point cloud in its untransformed units.
-    # MATLAB receives one scalar struct with no fit or recording metadata.
+    # MATLAB receives one scalar struct with meaningful physical field names
+    # and no fit or recording metadata.
+    resolved_mat_output_path: Path = Path(mat_output_path).expanduser().resolve()
+    resolved_mat_output_path.parent.mkdir(parents=True, exist_ok=True)
     savemat(
-        os.fspath(LINEAR_SCALE_MAT_OUTPUT_PATH),
+        os.fspath(resolved_mat_output_path),
         {
-            "linear_scale_data": {
-                "x_linear_scale": displayed_camera_score,
-                "y_linear_scale": displayed_illuminance,
+            "empiralAGC": {
+                "cameraScoreLinear": displayed_camera_score,
+                "msIlluminance": displayed_illuminance,
             }
         },
         do_compression=True,
@@ -3014,14 +3021,13 @@ def plot_frame_saturation_from_processed_data(
     maximum_saturation_percent: float | None = 40.0,
     minimum_correlation: float = 0.9,
     initial_samples_to_exclude: int = 0,
+    mat_output_path: str | os.PathLike[str] = EMPIRCAL_AGC_MAT_OUTPUT_PATH,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     Plot frame saturation calibration from previously processed recording data.
 
-    The plotted linear-scale values are written to
-    ``code/fitAGCtoIlluminance/camera_agc_illuminance_linear_scale.mat``
-    as the fields ``x_linear_scale`` and ``y_linear_scale`` of
-    ``linear_scale_data``.
+    The plotted linear-scale values are written to ``mat_output_path`` as the
+    fields ``cameraScoreLinear`` and ``msIlluminance`` of ``empiralAGC``.
 
     Args:
         processed_data_path: NumPy archive written by
@@ -3032,6 +3038,7 @@ def plot_frame_saturation_from_processed_data(
             when fitting the contextual robust calibration line.
         initial_samples_to_exclude: Number of observations to omit from the
             start of every recording before plotting and fitting.
+        mat_output_path: Destination for the generated MATLAB data file.
 
     Returns:
         Dashboard axes and the activity-highlight row axes.
@@ -3106,6 +3113,7 @@ def plot_frame_saturation_from_processed_data(
         minimum_correlation=minimum_correlation,
         maximum_saturation_percent=maximum_saturation_percent,
         initial_samples_to_exclude=initial_samples_to_exclude,
+        mat_output_path=mat_output_path,
     )
 
 
@@ -3513,7 +3521,7 @@ def fit_agc_to_illuminance(
         # Load the world-camera AGC metadata needed to reconstruct the
         # camera-side brightness score.
         metadata: pd.DataFrame = world_util.world_metadata_from_chunks(
-            os.path.dirname(recording_path.rstrip(os.sep)),
+            recording_path,
             convert_to_seconds=True,
             verbose=False,
         )

@@ -1795,7 +1795,7 @@ def calculate_color_weights_single_measurement(measurement: dict,
     return RGB_weights
 
 # Given a recording path, return all frame timestamps.
-def world_timestamps_from_chunks(recording_path: str, 
+def world_timestamps_from_chunks(raw_chunks_path: str,
                                  convert_to_seconds: bool=True,
                                  verbose: bool=False
                                 ) -> np.ndarray:
@@ -1806,7 +1806,7 @@ def world_timestamps_from_chunks(recording_path: str,
     interpolation.
 
     Args:
-        recording_path: Recording directory containing world metadata chunks.
+        raw_chunks_path: Directory containing world metadata chunks.
         convert_to_seconds: Whether to convert the stored nanosecond
             timestamps into seconds.
         verbose: Whether to display chunk-loading progress.
@@ -1814,7 +1814,7 @@ def world_timestamps_from_chunks(recording_path: str,
     Returns:
         One-dimensional NumPy array of world-frame timestamps.
     """
-    return world_metadata_from_chunks(recording_path, convert_to_seconds, verbose)["timestamp"].to_numpy()
+    return world_metadata_from_chunks(raw_chunks_path, convert_to_seconds, verbose)["timestamp"].to_numpy()
 
 
 def generate_real_dummy_frame_distribution(path_to_video: str) -> np.ndarray:
@@ -2023,7 +2023,7 @@ def world_camera_field_of_view_steradians(matlab_engine: object | None=None) -> 
 
 
 # Given a recording path, return all frame metadata.
-def world_metadata_from_chunks(recording_path: str, 
+def world_metadata_from_chunks(raw_chunks_path: str,
                                  convert_to_seconds: bool=True,
                                  verbose: bool=False
                                 ) -> pd.DataFrame:
@@ -2040,7 +2040,8 @@ def world_metadata_from_chunks(recording_path: str,
     the AGC-setting columns are filled with ``NaN``.
 
     Args:
-        recording_path: Recording directory containing the ``GKA`` directory.
+        raw_chunks_path: Directory containing ``config.pkl`` and the world
+            metadata chunk files.
         convert_to_seconds: Whether to convert timestamps from nanoseconds
             since boot into seconds.
         verbose: Whether to show progress while loading the metadata chunks.
@@ -2049,13 +2050,12 @@ def world_metadata_from_chunks(recording_path: str,
         ``pandas.DataFrame`` with columns ``["timestamp", "Again",
         "Dgain", "exposure"]`` in frame order.
     """
-    # Resolve chunks from the recording's required GKA subdirectory.
-    gka_path: str = os.path.join(recording_path, "GKA")
-    if(not os.path.isdir(gka_path)):
-        raise FileNotFoundError(f"Recording path must contain a GKA directory: {gka_path}")
+    chunks_path: str = os.path.abspath(os.path.expanduser(raw_chunks_path))
+    if(not os.path.isdir(chunks_path)):
+        raise FileNotFoundError(f"Raw chunks path does not exist: {chunks_path}")
 
     # Read the configured frame rate, or use the standard 120 FPS fallback when the config file is unavailable.
-    config_filepath: str = os.path.join(gka_path, "config.pkl")
+    config_filepath: str = os.path.join(chunks_path, "config.pkl")
     if(os.path.exists(config_filepath)):
         with open(config_filepath, 'rb') as config_file:
             config_data: dict = dill.load(config_file)
@@ -2068,13 +2068,13 @@ def world_metadata_from_chunks(recording_path: str,
     frame_period_ns: float = (10 ** 9) / recording_fps
 
     # First, let's find the world metadata chunks
-    world_metadata_chunks: list[str] = natsorted([os.path.join(gka_path, filename)
-                                                  for filename in os.listdir(gka_path)
+    world_metadata_chunks: list[str] = natsorted([os.path.join(chunks_path, filename)
+                                                  for filename in os.listdir(chunks_path)
                                                   if filename.startswith("world")
                                                   and "metadata" in filename
                                                  ]
                                             )
-    assert len(world_metadata_chunks) > 0, f"0 world metadata chunks found @ {gka_path}"
+    assert len(world_metadata_chunks) > 0, f"0 world metadata chunks found @ {chunks_path}"
     
     # Once we have them, let's iterate over the paths 
     metadata: list[np.ndarray] | np.ndarray = []
