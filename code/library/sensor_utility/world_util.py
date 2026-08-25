@@ -106,9 +106,6 @@ WORLD_CAMERA_CUSTOM_MODES: list[dict] = [
 
 WORLD_AGC_DEFAULT_TARGET: int = 127
 
-# Full-precision parameters [low-light slope, intercept, high-light slope, log10 breakpoint] from fitCameraAGCToIlluminance.m.
-CAMERA_AGC_ILLUMINANCE_PIECEWISE_FIT: tuple[float, float, float, float] = (-0.7811573674394614, 6.7241559168747713, -2.6098980163147898, 5.0864014693721744)
-
 # These contrast tables currently contain settings measured for an AGC
 # target of 127. Additional targets can be added as sibling keys.
 WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x9: dict[int | float, dict[float, tuple[float, float, float]]] = {

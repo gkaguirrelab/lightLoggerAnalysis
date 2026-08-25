@@ -46,7 +46,7 @@ end
 % generated from all 111 processed subject/activity recordings after
 % removing nonfinite and nonpositive AGC product / illuminance samples,
 % removing frames with >40% spatial saturation, and excluding the first 100
-% cached samples from every recording. The subjects and activities
+% samples from every recording. The subjects and activities
 % represented in the exported point cloud are:
 %
 %   Subjects: FLIC_20, FLIC_21, FLIC_28, FLIC_39, FLIC_42, FLIC_51,
@@ -56,9 +56,9 @@ end
 %   Activities: chat, gazeCalibration, lunch, phone, read, sitBiopond,
 %               walkBiopond, walkIndoor, walkOutdoor, work
 %
-% The Python diagnostic dashboard also marks this correlation-qualified
-% subset of 20 subject/activity recordings (shared empirical-kernel model
-% correlation >= 0.9):
+% The development analysis identified this correlation-qualified subset of
+% 20 subject/activity recordings (shared empirical-kernel model correlation
+% >= 0.9):
 %
 %   FLIC_20 read, walkBiopond
 %   FLIC_21 read
@@ -82,8 +82,8 @@ end
 % measures the light sensitivity of the camera at each point in time. In
 % separate code, we estimated the properties of a low-pass temporal filter
 % that transforms the illuminance values into the camera score. This
-% previous stage of analysis is implemented in
-% deriveEmpircalAGCAndIlluminance.py.
+% lag is derived by deriveAGCLag.py, and the aligned point cloud is exported
+% by deriveEmpircalAGCAndIlluminance.py.
 
 % The minispect illuminance is related to the average scene luminance by a
 % factor of pi.
@@ -91,7 +91,7 @@ end
 dataFileName = fullfile(...
     tbLocateProjectSilent('lightLoggerAnalysis'),...
     'data',...
-    'empircalAGC.mat');
+    'empircalAGCAndIlluminance.mat');
 load(dataFileName);
 empiricalCameraScore = empiralAGC.cameraScoreLinear;
 empiricalMeanLuminance = empiralAGC.msIlluminance / pi;

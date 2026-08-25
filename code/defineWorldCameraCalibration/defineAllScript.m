@@ -4,6 +4,7 @@
 % Housekeeping
 clear
 close all
+addpath(fullfile(fileparts(mfilename('fullpath')),'utilities'))
 
 defineDarkSignal
 defineFullWellCapacityEffect
@@ -11,3 +12,4 @@ defineFlatFieldingFunction
 defineRadiometricWeights
 % defineFisheyeCameraIntrinsics -- This is run in an interactive GUI
 defineAGCToMeanLuminance
+fitCameraAGCToIlluminance
