@@ -12,4 +12,27 @@ defineRadiometricCorrection -- The R, G, and B channels on the camera chip are c
 
 defineAGCToMeanLuminance -- The camera chip reports 8 bit sensor values. These values reflect variation in radiance across the scene around the set-point of the automatic gain control. Before linearization, a sensor value of 127 represents the mid-point of the sensor range and is the set-point target of the AGC. The linearization step maps 127 --> 57. We wish to express the sensor values in absolute radiometric units, instead of relative sensor values. In this routine we characterize how AGC settings are related to the mean luminance of the field to which the camera is exposed. With knowledge of this relationship, we can use the AGC settings to identify the set-point of the camera in units of luminance, and then interpret each pixel as absolute luminance using: AGC mean luminance * (pixel value / 57).
 
+deriveAGCLag -- The runnable Python temporal-alignment stage. It applies the
+empirical AGC kernel to raw minispect signals, selects one shared lag across
+recordings, and writes `derived/cameraAGCLag.mat`. The empirical AGC and
+illuminance data-prep script reads this derived lag when building the MATLAB
+calibration point cloud.
+
+utilities/fitCameraAGCToIlluminance -- Fits the selected empirical camera-score
+and illuminance point cloud from `data/empircalAGCAndIlluminance.mat` with a
+continuous two-slope model in log10 space and an L1 objective. It writes the
+coefficients, fitting ranges, sample count, shared lag, and provenance to the
+`cameraAGCToIlluminanceFit` struct in
+`derived/cameraAGCToIlluminanceFit.mat`. `defineAllScript.m` invokes this
+function after the other world-camera definitions. Python's
+`video_io.camera_scores_to_illuminance` loads this artifact directly, so the
+camera fit is not repeated during video processing.
+
+utilities/fitEmpircalAGCtoIlluminance -- Runs the shared fit and produces the
+diagnostic plot comparing the fitted curve, empirical recordings, breakpoint,
+and integrating-sphere measurements. Because it calls the shared fitter, it
+also updates `derived/cameraAGCToIlluminanceFit.mat`; it does not produce a
+separate diagnostic MAT file. See `utilities/README.md` for the complete input,
+output, and downstream-consumer contract.
+
 defineFisheyeCameraIntrinsics -- The world camera is a ArduCam B0392 IMX219 Wide Angle M12. This is a wide-angle, fisheye lens system. This routine works upon a set of images taken with the camera to derive the file: arducamB0392cameraInstrinsics.mat

@@ -7,7 +7,6 @@ OCR-based event detection.
 """
 
 import numpy as np
-import matlab
 import pandas as pd
 import cv2
 import warnings
@@ -1491,30 +1490,58 @@ def world_chunks_to_video(recording_path: str,
 
     return 
 
-def camera_scores_to_illuminance(camera_scores: np.ndarray, matlab_engine: object | None=None) -> np.ndarray:
-    """Fit and evaluate camera scores with the shared MATLAB implementation."""
+def camera_scores_to_illuminance(camera_scores: np.ndarray) -> np.ndarray:
+    """Convert camera scores using the saved AGC-to-illuminance fit."""
 
-    # Start a MATLAB engine if one was not supplied by the caller.
-    need_to_initialize_matlab: bool = matlab_engine is None
-    if(need_to_initialize_matlab):
-        from matlab import engine as matlab_engine_module
-        matlab_engine = matlab_engine_module.start_matlab()
+    fit_path: str = os.path.join(
+        light_logger_analysis_dir_path,
+        "derived",
+        "cameraAGCToIlluminanceFit.mat",
+    )
+    if(not os.path.isfile(fit_path)):
+        raise FileNotFoundError(
+            "Run fitCameraAGCToIlluminance.m to generate the calibration: "
+            f"{fit_path}"
+        )
 
-    # Add the shared fitting function's directory to the MATLAB path.
-    fit_directory: str = os.path.join(light_logger_analysis_dir_path, "code", "fitAGCtoIlluminance")
-    matlab_engine.addpath(fit_directory, nargout=0)
+    # Load the named MATLAB struct and validate its four-coefficient contract.
+    fit_file: dict = loadmat(fit_path, simplify_cells=True)
+    fit_data: object = fit_file.get("cameraAGCToIlluminanceFit")
+    if(not isinstance(fit_data, dict)):
+        raise KeyError(
+            "Expected cameraAGCToIlluminanceFit struct in "
+            f"{fit_path}"
+        )
+    parameters: np.ndarray = np.asarray(
+        fit_data.get("parameterVector"),
+        dtype=np.float64,
+    ).reshape(-1)
+    if(parameters.size != 4 or not np.all(np.isfinite(parameters))):
+        raise ValueError(
+            "cameraAGCToIlluminanceFit.parameterVector must contain four "
+            "finite coefficients."
+        )
 
-    # Send the complete frame-aligned score vector through the exact MATLAB fit once.
-    try:
-        matlab_camera_scores: matlab.double = matlab.double(np.asarray(camera_scores, dtype=np.float64).reshape(1, -1).tolist())
-        matlab_illuminance: object = matlab_engine.fitCameraAGCToIlluminance(matlab_camera_scores, nargout=1)
-
-    finally:
-        # If we initialized the MATLAB engine here, quit it
-        if(need_to_initialize_matlab):
-            matlab_engine.quit()
-
-    return np.asarray(matlab_illuminance, dtype=np.float64).reshape(-1)
+    # MATLAB parameter order: slope below breakpoint, intercept, slope above
+    # breakpoint, and the breakpoint expressed as log10(camera score).
+    slope_below, intercept, slope_above, breakpoint = parameters
+    camera_scores = np.asarray(camera_scores, dtype=np.float64).reshape(-1)
+    predicted_illuminance: np.ndarray = np.full(
+        camera_scores.shape,
+        np.nan,
+        dtype=np.float64,
+    )
+    valid: np.ndarray = np.isfinite(camera_scores) & (camera_scores > 0)
+    log_camera_score: np.ndarray = np.log10(camera_scores[valid])
+    log_illuminance: np.ndarray = np.where(
+        log_camera_score < breakpoint,
+        slope_below * log_camera_score + intercept,
+        slope_below * breakpoint
+        + intercept
+        + slope_above * (log_camera_score - breakpoint),
+    )
+    predicted_illuminance[valid] = np.power(10.0, log_illuminance)
+    return predicted_illuminance
 
 
 def _load_ms_counts_and_timestamps(recording_path: str) -> tuple[np.ndarray, np.ndarray]:
@@ -1615,8 +1642,8 @@ def video_to_illuminance(path_to_video: str,
         visualize_results: Whether to display the camera and minispect
             illuminance vectors after conversion. This requires
             ``result_as_mean=True``.
-        matlab_engine: Optional caller-owned MATLAB engine to reuse. Engines
-            created by this function are closed before it returns.
+        matlab_engine: Optional caller-owned MATLAB engine used for minispect
+            count conversion. Engines created here are closed before return.
         return_first_unsaturated_frame: Whether to stop at the first nonzero
             frame without saturated pixels and return that frame, its AGC
             settings, the nearest MS illuminance, and its illuminance frame.
@@ -1719,9 +1746,9 @@ def video_to_illuminance(path_to_video: str,
     selected_as_values: np.ndarray = as_values[ms_time_mask]
     selected_as_time: np.ndarray = as_time[ms_time_mask]
 
-    # Share one MATLAB session across the camera-score fit and minispect count conversion.
+    # Use the saved camera fit; MATLAB is needed only for minispect conversion.
     try:
-        reference_illuminance: np.ndarray = camera_scores_to_illuminance(camera_scores, matlab_engine=matlab_engine)
+        reference_illuminance: np.ndarray = camera_scores_to_illuminance(camera_scores)
         ms_illuminance: np.ndarray = ms_counts_to_illuminance(selected_as_values, matlab_engine=matlab_engine)
     finally:
         # Close only the MATLAB engine initialized by this function.

@@ -12,31 +12,36 @@ into an implied steady-state illuminance value. The minispectrometer provides
 the external illuminance reference, while the camera AGC settings provide the
 quantity that will be available during ordinary video processing.
 
+The active MATLAB fitting and diagnostic files now live in
+`../defineWorldCameraCalibration/utilities/`. This directory retains the formal
+workflow notebook and its analysis documentation. The production fit is stored
+in `derived/cameraAGCToIlluminanceFit.mat`, rather than being recalculated by
+Python for each processed video.
+
 ## Directory Contents
 
-- `fit_agc_to_illuminance_util.py`: Python workflow for loading raw recordings,
-  converting minispect AS counts to illuminance, applying the temporal AGC
-  response model, measuring world-video saturation, selecting usable points,
-  and writing cached processing data.
-- `../defineWorldCameraCalibration/deriveEmpircalAGCAndIlluminance.py`: Runnable
-  entry point that optionally invokes the raw processing workflow and writes
-  the final MATLAB calibration data from the processed-data cache.
-- `fitEmpircalAGCtoIlluminance.m`: MATLAB routine that loads
-  `data/empircalAGC.mat`, fits a robust piecewise
-  log-log relationship, plots the result, and reports a conversion equation.
-- `fitCameraAGCToIlluminance.m`: Shared MATLAB function containing the exact
-  robust piecewise fitting procedure and conversion. It is called by both the
-  MATLAB plotting script and Python's `video_to_illuminance` through the MATLAB
-  Engine API.
-- `../../data/empircalAGC.mat`: Linear-scale point cloud used by the MATLAB
+- `../defineWorldCameraCalibration/deriveAGCLag.py`: Runnable temporal-alignment
+  stage that estimates one shared AGC lag and writes
+  `derived/cameraAGCLag.mat`.
+- `../defineWorldCameraCalibration/dataPrep/deriveEmpircalAGCAndIlluminance.py`:
+  Runnable entry point that processes raw recordings in memory and writes the
+  final MATLAB calibration data.
+- `../defineWorldCameraCalibration/utilities/fitEmpircalAGCtoIlluminance.m`:
+  MATLAB routine that loads
+  `data/empircalAGCAndIlluminance.mat`, fits a robust piecewise
+  log-log relationship, plots the result, reports a conversion equation, and
+  writes the derived fit artifact.
+- `../defineWorldCameraCalibration/utilities/fitCameraAGCToIlluminance.m`:
+  Shared MATLAB fitter containing the robust piecewise fitting procedure. It
+  writes `derived/cameraAGCToIlluminanceFit.mat` for Python consumers.
+- `../../data/empircalAGCAndIlluminance.mat`: Linear-scale point cloud used by the MATLAB
   fitting routine. It contains the `empiralAGC` struct with the fields
-  `cameraScoreLinear` and `msIlluminance`.
+  `cameraScoreLinear`, `msIlluminance`, and `sharedLagSeconds`.
+- `../../derived/cameraAGCToIlluminanceFit.mat`: Saved piecewise fit
+  coefficients and fitting provenance loaded by Python video processing.
 - `fit_agc_to_illuminance_processing.ipynb`: Formal Python processing notebook
-  that selects recordings, runs the empirical AGC-kernel processing fit, writes
-  cached data, and renders the calibration-selection dashboard. The runnable
-  derivation script now owns the final MATLAB export.
-- `cached_processing_data/`: Generated data that allow downstream plotting and
-  diagnostics without reprocessing all raw recordings.
+  that selects recordings and runs the two Python derivation stages before the
+  MATLAB model fit.
 
 ## Method Summary
 
@@ -46,43 +51,42 @@ initial work characterized the temporal response of the AGC algorithm using
 `adaptiveControlDemo.m`, comparing a first-order low-pass model with an
 empirical kernel derived from simulated dark-to-bright and bright-to-dark step
 responses. The current workflow uses the empirical AGC kernel stored in
-`misc/agc_simulation/agc_empirical_kernels.mat`.
+`data/agc_empirical_kernels.mat`.
 
-For each raw `GKA` recording, `fit_agc_to_illuminance_util.py`:
+For each raw `GKA` recording, `deriveAGCLag.py`:
 
 1. Loads world-camera metadata and extracts analog gain, digital gain, and
    exposure.
 2. Computes the AGC product as the camera score.
-3. Locates the matching processed `W.avi` video and measures each frame's
-   spatial saturation.
-4. Loads minispect AS chunks, flattens the samples, and converts AS counts to
+3. Loads minispect AS chunks, flattens the samples, and converts AS counts to
    calibrated illuminance using `msCounts2Illuminance.m`.
-5. Applies the same empirical AGC kernel to every recording and chooses one
-   shared lag that maximizes mean recording-level correlation, unless a fixed
-   lag is supplied.
-6. Aligns filtered illuminance and camera score on a common timebase.
-7. Saves plot-ready cached point clouds so saturation thresholds and display
-   choices can be revisited without rerunning the full video/sensor workflow.
+4. Applies the same empirical AGC kernel to every recording and chooses one
+   shared lag that maximizes mean recording-level correlation.
+5. Writes the lag and its supporting search data to
+   `derived/cameraAGCLag.mat`.
+
+The data-prep exporter then reads that lag, aligns filtered illuminance and
+camera score, measures processed-video saturation, applies the point-selection
+filters, and writes the final MATLAB point cloud.
 
 The formal notebook `fit_agc_to_illuminance_processing.ipynb` records the
-recording-selection scope and diagnostics used to develop the analysis. The
-runnable entry point is now
-`../defineWorldCameraCalibration/deriveEmpircalAGCAndIlluminance.py`. With no
-arguments it reloads the checked-in cache and produces the final linear-scale
-MATLAB file; optional raw `GKA` paths rebuild the cache first.
+recording-selection scope used to develop the analysis. Run
+`../defineWorldCameraCalibration/deriveAGCLag.py` first to derive the lag, then
+run `../defineWorldCameraCalibration/dataPrep/deriveEmpircalAGCAndIlluminance.py`
+with the raw `GKA` recording paths to produce the linear-scale MATLAB file.
 
 The final linear-scale `.mat` export is produced by
 `deriveEmpircalAGCAndIlluminance.py`. The current export keeps points
 that are finite, positive, below or equal to 40% frame spatial saturation, and
-not among the first 100 cached samples of a recording. These exported points
-are then loaded by `fitEmpircalAGCtoIlluminance.m`, transformed into log10
-space, and fit with a continuous two-slope piecewise linear model using an L1
-objective.
+not among the first 100 samples of a recording. These exported points are then
+loaded by `../defineWorldCameraCalibration/utilities/fitEmpircalAGCtoIlluminance.m`,
+transformed into log10 space, and fit with a continuous two-slope piecewise
+linear model using an L1 objective. The shared fitter saves the coefficients
+and fit provenance to `derived/cameraAGCToIlluminanceFit.mat`.
 
-The Python diagnostic dashboard also shows a correlation-qualified contextual
-fit restricted to recordings with shared-model correlation at least 0.9. This
-contextual fit helps inspect the most temporally coherent recordings, but it
-does not change which points are written to `data/empircalAGC.mat`.
+The exported MATLAB struct records the shared lag alongside the matched
+camera-score and illuminance vectors so the temporal-alignment provenance is
+carried into the model-fitting stage.
 
 ## Applying the Fit to Video
 
@@ -108,11 +112,11 @@ in lux per video frame. Passing `result_as_mean=False` instead returns the full
 Inserted dummy frames, completely saturated frames, and saturated spatial
 pixels are represented by `NaN`. The function requires the standard processed
 world video with camera response linearization enabled; it is not valid for a
-raw or gamma-encoded video. The camera-score conversion is performed by
-`fitCameraAGCToIlluminance.m`, so video processing and the MATLAB diagnostic
-script always use the same fitting procedure and calibration point cloud. The
-linearized AGC target is calculated at runtime by passing the raw target of 127
-through `world_util.linearize_camera_responsivity`.
+raw or gamma-encoded video. The camera-score conversion loads
+`derived/cameraAGCToIlluminanceFit.mat` and evaluates the saved coefficients in
+NumPy; it no longer starts MATLAB or repeats the fit during video processing.
+The linearized AGC target is calculated at runtime by passing the raw target of
+127 through `world_util.linearize_camera_responsivity`.
 
 The function also loads minispect chunks from the matching raw GKA recording,
 selects the production spectral channels `AS_0-AS_7`, and converts their counts
@@ -132,7 +136,7 @@ slice before the raw metadata are aligned with the segmented video.
 
 ## Current Included Recordings
 
-The current `data/empircalAGC.mat` file includes
+The current `data/empircalAGCAndIlluminance.mat` file includes
 point-filtered data from 111 processed recordings, spanning 17 subjects and
 10 activities:
 
@@ -168,8 +172,7 @@ FLIC_2006: work
 
 Dark recordings are processed far enough to expose conversion failures, but
 they are excluded from pooled fits when minispect counts cannot be converted
-to illuminance. Lower-correlation recordings remain represented in the cached
-processing archive so thresholds can be re-evaluated later.
+to illuminance.
 
 ## Notes From Discussion
 
@@ -182,4 +185,4 @@ The group also investigated whether different apparent slopes could arise from
 camera saturation, AGC transients, or different exposure ranges in recordings
 collected at 120 FPS versus 180 FPS. The current workflow therefore includes
 frame saturation diagnostics, derivative-colored AGC product plots, and an
-option to exclude the initial cached samples from each recording.
+option to exclude the initial samples from each recording.
