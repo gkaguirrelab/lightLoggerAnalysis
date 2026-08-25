@@ -81,12 +81,12 @@ for ii = 1:length(fileSet)
 
     % Obtain the R, G, and B components
     imageVals = {};
-    [imageVals{1}, imageVals{2}, imageVals{3}] = ...
-        splitBayerFrame(linearFlatI, bayerPattern);
+    [rgbIdx{1}, rgbIdx{2}, rgbIdx{3}] = ...
+        returnBayerIndices(linearFlatI, bayerPattern);
 
     % Store the non-nan R, G, and B pixel values in the growing array
     for cc=1:3
-        theseVals = imageVals{cc};
+        theseVals = linearFlatI(rgbIdx{cc});
         theseVals = theseVals(~isnan(theseVals));
         pixelValsRGB{cc} = [pixelValsRGB{cc}; theseVals(:)];
     end
@@ -137,6 +137,14 @@ radiometricCorrectionRGB = predictedSensorValueNormed ./  sensorValuesNormed;
 k = 3/sum(radiometricCorrectionRGB);
 radiometricCorrectionRGB = radiometricCorrectionRGB * k;
 
+% Construct a map to apply this correction
+radiometricCorrectionMap = ones(size(I));
+[bayerIdx{1}, bayerIdx{2}, bayerIdx{3}] = returnBayerIndices(radiometricCorrectionMap, bayerPattern);
+for cc = 1:3
+    radiometricCorrectionMap(bayerIdx{cc}) = radiometricCorrectionRGB(cc);
+end
+
+
 % Report the correction to the console
 fprintf('The radiometric correction tuple (RGB) is: [%2.2f, %2.2f, %2.2f]\n',radiometricCorrectionRGB);
 
@@ -146,5 +154,6 @@ saveFileName = fullfile(...
     'derived',...
     'radiometricCorrectionRGB.mat');
 readme = ['Created by defineRadiometricWeights.\n'...
-    'radiometricCorrectionRGB -- multiple the (linearized) sensor values by these correction factors.\n'];
-save(saveFileName,'readme','radiometricCorrectionRGB');
+    'radiometricCorrectionRGB -- multiple the (linearized) sensor values by these correction factors.\n'...
+    'radiometricCorrectionMap -- a map of these corrections that can be applied to an entire image.\n'];
+save(saveFileName,'readme','radiometricCorrectionRGB','radiometricCorrectionMap');

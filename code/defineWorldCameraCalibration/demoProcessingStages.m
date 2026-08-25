@@ -7,10 +7,7 @@ tiffFileName = fullfile(...
     tbLocateProjectSilent('lightLoggerAnalysis'),...
     'data',...
     'exampleWorldCameraImages',...
-    'planetarium_1.tiff');
-
-% Define a saturation threshold value
-satThresh = 250;
+    'outdoor_1.tiff');
 
 % Load the image and convert to double
 imageStages{1} = double(imread(tiffFileName));
@@ -24,10 +21,10 @@ load(paramFileName,'clippingExponent');
 imageStages{2} = linearizeIMX219SensorCounts(...
     imageStages{1},clippingExponent);
 
-% Threshold
+% Set any pixel that is saturated to inf
 I = imageStages{2};
-I(I>satThresh) = Inf;
-imageStages{3} = I;
+I(I>250)=Inf;
+imageStages{3}=I;
 
 % Flat fielding function
 paramFileName = fullfile(...
@@ -42,21 +39,17 @@ paramFileName = fullfile(...
     tbLocateProjectSilent('lightLoggerAnalysis'),...
     'derived',...
     'radiometricCorrectionRGB.mat');
-load(paramFileName,'radiometricCorrectionRGB');
-bayerPattern = "BGGR";
-I = [];
-[I(:,:,1),I(:,:,2),I(:,:,3)] = splitBayerFrame(imageStages{4}, bayerPattern);
-I = I .* reshape(radiometricCorrectionRGB, 1, 1, 3);
-imageStages{5} = combineBayerFrame(I(:,:,1),I(:,:,2),I(:,:,3), bayerPattern);
+load(paramFileName,'radiometricCorrectionMap');
+imageStages{5} = imageStages{4} .* radiometricCorrectionMap;
 
 % Plot
-
-stages = {'raw','threshold','linearized','flattened','radiometric correction'};
+stages = {'raw','linearized','threshold','flattened','radiometric correction'};
+nStages = length(stages);
 channelColor = {'r','g','b'};
 
 figure
-tiledlayout(2,5,"TileSpacing","tight");
-for ss = 1:5
+tiledlayout(2,nStages,"TileSpacing","tight");
+for ss = 1:nStages
     nexttile(ss)
 
     % Get the image and some basic stats
@@ -72,14 +65,14 @@ for ss = 1:5
     title(stages{ss});
 
     % Show a histogram
-    nexttile(ss+5)
+    nexttile(ss+nStages)
     I(isinfI) = nan;
-    [rgb(:,:,1),rgb(:,:,2),rgb(:,:,3)] = splitBayerFrame(I, bayerPattern);
-    edges = 0:0.01:1;
+    [rgbIdx{1},rgbIdx{2},rgbIdx{3}] = returnBayerIndices(I, 'BGGR');
+    edges = (0:255)/255;
     for cc = 1:3
 
         % Grab this channel
-        vec = rgb(:,:,cc);
+        vec = I(rgbIdx{cc});
 
         % Record min and max prior to normalizing, rounded to nearest whole number
         minVals(cc) = round(min(vec(:)));
@@ -87,16 +80,26 @@ for ss = 1:5
 
         vec = vec(:)/maxVal;
         N = histcounts(vec,edges);
-        plot(edges(1:end-1),N,['-' channelColor{cc}]);
+
+        N=N./length(rgbIdx{cc});
+
+        plot(edges(1:end-1),N,['.-' channelColor{cc}]);
         hold on
     end
 
     % Add min and max text to the upper left corner
     textStr = {sprintf('min = [%d, %d, %d]', minVals(1), minVals(2), minVals(3)), ...
         sprintf('max = [%d, %d, %d]', maxVals(1), maxVals(2), maxVals(3)),...
-        sprintf('sat = %d', nInf)};
-    text(0.05, 0.95, textStr, 'Units', 'normalized', 'VerticalAlignment', 'top', 'FontSize', 8);
+        sprintf('ceil, floor = [%d, %d]', nInf,sum(I(:)==0))};
+    text(0.65, 0.95, textStr, 'Units', 'normalized', 'VerticalAlignment', 'top', 'FontSize', 8);
 
-    axis off
+    if ss ==1
+        ylabel('Proportion of pixels');
+        xlabel('Proportion max value');
+        a=gca();
+        a.TickDir="out";
+    else
+        axis off
+    end
     box off
 end

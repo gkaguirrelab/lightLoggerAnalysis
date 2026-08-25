@@ -93,6 +93,10 @@ correctionMap(1:2:end, 2:2:end) = corrG;
 correctionMap(2:2:end, 1:2:end) = corrG;
 correctionMap(2:2:end, 2:2:end) = corrR;
 
+% We need the correction map to preserve the mean value of the image after
+% the correction
+correctionMap = correctionMap / mean(correctionMap(:));
+
 % Plot the correction map
 figure
 imagesc(correctionMap)
