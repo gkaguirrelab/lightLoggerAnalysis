@@ -35,3 +35,11 @@ by the camera: `cameraAgain`, `AGCDgain`, and `cameraExposure`.
 | `AGCstate5_AGain-10.666666984558105_DGain-1_E-8290` | 5 | 10.666666984558105 | 1 | 8290 |
 
 The applied camera settings were fixed within each AGC-state recording.
+
+## Selected raw-frame indices
+
+The generation notebook chooses ten zero-based global raw-frame indices spanning each recording. Because the last selected index depends on the raw frame count, the notebook records the exact generated selection here whenever the dark-signal frames are rebuilt.
+
+<!-- populateData:dark-signal-frame-indices:start -->
+Frame indices pending regeneration from the raw dark-signal recordings.
+<!-- populateData:dark-signal-frame-indices:end -->

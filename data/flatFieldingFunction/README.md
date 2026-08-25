@@ -23,6 +23,49 @@ the camera field of view.
 The camera's pointing direction remained centered on the zenith throughout the recording; only rotational orientation 
 about the optical axis was changed between positions.
 
+## Selected temporary-video frames
+
+The raw chunks are reconstructed as a 180 fps, gap-filled temporary video with per-frame digital gain applied. The following zero-based video indices are then extracted. Because gap filling can insert synthetic frames, these are indices in the reconstructed video rather than indices counting only physically stored raw frames.
+
+| Output TIFF | Time (seconds) | Temporary-video frame index |
+| --- | ---: | ---: |
+| `0.tiff` | 366 | 65880 |
+| `1.tiff` | 372 | 66960 |
+| `2.tiff` | 393 | 70740 |
+| `3.tiff` | 401 | 72180 |
+| `4.tiff` | 427 | 76860 |
+| `5.tiff` | 435 | 78300 |
+| `6.tiff` | 456 | 82080 |
+| `7.tiff` | 466 | 83880 |
+| `8.tiff` | 488 | 87840 |
+| `9.tiff` | 498 | 89640 |
+| `10.tiff` | 518 | 93240 |
+| `11.tiff` | 528 | 95040 |
+| `12.tiff` | 550 | 99000 |
+| `13.tiff` | 560 | 100800 |
+| `14.tiff` | 582 | 104760 |
+| `15.tiff` | 592 | 106560 |
+| `16.tiff` | 614 | 110520 |
+| `17.tiff` | 624 | 112320 |
+| `18.tiff` | 646 | 116280 |
+| `19.tiff` | 656 | 118080 |
+| `20.tiff` | 678 | 122040 |
+| `21.tiff` | 686 | 123480 |
+| `22.tiff` | 708 | 127440 |
+| `23.tiff` | 718 | 129240 |
+| `24.tiff` | 742 | 133560 |
+| `25.tiff` | 752 | 135360 |
+| `26.tiff` | 774 | 139320 |
+| `27.tiff` | 784 | 141120 |
+| `28.tiff` | 806 | 145080 |
+| `29.tiff` | 814 | 146520 |
+| `30.tiff` | 836 | 150480 |
+| `31.tiff` | 846 | 152280 |
+| `32.tiff` | 868 | 156240 |
+| `33.tiff` | 878 | 158040 |
+| `34.tiff` | 912 | 164160 |
+| `35.tiff` | 920 | 165600 |
+
 
 Additional Calibration Notes (Geoff):
 

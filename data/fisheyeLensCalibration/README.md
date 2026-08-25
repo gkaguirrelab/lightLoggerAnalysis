@@ -6,8 +6,18 @@ The Light Logger’s wide-FOV camera exhibits significant lens distortion, requi
 
 The Light Logger was mounted on a tripod at a height of approximately 100 cm above the ground, leveled with the floor. Using a tape measure and sticky notes, we marked a 100 cm radius arc around the camera’s position to ensure consistent distance during calibration, extending from one side of the camera’s field of view to the other. After powering on the camera and allowing AGC to stabilize, we slowly moved the checkerboard pattern across the arc, beginning at the far left and progressing to the far right. At each horizontal position, the pattern was moved vertically in increments, held angled upward when positioned low, level at camera height, and angled downward when positioned high. At each position, the pattern was also tilted ~30° to the left and right for robust orientations. All movements were performed slowly to ensure sharp feature capture for the calibration software.
 
-Using the collected calibration data, we computed and exported the camera’s intrinsics, enabling lens distortion correction and accurate pixel-to-degree conversions for subsequent analyses.
+Using the collected calibration data, we computed and exported the camera's intrinsics, enabling lens distortion correction and accurate pixel-to-degree conversions for subsequent analyses.
+
+## Accepted raw-frame indices
+
+The 47 accepted checkerboard images should be recreated from their zero-based global raw-frame indices rather than copied from another image archive. Set the exact checkerboard raw-chunk directory and run the fisheye discovery section in `code/defineWorldCameraCalibration/populateData.ipynb` to replace this provisional block.
+
+<!-- populateData:fisheye-frame-indices:start -->
+Frame indices pending the exact checkerboard raw-chunk path and raw-recording access.
+<!-- populateData:fisheye-frame-indices:end -->
 
 The images and calibration calculation can be displayed in matlab using the command `cameraCalibrator('intrinsics_calibration_session.mat')`.
+
+To recreate the session from scratch, first regenerate `intrinsics_calibration_images/` from the recorded indices, open that folder in MATLAB Camera Calibrator, repeat the documented interactive image acceptance and fisheye fitting, and save the app session as `intrinsics_calibration_session.mat` in this directory.
 
 The resulting camera intrinsics file is saved in the derived folder as `arducamB0392cameraInstrinsics.mat`.

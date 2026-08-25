@@ -8,6 +8,14 @@ This directory contains manually selected example frames from the following reco
 
 These are completely raw world-camera frames. No processing, correction, linearization, debayering, or other transformation has been applied.
 
+## Raw-frame indices
+
+The zero-based global indices below count frames physically present in the naturally ordered raw world-camera chunks. They do not include synthetic frames for timestamp gaps. Run the example-frame discovery section in `code/defineWorldCameraCalibration/populateData.ipynb` while the raw recordings are available to replace this provisional block.
+
+<!-- populateData:example-frame-indices:start -->
+Frame indices pending raw-recording access.
+<!-- populateData:example-frame-indices:end -->
+
 ## Digital-gain values
 
 Record the digital-gain (`DGain`) value associated with each frame below.
