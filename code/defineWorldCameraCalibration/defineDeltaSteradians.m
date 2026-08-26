@@ -1,4 +1,3 @@
-function deltaSteradians = defineDeltaSteradians()
 % Define the solid angle subtended by each world-camera pixel.
 %
 % The calibrated fisheye model maps every 640-by-480 pixel center to an
@@ -93,6 +92,12 @@ assert(relativeFieldOfViewError < 0.01, ...
     ['The pixel solid-angle sum differs from the independently integrated ' ...
     'field of view by %.3f%%.'], 100 * relativeFieldOfViewError);
 
+% Show the map
+figure
+imagesc(deltaSteradians);
+colorbar
+title('Steradians per pixel')
+
 % Save only the reusable pixel map plus human-readable provenance. The scalar
 % totals are validation diagnostics and can always be recomputed from the map
 % and intrinsics.
@@ -108,10 +113,10 @@ readme = sprintf([ ...
 save(outputPath, 'readme', 'deltaSteradians');
 
 fprintf('Saved %s\n', outputPath);
-fprintf('Summed pixel solid angle: %.12g sr\n', summedPixelSteradians);
+fprintf('Summed pixel solid angle: %2.2f sr\n', summedPixelSteradians);
 
-end
 
+% LOCAL FUNCTIONS
 
 function derivative = secondOrderFiniteDifference(values, dimension)
 % Reproduce numpy.gradient(..., edge_order=2) at unit sample spacing.
