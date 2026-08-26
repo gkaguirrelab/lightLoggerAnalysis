@@ -28,9 +28,9 @@ function fov_degrees = calculateFisheyeFOV(fisheyeIntrinsics)
 % Examples:
 %{
     project_root = fileparts(fileparts(fileparts(mfilename('fullpath'))));
-    intrinsics_path = fullfile(project_root, "derived", "arducamB0392cameraInstrinsics.mat");
-    intrinsics_data = load(intrinsics_path, "arducamB0392cameraInstrinsics");
-    fisheyeIntrinsics = intrinsics_data.arducamB0392cameraInstrinsics.results.Intrinsics;
+    intrinsics_path = fullfile(project_root, "derived", "arducamB0392cameraIntrinsics.mat");
+    intrinsics_data = load(intrinsics_path, "arducamB0392cameraIntrinsics");
+    fisheyeIntrinsics = intrinsics_data.arducamB0392cameraIntrinsics.results.Intrinsics;
     fov_degrees = calculateFisheyeFOV(fisheyeIntrinsics);
 %}
 

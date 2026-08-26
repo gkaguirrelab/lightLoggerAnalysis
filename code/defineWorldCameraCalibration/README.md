@@ -35,4 +35,13 @@ also updates `derived/cameraAGCToIlluminanceFit.mat`; it does not produce a
 separate diagnostic MAT file. See `utilities/README.md` for the complete input,
 output, and downstream-consumer contract.
 
-defineFisheyeCameraIntrinsics -- The world camera is a ArduCam B0392 IMX219 Wide Angle M12. This is a wide-angle, fisheye lens system. This routine works upon a set of images taken with the camera to derive the file: arducamB0392cameraInstrinsics.mat
+defineFisheyeCameraIntrinsics -- The world camera is a ArduCam B0392 IMX219 Wide Angle M12. This is a wide-angle, fisheye lens system. This routine works upon a set of images taken with the camera to derive the file: arducamB0392cameraIntrinsics.mat
+
+defineDeltaSteradians -- Uses the calibrated fisheye intrinsics to map every
+640-by-480 world-camera pixel center to a unit viewing direction. It reproduces
+the finite-difference solid-angle calculation in
+`world_util.world_frame_visual_angle_to_steradians`, validates the summed pixel
+areas against an independent integration of the calibrated camera field of
+view, and saves the 480-by-640 `deltaSteradians` array to
+`derived/deltaSteradians.mat`. Each element gives the solid angle represented
+by the corresponding raw world-camera pixel, in steradians.

@@ -1,5 +1,18 @@
 Stored here are results of various calibration operations. These parameters are subsequently used in the processing pipeline of recordings using the light logger.
 
+## `deltaSteradians.mat`
+
+The output of
+[`defineDeltaSteradians.m`](../code/defineWorldCameraCalibration/defineDeltaSteradians.m).
+The 480-by-640 double array `deltaSteradians` is aligned with raw world-camera
+`[row, column]` coordinates and gives the calibrated solid angle represented by
+each pixel, in steradians. The definition uses the fisheye intrinsics to map
+pixel centers to unit viewing directions, then calculates the local
+spherical-area Jacobian with the same second-order finite-difference method as
+`world_util.world_frame_visual_angle_to_steradians`. The MAT file also contains
+a `readme` variable recording the summed pixel solid angle and the independently
+integrated field of view used for validation.
+
 ## `cameraAGCLag.mat`
 
 The output of

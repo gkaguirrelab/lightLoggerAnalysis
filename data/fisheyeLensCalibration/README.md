@@ -20,4 +20,4 @@ The images and calibration calculation can be displayed in matlab using the comm
 
 To recreate the session from scratch, first regenerate `intrinsics_calibration_images/` from the recorded indices, open that folder in MATLAB Camera Calibrator, repeat the documented interactive image acceptance and fisheye fitting, and save the app session as `intrinsics_calibration_session.mat` in this directory.
 
-The resulting camera intrinsics file is saved in the derived folder as `arducamB0392cameraInstrinsics.mat`.
+The resulting camera intrinsics file is saved in the derived folder as `arducamB0392cameraIntrinsics.mat`.

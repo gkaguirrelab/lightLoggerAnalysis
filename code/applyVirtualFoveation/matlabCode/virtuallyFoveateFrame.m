@@ -52,7 +52,7 @@ function retinalImage = virtuallyFoveateFrame(I, gaze_angle, fisheyeIntrinsicsPa
 % Examples:
 %{
     projectRoot = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));
-    intrPath = fullfile(projectRoot, "derived", "arducamB0392cameraInstrinsics.mat");
+    intrPath = fullfile(projectRoot, "derived", "arducamB0392cameraIntrinsics.mat");
     retinalImage = virtuallyFoveateFrame(I, [0; 0], intrPath);
 
     retinalImage = virtuallyFoveateFrame( ...
@@ -101,8 +101,8 @@ function retinalImage = virtuallyFoveateFrame(I, gaze_angle, fisheyeIntrinsicsPa
         nRowsLast = nRows;
         nColsLast = nCols;
 
-        intrinsicsData = load(fisheyeIntrinsicsPath, "arducamB0392cameraInstrinsics");
-        fisheyeIntrinsics = intrinsicsData.arducamB0392cameraInstrinsics.results.Intrinsics;
+        intrinsicsData = load(fisheyeIntrinsicsPath, "arducamB0392cameraIntrinsics");
+        fisheyeIntrinsics = intrinsicsData.arducamB0392cameraIntrinsics.results.Intrinsics;
 
         % Compute mapping from pixel -> (deg_x, deg_y)
         [xg, yg] = meshgrid(1:nCols, 1:nRows);

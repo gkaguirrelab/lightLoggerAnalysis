@@ -19,4 +19,4 @@ sessionFileName = fullfile(...
 cameraCalibrator(sessionFileName)
 
 % The resulting intrinsics file is saved as:
-%   /derived/arducamB0392cameraInstrinsics.mat
+%   /derived/arducamB0392cameraIntrinsics.mat

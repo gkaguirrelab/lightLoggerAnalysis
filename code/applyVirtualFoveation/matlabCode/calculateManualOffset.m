@@ -37,9 +37,9 @@ function [x_offset, y_offset] = calculateManualOffset(subjectID, activity, intri
 % Examples:
 %{
     project_root = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));
-    intrinsics_path = fullfile(project_root, "derived", "arducamB0392cameraInstrinsics.mat");
-    intrinsics_data = load(intrinsics_path, "arducamB0392cameraInstrinsics");
-    intr = intrinsics_data.arducamB0392cameraInstrinsics.results.Intrinsics;
+    intrinsics_path = fullfile(project_root, "derived", "arducamB0392cameraIntrinsics.mat");
+    intrinsics_data = load(intrinsics_path, "arducamB0392cameraIntrinsics");
+    intr = intrinsics_data.arducamB0392cameraIntrinsics.results.Intrinsics;
     [x_off, y_off] = calculateManualOffset('2001', 'walkIndoor', intr, ...
         "april_tag_frames", [100, 200, 300]);
 %}

@@ -1920,7 +1920,7 @@ def world_frame_to_visual_angle(world_frame: np.ndarray, matlab_engine: object |
 
     # Resolve and validate the MATLAB function and calibration paths before starting MATLAB.
     project_root: pathlib.Path = pathlib.Path(__file__).resolve().parents[3]
-    intrinsics_path: pathlib.Path = project_root / "derived" / "arducamB0392cameraInstrinsics.mat"
+    intrinsics_path: pathlib.Path = project_root / "derived" / "arducamB0392cameraIntrinsics.mat"
     if(not intrinsics_path.is_file()):
         raise FileNotFoundError(f"World-camera intrinsics calibration does not exist: {intrinsics_path}")
 
@@ -1933,8 +1933,8 @@ def world_frame_to_visual_angle(world_frame: np.ndarray, matlab_engine: object |
 
     # Generate the visual field points.
     try:
-        calibration_data: dict = matlab_engine.load(os.fspath(intrinsics_path), "arducamB0392cameraInstrinsics", nargout=1)
-        calibration_results: object = calibration_data["arducamB0392cameraInstrinsics"]["results"]
+        calibration_data: dict = matlab_engine.load(os.fspath(intrinsics_path), "arducamB0392cameraIntrinsics", nargout=1)
+        calibration_results: object = calibration_data["arducamB0392cameraIntrinsics"]["results"]
         fisheye_intrinsics: object = matlab_engine.getfield(calibration_results, "Intrinsics", nargout=1)
         visual_field_points: object = matlab_engine.anglesFromIntrinsics(matlab.double(sensor_points.tolist()), fisheye_intrinsics, nargout=1)
     finally:
@@ -1997,7 +1997,7 @@ def world_camera_field_of_view_steradians(matlab_engine: object | None=None) -> 
         Total calibrated camera field of view in steradians.
     """
     project_root: pathlib.Path = pathlib.Path(__file__).resolve().parents[3]
-    intrinsics_path: pathlib.Path = project_root / "derived" / "arducamB0392cameraInstrinsics.mat"
+    intrinsics_path: pathlib.Path = project_root / "derived" / "arducamB0392cameraIntrinsics.mat"
     if(not intrinsics_path.is_file()):
         raise FileNotFoundError(f"World-camera intrinsics calibration does not exist: {intrinsics_path}")
 
@@ -2008,8 +2008,8 @@ def world_camera_field_of_view_steradians(matlab_engine: object | None=None) -> 
         matlab_engine.tbUseProject('lightLoggerAnalysis', nargout=0)
 
     try:
-        calibration_data: dict = matlab_engine.load(os.fspath(intrinsics_path), "arducamB0392cameraInstrinsics", nargout=1)
-        calibration_results: object = calibration_data["arducamB0392cameraInstrinsics"]["results"]
+        calibration_data: dict = matlab_engine.load(os.fspath(intrinsics_path), "arducamB0392cameraIntrinsics", nargout=1)
+        calibration_results: object = calibration_data["arducamB0392cameraIntrinsics"]["results"]
         fisheye_intrinsics: object = matlab_engine.getfield(calibration_results, "Intrinsics", nargout=1)
         solid_angle: object = matlab_engine.calculateFisheyeSolidAngle(fisheye_intrinsics, nargout=1)
     finally:

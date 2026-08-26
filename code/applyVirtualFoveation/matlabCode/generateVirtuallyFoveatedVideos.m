@@ -155,7 +155,7 @@ function generateVirtuallyFoveatedVideos(subjectIDs, options)
 
         % Load in the camera intrinscis of the world camera
         project_root = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));
-        path_to_intrinsics = fullfile(project_root, "derived", "arducamB0392cameraInstrinsics.mat");
+        path_to_intrinsics = fullfile(project_root, "derived", "arducamB0392cameraIntrinsics.mat");
 
         if(options.verbose)
             fprintf("\twith intrinsics:\n");
@@ -307,8 +307,8 @@ function [pupil_t, gaze_angles] = load_gaze_angles(path, intrinsics_path)
 
     gaze_angles_px = [gx, gy];
 
-    intrinsics_data = load(intrinsics_path, "arducamB0392cameraInstrinsics");
-    intr = intrinsics_data.arducamB0392cameraInstrinsics.results.Intrinsics;
+    intrinsics_data = load(intrinsics_path, "arducamB0392cameraIntrinsics");
+    intr = intrinsics_data.arducamB0392cameraIntrinsics.results.Intrinsics;
     gaze_angles = anglesFromIntrinsics(gaze_angles_px, intr);
 end
 
