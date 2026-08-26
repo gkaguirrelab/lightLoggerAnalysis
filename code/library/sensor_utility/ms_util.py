@@ -364,7 +364,9 @@ def parse_SERIAL(readings_buffer: np.ndarray) -> tuple:
 
     LS_channels: np.ndarray = np.ascontiguousarray(readings_buffer[:, current_buffer_pos: current_buffer_pos + (MS_LS_CHANNELS * MS_LS_BUFFER_SIZE)])
     LS_channels = LS_channels.astype(MS_LS_DTYPE)
-    current_buffer_pos += MS_LS_CHANNELS
+    # Advance past the complete buffered accelerometer block, not just one
+    # six-channel LS reading, so TEMP begins at the final MS value.
+    current_buffer_pos += MS_LS_CHANNELS * MS_LS_BUFFER_SIZE
 
     LS_temp: np.ndarray = np.ascontiguousarray(readings_buffer[:, current_buffer_pos:current_buffer_pos+MS_TEMP_CHANNELS])
     LS_temp = LS_temp.astype(MS_TEMP_DTYPE)

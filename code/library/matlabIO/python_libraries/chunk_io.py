@@ -12,6 +12,8 @@ from natsort import natsorted
 import numpy as np
 import pathlib
 import sys
+from collections.abc import Sequence
+from typing import Literal
 from tqdm.auto import tqdm
 from numba import njit, prange
 
@@ -645,6 +647,247 @@ def find_frame_index(raw_chunks_path: str,
         global_frame_offset += len(frames)
 
     return None
+
+
+def _timestamps_in_seconds(
+    metadata: np.ndarray,
+    sensor: Literal["W", "M"],
+) -> np.ndarray:
+    """Extract one chunk's timestamp column and normalize it to seconds."""
+    # Some older recordings store metadata as a timestamp-only vector. Newer
+    # recordings store a matrix whose first column is timestamp and whose
+    # remaining columns contain settings.
+    if(metadata.ndim == 1):
+        timestamps = np.asarray(metadata, dtype=np.float64)
+    elif(metadata.ndim == 2 and metadata.shape[1] >= 1):
+        timestamps = np.asarray(metadata[:, 0], dtype=np.float64)
+    else:
+        raise ValueError(
+            f"{sensor} metadata must be a timestamp vector or a matrix with "
+            f"timestamp in column zero. Received shape {metadata.shape}."
+        )
+
+    # World-camera timestamps are stored as nanoseconds; minispect timestamps
+    # are already stored as seconds.
+    if(sensor == "W"):
+        timestamps = timestamps / 1e9
+    return timestamps
+
+
+def _world_agc_settings_from_row(metadata_row: np.ndarray) -> dict[str, float]:
+    """Return every world-camera metadata setting except timestamp."""
+    # Flatten both a selected matrix row and a one-row matrix to the same form.
+    row = np.asarray(metadata_row, dtype=np.float64).reshape(-1)
+    setting_count = row.size - 1
+    modern_names = tuple(world_util.WORLD_AGC_METADATA_COLS)
+    legacy_names = ("Again", "Dgain", "exposure")
+
+    # Infer the metadata schema from its width. This preserves the names that
+    # actually belong to the modern or legacy recording format.
+    if(setting_count == len(modern_names)):
+        setting_names = modern_names
+    elif(setting_count == len(legacy_names)):
+        setting_names = legacy_names
+    elif(setting_count == 0):
+        return {}
+    else:
+        raise ValueError(
+            f"Unsupported world metadata row width {row.size}. Expected "
+            f"timestamp plus {len(legacy_names)} legacy or "
+            f"{len(modern_names)} modern AGC settings."
+        )
+
+    # Skip row[0], which is timestamp, and return ordinary Python floats so the
+    # dictionary serializes cleanly to MATLAB and other formats.
+    return {
+        setting_name: float(setting_value)
+        for setting_name, setting_value in zip(setting_names, row[1:])
+    }
+
+
+def _parse_minispect_value(raw_value: np.ndarray) -> dict[str, np.ndarray]:
+    """Parse one packed minispect row into its named component sensors."""
+    raw_value = np.asarray(raw_value)
+    if(raw_value.ndim != 1):
+        raise ValueError(
+            f"A single minispect entry must be one-dimensional. Received {raw_value.shape}."
+        )
+
+    minispect_width = int(ms_util.MS_UNCOMPRESSED_FRAME_SHAPE[0])
+    combined_width = int(ms_util.MS_SUNGLASSES_FRAME_SHAPE[0])
+
+    # Production MS chunks append one sunglasses-detector value to every
+    # minispect row. Strip that value before using the canonical MS parser.
+    if(raw_value.size == combined_width):
+        minispect_value = raw_value[:minispect_width]
+    elif(raw_value.size == minispect_width):
+        # Supporting an MS-only row is useful for recordings made before the
+        # sunglasses value was merged into the same chunk.
+        minispect_value = raw_value
+    else:
+        raise ValueError(
+            f"Unexpected minispect row width {raw_value.size}. Expected "
+            f"{minispect_width} MS values or {combined_width} combined values."
+        )
+
+    # parse_readings expects a batch, so temporarily restore the leading row
+    # dimension. Its named outputs preserve the 127x6 LS buffer while AS, TS,
+    # and TEMP each contain the single selected packet's readings.
+    parsed_frames = ms_util.parse_readings(minispect_value[np.newaxis, :])
+    return {
+        sensor_name: frame.to_numpy().copy()
+        for sensor_name, frame in zip(ms_util.MS_SENSOR_NAMES, parsed_frames)
+    }
+
+
+def find_nearest_neighbor(
+    recording_path: str,
+    timestamp_seconds: float,
+    sensors: Literal["W", "M"] | Sequence[Literal["W", "M"]],
+) -> dict[Literal["W", "M"], dict[str, object]]:
+    """Return the nearest raw world or minispect entry to an absolute time.
+
+    The search scans chunk metadata without loading all sensor values into
+    memory. Once the nearest metadata row has been identified, only its
+    corresponding raw value is copied from the value chunk. World timestamps
+    are converted from nanoseconds to seconds before comparison; minispect
+    timestamps are already expressed in seconds.
+
+    Args:
+        recording_path: Directory containing the recording's paired raw chunk
+            files.
+        timestamp_seconds: Absolute recording timestamp in seconds, on the
+            shared light-logger clock.
+        sensors: ``"W"`` or ``"M"``, or a sequence containing either or both.
+
+    Returns:
+        Dictionary keyed by each requested sensor. Every sensor entry contains
+        ``timestamp`` in seconds and ``value`` at the nearest sample. World
+        ``value`` is the raw frame; minispect ``value`` is a dictionary of
+        parsed ``AS``, ``TS``, ``LS``, and ``TEMP`` arrays. A world-camera entry
+        additionally contains ``AGCSettings``, with every metadata setting
+        except timestamp.
+
+    Raises:
+        ValueError: If the requested timestamp or sensor selection is invalid,
+            or if paired metadata and value chunks have inconsistent lengths.
+        FileNotFoundError: If the recording or requested sensor chunks do not
+            exist.
+    """
+    if(not os.path.isdir(recording_path)):
+        raise FileNotFoundError(f"Recording path does not exist: {recording_path}")
+    if(not np.isfinite(timestamp_seconds)):
+        raise ValueError("timestamp_seconds must be finite.")
+
+    # Normalize a single sensor string and a multi-sensor sequence to one tuple
+    # so the search below follows exactly the same path in either case.
+    requested_sensors: tuple[Literal["W", "M"], ...]
+    if(isinstance(sensors, str)):
+        requested_sensors = (sensors,)
+    else:
+        requested_sensors = tuple(sensors)
+    if(len(requested_sensors) == 0):
+        raise ValueError("At least one sensor must be requested.")
+    if(any(sensor not in ("W", "M") for sensor in requested_sensors)):
+        raise ValueError(
+            f"sensors may contain only 'W' and 'M'. Received {requested_sensors}."
+        )
+    # Preserve caller order while avoiding duplicate searches and output keys.
+    requested_sensors = tuple(dict.fromkeys(requested_sensors))
+
+    # Pair each sensor's naturally ordered metadata and value chunks once.
+    grouped_chunks = group_sensors_files(recording_path)
+    nearest_by_sensor: dict[Literal["W", "M"], dict[str, object]] = {}
+
+    for sensor in requested_sensors:
+        chunks = grouped_chunks[sensor]
+        if(len(chunks) == 0):
+            raise FileNotFoundError(
+                f"No {sensor} chunks found in recording: {recording_path}"
+            )
+
+        # Retain only the location of the best row while scanning. The actual
+        # image or minispect value is not copied until the winning row is known.
+        best_difference = np.inf
+        best_metadata_path: str | None = None
+        best_value_path: str | None = None
+        best_local_index: int | None = None
+        best_timestamp: float | None = None
+
+        for metadata_path, value_path in chunks:
+            # Memory mapping reads array headers and timestamp pages without
+            # loading the complete image/minispect chunk into RAM.
+            metadata = np.load(metadata_path, mmap_mode="r")
+            timestamps = _timestamps_in_seconds(metadata, sensor)
+            values = np.load(value_path, mmap_mode="r")
+
+            # Metadata row i must describe value i. Continuing with mismatched
+            # files could silently return the wrong frame or minispect packet.
+            if(len(timestamps) != len(values)):
+                raise ValueError(
+                    f"Metadata/value length mismatch for {sensor}: "
+                    f"{metadata_path} has {len(timestamps)} rows while "
+                    f"{value_path} has {len(values)} values."
+                )
+
+            # A recording can have an empty terminal chunk, but every stored
+            # timestamp row is expected to contain a valid finite timestamp.
+            if(timestamps.size == 0):
+                continue
+
+            # First find this chunk's closest timestamp, then compare that one
+            # candidate with the best candidate from all earlier chunks.
+            local_index = int(
+                np.argmin(np.abs(timestamps - float(timestamp_seconds)))
+            )
+            difference = abs(float(timestamps[local_index]) - float(timestamp_seconds))
+
+            # A strict comparison makes an exact tie deterministic: the earlier
+            # sample in natural chunk order remains selected.
+            if(difference < best_difference):
+                best_difference = difference
+                best_metadata_path = metadata_path
+                best_value_path = value_path
+                best_local_index = local_index
+                best_timestamp = float(timestamps[local_index])
+
+        if(
+            best_metadata_path is None
+            or best_value_path is None
+            or best_local_index is None
+            or best_timestamp is None
+        ):
+            raise ValueError(
+                f"No {sensor} timestamp rows found in recording: {recording_path}"
+            )
+
+        # Now that the winning row is known, copy just that value out of its
+        # memory map so it can be returned or parsed independently.
+        selected_values = np.load(best_value_path, mmap_mode="r")
+        selected_value = np.asarray(selected_values[best_local_index]).copy()
+        sensor_result: dict[str, object] = {
+            "timestamp": best_timestamp,
+            "value": (
+                _parse_minispect_value(selected_value)
+                if sensor == "M"
+                else selected_value
+            ),
+        }
+        if(sensor == "W"):
+            # World metadata carries AGC settings in the same row as timestamp.
+            # Minispect metadata contains timestamp only, so no settings field
+            # is added to the M result.
+            selected_metadata = np.load(best_metadata_path, mmap_mode="r")
+            metadata_row = (
+                np.asarray([selected_metadata[best_local_index]])
+                if selected_metadata.ndim == 1
+                else selected_metadata[best_local_index]
+            )
+            sensor_result["AGCSettings"] = _world_agc_settings_from_row(metadata_row)
+
+        nearest_by_sensor[sensor] = sensor_result
+
+    return nearest_by_sensor
 
 
 def find_chunks_by_timestamp(recording_path: str,
