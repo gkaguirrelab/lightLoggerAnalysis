@@ -7,7 +7,7 @@ tiffFileName = fullfile(...
     tbLocateProjectSilent('lightLoggerAnalysis'),...
     'data',...
     'exampleWorldCameraImages',...
-    'outdoor_1.tiff');
+    'indoor_1.tiff');
 
 % Load the image and convert to double
 imageStages{1} = double(imread(tiffFileName));
@@ -78,12 +78,15 @@ for ss = 1:nStages
         minVals(cc) = round(min(vec(:)));
         maxVals(cc) = round(max(vec(:)));
 
+        % Set the nan values to the maxVal
+        vec(isnan(vec))=maxVal;
+
         vec = vec(:)/maxVal;
         N = histcounts(vec,edges);
 
         N=N./length(rgbIdx{cc});
 
-        plot(edges(1:end-1),N,['.-' channelColor{cc}]);
+        plot(edges(1:end-1)*100,N*100,['.-' channelColor{cc}]);
         hold on
     end
 
@@ -94,8 +97,8 @@ for ss = 1:nStages
     text(0.65, 0.95, textStr, 'Units', 'normalized', 'VerticalAlignment', 'top', 'FontSize', 8);
 
     if ss ==1
-        ylabel('Proportion of pixels');
-        xlabel('Proportion max value');
+        ylabel('Percentage of pixels');
+        xlabel('Percentage max value');
         a=gca();
         a.TickDir="out";
     else
