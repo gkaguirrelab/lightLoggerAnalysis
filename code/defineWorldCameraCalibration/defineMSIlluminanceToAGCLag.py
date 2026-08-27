@@ -3,7 +3,8 @@
 For each supplied ``GKA`` directory, this script loads the camera AGC product
 and minispect illuminance, applies the empirical AGC kernel, and evaluates the
 camera/minispect correlation across a common lag grid. The lag maximizing the
-mean correlation across recordings is written to ``derived/cameraAGCLag.mat``.
+mean correlation across recordings is written to
+``derived/MSIlluminanceToAGCLag.mat``.
 
 Positive lag means that the camera response follows the minispect signal.
 """
@@ -20,7 +21,13 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from scipy.io import loadmat, savemat
+
+from derived_io import save_derived_mat
+from defineMSIlluminanceToAGCKernel import (
+    DEFAULT_OUTPUT_PATH as DEFAULT_KERNEL_PATH,
+    EmpiricalKernelDefinition,
+    load_agc_kernel,
+)
 
 
 THIS_FILE: Path = Path(__file__).resolve()
@@ -28,8 +35,9 @@ PROJECT_ROOT: Path = THIS_FILE.parents[2]
 LIGHT_LOGGER_ROOT: Path = PROJECT_ROOT.parent / "lightLogger"
 PI_UTILITY_DIR: Path = LIGHT_LOGGER_ROOT / "raspberry_pi_firmware" / "utility"
 SENSOR_UTILITY_DIR: Path = PROJECT_ROOT / "code" / "library" / "sensor_utility"
-DEFAULT_KERNEL_PATH: Path = PROJECT_ROOT / "data" / "agc_empirical_kernels.mat"
-DEFAULT_OUTPUT_PATH: Path = PROJECT_ROOT / "derived" / "cameraAGCLag.mat"
+DEFAULT_OUTPUT_PATH: Path = (
+    PROJECT_ROOT / "derived" / "MSIlluminanceToAGCLag.mat"
+)
 DEFAULT_LAG_RANGE_SECONDS: tuple[float, float] = (-10.0, 10.0)
 DEFAULT_LAG_COUNT: int = 201
 
@@ -202,19 +210,18 @@ def apply_empirical_kernel(
     time: np.ndarray,
     signal: np.ndarray,
     kernel_path: str | os.PathLike[str] = DEFAULT_KERNEL_PATH,
+    *,
+    kernel_definition: EmpiricalKernelDefinition | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Apply the empirical AGC kernel on its uniform timebase."""
 
     # Resample to the kernel's fixed interval before performing convolution.
-    kernel_data: dict[str, Any] = loadmat(kernel_path)
-    kernel_time: np.ndarray = np.squeeze(
-        kernel_data["commonKernelTime"]
-    ).astype(float)
-    kernel: np.ndarray = np.squeeze(kernel_data["meanKernel"]).astype(float)
-    time_step: float = float(np.median(np.diff(kernel_time)))
+    if kernel_definition is None:
+        kernel_definition = load_agc_kernel(kernel_path)
+    time_step = kernel_definition.sample_interval_seconds
     uniform_time: np.ndarray = np.arange(time[0], time[-1], time_step)
     uniform_signal: np.ndarray = np.interp(uniform_time, time, signal)
-    kernel_weights: np.ndarray = kernel / np.sum(kernel)
+    kernel_weights = kernel_definition.normalized_weights
     # Edge padding avoids an artificial zero-valued transient at the start.
     padded_signal: np.ndarray = np.pad(
         uniform_signal,
@@ -268,7 +275,7 @@ def _zscore(values: np.ndarray) -> np.ndarray:
 def _recording_lag_correlations(
     recording: RecordingSignals,
     candidate_lags_seconds: np.ndarray,
-    kernel_path: str | os.PathLike[str],
+    kernel_definition: EmpiricalKernelDefinition,
 ) -> np.ndarray:
     """Calculate one recording's camera/minispect correlation by lag."""
 
@@ -276,7 +283,7 @@ def _recording_lag_correlations(
     filtered_time, filtered_illuminance = apply_empirical_kernel(
         recording.minispect_time,
         recording.illuminance,
-        kernel_path,
+        kernel_definition=kernel_definition,
     )
     # Greater illumination requires less gain/exposure, hence the minus sign.
     camera_brightness: np.ndarray = -_zscore(recording.camera_score)
@@ -308,27 +315,43 @@ def _recording_lag_correlations(
     return correlations
 
 
-def _save_lag_result(result: LagSearchResult) -> None:
-    """Write the compact MATLAB contract consumed by the next stage."""
+def _save_lag_result(
+    result: LagSearchResult,
+    kernel_definition: EmpiricalKernelDefinition,
+    kernel_path: str | os.PathLike[str],
+) -> None:
+    """Write the lag and exact smoothing-kernel contract for the next stage."""
 
-    # Write-then-replace prevents a failed run from corrupting the prior MAT.
-    result.output_path.parent.mkdir(parents=True, exist_ok=True)
-    temporary_path: Path = result.output_path.with_suffix(".tmp.mat")
-    savemat(
-        temporary_path,
-        {
-            "cameraAGCLag": {
+    resolved_kernel_path = Path(kernel_path).expanduser().resolve()
+    try:
+        kernel_artifact = resolved_kernel_path.relative_to(PROJECT_ROOT).as_posix()
+    except ValueError:
+        kernel_artifact = os.fspath(resolved_kernel_path)
+
+    save_derived_mat(
+        result.output_path,
+        readme=(
+            "Created by defineMSIlluminanceToAGCLag.py.\n"
+            "MSIlluminanceToAGCLag contains the shared temporal lag "
+            "between empirical-kernel-filtered minispect illuminance "
+            "and the world-camera AGC response, plus the lag-search "
+            "diagnostics and the exact smoothing-kernel definition. The model "
+            "is empirical FIR smoothing followed by a pure lag shift. Positive "
+            "lag means the camera response follows the minispect signal."
+        ),
+        variables={
+            "MSIlluminanceToAGCLag": {
                 "sharedLagSeconds": result.shared_lag_seconds,
+                "model": "empirical FIR smoothing followed by pure lag shift",
+                "kernelArtifact": kernel_artifact,
+                "kernel": kernel_definition.as_matlab_struct(),
                 "candidateLagsSeconds": result.candidate_lags_seconds,
                 "meanCorrelationByLag": result.mean_correlation_by_lag,
                 "recordingCount": result.recording_count,
                 "skippedRecordingCount": result.skipped_recording_count,
-            }
+            },
         },
-        do_compression=True,
-        oned_as="column",
     )
-    os.replace(temporary_path, result.output_path)
 
 
 def derive_agc_lag(
@@ -360,6 +383,8 @@ def derive_agc_lag(
                 f"{recording_path}"
             )
 
+    kernel_definition = load_agc_kernel(kernel_path)
+
     # Every recording is evaluated on the same lag grid so their correlations
     # can be averaged without interpolation or recording-length weighting.
     candidate_lags: np.ndarray = np.linspace(
@@ -388,7 +413,7 @@ def derive_agc_lag(
                 correlations: np.ndarray = _recording_lag_correlations(
                     recording,
                     candidate_lags,
-                    kernel_path,
+                    kernel_definition,
                 )
             except InvalidRecordingError as error:
                 skipped_recording_count += 1
@@ -420,7 +445,7 @@ def derive_agc_lag(
         recording_count=len(correlation_rows),
         skipped_recording_count=skipped_recording_count,
     )
-    _save_lag_result(result)
+    _save_lag_result(result, kernel_definition, kernel_path)
     return result
 
 

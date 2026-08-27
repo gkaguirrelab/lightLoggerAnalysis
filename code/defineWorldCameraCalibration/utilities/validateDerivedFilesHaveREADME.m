@@ -1,0 +1,33 @@
+function validateDerivedFilesHaveREADME(derivedDirectory)
+% Assert that every derived MAT artifact contains a descriptive README.
+
+arguments
+    derivedDirectory {mustBeTextScalar}
+end
+
+derivedDirectory = char(derivedDirectory);
+assert(isfolder(derivedDirectory), ...
+    'validateDerivedFilesHaveREADME:MissingDirectory', ...
+    'Derived directory does not exist: %s', derivedDirectory);
+
+derivedFiles = dir(fullfile(derivedDirectory, '*.mat'));
+for fileIndex = 1:numel(derivedFiles)
+    filePath = fullfile(derivedFiles(fileIndex).folder, ...
+        derivedFiles(fileIndex).name);
+    variableNames = string({whos('-file', filePath).name});
+    assert(ismember("README", variableNames), ...
+        'validateDerivedFilesHaveREADME:MissingREADME', ...
+        'Derived artifact lacks a top-level README variable: %s', filePath);
+
+    metadata = load(filePath, 'README');
+    assert((ischar(metadata.README) || ...
+        (isstring(metadata.README) && isscalar(metadata.README))) && ...
+        strlength(strtrim(string(metadata.README))) >= 20, ...
+        'validateDerivedFilesHaveREADME:InvalidREADME', ...
+        'Derived artifact has an invalid README variable: %s', filePath);
+end
+
+fprintf('Validated README metadata in %d derived MAT artifact(s).\n', ...
+    numel(derivedFiles));
+
+end

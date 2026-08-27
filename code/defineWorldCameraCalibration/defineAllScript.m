@@ -13,4 +13,6 @@ defineRadiometricWeights
 % defineFisheyeCameraIntrinsics -- This is run in an interactive GUI
 defineDeltaSteradians
 defineAGCToMeanLuminance
-fitCameraAGCToIlluminance
+
+validateDerivedFilesHaveREADME(fullfile( ...
+    tbLocateProjectSilent('lightLoggerAnalysis'), 'derived'));
