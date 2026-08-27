@@ -13,7 +13,14 @@ These are completely raw world-camera frames. No processing, correction, lineari
 The zero-based global indices below count frames physically present in the naturally ordered raw world-camera chunks. They do not include synthetic frames for timestamp gaps. Run the example-frame discovery section in `code/defineWorldCameraCalibration/populateData.ipynb` while the raw recordings are available to replace this provisional block.
 
 <!-- populateData:example-frame-indices:start -->
-Frame indices pending raw-recording access.
+| Frame | Source recording | Zero-based global raw-frame index |
+| --- | --- | ---: |
+| `indoor_1.tiff` | FLIC_2001 walkIndoor | 4777 |
+| `indoor_2.tiff` | FLIC_2001 walkIndoor | 42993 |
+| `indoor_3.tiff` | FLIC_2001 walkIndoor | 21713 |
+| `outdoor_1.tiff` | FLIC_2001 walkOutdoor | 4512 |
+| `outdoor_2.tiff` | FLIC_2001 walkOutdoor | 40615 |
+| `planetarium_1.tiff` | Fels Planetarium | 96978 |
 <!-- populateData:example-frame-indices:end -->
 
 ## Digital-gain values
