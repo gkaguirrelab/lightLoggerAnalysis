@@ -2,6 +2,15 @@
 % custom AGC settings we use to control the sensitivity of the IMX219
 % camera, the irradiance to which the camera is exposed, and the mean
 % radiance of each pixel in the camera array.
+%
+% We observe a slight difference between the color channels in this
+% relationship. These differences can arise from several sources
+% (interaction of the source spectrum with the particular sensitivity
+% functions of the channels; differences in radiometric sensitivity between
+% the channels). We make the general assumption that the spectral
+% distribution of the environment in which the camera will be used will be
+% similarly broadband. Therefore, we simply save the mean relationship
+% between radiance and camera sensitivity.
 
 % Housekeeping
 clear
@@ -31,20 +40,19 @@ wlsSensor = T.wls;
 channelNames = {'red','green','blue'};
 channelCodes = {'r','g','b'};
 
-
 % Next, load the "maxSpectrum" calibration files and extract for each the
-% irradiance of the sphere interior. The combiLED was set to the half-on
-% settings, so we account for this as well.
+% radiance of the sphere interior. Account for the settings level of the
+% combiLED during the measurement.
 settings = 0.25;
-calDataFolder = getpref('lightLoggerAnalysis','CalDataFolder');
 for ii = 1:length(agcData.ndf)
     thisCalFile = sprintf('CombiLED-A_cassette-ND%d_sphere_maxSpectrum.mat',agcData.ndf(ii));
     load(thisCalFile,'cals');
     cal = cals{end};
     S = cal.rawData.S;
     wlsSource = SToWls(S);
-    % This is the average radiance in units of Watts/m2/sr/[S(3)*nm]
-    spdSource = cal.rawData.gammaCurveMeanMeasurements;
+    % This is the average radiance in units of Watts/m2/sr/[S(3)*nm],
+    % adjusted for the settings level of the combiLED.
+    spdSource = cal.rawData.gammaCurveMeanMeasurements * settings;
     % Loop over the channels
     for cc = 1:length(channelNames)
         % Spline the sensor sensitivity to match the source SPD
@@ -53,12 +61,16 @@ for ii = 1:length(agcData.ndf)
     end
 end
 
+% Derive the average effective radiance across the camera channels
+avgSceneRadiance = mean(effectiveRadiance,2);
+
 % Plot the measurements
 figure;
 for cc = 1:3
-    loglog(cameraScore, effectiveRadiance(:,cc),['-*' channelCodes{cc}],'LineWidth',2,'MarkerSize',10); 
+    loglog(cameraScore, effectiveRadiance(:,cc),['-.' channelCodes{cc}],'LineWidth',1,'MarkerSize',10); 
     hold on
 end
+loglog(cameraScore, avgSceneRadiance,'-*k','LineWidth',2,'MarkerSize',10); 
 a = gca();
 a.XScale = 'log';
 a.YScale = 'log';
@@ -67,5 +79,19 @@ hold on; grid off; box off;
 
 % Clean up, label, legend
 xlabel('Log camera sensitivity score');
-ylabel('Log mean irradiance (W/m2/sr)');
+ylabel('Log mean radiance (W/m2/sr)');
 title('Average radiance vs. camera AGC sensitivity');
+
+% Save the values that relate camera score to average scene radiance
+saveFileName = fullfile(...
+    tbLocateProjectSilent('lightLoggerAnalysis'),...
+    'derived',...
+    'cameraScoreToAverageRadiance.mat');
+README = ['Created by defineAGCToMeanRadiance.\n'...
+    'A linear interpolation between these values (in log10 space) maps AGC values to radiance.\n',...
+    'cameraScore -- the product of the AGC settings (analog gain, digital gain, exposure).\n',...
+    'avgSceneRadiance -- the average broad-band radiance (W/m2/sr) of the scene viewed by the camera.\n'];
+derivedVariables = struct();
+derivedVariables.cameraScore = cameraScore;
+derivedVariables.avgSceneRadiance = avgSceneRadiance;
+saveDerivedFile(saveFileName, README, derivedVariables);

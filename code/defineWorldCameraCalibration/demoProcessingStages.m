@@ -2,15 +2,19 @@
 % Housekeeping
 clear
 
+% Pick a measurement
+measurementName = 'planetarium_AGCandMS_01.mat';
+
 % Identify a raw TIFF
-tiffFileName = fullfile(...
+fileName = fullfile(...
     tbLocateProjectSilent('lightLoggerAnalysis'),...
     'data',...
     'exampleWorldCameraImages',...
-    'indoor_1.tiff');
+    measurementName);
 
 % Load the image and convert to double
-imageStages{1} = double(imread(tiffFileName));
+load(fileName,'worldFrame','AGCSettings','minispectValue')
+imageStages{1} = double(worldFrame);
 
 % Linearize
 paramFileName = fullfile(...
@@ -42,8 +46,11 @@ paramFileName = fullfile(...
 load(paramFileName,'radiometricCorrectionMap');
 imageStages{5} = imageStages{4} .* radiometricCorrectionMap;
 
+% Convert to radiance units
+imageStages{6} = convertSensorValuesToRadiance(imageStages{5},AGCSettings);
+
 % Plot
-stages = {'raw','linearized','threshold','flattened','radiometric correction'};
+stages = {'raw','linearized','threshold','flattened','radiometric correction','absolute radiance'};
 nStages = length(stages);
 channelColor = {'r','g','b'};
 
@@ -61,7 +68,7 @@ for ss = 1:nStages
     showI(isinfI) = maxVal;
 
     % Show the image
-    imshow(I,[]);
+    imshow(I,[0 prctile(I(~isinf(I)), 95)]);
     title(stages{ss});
 
     % Show a histogram
