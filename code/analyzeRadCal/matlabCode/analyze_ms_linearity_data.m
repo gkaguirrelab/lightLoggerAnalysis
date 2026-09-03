@@ -45,9 +45,14 @@ function figureHandles = analyze_ms_linearity_data(calibration_metadata, measure
 %                                   -plotAllNDF - bool for whether to plot
 %                                   all NDFs(true) or just 0-5(false)
 %{
-    path_to_experiment = "/example/path"; 
-    converted_light_logger_data = convert_light_logger_calibration_data(path_to_experiment, true, true true, true); 
-    analyze_ms_linearity_data(converted_light_logger_data.metdata.ms_linearity, converted_light_logger_data.readings.ms_linearity);
+    path_to_converted_data = fullfile(getpref('lightLoggerAnalysis', 'dropboxBaseDir'), "FLIC_data/LightLoggerRadCal/W1P1M1/MSLinearityMeasurements/MS_linearity_data.mat");
+    converted_data = load(path_to_converted_data).MS_linearity_data;
+
+    % ILLUMINANCE PLOTS 
+    analyze_ms_linearity_data(converted_data.metadata.ms_linearity, converted_data.readings.ms_linearity);
+
+    % IRRADIANCE PLOTS 
+    analyze_ms_linearity_data(converted_data.metadata.ms_linearity, converted_data.readings.ms_linearity, 'plotIllum', false);
 %}
     arguments
         calibration_metadata; % Struct representing the metadata for the ms_linearity calibration measurement
@@ -71,36 +76,33 @@ function figureHandles = analyze_ms_linearity_data(calibration_metadata, measure
     % path to find other files
     combiExperiments_path = getpref('lightLoggerAnalysis', 'combiExperiments_path');
 
-    % Save the path to light logger analysis. 
-    % We will use this to construct local paths
-    lightLoggerAnalysis_path = getpref("lightLoggerAnalysis", "light_logger_analysis_path");
+    % Locate repository data relative to this file so the analysis does not
+    % depend on a machine-specific light_logger_analysis_path preference.
+    analysisDirectory = fileparts(mfilename('fullpath'));
+    projectRoot = fileparts(fileparts(fileparts(analysisDirectory)));
+    asSensitivityFile = fullfile( ...
+        projectRoot, 'data', 'ASM7341_spectralSensitivity.mat');
+    assert(isfile(asSensitivityFile), ...
+        'analyze_ms_linearity_data:MissingASSensitivity', ...
+        'AS7341 spectral-sensitivity file not found: %s', ...
+        asSensitivityFile);
 
-    % Load the minispect SPDs
-    spectral_sensitivity_map = containers.Map({'ASM7341', 'TSL2591'},...
-        {fullfile(lightLoggerAnalysis_path, 'data','ASM7341_spectralSensitivity.mat');
-        fullfile(lightLoggerAnalysis_path, 'data','TSL2591_spectralSensitivity.mat')...
-        }...
-        );
+    % Only the AS7341 sensitivity calibration is stored in this repository.
+    spectral_sensitivity_map = containers.Map( ...
+        {'ASM7341'}, {asSensitivityFile});
 
     % Create a map for the filters used to select good indices from the resulting curves for each chip
     as_chip_point_filter = @(x, y) and(and(~isinf(y), ~isinf(x)), y >= 0.25); % AS chip we want to exclude points in the mud
-    ts_chip_point_filter= @(x, y) and(and(~isinf(y), ~isinf(x)), y < max(y)); % TS chip we want to exclude points that are saturated
-    goodIdxFilterMap = containers.Map({'ASM7341', 'TSL2591'},...
-        {as_chip_point_filter, ts_chip_point_filter}...
-        );
+    goodIdxFilterMap = containers.Map( ...
+        {'ASM7341'}, {as_chip_point_filter});
 
 
     % Create a map for the limits for the chips' associated curves
-    lim_map = containers.Map({'ASM7341', 'TSL2591'},...
-        {[-1, 5], [-6, 6]}...
-        );
+    lim_map = containers.Map({'ASM7341'}, {[-1, 5]});
 
     % Initialize a map between chips and the number of channels that they have
-    n_channels_map = containers.Map({'ASM7341', 'TSL2591'},...
-        {size(measurements{1,1}.M.v.AS, 2),...
-        size(measurements{1,1}.M.v.TS, 2)...
-        }...
-        );
+    n_channels_map = containers.Map( ...
+        {'ASM7341'}, {size(measurements{1,1}.M.v.AS, 2)});
 
 
     % Get the background that was modified by the settings
@@ -117,28 +119,31 @@ function figureHandles = analyze_ms_linearity_data(calibration_metadata, measure
     % Save a map between the predicted and measured counts
     % across NDF levels
     predicted_measured_map = containers.Map( ...
-        {'ASM7341', 'TSL2591'}, ...
-        { ...
-        {zeros(0, n_channels_map('ASM7341')), zeros(0, n_channels_map('ASM7341'))}, ...
-        {zeros(0, n_channels_map('TSL2591')), zeros(0, n_channels_map('TSL2591'))} ...
-        } ...
-        );
+        {'ASM7341'}, ...
+        {{zeros(0, n_channels_map('ASM7341')), ...
+        zeros(0, n_channels_map('ASM7341'))}});
 
     % Initialize a matrix of starting/ending indices
     % for each NDF for each chip
     NDF_start_end_map = containers.Map( ...
-        {'ASM7341', 'TSL2591'}, ...
-        { zeros(numel(calibration_metadata.NDFs), 2), ...
-        zeros(numel(calibration_metadata.NDFs), 2) ...
-        } ...
-        );
+        {'ASM7341'}, ...
+        {zeros(numel(calibration_metadata.NDFs), 2)});
 
     % Make a list of colors for each ND level for the conjoined plot.
     colorList = ndf_color_list(numel(calibration_metadata.NDFs));
 
-    % add path to isetBIO CIE luminous efficiency function
-    addpath('~/Documents/MATLAB/toolboxes/Psychtoolbox-3/Psychtoolbox/PsychColorimetricData/PsychColorimetricMatFiles');
-    load("T_CIE_Y2.mat");   
+    % Locate the Psychtoolbox CIE luminous-efficiency data.
+    matlabDirectory = fileparts(fileparts(projectRoot));
+    cieFilePath = fullfile(matlabDirectory, 'toolboxes', ...
+        'Psychtoolbox-3', 'Psychtoolbox', ...
+        'PsychColorimetricData', 'PsychColorimetricMatFiles', ...
+        'T_CIE_Y2.mat');
+    assert(isfile(cieFilePath), ...
+        'analyze_ms_linearity_data:MissingCIEData', ...
+        'CIE luminous-efficiency file not found: %s', cieFilePath);
+    cieData = load(cieFilePath, 'T_CIE_Y2', 'S_CIE_Y2');
+    T_CIE_Y2 = cieData.T_CIE_Y2;
+    S_CIE_Y2 = cieData.S_CIE_Y2;
     wls_CIE_Y2 = SToWls(S_CIE_Y2); % convert to wavelength
 
     % First, let's iterate over the chips
@@ -364,7 +369,7 @@ function figureHandles = analyze_ms_linearity_data(calibration_metadata, measure
 
             if isempty(xmin) || isempty(xmax) || ~isfinite(xmin) || ~isfinite(xmax) || xmin == xmax
                 warning("Invalid x range for fit: xmin=%s xmax=%s", mat2str(xmin), mat2str(xmax));
-                disp("Does the TS chip have valid data?");
+                disp("Does the AS chip have valid data?");
                 continue;
             end
 
@@ -539,23 +544,11 @@ for ss = 1:num_settings_levels
         measurement_counts = 0;
 
         % Add the number of readings
-        if(chip == "ASM7341")
-            measurement_counts = measurement.M.v.AS;
+        measurement_counts = measurement.M.v.AS;
 
-
-            % Save the total number of channels if we have not already
-            if(n_channels == 0)
-                n_channels = size(measurement.M.v.AS, 2);
-            end
-
-        else
-            measurement_counts = measurement.M.v.TS;
-
-            % Save the total number of channels if we have not already
-            if(n_channels == 0)
-                n_channels = size(measurement.M.v.TS, 2);
-            end
-
+        % Save the total number of channels if we have not already
+        if(n_channels == 0)
+            n_channels = size(measurement.M.v.AS, 2);
         end
 
         % Calculate the number of readings
@@ -594,12 +587,7 @@ for ss = 1:num_settings_levels
                 candidate_counts = 0;
 
                 % Retrieve the readings for the chip
-                if(chip == "ASM7341")
-                    candidate_counts = candidate_measurement.M.v.AS;
-
-                else
-                    candidate_counts = candidate_measurement.M.v.TS;
-                end
+                candidate_counts = candidate_measurement.M.v.AS;
 
                 % If another example has no readings, this is really bad
                 % so let's error
@@ -628,12 +616,7 @@ for ss = 1:num_settings_levels
                 candidate_measurement = measurements{NDF_num, ss, candidate_idx};
 
                 % Retrieve the readings for the chip
-                if(chip == "ASM7341")
-                    candidate_counts = candidate_measurement.M.v.AS;
-
-                else
-                    candidate_counts = candidate_measurement.M.v.TS;
-                end
+                candidate_counts = candidate_measurement.M.v.AS;
 
                 % If we are on the first index, simply save the matrix
                 if(candidate_idx_idx == 1)
@@ -657,11 +640,7 @@ for ss = 1:num_settings_levels
 
             % Now, we need to save this back into the measurements array
             % because we iterate over it again
-            if(chip == "ASM7341")
-                measurement.M.v.AS = measurement_counts;
-            else
-                measurement.M.v.TS = measurement_counts;
-            end
+            measurement.M.v.AS = measurement_counts;
 
             % Resave the edited measurement.
             measurements{NDF_num, ss, nn} = measurement;
@@ -690,12 +669,7 @@ for ss = 1:num_settings_levels
         measurement = measurements{NDF_num, ss, nn};
 
         % Retrieve the readings from the MS
-        readings = 0;
-        if(chip == 'ASM7341')
-            readings = measurement.M.v.AS;
-        else
-            readings = measurement.M.v.TS;
-        end
+        readings = measurement.M.v.AS;
 
         % Insert these readings into the matrix
         counts_mat(ss, nn, 1:min_num_readings, :) = readings(1:min_num_readings, :);

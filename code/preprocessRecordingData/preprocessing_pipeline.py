@@ -12,6 +12,7 @@ import zipfile
 import warnings
 import math
 import time
+import tempfile
 import matplotlib.pyplot as plt
 import json
 import scipy.io
@@ -78,30 +79,49 @@ def _open_path_for_writing_with_blocking_retry(save_path: pathlib.Path, verbose:
 
             time.sleep(retry_delay_seconds)
 
-def get_subject_ids(FLIC_subject_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_subject/NEWscriptedIndoorOutdoorVideos2026") -> set[int]:
-    """
-    Function to load in the excel sheet recording
-    subjects we processed and return their IDs
-    for differernt experiments
-    """
-    
-    # Load in the excel file containing the subjectIDs 
-    subject_summary_filename: str = [ filename for filename in os.listdir(FLIC_subject_dir) 
-                                      if "subjectsummarymigraine" if filename.lower() 
-                                    ][0]
-    subject_summary_filepath: str = os.path.join(FLIC_subject_dir, subject_summary_filename)
-    df: pd.DataFrame = pd.read_excel(subject_summary_filepath, header=0)
+def get_subject_ids(FLIC_subject_dir: str="/Users/zacharykelly/Library/CloudStorage/Dropbox-Aguirre-BrainardLab/Zachary Kelly/FLIC_subject/NEWscriptedIndoorOutdoorVideos2026") -> set[int]:
+    """Return the union of the Migraine and test-subject session IDs."""
 
-    return set([ _extract_num_from_id(subject_id) for subject_id in df["Subject ID"]])
+    session_filepaths: tuple[str, str] = (
+        os.path.join(FLIC_subject_dir, "FLIC_SessionsMigraine_LL.xlsx"),
+        os.path.join(
+            FLIC_subject_dir,
+            "Test_Subjects",
+            "FLIC_Sessions_LL.xlsx",
+        ),
+    )
 
-def get_activity_names(FLIC_subject_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_subject/NEWscriptedIndoorOutdoorVideos2026",
+    subject_ids: set[int] = set()
+    for session_filepath in session_filepaths:
+        if(not os.path.isfile(session_filepath)):
+            raise FileNotFoundError(
+                f"Sessions workbook does not exist or is not a file: "
+                f"{session_filepath}"
+            )
+
+        df: pd.DataFrame = pd.read_excel(session_filepath, header=0)
+        df.columns = df.columns.astype(str).str.strip()
+        if("Subject ID" not in df.columns):
+            raise KeyError(
+                f"Subject ID column not found in {session_filepath}. "
+                f"Columns: {list(df.columns)}"
+            )
+
+        subject_ids.update(
+            _extract_num_from_id(str(subject_id).strip())
+            for subject_id in df["Subject ID"].dropna()
+        )
+
+    return subject_ids
+
+def get_activity_names(FLIC_subject_dir: str="/Users/zacharykelly/Library/CloudStorage/Dropbox-Aguirre-BrainardLab/Zachary Kelly/FLIC_subject/NEWscriptedIndoorOutdoorVideos2026",
                        group_by: list[str] | None=["Activity Name"]
                       ) -> set[str] | dict[tuple, str]:
     """Load activity names from the activities Excel spreadsheet.
 
-    Reads an Excel file whose name contains "activitiesmigraine" from
-    the given directory. Optionally groups activity names by one or more
-    columns in the spreadsheet.
+    Reads ``FLIC_activitiesMigraine_LL.xlsx`` from the current experiment
+    directory. Optionally groups activity names by one or more columns in the
+    spreadsheet.
 
     Args:
         FLIC_subject_dir: Path to the directory containing the activities
@@ -116,12 +136,23 @@ def get_activity_names(FLIC_subject_dir: str="/Users/zacharykelly/Aguirre-Braina
         ``["Activity Name"]``, or a dict mapping group tuples to lists
         of activity name strings otherwise.
     """
-    # Load in the excel file containing the activity names
-    activities_filename: str = [filename for filename in os.listdir(FLIC_subject_dir)
-                                if "activitiesmigraine" in filename.lower() 
-                               ][0]
-    activities_filepath: str = os.path.join(FLIC_subject_dir, activities_filename)
+    # Use the current activity workbook name exactly.
+    activities_filepath: str = os.path.join(
+        FLIC_subject_dir, "FLIC_activitiesMigraine_LL.xlsx"
+    )
+    if(not os.path.isfile(activities_filepath)):
+        raise FileNotFoundError(
+            f"Activity workbook does not exist or is not a file: "
+            f"{activities_filepath}"
+        )
+
     df: pd.DataFrame = pd.read_excel(activities_filepath, header=0)
+    df.columns = df.columns.astype(str).str.strip()
+    if("Activity Name" not in df.columns):
+        raise KeyError(
+            f"Activity Name column not found in {activities_filepath}. "
+            f"Columns: {list(df.columns)}"
+        )
 
     # Convert the Y/N columns to bool 
     for col in df.columns[1:]:
@@ -129,7 +160,10 @@ def get_activity_names(FLIC_subject_dir: str="/Users/zacharykelly/Aguirre-Braina
 
     # If we just want to return activity names, no need to do complex operations 
     if(tuple(group_by) == ("Activity Name",)):
-        return set(df["Activity Name"]) 
+        return {
+            str(activity_name).strip()
+            for activity_name in df["Activity Name"].dropna()
+        }
 
     # Group by the desired columns, default is activity name
     # (primary key)
@@ -169,9 +203,10 @@ def generate_world_videos(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
                          ) -> None:
     """
     Build playable world-camera videos from raw chunk recordings.
-    Iterates over all subjects and activities, combines chunk files from the
-    GKA directory, optionally applies preprocessing (debayer, color weights,
-    digital gain, frame filling), and writes a single W.avi per recording.
+    Iterates over all subjects and activities, then processes every numerical
+    recording directory beneath GKA. Each ``GKA/<recording_number>`` chunk
+    directory produces a corresponding
+    ``GKA/<recording_number>/W.avi`` in ``dst_dir``.
 
     Inputs:
       src_dir            root directory containing raw FLIC recordings
@@ -215,38 +250,64 @@ def generate_world_videos(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
             activity_path: str = activites_paths[activity_num]
             activity_name: str = os.path.basename(activity_path)
 
-            # Construct the path to the chunks that form the world video 
-            world_video_in: str = os.path.join(activity_path, "GKA")
-            assert os.path.exists(world_video_in) and os.path.isdir(world_video_in) and len(os.listdir(world_video_in)) > 0, f"Problem with: {world_video_in}"
+            # GKA now contains one numerical directory per recording attempt.
+            # Ignore nonnumeric entries so ancillary files cannot be mistaken
+            # for raw chunk directories.
+            gka_input_dir: str = os.path.join(activity_path, "GKA")
+            assert os.path.isdir(gka_input_dir), f"Problem with: {gka_input_dir}"
+            recording_numbers: list[str] = natsorted([
+                filename
+                for filename in os.listdir(gka_input_dir)
+                if filename.isdigit()
+                and os.path.isdir(os.path.join(gka_input_dir, filename))
+            ])
+            assert len(recording_numbers) > 0, (
+                f"No numerical recording directories found in: {gka_input_dir}"
+            )
 
-            # Construct the output path to where this video will be output 
-            world_video_out_dir: str = os.path.join(dst_dir, subject_id, activity_name, "GKA")
-            world_video_out: str = os.path.join(world_video_out_dir, "W.avi")
-            
-            # Skip existing videos if so desired 
-            if(os.path.exists(world_video_out) and overwrite_existing is False):
-                continue
+            # Generate every numbered recording independently. This preserves
+            # the raw attempt number in the processed output hierarchy.
+            for recording_number in recording_numbers:
+                world_video_in: str = os.path.join(
+                    gka_input_dir, recording_number
+                )
+                assert len(os.listdir(world_video_in)) > 0, (
+                    f"World recording directory is empty: {world_video_in}"
+                )
 
-            # Otherwise, we will generate the video 
-            # to the output location 
-            os.makedirs(world_video_out_dir, exist_ok=True)
+                world_video_out_dir: str = os.path.join(
+                    dst_dir,
+                    subject_id,
+                    activity_name,
+                    "GKA",
+                    recording_number,
+                )
+                world_video_out: str = os.path.join(world_video_out_dir, "W.avi")
 
-            if(verbose is True):
-                print(f"Input: {world_video_in}")
-                print(f"Output: {world_video_out}")
+                # Skip or overwrite each attempt separately so one existing
+                # video does not prevent other attempts from being generated.
+                if(os.path.exists(world_video_out) and overwrite_existing is False):
+                    continue
 
-            video_io.world_chunks_to_video(world_video_in, 
-                                           world_video_out,
-                                           apply_color_weights=apply_color_weights, 
-                                           apply_floor_ceiling=apply_floor_ceiling,
-                                           debayer_images=debayer_images,
-                                           apply_digital_gain=apply_digital_gain, 
-                                           apply_fielding_function=apply_fielding_function,
-                                           fill_missing_frames=fill_missing_frames,
-                                           linearize_camera_responsivity=linearize_camera_responsivity, 
-                                           convert_to_seconds=True,
-                                           verbose=verbose
-                                          )
+                os.makedirs(world_video_out_dir, exist_ok=True)
+
+                if(verbose is True):
+                    print(f"Input: {world_video_in}")
+                    print(f"Output: {world_video_out}")
+
+                video_io.world_chunks_to_video(
+                    world_video_in,
+                    world_video_out,
+                    apply_color_weights=apply_color_weights,
+                    apply_floor_ceiling=apply_floor_ceiling,
+                    debayer_images=debayer_images,
+                    apply_digital_gain=apply_digital_gain,
+                    apply_fielding_function=apply_fielding_function,
+                    fill_missing_frames=fill_missing_frames,
+                    linearize_camera_responsivity=linearize_camera_responsivity,
+                    convert_to_seconds=True,
+                    verbose=verbose,
+                )
             
     return 
 
@@ -268,8 +329,10 @@ def generate_egocentric_mapper_results(src_dir: str="/Volumes/FLIC_raw/NEWscript
                                       ) -> None:
     """
     Runs the egocentric video mapper to align Neon gaze data with the world
-    camera video. Produces gaze/fixation mappings and optional visualization
-    outputs for each subject/activity recording.
+    camera video. For every numerical ``GKA/<recording_number>`` directory in
+    the raw dataset, the matching raw Neon timeseries and processed world video
+    are used to produce gaze/fixation mappings beneath
+    ``Neon/<recording_number>/egocentric_mapper_results`` in ``dst_dir``.
 
     Inputs:
       src_dir                    raw dataset directory
@@ -315,48 +378,117 @@ def generate_egocentric_mapper_results(src_dir: str="/Volumes/FLIC_raw/NEWscript
             activity_path: str = activites_paths[activity_num]
             activity_name: str = os.path.basename(activity_path)
 
-            # Next, let's find the paths to both the Neon and the world videos 
-            neon_dir: str = os.path.join(activity_path, "Neon")
-            neon_video_path: str = os.path.join(neon_dir, [filename for filename in os.listdir(neon_dir) if "." not in filename][0])
-            world_video_path: str = os.path.join(dst_dir, subject_id, activity_name, "GKA", "W.avi")
+            # GKA defines which numbered recording attempts should be mapped.
+            gka_raw_dir: str = os.path.join(activity_path, "GKA")
+            assert os.path.isdir(gka_raw_dir), f"Problem with: {gka_raw_dir}"
+            recording_numbers: list[str] = natsorted([
+                filename
+                for filename in os.listdir(gka_raw_dir)
+                if filename.isdigit()
+                and os.path.isdir(os.path.join(gka_raw_dir, filename))
+            ])
+            assert len(recording_numbers) > 0, (
+                f"No numerical recording directories found in: {gka_raw_dir}"
+            )
 
-            # Assert these paths exist 
-            assert os.path.exists(neon_video_path) and len(os.listdir(neon_video_path)) > 0, f"Problem with: {neon_video_path}"
-            assert os.path.exists(world_video_path), f"Problem with: {world_video_path}"
+            neon_raw_dir: str = os.path.join(activity_path, "Neon")
+            assert os.path.isdir(neon_raw_dir), f"Problem with: {neon_raw_dir}"
 
-            # Define the output directory 
-            neon_output_dir: str = os.path.join(dst_dir, subject_id, activity_name, "Neon", "egocentric_mapper_results")
-            temp_output_dir: str = os.path.join(os.path.expanduser('~/Desktop'), "egocentric_mapper_temp")
-            os.makedirs(temp_output_dir, exist_ok=True)
+            for recording_number in recording_numbers:
+                # A newly downloaded Neon recording stores its timeseries files
+                # directly in Neon/<number>. Older recordings migrated into the
+                # numbered layout may retain one nested export directory. Find
+                # the unique world_timestamps.csv so both layouts are accepted.
+                neon_recording_dir: str = os.path.join(
+                    neon_raw_dir, recording_number
+                )
+                assert os.path.isdir(neon_recording_dir), (
+                    f"No matching Neon recording directory for GKA recording "
+                    f"{recording_number}: {neon_recording_dir}"
+                )
+                neon_timestamp_paths: list[str] = [
+                    os.path.join(root, "world_timestamps.csv")
+                    for root, _, filenames in os.walk(neon_recording_dir)
+                    if "world_timestamps.csv" in filenames
+                ]
+                assert len(neon_timestamp_paths) == 1, (
+                    f"Expected exactly one world_timestamps.csv beneath "
+                    f"{neon_recording_dir}; found {len(neon_timestamp_paths)}: "
+                    f"{neon_timestamp_paths}"
+                )
+                neon_timeseries_dir: str = os.path.dirname(
+                    neon_timestamp_paths[0]
+                )
 
-            # If the output already exsits adn we do not want to overwrite, then just skip 
-            if(os.path.exists(neon_output_dir) and overwrite_existing is False):
-                continue
+                world_video_path: str = os.path.join(
+                    dst_dir,
+                    subject_id,
+                    activity_name,
+                    "GKA",
+                    recording_number,
+                    "W.avi",
+                )
+                assert os.path.isfile(world_video_path), (
+                    f"Problem with: {world_video_path}"
+                )
 
-            # Otherwise, run the egocentric video mapper 
-            if(verbose is True):
-                print(f"Input:")
-                print(f"\tNeon: {neon_video_path}")
-                print(f"\tWorld: {world_video_path}")
-                print(f"Temp: {temp_output_dir}")
-                print(f"Output: {neon_output_dir}")
-        
-            virtual_foveation.run_egocentric_video_mapper(neon_timeseries_dir=neon_video_path, 
-                                                          alternative_vid_path=world_video_path, 
-                                                          output_dir=temp_output_dir,
-                                                          mapping_choice=mapping_choice, 
-                                                          refresh_time_threshold_sec=refresh_time_threshold_sec, 
-                                                          render_video=render_video,
-                                                          render_video_comparison=render_video_comparison, 
-                                                          optic_flow_algorithm=optic_flow_algorithm, 
-                                                          image_matcher=image_matcher, 
-                                                          show_video_preview=show_video_preview
-                                                        )
+                neon_recording_output_dir: str = os.path.join(
+                    dst_dir,
+                    subject_id,
+                    activity_name,
+                    "Neon",
+                    recording_number,
+                )
+                neon_output_dir: str = os.path.join(
+                    neon_recording_output_dir, "egocentric_mapper_results"
+                )
 
-            # Move the temp output to the destination output 
-            os.makedirs(neon_output_dir, exist_ok=True)
-            shutil.copytree(temp_output_dir, neon_output_dir, dirs_exist_ok=True)
-            shutil.rmtree(temp_output_dir)
+                # Existing results for one recording do not prevent missing
+                # sibling recordings from being generated.
+                if(os.path.exists(neon_output_dir) and overwrite_existing is False):
+                    continue
+
+                temp_output_dir: str = tempfile.mkdtemp(
+                    prefix=(
+                        f"egocentric_mapper_{subject_id}_{activity_name}_"
+                        f"{recording_number}_"
+                    )
+                )
+                try:
+                    if(verbose is True):
+                        print("Input:")
+                        print(f"\tNeon: {neon_timeseries_dir}")
+                        print(f"\tWorld: {world_video_path}")
+                        print(f"\tRecording number: {recording_number}")
+                        print(f"Temp: {temp_output_dir}")
+                        print(f"Output: {neon_output_dir}")
+
+                    virtual_foveation.run_egocentric_video_mapper(
+                        neon_timeseries_dir=neon_timeseries_dir,
+                        alternative_vid_path=world_video_path,
+                        output_dir=temp_output_dir,
+                        mapping_choice=mapping_choice,
+                        refresh_time_threshold_sec=refresh_time_threshold_sec,
+                        render_video=render_video,
+                        render_video_comparison=render_video_comparison,
+                        optic_flow_algorithm=optic_flow_algorithm,
+                        image_matcher=image_matcher,
+                        show_video_preview=show_video_preview,
+                    )
+
+                    # Keep existing results until the replacement has been
+                    # generated successfully in the temporary directory.
+                    if(os.path.exists(neon_output_dir)):
+                        if(not os.path.isdir(neon_output_dir)):
+                            raise NotADirectoryError(
+                                f"Mapper output exists but is not a directory: "
+                                f"{neon_output_dir}"
+                            )
+                        shutil.rmtree(neon_output_dir)
+                    os.makedirs(neon_recording_output_dir, exist_ok=True)
+                    shutil.copytree(temp_output_dir, neon_output_dir)
+                finally:
+                    shutil.rmtree(temp_output_dir, ignore_errors=True)
 
     return 
 
@@ -3493,7 +3625,11 @@ def transfer_light_logger_recordings(src_dir: str="/Volumes/T7 Shield",
                                      verbose: bool=False
                                     ) -> None:
     # First, let's get all the recording names from the src dir 
-    """Transfer light logger recordings.
+    """Transfer every matching light-logger recording attempt.
+
+    Source names ending in a recording number are grouped by subject and
+    activity without discarding earlier attempts. Each source directory is
+    copied to ``FLIC_<subject>/<activity>/GKA/<recording_number>``.
 
     Args:
         src_dir: Path-like input for src dir.
@@ -3512,8 +3648,11 @@ def transfer_light_logger_recordings(src_dir: str="/Volumes/T7 Shield",
                            if os.path.isdir(os.path.join(src_dir, filename))
                           ]
 
-    # Now, let's deconstruct the recording names into an easily parasable hashmap 
-    parsed_recording_map: dict[str, dict] = {}
+    # Preserve every recording attempt instead of collapsing each
+    # subject/activity pair to only its greatest recording number.
+    #
+    # subject -> activity -> recording number -> source directory name
+    parsed_recording_map: dict[int, dict[str, dict[int, str]]] = {}
     for recording_name in r_result:
 
         # If the recording name does not contain FLIC, 
@@ -3532,30 +3671,16 @@ def transfer_light_logger_recordings(src_dir: str="/Volumes/T7 Shield",
         # Find the recording number
         recording_number: int = int(re.search(r"_(\d+)$", recording_name).group(1))
 
-        # If the subject has not been seen before, this is very simple
-        if(subject_id not in parsed_recording_map):
-            parsed_recording_map[subject_id] = {activity_name: 
-                                                    {"recording_number": recording_number,
-                                                     "recording_name": recording_name, 
-                                                    }
-                                                    
-                                               }
-        
-        # If the subject has been seen before, let's check if the activity 
-        # has been seen before for this subject 
-        else:
-            # If the activity has not been seen before for this subject, 
-            # it is also then very easy 
-            if(activity_name not in parsed_recording_map[subject_id]):
-                parsed_recording_map[subject_id][activity_name] = {"recording_number": recording_number, "recording_name": recording_name}
-            
-            # Otherwise, this subject and activity have been seen before, we haev a duplicate. 
-            # We need to keep only the one that has the max recording number 
-            else:
-                # If the current recording number is greater than the other one, 
-                # update 
-                if(recording_number > parsed_recording_map[subject_id][activity_name]["recording_number"]):
-                    parsed_recording_map[subject_id][activity_name] = {"recording_number": recording_number, "recording_name": recording_name}
+        activity_recordings: dict[int, str] = parsed_recording_map.setdefault(
+            subject_id, {}
+        ).setdefault(activity_name, {})
+        if(recording_number in activity_recordings):
+            warnings.warn(
+                f"Duplicate light-logger recording number {recording_number} for "
+                f"FLIC_{subject_id} {activity_name}; replacing "
+                f"{activity_recordings[recording_number]} with {recording_name}"
+            )
+        activity_recordings[recording_number] = recording_name
 
     # Now, let's iterate over all the subject paths 
     subjects_to_download: list[int] = [subject for subject in parsed_recording_map 
@@ -3582,30 +3707,36 @@ def transfer_light_logger_recordings(src_dir: str="/Volumes/T7 Shield",
             activity_name: str = activities_to_download[activity_num]
             assert activity_name in subject_recordings, f"Activity: {activity_name} not in subject: {subject_id_num} recordings: {subject_recordings.keys()}"
 
-            # Retrieve this activity recording's infop 
-            activity_recording: dict = subject_recordings[activity_name]
-            recording_name: str = activity_recording["recording_name"]
+            # Each activity can have multiple attempts. Copy all of them into
+            # GKA/<recording number> rather than selecting only the maximum.
+            activity_recordings: dict[int, str] = subject_recordings[activity_name]
+            for recording_number in sorted(activity_recordings):
+                recording_name: str = activity_recordings[recording_number]
 
-            # Construct the path to this video 
-            input_path: str = os.path.join(src_dir, recording_name)
+                # Construct the source recording and its numbered destination.
+                input_path: str = os.path.join(src_dir, recording_name)
+                gka_output_dir: str = os.path.join(
+                    dst_dir, f"FLIC_{subject_id_num}", activity_name, "GKA"
+                )
+                output_path: str = os.path.join(gka_output_dir, str(recording_number))
 
-            # Construct the output path where this recording will go 
-            output_dir: str = os.path.join(dst_dir, f"FLIC_{subject_id_num}", activity_name)
-            output_path: str = os.path.join(output_dir, "GKA")
+                if(verbose is True):
+                    print(f"Input path: {input_path}")
+                    print(f"Output path: {output_path}")
 
-            if(verbose is True):
-                print(f"Input path: {input_path}")
-                print(f"Output path: {output_path}")
+                # Overwrite applies to one numbered recording only; it does not
+                # remove sibling attempts belonging to the same activity.
+                if(os.path.exists(output_path)):
+                    if(overwrite_existing is False):
+                        continue
+                    if(not os.path.isdir(output_path)):
+                        raise NotADirectoryError(
+                            f"Recording output exists but is not a directory: {output_path}"
+                        )
+                    shutil.rmtree(output_path)
 
-            # Skip recordings that are already downloaded unless we want to overwrite 
-            if(os.path.exists(output_path) and overwrite_existing is False):
-                continue
-            
-            # Make the output location 
-            os.makedirs(output_dir, exist_ok=True)
-
-            # Copy this directory to output_dir with the name described in output_path
-            shutil.copytree(input_path, output_path, dirs_exist_ok=True)
+                os.makedirs(gka_output_dir, exist_ok=True)
+                shutil.copytree(input_path, output_path)
 
     return 
 
@@ -3849,7 +3980,11 @@ def download_pupil_cloud_recordings(api_key: str,
 
     
     # First, we will get a list of all the recordings on pupil cloud
-    """Download pupil cloud recordings.
+    """Download every matching Pupil Cloud recording attempt.
+
+    Recording names are grouped by subject, activity, and their final numeric
+    suffix. Every attempt is downloaded and extracted independently beneath
+    ``FLIC_<subject>/<activity>/Neon/<recording_number>``.
 
     Args:
         api_key: Input value for api key.
@@ -3872,8 +4007,10 @@ def download_pupil_cloud_recordings(api_key: str,
     r_json: object = r.json() 
     r_result: object = r_json["result"]
 
-    # Now, let's deconstruct the recording names into an easily parasable hashmap 
-    parsed_recording_map: dict[str, dict] = {}
+    # Preserve every cloud recording attempt.
+    #
+    # subject -> activity -> recording number -> cloud recording information
+    parsed_recording_map: dict[int, dict[str, dict[int, dict[str, str]]]] = {}
     for recording_result in r_result:
         # Find the recording name 
         recording_name: str = recording_result["name"]
@@ -3908,32 +4045,20 @@ def download_pupil_cloud_recordings(api_key: str,
             warnings.warn(f"Recording name: {recording_name} has no recording number, Skipping...")
             continue
 
-        # Now, we will save it into the parsed recording dictionary 
-
-        # If the subject has not been seen before, this is very simple 
-        if(subject_id not in parsed_recording_map):
-            parsed_recording_map[subject_id] = {activity_name: 
-                                                    {"recording_number": recording_number,
-                                                     "id": recording_id
-                                                    }
-                                                    
-                                               }
-        
-        # If the subject has been seen before, let's check if the activity 
-        # has been seen before for this subject 
-        else:
-            # If the activity has not been seen before for this subject, 
-            # it is also then very easy 
-            if(activity_name not in parsed_recording_map[subject_id]):
-                parsed_recording_map[subject_id][activity_name] = {"recording_number": recording_number, "id": recording_id}
-            
-            # Otherwise, this subject and activity have been seen before, we haev a duplicate. 
-            # We need to keep only the one that has the max recording number 
-            else:
-                # If the current recording number is greater than the other one, 
-                # update 
-                if(recording_number > parsed_recording_map[subject_id][activity_name]["recording_number"]):
-                    parsed_recording_map[subject_id][activity_name] = {"recording_number": recording_number, "id": recording_id}
+        activity_recordings: dict[int, dict[str, str]] = (
+            parsed_recording_map.setdefault(subject_id, {})
+            .setdefault(activity_name, {})
+        )
+        if(recording_number in activity_recordings):
+            warnings.warn(
+                f"Duplicate Pupil Cloud recording number {recording_number} for "
+                f"FLIC_{subject_id} {activity_name}; replacing cloud recording "
+                f"{activity_recordings[recording_number]['id']} with {recording_id}"
+            )
+        activity_recordings[recording_number] = {
+            "id": recording_id,
+            "name": recording_name,
+        }
 
     # Now, let's iterate over all the subject paths 
     subjects_to_transfer: list[int] = [subject for subject in parsed_recording_map 
@@ -3942,7 +4067,7 @@ def download_pupil_cloud_recordings(api_key: str,
     subject_iterator: Iterable = range(len(subjects_to_transfer)) if verbose is False else tqdm(range(len(subjects_to_transfer)), desc="Processing Subjects", leave=True)
     for subject_num in subject_iterator:
         # Retrieve the subject path and subject name
-        subject_id_num = subjects_to_download[subject_num]
+        subject_id_num: int = subjects_to_transfer[subject_num]
         assert subject_id_num in parsed_recording_map, f"Subject id num: {subject_id_num} not in cloud recordings subjects: {parsed_recording_map.keys()}"
 
         # Retrieve just the recordings for this subject 
@@ -3959,49 +4084,90 @@ def download_pupil_cloud_recordings(api_key: str,
             activity_name: str = activities_to_transfer[activity_num]
             assert activity_name in subject_recordings, f"Activity: {activity_name} not in subject: {subject_id_num} recordings: {subject_recordings.keys()}"
 
-            # Retrieve this activity recording's infop 
-            activity_recording: dict = subject_recordings[activity_name]
+            # Download every attempt to Neon/<recording number>. The archive is
+            # extracted inside that numbered directory and removed afterward.
+            activity_recordings: dict[int, dict[str, str]] = subject_recordings[
+                activity_name
+            ]
+            for recording_number in sorted(activity_recordings):
+                activity_recording: dict[str, str] = activity_recordings[
+                    recording_number
+                ]
+                recording_id: str = activity_recording["id"]
 
-            # Now, we will retrieve the recording id to download 
-            recording_id: str = activity_recording["id"]
+                neon_output_dir: str = os.path.join(
+                    dst_dir,
+                    f"FLIC_{subject_id_num}",
+                    activity_name,
+                    "Neon",
+                )
+                recording_output_dir: str = os.path.join(
+                    neon_output_dir, str(recording_number)
+                )
+                output_filename: str = os.path.join(
+                    recording_output_dir, "Timeseries Data + Scene Video.zip"
+                )
 
-            # Construct the output path where this recording will go 
-            output_dir: str = os.path.join(dst_dir, f"FLIC_{subject_id_num}", activity_name)
-            output_filename: str = os.path.join(output_dir, "Timeseries Data + Scene Video.zip")
-            unzipped_output_filename: str = os.path.join(output_dir, "Neon")
+                # A successful prior run removes the archive and leaves its
+                # extracted contents. Treat any such contents as complete when
+                # overwrite_existing is false.
+                existing_extracted_entries: list[str] = []
+                if(os.path.isdir(recording_output_dir)):
+                    existing_extracted_entries = [
+                        filename
+                        for filename in os.listdir(recording_output_dir)
+                        if filename != os.path.basename(output_filename)
+                    ]
+                if(existing_extracted_entries and overwrite_existing is False):
+                    continue
 
-            # Skip recordings that are already downloaded unless we want to overwrite 
-            if( (os.path.exists(output_filename) and os.path.exists(unzipped_output_filename)) and overwrite_existing is False):
-                continue
-            
-            # Make the output location 
-            os.makedirs(output_dir, exist_ok=True)
+                # Overwriting one attempt must not remove any sibling numbered
+                # recording directories.
+                if(os.path.exists(recording_output_dir) and overwrite_existing):
+                    if(not os.path.isdir(recording_output_dir)):
+                        raise NotADirectoryError(
+                            f"Recording output exists but is not a directory: "
+                            f"{recording_output_dir}"
+                        )
+                    shutil.rmtree(recording_output_dir)
+                os.makedirs(recording_output_dir, exist_ok=True)
 
-            # Now, let's download the recording and place it where it belongs 
-            recording_zip_url: str = f"{api_url}/workspaces/{workspace_id}/recordings:raw-data-export"
-            params: dict = {"ids": [recording_id], "exclude": []}
-            r: object = requests.get(recording_zip_url, stream=True, 
-                                     params=params,
-                                     headers={"api-key": api_key, "workspace_id": workspace_id})
-            r.raise_for_status()
-            save_path = pathlib.Path(output_filename) 
-            if(verbose is True):
-                print(f"Downloading: {subject_id_num} | {activity_name} | {save_path}")
+                recording_zip_url: str = (
+                    f"{api_url}/workspaces/{workspace_id}/recordings:raw-data-export"
+                )
+                params: dict = {"ids": [recording_id], "exclude": []}
+                r: object = requests.get(
+                    recording_zip_url,
+                    stream=True,
+                    params=params,
+                    headers={"api-key": api_key, "workspace_id": workspace_id},
+                )
+                r.raise_for_status()
+                save_path: pathlib.Path = pathlib.Path(output_filename)
+                if(verbose is True):
+                    print(
+                        f"Downloading: {subject_id_num} | {activity_name} | "
+                        f"recording {recording_number} | {save_path}"
+                    )
 
-            with _open_path_for_writing_with_blocking_retry(save_path, verbose) as fd:
-                for chunk in r.iter_content(chunk_size=1024 * 1024):
-                    _write_chunk_with_blocking_retry(fd, chunk, save_path, verbose)
+                with _open_path_for_writing_with_blocking_retry(save_path, verbose) as fd:
+                    for chunk in r.iter_content(chunk_size=1024 * 1024):
+                        _write_chunk_with_blocking_retry(fd, chunk, save_path, verbose)
 
-    # After all the recordings have been downloaded, we will unpack them 
-    # here 
-    unpack_neon_recordings(dst_dir, 
-                           overwrite_existing=overwrite_existing,
-                           verbose=verbose, 
-                           subjects_to_process=subjects_to_download, 
-                           subjects_to_skip=subjects_to_skip, 
-                           activities_to_process=activities_to_download, 
-                           activities_to_skip=activities_to_skip
-                          )
+                # Extract into the same numbered directory. On extraction
+                # failure, remove the partial attempt so a later run cannot
+                # mistake incomplete files for a completed download.
+                try:
+                    with zipfile.ZipFile(output_filename, "r") as zip_ref:
+                        zip_ref.extractall(recording_output_dir)
+                except Exception as error:
+                    shutil.rmtree(recording_output_dir, ignore_errors=True)
+                    raise RuntimeError(
+                        f"Error unpacking Pupil Cloud recording "
+                        f"FLIC_{subject_id_num} {activity_name} "
+                        f"recording {recording_number}: {error}"
+                    ) from error
+                os.remove(output_filename)
 
 
 
