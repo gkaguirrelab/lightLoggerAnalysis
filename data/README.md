@@ -9,7 +9,7 @@ Spectral sensitivity functions for the first 10 channels of the "minispect" chip
 ## `agc_empirical_kernels.mat`
 
 The simulated temporal impulse response of the world-camera automatic gain
-control. [`deriveAGCLag.py`](../code/defineWorldCameraCalibration/deriveAGCLag.py)
+control. [`defineMSIlluminanceToAGCLag.py`](../code/defineWorldCameraCalibration/defineMSIlluminanceToAGCLag.py)
 applies this kernel to minispect illuminance before estimating the shared lag
 between minispect measurements and the camera AGC response.
 
@@ -32,7 +32,11 @@ increments. The MAT file also retains the full per-direction `results` struct.
 The generator was removed in cleanup commit `3f5194c8`, and the MAT file was
 restored by itself in commit `bd541ac0`. The current repository therefore
 preserves the generated kernel and the related AGC simulation, but not the
-original `analyzeAGCEmpiricalKernel.m` generator.
+original `analyzeAGCEmpiricalKernel.m` generator. The exact normalized weights,
+timebase, sampling properties, fitted source-response time constants, and
+convolution boundary rules are exported by
+`defineMSIlluminanceToAGCKernel.py` to the standalone derived artifact
+`derived/MSIlluminanceToAGCKernel.mat`, which the lag derivation loads.
 
 ## `empircalAGCAndIlluminance.mat`
 
@@ -44,20 +48,20 @@ linear-scale column vectors and the lag used to align them:
 - `cameraScoreLinear`: the camera sensitivity score, calculated as analog gain × digital gain × exposure.
 - `msIlluminance`: the corresponding temporally filtered minispect illuminance in lux.
 - `sharedLagSeconds`: the shared camera-response lag read from
-  `derived/cameraAGCLag.mat`.
+  `derived/MSIlluminanceToAGCLag.mat`.
 
 To regenerate the file from raw `GKA` recording paths, first derive the shared
 lag and then export the point cloud with the same paths:
 
 ```bash
-python code/defineWorldCameraCalibration/deriveAGCLag.py /path/to/recording/GKA [...]
+python code/defineWorldCameraCalibration/defineMSIlluminanceToAGCLag.py /path/to/recording/GKA [...]
 python code/defineWorldCameraCalibration/dataPrep/deriveEmpircalAGCAndIlluminance.py /path/to/recording/GKA [...]
 ```
 
 After regenerating this point cloud, run
-`code/defineWorldCameraCalibration/utilities/fitCameraAGCToIlluminance.m` to
-write the fitted conversion model to
-`derived/cameraAGCToIlluminanceFit.mat`.
+`code/defineWorldCameraCalibration/defineAGCToMeanLuminance.m` to compare it
+with the integrating-sphere measurements and refresh
+`derived/cameraScoreToAverageLuminance.mat`.
 
 ## `fullWellCapacityEffect`
 

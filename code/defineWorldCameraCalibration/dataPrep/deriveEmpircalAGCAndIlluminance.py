@@ -1,6 +1,6 @@
 """Export the empirical camera-AGC/minispect-illuminance point cloud.
 
-The shared temporal lag is read from ``derived/cameraAGCLag.mat``. Each raw
+The shared temporal lag is read from ``derived/MSIlluminanceToAGCLag.mat``. Each raw
 ``GKA`` recording is processed in memory, filtered for valid unsaturated
 samples, and appended to the point cloud written to
 ``data/empircalAGCAndIlluminance.mat``.
@@ -26,7 +26,9 @@ CALIBRATION_CODE_DIR: Path = THIS_FILE.parent.parent
 VIDEO_IO_DIR: Path = (
     PROJECT_ROOT / "code" / "library" / "matlabIO" / "python_libraries"
 )
-DEFAULT_LAG_PATH: Path = PROJECT_ROOT / "derived" / "cameraAGCLag.mat"
+DEFAULT_LAG_PATH: Path = (
+    PROJECT_ROOT / "derived" / "MSIlluminanceToAGCLag.mat"
+)
 DEFAULT_OUTPUT_PATH: Path = (
     PROJECT_ROOT / "data" / "empircalAGCAndIlluminance.mat"
 )
@@ -43,23 +45,27 @@ class EmpiricalPointCloud:
 
 
 def _load_shared_lag_seconds(lag_path: Path) -> float:
-    """Load and validate ``cameraAGCLag.sharedLagSeconds``."""
+    """Load and validate ``MSIlluminanceToAGCLag.sharedLagSeconds``."""
 
     if not lag_path.is_file():
         raise FileNotFoundError(
-            "Run code/defineWorldCameraCalibration/deriveAGCLag.py first:\n"
+            "Run code/defineWorldCameraCalibration/"
+            "defineMSIlluminanceToAGCLag.py first:\n"
             f"{lag_path}"
         )
     lag_file: dict[str, Any] = loadmat(lag_path, simplify_cells=True)
-    lag_data: Any = lag_file.get("cameraAGCLag")
+    lag_data: Any = lag_file.get("MSIlluminanceToAGCLag")
     if not isinstance(lag_data, dict) or "sharedLagSeconds" not in lag_data:
         raise KeyError(
-            "The lag file must contain cameraAGCLag.sharedLagSeconds: "
+            "The lag file must contain "
+            "MSIlluminanceToAGCLag.sharedLagSeconds: "
             f"{lag_path}"
         )
     lag_seconds: float = float(lag_data["sharedLagSeconds"])
     if not np.isfinite(lag_seconds):
-        raise ValueError("cameraAGCLag.sharedLagSeconds must be finite.")
+        raise ValueError(
+            "MSIlluminanceToAGCLag.sharedLagSeconds must be finite."
+        )
     return lag_seconds
 
 
@@ -164,7 +170,7 @@ def _derive_point_cloud(
         if import_path_string not in sys.path:
             sys.path.insert(0, import_path_string)
 
-    import deriveAGCLag
+    import defineMSIlluminanceToAGCLag
     import video_io
 
     selected_scores: list[np.ndarray] = []
@@ -172,7 +178,7 @@ def _derive_point_cloud(
     processed_count: int = 0
     skipped_count: int = 0
     # Reuse one engine because starting MATLAB dominates short-recording cost.
-    matlab_engine: Any = deriveAGCLag.start_matlab_engine()
+    matlab_engine: Any = defineMSIlluminanceToAGCLag.start_matlab_engine()
     try:
         for recording_index, recording_path in enumerate(recording_paths, start=1):
             print(
@@ -180,13 +186,13 @@ def _derive_point_cloud(
                 f"Processing {recording_path}"
             )
             try:
-                recording: deriveAGCLag.RecordingSignals = (
-                    deriveAGCLag.load_recording_signals(
+                recording: defineMSIlluminanceToAGCLag.RecordingSignals = (
+                    defineMSIlluminanceToAGCLag.load_recording_signals(
                         recording_path,
                         matlab_engine=matlab_engine,
                     )
                 )
-            except deriveAGCLag.InvalidRecordingError as error:
+            except defineMSIlluminanceToAGCLag.InvalidRecordingError as error:
                 skipped_count += 1
                 print(f"Skipping invalid recording: {error}", file=sys.stderr)
                 continue
@@ -194,13 +200,13 @@ def _derive_point_cloud(
             # Apply the controller kernel and the single lag derived across all
             # recordings before putting both sensors on the minispect timebase.
             filtered_time, unshifted_illuminance = (
-                deriveAGCLag.apply_empirical_kernel(
+                defineMSIlluminanceToAGCLag.apply_empirical_kernel(
                     recording.minispect_time,
                     recording.illuminance,
                 )
             )
             shifted_illuminance: np.ndarray = (
-                deriveAGCLag.lag_filtered_signal(
+                defineMSIlluminanceToAGCLag.lag_filtered_signal(
                     filtered_time,
                     unshifted_illuminance,
                     lag_seconds,

@@ -156,10 +156,13 @@ saveFileName = fullfile(...
     'nonLinearClippingExponent.mat');
 clippingExponent = p(1);
 linearizedSetPoint = idxCen;
-readme = ['Created by defineFullWellCapacityEffect.\n'...
+README = ['Created by defineFullWellCapacityEffect.\n'...
     'clippingExponent -- the exponent of the soft non-linear function that\ndefines the roll-off of sensor values with higher light levels.\n',...
     'linearizedSetPoint -- the sensor value in the linearized values that reflects\nthe set point of the automatic gain control (127 in the original sensor values).\n'];
-save(saveFileName,'readme','clippingExponent','linearizedSetPoint');
+derivedVariables = struct();
+derivedVariables.clippingExponent = clippingExponent;
+derivedVariables.linearizedSetPoint = linearizedSetPoint;
+saveDerivedFile(saveFileName, README, derivedVariables);
 
 
 %% Local function to implement algebraic soft-clipping

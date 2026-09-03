@@ -82,7 +82,7 @@ end
 % measures the light sensitivity of the camera at each point in time. In
 % separate code, we estimated the properties of a low-pass temporal filter
 % that transforms the illuminance values into the camera score. This
-% lag is derived by deriveAGCLag.py, and the aligned point cloud is exported
+% lag is derived by defineMSIlluminanceToAGCLag.py, and the aligned point cloud is exported
 % by deriveEmpircalAGCAndIlluminance.py.
 
 % The minispect illuminance is related to the average scene luminance by a
@@ -123,8 +123,11 @@ saveFileName = fullfile(...
     'derived',...
     'cameraScoreToAverageLuminance.mat');
 avgSceneLuminance = sphereAvgLuminance;
-readme = ['Created by defineAGCToMeanLuminance.\n'...
+README = ['Created by defineAGCToMeanLuminance.\n'...
     'A linear interpolation between these values (in log10 space) maps AGC values to luminance.\n',...
     'cameraScore -- the product of the AGC settings (analog gain, digital gain, exposure).\n',...
     'avgSceneLuminance -- the average luminance (cd/m2) of the scene viewed by the camera.\n'];
-save(saveFileName,'readme','cameraScore','avgSceneLuminance');
+derivedVariables = struct();
+derivedVariables.cameraScore = cameraScore;
+derivedVariables.avgSceneLuminance = avgSceneLuminance;
+saveDerivedFile(saveFileName, README, derivedVariables);

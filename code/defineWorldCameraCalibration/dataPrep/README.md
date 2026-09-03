@@ -5,7 +5,7 @@ directory of the lightLoggerAnalysis repository.
 
 This runnable Python derivation creates the empirical data consumed by the
 AGC-to-illuminance fitter. It reads the shared temporal alignment from
-`derived/cameraAGCLag.mat`, processes the supplied raw `GKA` recordings in
+`derived/MSIlluminanceToAGCLag.mat`, processes the supplied raw `GKA` recordings in
 memory, aligns the camera score with filtered minispect illuminance, and
 selects the calibration points.
 
@@ -14,18 +14,22 @@ struct `empiralAGC` with these fields:
 
 - `cameraScoreLinear`: analog gain × digital gain × exposure;
 - `msIlluminance`: matched, temporally filtered illuminance in lux; and
-- `sharedLagSeconds`: the lag loaded from `derived/cameraAGCLag.mat`.
+- `sharedLagSeconds`: the lag loaded from `derived/MSIlluminanceToAGCLag.mat`.
 
-The script does not fit the final camera conversion model. Its output feeds
-[`fitCameraAGCToIlluminance.m`](../utilities/fitCameraAGCToIlluminance.m), which
-writes the production coefficients and fitting metadata to
-`derived/cameraAGCToIlluminanceFit.mat`. That derived fit is subsequently
-loaded by `video_io.camera_scores_to_illuminance` during video processing.
+The script does not define the final camera conversion. Its output is plotted
+by [`defineAGCToMeanLuminance.m`](../defineAGCToMeanLuminance.m) alongside the
+integrating-sphere calibration points. That MATLAB definition saves the
+authoritative camera-score/mean-luminance lookup vectors in
+`derived/cameraScoreToAverageLuminance.mat`.
 
 ```text
-derived/cameraAGCLag.mat
+data/agc_empirical_kernels.mat
+    -> ../defineMSIlluminanceToAGCKernel.py
+    -> derived/MSIlluminanceToAGCKernel.mat
+    -> ../defineMSIlluminanceToAGCLag.py
+    -> derived/MSIlluminanceToAGCLag.mat
     -> deriveEmpircalAGCAndIlluminance.py
     -> data/empircalAGCAndIlluminance.mat
-    -> ../utilities/fitCameraAGCToIlluminance.m
-    -> derived/cameraAGCToIlluminanceFit.mat
+    -> ../defineAGCToMeanLuminance.m
+    -> derived/cameraScoreToAverageLuminance.mat
 ```
