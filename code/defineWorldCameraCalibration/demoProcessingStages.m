@@ -58,9 +58,10 @@ nStages = length(stages);
 channelColor = {'r','g','b'};
 
 figure
-tiledlayout(2,nStages,"TileSpacing","tight");
+tiledlayout(4,ceil(nStages/2),"TileSpacing","tight");
 for ss = 1:nStages
-    nexttile(ss)
+
+    nexttile
 
     % Get the image and some basic stats
     I = imageStages{ss};
@@ -72,10 +73,10 @@ for ss = 1:nStages
 
     % Show the image
     imshow(I,[0 prctile(I(~isinf(I)), 85)]);
-    title(stages{ss});
+    title([sprintf('%d. ',ss),stages{ss}]);
 
     % Show a histogram
-    nexttile(ss+nStages)
+    nexttile
     I(isinfI) = nan;
     [rgbIdx{1},rgbIdx{2},rgbIdx{3}] = returnBayerIndices(I, 'BGGR');
     edges = (0:255)/255;
@@ -104,7 +105,7 @@ for ss = 1:nStages
     textStr = {sprintf('min = [%d, %d, %d]', minVals(1), minVals(2), minVals(3)), ...
         sprintf('max = [%d, %d, %d]', maxVals(1), maxVals(2), maxVals(3)),...
         sprintf('ceil, floor = [%d, %d]', nInf,sum(I(:)==0))};
-    text(0.65, 0.95, textStr, 'Units', 'normalized', 'VerticalAlignment', 'top', 'FontSize', 8);
+    text(0.25, 0.95, textStr, 'Units', 'normalized', 'VerticalAlignment', 'top', 'FontSize', 8);
 
     if ss ==1
         ylabel('Percentage of pixels');
