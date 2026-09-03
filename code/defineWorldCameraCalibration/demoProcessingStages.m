@@ -49,8 +49,11 @@ imageStages{5} = imageStages{4} .* radiometricCorrectionMap;
 % Convert to radiance units
 imageStages{6} = convertSensorValuesToRadiance(imageStages{5},AGCSettings);
 
+% Impute radiance values for saturated areas
+imageStages{7} = imputeSaturatedPixelValues(imageStages{6},[]);
+
 % Plot
-stages = {'raw','linearized','threshold','flattened','radiometric correction','absolute radiance'};
+stages = {'raw','linearized','threshold','flattened','radiometric correction','absolute radiance','impute saturated'};
 nStages = length(stages);
 channelColor = {'r','g','b'};
 
@@ -68,7 +71,7 @@ for ss = 1:nStages
     showI(isinfI) = maxVal;
 
     % Show the image
-    imshow(I,[0 prctile(I(~isinf(I)), 95)]);
+    imshow(I,[0 prctile(I(~isinf(I)), 85)]);
     title(stages{ss});
 
     % Show a histogram
