@@ -3,7 +3,7 @@
 clear
 
 % Pick a measurement
-measurementName = 'planetarium_AGCandMS_01.mat';
+measurementName = 'outdoor_AGCandMS_01.mat';
 
 % Identify a raw TIFF
 fileName = fullfile(...

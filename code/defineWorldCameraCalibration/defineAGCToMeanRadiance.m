@@ -30,7 +30,7 @@ agcData.Exposure = [1466, 8333, 8333, 8333, 8333, 8333];
 % Derive a "camera score" by obtaining the product of the AGC settings
 cameraScore = agcData.DGain .* agcData.AGain .* agcData.Exposure;
 
-% Load the IMX219 sensitivity functions
+% Load the IMX219 sensitivity functions.
 dataFileName = fullfile(...
     tbLocateProjectSilent('lightLoggerAnalysis'),...
     'data',...
@@ -57,6 +57,7 @@ for ii = 1:length(agcData.ndf)
     for cc = 1:length(channelNames)
         % Spline the sensor sensitivity to match the source SPD
         sensitivitySensor = SplineRaw(wlsSensor,T.(channelNames{cc}),wlsSource);
+        sensitivitySensor = sensitivitySensor./max(sensitivitySensor);
         effectiveRadiance(ii,cc) = spdSource' * sensitivitySensor;
     end
 end
