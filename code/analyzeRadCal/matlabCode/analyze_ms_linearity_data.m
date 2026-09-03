@@ -48,355 +48,211 @@ function figureHandles = analyze_ms_linearity_data(calibration_metadata, measure
     path_to_converted_data = fullfile(getpref('lightLoggerAnalysis', 'dropboxBaseDir'), "FLIC_data/LightLoggerRadCal/W1P1M1/MSLinearityMeasurements/MS_linearity_data.mat");
     converted_data = load(path_to_converted_data).MS_linearity_data;
 
-    % ILLUMINANCE PLOTS 
+    % MEAN RADIANCE PLOTS 
     analyze_ms_linearity_data(converted_data.metadata.ms_linearity, converted_data.readings.ms_linearity);
 
-    % IRRADIANCE PLOTS 
-    analyze_ms_linearity_data(converted_data.metadata.ms_linearity, converted_data.readings.ms_linearity, 'plotIllum', false);
+    % ILLUMINANCE PLOTS 
+    analyze_ms_linearity_data(converted_data.metadata.ms_linearity, converted_data.readings.ms_linearity);
 %}
-    arguments
-        calibration_metadata; % Struct representing the metadata for the ms_linearity calibration measurement
-        measurements; % Parsed and converted recordings from the light logger
-        opts.plotSettingLevel logical = false;
-        opts.plotAllNDF logical = true;
-        opts.plotIllum logical = true;
-        opts.save_illum_to_MS logical = false;
-        opts.output_path = false;
-    end
+arguments
+    calibration_metadata; % Struct representing the metadata for the ms_linearity calibration measurement
+    measurements; % Parsed and converted recordings from the light logger
+    opts.output_path = false;
+end
 
-    figureHandles = {};
+n_ndfs_to_plot = 5;
 
-    % Defaults for all of the plotting we will do
-    set(groot, 'DefaultAxesFontSize', 16);
-    set(groot, 'DefaultTextFontSize', 16);
-    set(groot, 'DefaultAxesColor', 'w');
-    set(groot, 'DefaultFigureColor', 'w');
+figureHandles = {};
 
-    % Save the path to CombiExperiments. We will use this as a relative
-    % path to find other files
-    combiExperiments_path = getpref('lightLoggerAnalysis', 'combiExperiments_path');
+% Defaults for all of the plotting we will do
+set(groot, 'DefaultAxesFontSize', 16);
+set(groot, 'DefaultTextFontSize', 16);
+set(groot, 'DefaultAxesColor', 'w');
+set(groot, 'DefaultFigureColor', 'w');
 
-    % Locate repository data relative to this file so the analysis does not
-    % depend on a machine-specific light_logger_analysis_path preference.
-    analysisDirectory = fileparts(mfilename('fullpath'));
-    projectRoot = fileparts(fileparts(fileparts(analysisDirectory)));
-    asSensitivityFile = fullfile( ...
-        projectRoot, 'data', 'ASM7341_spectralSensitivity.mat');
-    assert(isfile(asSensitivityFile), ...
-        'analyze_ms_linearity_data:MissingASSensitivity', ...
-        'AS7341 spectral-sensitivity file not found: %s', ...
-        asSensitivityFile);
+% Save the path to CombiExperiments. We will use this as a relative
+% path to find other files
+combiExperiments_path = getpref('lightLoggerAnalysis', 'combiExperiments_path');
 
-    % Only the AS7341 sensitivity calibration is stored in this repository.
-    spectral_sensitivity_map = containers.Map( ...
-        {'ASM7341'}, {asSensitivityFile});
+% Locate repository data relative to this file so the analysis does not
+% depend on a machine-specific light_logger_analysis_path preference.
+analysisDirectory = fileparts(mfilename('fullpath'));
+projectRoot = fileparts(fileparts(fileparts(analysisDirectory)));
+asSensitivityFile = fullfile( ...
+    projectRoot, 'data', 'ASM7341_spectralSensitivity.mat');
+assert(isfile(asSensitivityFile), ...
+    'analyze_ms_linearity_data:MissingASSensitivity', ...
+    'AS7341 spectral-sensitivity file not found: %s', ...
+    asSensitivityFile);
 
-    % Create a map for the filters used to select good indices from the resulting curves for each chip
-    as_chip_point_filter = @(x, y) and(and(~isinf(y), ~isinf(x)), y >= 0.25); % AS chip we want to exclude points in the mud
-    goodIdxFilterMap = containers.Map( ...
-        {'ASM7341'}, {as_chip_point_filter});
+% Only the AS7341 sensitivity calibration is stored in this repository.
+spectral_sensitivity_map = containers.Map( ...
+    {'ASM7341'}, {asSensitivityFile});
+
+% Create a map for the filters used to select good indices from the resulting curves for each chip
+as_chip_point_filter = @(x, y) and(and(~isinf(y), ~isinf(x)), y >= 0.25); % AS chip we want to exclude points in the mud
+goodIdxFilterMap = containers.Map( ...
+    {'ASM7341'}, {as_chip_point_filter});
 
 
-    % Create a map for the limits for the chips' associated curves
-    lim_map = containers.Map({'ASM7341'}, {[-1, 5]});
+% Create a map for the limits for the chips' associated curves
+lim_map = containers.Map({'ASM7341'}, {[-1, 5]});
 
-    % Initialize a map between chips and the number of channels that they have
-    n_channels_map = containers.Map( ...
-        {'ASM7341'}, {size(measurements{1,1}.M.v.AS, 2)});
-
-
-    % Get the background that was modified by the settings
-    % scalar and shown to the MS
-    background = calibration_metadata.background;
+% Initialize a map between chips and the number of channels that they have
+n_channels_map = containers.Map( ...
+    {'ASM7341'}, {size(measurements{1,1}.M.v.AS, 2)});
 
 
-    % Retrieve the list of background scalars
-    background_scalars = calibration_metadata.background_scalars;
+% Get the background that was modified by the settings
+% scalar and shown to the MS
+background = calibration_metadata.background;
 
-    % Determine the number of settings levels that were exposed
-    n_settings_levels = numel(background_scalars);
 
-    % Save a map between the predicted and measured counts
-    % across NDF levels
-    predicted_measured_map = containers.Map( ...
-        {'ASM7341'}, ...
-        {{zeros(0, n_channels_map('ASM7341')), ...
-        zeros(0, n_channels_map('ASM7341'))}});
+% Retrieve the list of background scalars
+background_scalars = calibration_metadata.background_scalars;
 
-    % Initialize a matrix of starting/ending indices
-    % for each NDF for each chip
-    NDF_start_end_map = containers.Map( ...
-        {'ASM7341'}, ...
-        {zeros(numel(calibration_metadata.NDFs), 2)});
+% Determine the number of settings levels that were exposed
+n_settings_levels = numel(background_scalars);
 
-    % Make a list of colors for each ND level for the conjoined plot.
-    colorList = ndf_color_list(numel(calibration_metadata.NDFs));
+% Save a map between the predicted and measured counts
+% across NDF levels
+predicted_measured_map = containers.Map( ...
+    {'ASM7341'}, ...
+    {{zeros(0, n_channels_map('ASM7341')), ...
+    zeros(0, n_channels_map('ASM7341'))}});
 
-    % Locate the Psychtoolbox CIE luminous-efficiency data.
-    matlabDirectory = fileparts(fileparts(projectRoot));
-    cieFilePath = fullfile(matlabDirectory, 'toolboxes', ...
-        'Psychtoolbox-3', 'Psychtoolbox', ...
-        'PsychColorimetricData', 'PsychColorimetricMatFiles', ...
-        'T_CIE_Y2.mat');
-    assert(isfile(cieFilePath), ...
-        'analyze_ms_linearity_data:MissingCIEData', ...
-        'CIE luminous-efficiency file not found: %s', cieFilePath);
-    cieData = load(cieFilePath, 'T_CIE_Y2', 'S_CIE_Y2');
-    T_CIE_Y2 = cieData.T_CIE_Y2;
-    S_CIE_Y2 = cieData.S_CIE_Y2;
-    wls_CIE_Y2 = SToWls(S_CIE_Y2); % convert to wavelength
+% Initialize a matrix of starting/ending indices
+% for each NDF for each chip
+NDF_start_end_map = containers.Map( ...
+    {'ASM7341'}, ...
+    {zeros(numel(calibration_metadata.NDFs), 2)});
 
-    % First, let's iterate over the chips
-    chips = keys(spectral_sensitivity_map);
-    for cc = 1:numel(chips)
-        % Retrieve the name of the chip we are analyzing
-        chip = chips{cc};
+% Make a list of colors for each ND level for the conjoined plot.
+colorList = ndf_color_list(numel(calibration_metadata.NDFs));
 
-        % Grab the channels of the chip we are fitting
-        n_detector_channels = n_channels_map(chip);
+% Locate the Psychtoolbox CIE luminous-efficiency data.
+matlabDirectory = fileparts(fileparts(projectRoot));
+cieFilePath = fullfile(matlabDirectory, 'toolboxes', ...
+    'Psychtoolbox-3', 'Psychtoolbox', ...
+    'PsychColorimetricData', 'PsychColorimetricMatFiles', ...
+    'T_CIE_Y2.mat');
+assert(isfile(cieFilePath), ...
+    'analyze_ms_linearity_data:MissingCIEData', ...
+    'CIE luminous-efficiency file not found: %s', cieFilePath);
+cieData = load(cieFilePath, 'T_CIE_Y2', 'S_CIE_Y2');
+T_CIE_Y2 = cieData.T_CIE_Y2;
+S_CIE_Y2 = cieData.S_CIE_Y2;
+wls_CIE_Y2 = SToWls(S_CIE_Y2); % convert to wavelength
 
-        % Retrieve the limits for this chip
-        limits = lim_map(chip);
+% First, let's iterate over the chips
+chips = keys(spectral_sensitivity_map);
+for cc = 1:numel(chips)
+    % Retrieve the name of the chip we are analyzing
+    chip = chips{cc};
 
-        if opts.plotSettingLevel
-            % Create a tiledlayout figure we will use to show the counts by settings
-            % level for this chip across NDF levels
-            [rows, cols] = find_min_figsize(numel(calibration_metadata.NDFs));
-            countsByNdfFig = figure('Name', sprintf("MS_Linearity_Counts_By_NDF_%s", chip));
-            set(countsByNdfFig, 'Color', 'w');
-            counts_by_NDF_tiled = tiledlayout(rows, cols);
-            title(counts_by_NDF_tiled, sprintf("Counts by NDF Level | C: %s", chip), 'FontWeight', 'Bold');
-            figureHandles{end+1,1} = countsByNdfFig;
+    % Grab the channels of the chip we are fitting
+    n_detector_channels = n_channels_map(chip);
+
+    % Retrieve the limits for this chip
+    limits = lim_map(chip);
+
+    % Initialize a cell array that will hold the measured/predicted value by NDF
+    countsAndCalculatedRadiance = {};
+
+    % Iterate over the NDF levels
+    for nn = 1:numel(calibration_metadata.NDFs)
+
+        % Retrieve the current NDF
+        NDF = calibration_metadata.NDFs(nn);
+
+        % Retrieve the cal file for this NDF
+        cal = calibration_metadata.cal_files{nn};
+
+        % Get the source from the cal file
+        sourceS = cal.rawData.S;
+        sourceP_abs = cal.processedData.P_device;
+
+        % Retrieve the wavelengths
+        wls = SToWls(sourceS);
+
+        % Reformat minispect SPDs
+        minipspectP_rels_map = reformat_SPDs(spectral_sensitivity_map, sourceS);
+
+        % Initialize detector counts
+        sum_detector_counts = 0;
+        calculatedRadiance = 0;
+
+        % Find associated detectorP_rel
+        detectorP_rel = minipspectP_rels_map(chip);
+
+        % Extract detector counts
+        detectorCounts = extract_detector_counts(nn, measurements, chip);
+
+        % Average across measurements and readings
+        detectorCounts = squeeze(mean(detectorCounts, [2, 3]));
+
+        % Initialize predicted counts and illuminance
+        sphereSPDs = nan(n_settings_levels, sourceS(3));
+        calculatedRadiance = nan(n_settings_levels, n_detector_channels);
+        T_CIE_Y2_resamp = interp1(wls_CIE_Y2, T_CIE_Y2, wls, 'linear', 0);
+
+        for ss = 1:n_settings_levels
+            source_settings = background * background_scalars(ss);
+            sphereSPDs(ss,:) = sourceP_abs*source_settings';
+            calculatedRadiance(ss,:) = sphereSPDs(ss,:) * detectorP_rel;
         end
 
-        % Initialize a cell array that will hold the measured/predicted value by NDF
-        measured_predicted_by_NDF = {};
+        countsAndCalculatedRadiance{nn} = {detectorCounts, calculatedRadiance};
 
-        % Iterate over the NDF levels
-        for nn = 1:numel(calibration_metadata.NDFs)
+    end % NDF loop
 
-            % Retrieve the current NDF
-            NDF = calibration_metadata.NDFs(nn);
+    % Plot linearity across all NDF levels for a given chip
+    [rows, cols] = find_min_figsize(n_detector_channels);
+    % channels we care about, coeffs(slope, intercept)
+    if cc ==1
+        illum_to_MS = nan((n_detector_channels - 1), 2);
+    end
 
-            if opts.plotSettingLevel
-                % Create a standard figure for this NDF so it can be exported to EPS
-                measuredPredictedFig = figure('Name', sprintf("MS_Linearity_%s_Measured_vs_Predicted_NDF_%0.0f", chip, NDF));
-                set(measuredPredictedFig, 'Color', 'w');
-                [rows, cols] = find_min_figsize(n_channels_map(chip));
-                measured_predicted_tiled = tiledlayout(measuredPredictedFig, rows, cols);
-                title(measured_predicted_tiled, sprintf("%s Measured vs Predicted | NDF %.0f", chip, NDF), 'FontWeight', 'Bold');
-                figureHandles{end+1,1} = measuredPredictedFig;
-            end
 
-            % Retrieve the cal file for this NDF
-            cal = calibration_metadata.cal_files{nn};
+    for ch = 1:n_detector_channels
+        acrossNdfFig = figure('Name', sprintf("MS_Linearity_%s_Channel_%d", chip, ch));
+        across_NDF_channel_ax = axes;
+        hold(across_NDF_channel_ax, 'on');
+        figureHandles{end+1,1} = acrossNdfFig;
 
-            % Get the source from the cal file
-            sourceS = cal.rawData.S;
-            sourceP_abs = cal.processedData.P_device;
+        measured_all_NDF_this_chip = nan(n_ndfs_to_plot, n_settings_levels);
 
-            % Retrieve the wavelengths
-            wls = SToWls(sourceS);
+        for nn = 1:n_ndfs_to_plot
+            detectorCounts = countsAndCalculatedRadiance{nn}{1};
+            calculatedRadiance = countsAndCalculatedRadiance{nn}{2};
 
-            % Reformat minispect SPDs
-            minipspectP_rels_map = reformat_SPDs(spectral_sensitivity_map, sourceS);
+            h = scatter(across_NDF_channel_ax, ...
+                log10(calculatedRadiance(:, ch)), log10(detectorCounts(:, ch)), ...
+                'o', 'MarkerFaceColor', colorList(nn,:));
 
-            % Initialize detector counts
-            sum_detector_counts = 0;
-            predictedCounts = 0;
+            %'DisplayName', sprintf("NDF%.1g (%.2f lux)", calibration_metadata.NDFs(nn), round(PR670_Illum_by_NDF(cc,nn,5), 2, "significant")));
 
-            % Find associated detectorP_rel
-            detectorP_rel = minipspectP_rels_map(chip);
-
-            % Extract detector counts
-            detector_counts = extract_detector_counts(nn, measurements, chip);
-
-            % Average across measurements and readings
-            detector_counts = squeeze(mean(detector_counts, [2, 3]));
-
-            if opts.plotSettingLevel
-                % Plot detector counts across settings levels
-                counts_ax = nexttile(counts_by_NDF_tiled);
-                title(counts_ax, sprintf("Averaged Counts by Settings Level | NDF %.0f", NDF));
-                hold(counts_ax, 'on');
-
-                for ch = 1:n_detector_channels
-                    plot(counts_ax, background_scalars, detector_counts(:, ch), "-x", 'DisplayName', sprintf("Ch%d", ch));
-                end
-
-                xlabel(counts_ax, "Settings Level");
-                ylabel(counts_ax, "Averged Count");
-                legend(counts_ax, 'Location', 'best');
-                set(counts_ax, 'Color', 'none', 'Box', 'off');
-                hold(counts_ax, 'off');
-            end
-
-            % Initialize predicted counts and illuminance
-            sphereSPDs = nan(n_settings_levels, sourceS(3));
-            predictedCounts = nan(n_settings_levels, n_detector_channels);
-            T_CIE_Y2_resamp = interp1(wls_CIE_Y2, T_CIE_Y2, wls, 'linear', 0);
-
-            for ss = 1:n_settings_levels
-                source_settings = background * background_scalars(ss);
-                sphereSPDs(ss,:) = ( (sourceP_abs*source_settings') / sourceS(2) );
-
-                sphereIrrad(ss,:) = sphereSPDs(ss,:) .* pi;
-                irradXCIE(ss,:) = sphereIrrad(ss,:) .* T_CIE_Y2_resamp';
-                integratedIrradXCIE(ss) = sum(irradXCIE(ss,:));
-                illum(ss) = integratedIrradXCIE(ss) * 683;
-
-                predictedCounts(ss,:) = sphereSPDs(ss,:) * detectorP_rel;
-            end
-
-            measured = detector_counts;
-            predicted = predictedCounts;
-
-            if opts.plotSettingLevel
-                for ch = 1:n_detector_channels
-                    measured_predicted_ax = nexttile(measured_predicted_tiled);
-
-                    plot(measured_predicted_ax, log10((predicted(:, ch)).*pi), log10(measured(:, ch)), '-x', 'DisplayName', 'Data');
-                    hold(measured_predicted_ax, 'on');
-
-                    p = polyfit(log10(predicted(:, ch)), log10(measured(:, ch)), 1);
-                    fitY = polyval(p, log10(predicted(:, ch)));
-                    plot(measured_predicted_ax, log10(predicted(:, ch)).*pi, fitY, '-r', 'DisplayName', 'Fit');
-
-                    plot(measured_predicted_ax, [limits(1), limits(2)], [limits(1), limits(2)], ':k', "DisplayName", "ReferenceLine");
-
-                    xlim(measured_predicted_ax, limits);
-                    xlabel(measured_predicted_ax, sprintf('%s predicted irradiance [log]', chip));
-                    ylim(measured_predicted_ax, limits);
-                    ylabel(measured_predicted_ax, sprintf('%s measured counts [log]', chip));
-
-                    legend(measured_predicted_ax, 'Location','best');
-                    title(measured_predicted_ax, sprintf('channel %d, [slope intercept] = %2.2f, %2.2f', ch, p));
-                    hold(measured_predicted_ax, 'off');
-                end
-            end
-
-            measured_predicted_by_NDF{nn} = {measured, predicted};
-            PR670_Illum_by_NDF(cc,nn,:) = illum;
-
-        end % NDF loop
-
-        % Plot linearity across all NDF levels for a given chip
-        [rows, cols] = find_min_figsize(n_detector_channels);
-        % channeels we care about, coeffs(slope, intercept)
-        if cc ==1
-              illum_to_MS = nan((n_detector_channels - 1), 2);
+            h.MarkerFaceAlpha = 0.4;
+            h.MarkerEdgeAlpha = 0.4;
         end
 
+        plot(across_NDF_channel_ax, [limits(1), limits(2)], [limits(1), limits(2)], ':k', "DisplayName", "IdentityLine");
 
-        for ch = 1:n_detector_channels
-            acrossNdfFig = figure('Name', sprintf("MS_Linearity_%s_Channel_%d", chip, ch));
-            across_NDF_channel_ax = axes;
-            hold(across_NDF_channel_ax, 'on');
-            figureHandles{end+1,1} = acrossNdfFig;
+        title(across_NDF_channel_ax, sprintf("Channel %d", ch));
+        xlabel(across_NDF_channel_ax, sprintf('%s predicted radiance [log W/m^2/sr]', chip));
+        ylabel(across_NDF_channel_ax, sprintf('%s measured counts [log]', chip));
 
-            if opts.plotAllNDF
-                n_ndfs_to_plot = numel(calibration_metadata.NDFs);
-            else
-                n_ndfs_to_plot = 5;
-            end
-            
-            measured_all_NDF_this_chip = nan(n_ndfs_to_plot, n_settings_levels);
-            if ~opts.plotIllum
-                for nn = 1:n_ndfs_to_plot
-                    NDF_measured_predicted = measured_predicted_by_NDF{nn};
-                    measured = NDF_measured_predicted{1};
-                    predicted = NDF_measured_predicted{2} * pi;
+        legend(across_NDF_channel_ax, 'Location', 'bestoutside');
+        set(gca, 'box', 'off', 'color', 'none');
+        set(gcf, 'color', 'w');
 
-                    h = scatter(across_NDF_channel_ax, ...
-                        log10(predicted(:, ch)), log10(measured(:, ch)), ...
-                        'o', 'MarkerFaceColor', colorList(nn,:), ...
-                        'DisplayName', sprintf("NDF%.1g (%.2f lux)", calibration_metadata.NDFs(nn), round(PR670_Illum_by_NDF(cc,nn,5), 2, "significant")));
+        hold(across_NDF_channel_ax, 'off');
 
-                    h.MarkerFaceAlpha = 0.4;
-                    h.MarkerEdgeAlpha = 0.4;
-                end
 
-                plot(across_NDF_channel_ax, [limits(1), limits(2)], [limits(1), limits(2)], ':k', "DisplayName", "IdentityLine");
+    end % channel loop
+end % chip loop
 
-                title(across_NDF_channel_ax, sprintf("Channel %d", ch));
-                xlabel(across_NDF_channel_ax, sprintf('%s predicted irradiance [log]', chip));
-                ylabel(across_NDF_channel_ax, sprintf('%s measured counts [log]', chip));
-
-                legend(across_NDF_channel_ax, 'Location', 'bestoutside');
-                set(gca, 'box', 'off', 'color', 'none');
-                set(gcf, 'color', 'w');
-            else
-                for nn = 1:n_ndfs_to_plot
-                    NDF_measured_predicted = measured_predicted_by_NDF{nn};
-                    measured = NDF_measured_predicted{1};
-                    measured_all_NDF_this_chip(nn,:) = measured(:, ch);
-
-                    p = scatter(across_NDF_channel_ax, ...
-                        squeeze(log10(PR670_Illum_by_NDF(cc,nn,:))), ...
-                        squeeze(log10(measured(:, ch))), ...
-                        'o', 'MarkerFaceColor', colorList(nn,:), ...
-                        'DisplayName', sprintf("NDF%.1g (%.2f lux)", calibration_metadata.NDFs(nn), round(PR670_Illum_by_NDF(cc,nn,5), 2, "significant")));
-
-                    p.MarkerFaceAlpha = 0.4;
-                    p.MarkerEdgeAlpha = 0.4;
-                end
-
-                xlabel(across_NDF_channel_ax, 'log Illuminance [lux]');
-                ylabel(across_NDF_channel_ax, 'log measured sensor count');
-                title(across_NDF_channel_ax, sprintf('%s Channel %d Sensor Count vs Illuminance', chip, ch));
-            end
-
-            hold(across_NDF_channel_ax, 'off');
-
-            x = squeeze(log10(PR670_Illum_by_NDF(cc,1:n_ndfs_to_plot,:)));
-            y = squeeze(log10(measured_all_NDF_this_chip(1:n_ndfs_to_plot,:)));
-
-            x = x(:);
-            y = y(:);
-            valid_idx = isfinite(x) & isfinite(y);
-
-            x = x(valid_idx);
-            y = y(valid_idx);
-
-            coeffs = polyfit(x, y, 1);
-            %store the coefficients for chip one, all channels except IR
-            if cc ==1 && ch<10
-                illum_to_MS(ch,:) = coeffs;
-            end
-
-            xmin = min(x); 
-            xmax = max(x); 
-
-            if isempty(xmin) || isempty(xmax) || ~isfinite(xmin) || ~isfinite(xmax) || xmin == xmax
-                warning("Invalid x range for fit: xmin=%s xmax=%s", mat2str(xmin), mat2str(xmax));
-                disp("Does the AS chip have valid data?");
-                continue;
-            end
-
-            x_fit = linspace(min(x), max(x), 100);
-            y_fit = polyval(coeffs, x_fit);
-
-            hold(across_NDF_channel_ax, 'on');
-            plot(across_NDF_channel_ax, x_fit, y_fit, 'k:', 'LineWidth', 1, "DisplayName", "Fit Line");
-
-            if opts.plotIllum
-                set(across_NDF_channel_ax, 'XLim', [-1, 6]);
-                set(across_NDF_channel_ax, 'YLim', [-1, 6]);
-                pbaspect(across_NDF_channel_ax, [1 1 1]);
-                axis(across_NDF_channel_ax, 'square');
-            else
-                pbaspect(across_NDF_channel_ax, [1 1 1]);
-                axis(across_NDF_channel_ax, 'square');
-            end
-
-            legend(across_NDF_channel_ax, 'Location', 'bestoutside');
-        end % channel loop
-    end % chip loop
-    if opts.save_illum_to_MS
-        filename = [combiExperiments_path, '/data/PR670_illum_to_MS_fits'];
-        save(filename, "illum_to_MS");
-    end
-    end % function loop
+end % function loop
 
 function colorList = ndf_color_list(num_NDFs)
 % Internal helper to create one plotting color per NDF level.
@@ -408,102 +264,102 @@ function colorList = ndf_color_list(num_NDFs)
 %   Returns the historical 7-color NDF palette for small calibrations and
 %   interpolates through that palette when a calibration has more NDF levels.
 
-    baseColors = [
-        0.6350, 0.0780, 0.1840   % Red
-        0.8500, 0.3250, 0.0980;  % Orange
-        0.9290, 0.6940, 0.1250;  % Yellow
-        0.4660, 0.6740, 0.1880;  % Green
-        0.3010, 0.7450, 0.9330;  % Light Blue
-        0, 0.4470, 0.7410;       % Blue
-        0.4940, 0.1840, 0.5560;  % Purple
-        ];
+baseColors = [
+    0.6350, 0.0780, 0.1840   % Red
+    0.8500, 0.3250, 0.0980;  % Orange
+    0.9290, 0.6940, 0.1250;  % Yellow
+    0.4660, 0.6740, 0.1880;  % Green
+    0.3010, 0.7450, 0.9330;  % Light Blue
+    0, 0.4470, 0.7410;       % Blue
+    0.4940, 0.1840, 0.5560;  % Purple
+    ];
 
-    if(num_NDFs <= size(baseColors, 1))
-        colorList = baseColors(1:num_NDFs, :);
-        return;
-    end
-
-    basePositions = linspace(1, num_NDFs, size(baseColors, 1));
-    requestedPositions = 1:num_NDFs;
-    colorList = interp1(basePositions, baseColors, requestedPositions, 'linear');
+if(num_NDFs <= size(baseColors, 1))
+    colorList = baseColors(1:num_NDFs, :);
+    return;
 end
 
-    % Local function to reformat the minispect SPDs to be in the space of
-    % the source SPDs
-    function minipspectP_rels_map = reformat_SPDs(spectral_sensitivity_map, sourceS)
-    % Internal helper to reformat spds.
-    %
-    % Syntax:
-    %   minipspectP_rels_map = reformat_SPDs(spectral_sensitivity_map, sourceS)
-    %
-    % Description:
-    %   This local helper function internal helper to reformat spds within its parent workflow.
-    % Inputs:
-    %   spectral_sensitivity_map - Input used by the function.
-    %   sourceS                  - Input used by the function.
-    %
-    % Outputs:
-    %   minipspectP_rels_map     - Output produced by the function.
-    %
-    % Examples:
-    %{
+basePositions = linspace(1, num_NDFs, size(baseColors, 1));
+requestedPositions = 1:num_NDFs;
+colorList = interp1(basePositions, baseColors, requestedPositions, 'linear');
+end
+
+% Local function to reformat the minispect SPDs to be in the space of
+% the source SPDs
+function minipspectP_rels_map = reformat_SPDs(spectral_sensitivity_map, sourceS)
+% Internal helper to reformat spds.
+%
+% Syntax:
+%   minipspectP_rels_map = reformat_SPDs(spectral_sensitivity_map, sourceS)
+%
+% Description:
+%   This local helper function internal helper to reformat spds within its parent workflow.
+% Inputs:
+%   spectral_sensitivity_map - Input used by the function.
+%   sourceS                  - Input used by the function.
+%
+% Outputs:
+%   minipspectP_rels_map     - Output produced by the function.
+%
+% Examples:
+%{
         % See analyze_ms_linearity_data.m for usage context.
-    %}
+%}
 
-        minipspectP_rels_map = containers.Map();
-        chips = keys(spectral_sensitivity_map);
-        for cc = 1:numel(chips)
-            % Retrieve the current chip
-            chip = chips{cc};
+minipspectP_rels_map = containers.Map();
+chips = keys(spectral_sensitivity_map);
+for cc = 1:numel(chips)
+    % Retrieve the current chip
+    chip = chips{cc};
 
-            miniSpectSPDPath = spectral_sensitivity_map(chip);
-            load(miniSpectSPDPath,'T');
-            minispectS = WlsToS(T.wl);
-            minispectP_rel = T{:,2:end};
+    miniSpectSPDPath = spectral_sensitivity_map(chip);
+    load(miniSpectSPDPath,'T');
+    minispectS = WlsToS(T.wl);
+    minispectP_rel = T{:,2:end};
 
-            detectorP_rel = [];
-            for jj = 1:size(minispectP_rel,2)
-                detectorP_rel(:,jj) = interp1(SToWls(minispectS),minispectP_rel(:,jj),SToWls(sourceS));
-            end
+    detectorP_rel = [];
+    for jj = 1:size(minispectP_rel,2)
+        detectorP_rel(:,jj) = interp1(SToWls(minispectS),minispectP_rel(:,jj),SToWls(sourceS));
+    end
 
-            % Save the new SPDs
-            minipspectP_rels_map(chip) = detectorP_rel;
-        end
+    % Save the new SPDs
+    minipspectP_rels_map(chip) = detectorP_rel;
+end
 
+return ;
+end
+
+% Local function to find the min square figsize required to plot data
+function [rows, cols] = find_min_figsize(num_plots)
+% Internal helper to find min figsize.
+%
+% Syntax:
+%   rows, cols = find_min_figsize(num_plots)
+%
+% Description:
+%   This local helper function internal helper to find min figsize within its parent workflow.
+% Inputs:
+%   num_plots                - Input used by the function.
+%
+% Outputs:
+%   rows                     - Output produced by the function.
+%   cols                     - Output produced by the function.
+%
+% Examples:
+%{
+        % See analyze_ms_linearity_data.m for usage context.
+%}
+
+for ii = 1:num_plots
+    rows = ii;
+    cols = ii;
+
+    % Determine if we have reached the target
+    if(rows * cols >= num_plots)
         return ;
     end
 
-    % Local function to find the min square figsize required to plot data
-    function [rows, cols] = find_min_figsize(num_plots)
-    % Internal helper to find min figsize.
-    %
-    % Syntax:
-    %   rows, cols = find_min_figsize(num_plots)
-    %
-    % Description:
-    %   This local helper function internal helper to find min figsize within its parent workflow.
-    % Inputs:
-    %   num_plots                - Input used by the function.
-    %
-    % Outputs:
-    %   rows                     - Output produced by the function.
-    %   cols                     - Output produced by the function.
-    %
-    % Examples:
-    %{
-        % See analyze_ms_linearity_data.m for usage context.
-    %}
-
-        for ii = 1:num_plots
-            rows = ii;
-            cols = ii;
-
-            % Determine if we have reached the target
-            if(rows * cols >= num_plots)
-                return ;
-            end
-
-        end
+end
 
 end
 
