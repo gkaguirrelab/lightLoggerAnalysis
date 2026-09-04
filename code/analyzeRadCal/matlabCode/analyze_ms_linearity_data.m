@@ -280,9 +280,11 @@ for cc = 1:numel(chips)
         validFitIdx = isfinite(fitX) & isfinite(fitY) & ...
             fitY >= log10(fitCountLo) & fitY <= log10(fitCountHigh);
 
-        % Fit log10(counts) = slope*log10(radiance) + intercept, then draw
-        % the fitted segment only across the radiance values used to fit it.
-        logLogFitCoefficients(ch,:) = polyfit(fitX(validFitIdx), fitY(validFitIdx), 1);
+        % Fit log10(counts) = log10(radiance) + intercept with the slope
+        % constrained to one. The least-squares intercept is the mean
+        % vertical offset between the valid measured and predicted values.
+        fitIntercept = mean(fitY(validFitIdx) - fitX(validFitIdx));
+        logLogFitCoefficients(ch,:) = [1, fitIntercept];
         fitXRange = [min(fitX(validFitIdx)), max(fitX(validFitIdx))];
         plot(across_NDF_channel_ax, fitXRange, polyval(logLogFitCoefficients(ch,:), fitXRange), ...
             '-k', 'LineWidth', 1.5, ...
@@ -290,7 +292,9 @@ for cc = 1:numel(chips)
 
         plot(across_NDF_channel_ax, [limits(1), limits(2)], [limits(1), limits(2)], ':k', "DisplayName", "IdentityLine");
 
-        title(across_NDF_channel_ax, sprintf("Channel %d", ch));
+        title(across_NDF_channel_ax, ...
+            sprintf("Channel %d | slope = %.3f, intercept = %+.3f", ...
+            ch, logLogFitCoefficients(ch,1), logLogFitCoefficients(ch,2)));
         xlabel(across_NDF_channel_ax, sprintf('%s predicted radiance [log W/m^2/sr]', chip));
         ylabel(across_NDF_channel_ax, sprintf('%s measured counts [log]', chip));
 
@@ -322,7 +326,9 @@ for cc = 1:numel(chips)
         copyobj(allchild(channelAxes(ch)), combinedChannelAx);
         xlim(combinedChannelAx, xlim(channelAxes(ch)));
         ylim(combinedChannelAx, ylim(channelAxes(ch)));
-        title(combinedChannelAx, sprintf("Channel %d", ch));
+        title(combinedChannelAx, ...
+            sprintf("Ch %d | m = %.3f, b = %+.3f", ...
+            ch, logLogFitCoefficients(ch,1), logLogFitCoefficients(ch,2)));
         set(combinedChannelAx, 'box', 'off', 'color', 'none');
     end
 
