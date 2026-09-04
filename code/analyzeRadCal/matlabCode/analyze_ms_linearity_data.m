@@ -159,6 +159,24 @@ for cc = 1:numel(chips)
     % Initialize a cell array that will hold the measured/predicted value by NDF
     countsAndCalculatedRadiance = {};
 
+    % All NDF calibration files use the same wavelength sampling, so
+    % resample and normalize the channel sensitivities once for plotting.
+    referenceSourceS = calibration_metadata.cal_files{1}.rawData.S;
+    referenceWls = SToWls(referenceSourceS);
+    minipspectP_rels_map = reformat_SPDs(spectral_sensitivity_map, referenceSourceS);
+    detectorP_rel = minipspectP_rels_map(chip);
+
+    vec = nan(n_detector_channels, size(detectorP_rel, 1));
+    peakSensitivityValue = nan(1, n_detector_channels);
+    idxVals = nan(1, n_detector_channels);
+    lambdaMax = nan(1, n_detector_channels);
+    for ii = 1:n_detector_channels
+        vec(ii,:) = detectorP_rel(:,ii).';
+        [peakSensitivityValue(ii), idxVals(ii)] = max(vec(ii,:));
+        lambdaMax(ii) = referenceWls(idxVals(ii));
+        detectorP_rel(:,ii) = detectorP_rel(:,ii) ./ peakSensitivityValue(ii);
+    end
+
     % Iterate over the NDF levels
     for nn = 1:numel(calibration_metadata.NDFs)
 
@@ -175,15 +193,9 @@ for cc = 1:numel(chips)
         % Retrieve the wavelengths
         wls = SToWls(sourceS);
 
-        % Reformat minispect SPDs
-        minipspectP_rels_map = reformat_SPDs(spectral_sensitivity_map, sourceS);
-
         % Initialize detector counts
         sum_detector_counts = 0;
         calculatedRadiance = 0;
-
-        % Find associated detectorP_rel
-        detectorP_rel = minipspectP_rels_map(chip);
 
         % Extract detector counts
         detectorCounts = extract_detector_counts(nn, measurements, chip);
@@ -207,7 +219,7 @@ for cc = 1:numel(chips)
     end % NDF loop
 
     % Plot linearity across all NDF levels for a given chip
-    [rows, cols] = find_min_figsize(n_detector_channels);
+    [rows, cols] = find_min_figsize(n_detector_channels + 1);
     % channels we care about, coeffs(slope, intercept)
     if cc ==1
         illum_to_MS = nan((n_detector_channels - 1), 2);
@@ -222,10 +234,12 @@ for cc = 1:numel(chips)
     % even though the regression itself is performed in log10 coordinates.
     fitCountLo = 10;
     fitCountHigh = 2^16 - 11;
+    channelAxes = gobjects(n_detector_channels, 1);
 
     for ch = 1:n_detector_channels
         acrossNdfFig = figure('Name', sprintf("MS_Linearity_%s_Channel_%d", chip, ch));
         across_NDF_channel_ax = axes;
+        channelAxes(ch) = across_NDF_channel_ax;
         hold(across_NDF_channel_ax, 'on');
         figureHandles{end+1,1} = acrossNdfFig;
 
@@ -289,9 +303,41 @@ for cc = 1:numel(chips)
 
     end % channel loop
 
-    % Persist the channel fits and their raw-count inclusion thresholds for
-    % downstream conversion code.
+    % Add one final overview figure containing every channel plot as a tile.
+    % Copying the plotted objects keeps this view identical to the individual
+    % channel figures without repeating the fitting calculations.
+    allChannelsFig = figure('Name', sprintf("MS_Linearity_%s_All_Channels", chip));
+    allChannelsLayout = tiledlayout(allChannelsFig, rows, cols, ...
+        'TileSpacing', 'compact', 'Padding', 'compact');
+    figureHandles{end+1,1} = allChannelsFig;
+    combinedChannelAxes = gobjects(n_detector_channels, 1);
+
+    % Build one overview tile per detector channel. For each tile, retain its
+    % axes handle, copy all plotted data and reference lines from the matching
+    % individual-channel figure, reproduce that figure's axis limits, and add
+    % the channel title and transparent, box-free styling.
+    for ch = 1:n_detector_channels
+        combinedChannelAx = nexttile(allChannelsLayout);
+        combinedChannelAxes(ch) = combinedChannelAx;
+        copyobj(allchild(channelAxes(ch)), combinedChannelAx);
+        xlim(combinedChannelAx, xlim(channelAxes(ch)));
+        ylim(combinedChannelAx, ylim(channelAxes(ch)));
+        title(combinedChannelAx, sprintf("Channel %d", ch));
+        set(combinedChannelAx, 'box', 'off', 'color', 'none');
+    end
+
+    % Use the first channel's labels as a shared legend and place it in the
+    % first unused tile so it does not cover any plotted data.
+    allChannelsLegend = legend(combinedChannelAxes(1));
+    allChannelsLegend.Layout.Tile = n_detector_channels + 1;
+
+    title(allChannelsLayout, sprintf("MS Linearity | %s | All Channels", chip));
+    xlabel(allChannelsLayout, sprintf('%s predicted radiance [log W/m^2/sr]', chip));
+    ylabel(allChannelsLayout, sprintf('%s measured counts [log]', chip));
+
+    % Save the fits and lambda
     fitObj.coeff = logLogFitCoefficients;
+    fitObj.lambdaMax = lambdaMax;
 
     save(fullfile(projectRoot, 'derived', 'MSLinearityLogLogFits.mat'), ...
         'fitObj');
@@ -374,7 +420,7 @@ end
 return ;
 end
 
-% Local function to find the min square figsize required to plot data
+% Local function to find a compact near-square layout for the plots
 function [rows, cols] = find_min_figsize(num_plots)
 % Internal helper to find min figsize.
 %
@@ -382,7 +428,7 @@ function [rows, cols] = find_min_figsize(num_plots)
 %   rows, cols = find_min_figsize(num_plots)
 %
 % Description:
-%   This local helper function internal helper to find min figsize within its parent workflow.
+%   Choose enough rows and columns for a compact, approximately square grid.
 % Inputs:
 %   num_plots                - Input used by the function.
 %
@@ -395,16 +441,8 @@ function [rows, cols] = find_min_figsize(num_plots)
         % See analyze_ms_linearity_data.m for usage context.
 %}
 
-for ii = 1:num_plots
-    rows = ii;
-    cols = ii;
-
-    % Determine if we have reached the target
-    if(rows * cols >= num_plots)
-        return ;
-    end
-
-end
+cols = ceil(sqrt(num_plots));
+rows = ceil(num_plots / cols);
 
 end
 
