@@ -50,7 +50,7 @@ imageStages{5} = imageStages{4} .* radiometricCorrectionMap;
 imageStages{6} = convertSensorValuesToRadiance(imageStages{5},AGCSettings);
 
 % Impute radiance values for saturated areas
-imageStages{7} = imputeSaturatedPixelValues(imageStages{6},[]);
+imageStages{7} = imputeSaturatedPixelValues(imageStages{6},minispectValue);
 
 % Plot
 stages = {'raw','linearized','threshold','flattened','radiometric correction','absolute radiance','impute saturated'};

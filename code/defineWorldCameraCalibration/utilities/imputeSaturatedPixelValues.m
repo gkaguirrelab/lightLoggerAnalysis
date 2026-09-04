@@ -1,4 +1,4 @@
-function I = imputeSaturatedPixelValues(I,minispectValue)
+function I = imputeSaturatedPixelValues(I,minispectData)
 % This function imputes absolute values for saturated pixels
 
 persistent deltaSteradians
@@ -10,32 +10,24 @@ if isempty(deltaSteradians)
     load(paramFileName,'deltaSteradians');
 end
 
-persistent T
-if isempty(T)
+persistent cameraT cameraWls
+if isempty(cameraT)
     paramFileName = fullfile(...
         tbLocateProjectSilent('lightLoggerAnalysis'),...
         'data',...
         'IMX219_spectralSensitivity.mat');
     load(paramFileName,'T');
+    cameraT = table2array(T(:,["red" "green" "blue"]))';
+    cameraWls = T.wls;
 end
-cameraWls = T.wls;
 
 % Derive an estimate of the environmental SPD from the minispect
-%% just assuming a uniform distribution for now
-msSPD = ones(size(cameraWls));
+[miniSpectSPD,miniSpectS] = estimateRadianceSpectrumFromMiniSpect(minispectData.AS(1:9));
+miniSpectSPD = SplineRaw(SToWls(miniSpectS),miniSpectSPD,cameraWls);
+miniSpectS = WlsToS(cameraWls);
 
-% Obtain an estimate of the mean scene radiance as observed by the
-% minispect
-miniSpectAvgSceneRadiance = 1.25;
-minispectSteradians = 2 * pi;
-
-% Obtain the predicted camera channel weights given the environmental SPD
-channels = {'red','green','blue'};
-for cc = 1:3
-    sensSPD = T.(channels{cc});
-    sensSPD = sensSPD / max(sensSPD);
-Wrgb(cc) = sensSPD' * msSPD;
-end
+% Obtain an estimate of the mean scene radiance experienced by the camera
+miniSpectAvgSceneRadiance = mean(miniSpectSPD'*(cameraT ./ max(cameraT,[],2))');
 
 % Obtain the visual angle area (in steradians) of the saturated pixels, and
 % the total visual surface area of the camrea
