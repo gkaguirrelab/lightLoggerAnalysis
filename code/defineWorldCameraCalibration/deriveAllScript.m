@@ -12,7 +12,4 @@ defineFlatFieldingFunction
 defineRadiometricWeights
 % defineFisheyeCameraIntrinsics -- This is run in an interactive GUI
 defineDeltaSteradians
-defineAGCToMeanLuminance
-
-validateDerivedFilesHaveREADME(fullfile( ...
-    tbLocateProjectSilent('lightLoggerAnalysis'), 'derived'));
+defineAGCToMeanRadiance

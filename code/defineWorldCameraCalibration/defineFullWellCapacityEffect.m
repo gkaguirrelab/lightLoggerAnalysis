@@ -106,7 +106,7 @@ plot([0 1],[127 127],':k');
 plot([1 1],[0 127],':k');
 ylim([0 255]);
 ylabel('8-bit Sensor value');
-xlabel('Relative mean luminance [AU]');
+xlabel('Relative mean radiance [AU]');
 legend({'fit',...
     sprintf('R, relative nd = %2.2f',p(3)),...
     sprintf('G, relative nd = %2.2f',p(4)),...
@@ -128,7 +128,7 @@ a.XTick = 0:50:250;
 box off
 title('Linearization function');
 
-% Plot the interpretation of luminance vs. linearized sensor value
+% Plot the interpretation of radiance vs. linearized sensor value
 nexttile
 plot(yLinear,xRel(idxSort),'.k','LineWidth',2);
 hold on
@@ -142,7 +142,7 @@ plot([0 idxCen],[1 1],':k');
 text(idxCen,0.5,sprintf('<-- %d',idxCen));
 xlim([0 255]);
 xlabel('Linearized sensor value');
-ylabel('Relative luminance [AU]');
+ylabel('Relative radiance [AU]');
 title('Linear sensor interpretation');
 box off
 a = gca();
@@ -156,13 +156,10 @@ saveFileName = fullfile(...
     'nonLinearClippingExponent.mat');
 clippingExponent = p(1);
 linearizedSetPoint = idxCen;
-README = ['Created by defineFullWellCapacityEffect.\n'...
+readme = ['Created by defineFullWellCapacityEffect.\n'...
     'clippingExponent -- the exponent of the soft non-linear function that\ndefines the roll-off of sensor values with higher light levels.\n',...
     'linearizedSetPoint -- the sensor value in the linearized values that reflects\nthe set point of the automatic gain control (127 in the original sensor values).\n'];
-derivedVariables = struct();
-derivedVariables.clippingExponent = clippingExponent;
-derivedVariables.linearizedSetPoint = linearizedSetPoint;
-saveDerivedFile(saveFileName, README, derivedVariables);
+save(saveFileName,'readme','clippingExponent','linearizedSetPoint');
 
 
 %% Local function to implement algebraic soft-clipping
