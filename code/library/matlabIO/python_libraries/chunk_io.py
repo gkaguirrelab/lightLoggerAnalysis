@@ -12,6 +12,7 @@ from natsort import natsorted
 import numpy as np
 import pathlib
 import sys
+import warnings
 from collections.abc import Sequence
 from typing import Literal
 from tqdm.auto import tqdm
@@ -1049,9 +1050,18 @@ def parse_chunks(recording_path: str,
     assert len(floor_ceiling) == 2, f"floor_ceiling must contain exactly 2 values. Received: {floor_ceiling}"
 
     config_filepath: str = os.path.join(recording_path, "config.pkl")
-    with open(config_filepath, "rb") as f:
-        config_data: dict = dill.load(f)
-    world_original_bit_depth: int = int(config_data["sensors"]["W"]["sensor_mode"]["bit_depth"])
+    if(os.path.exists(config_filepath)):
+        with open(config_filepath, "rb") as f:
+            config_data: dict = dill.load(f)
+        world_original_bit_depth: int = int(config_data["sensors"]["W"]["sensor_mode"]["bit_depth"])
+    else:
+        world_original_bit_depth = 8
+        warnings.warn(
+            f"No config.pkl found in recording directory '{recording_path}'. "
+            "Assuming an 8-bit world-camera source depth.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
 
     # Retrieve each of the sensor's files grouped together 
     sensors_chunks_paths: dict[str, list[tuple]] = group_sensors_files(recording_path)

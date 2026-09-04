@@ -60,7 +60,7 @@ arguments
     opts.output_path = false;
 end
 
-n_ndfs_to_plot = 5;
+n_ndfs_to_plot = 4;
 
 figureHandles = {};
 
@@ -213,6 +213,15 @@ for cc = 1:numel(chips)
         illum_to_MS = nan((n_detector_channels - 1), 2);
     end
 
+    % Store one log-log linear fit per detector channel. Each row is a
+    % channel and the two columns are [slope, intercept].
+    logLogFitCoefficients = nan(n_detector_channels, 2);
+
+    % Exclude measurements near the detector floor and the 16-bit ceiling
+    % from the fit. These thresholds are applied to the original counts,
+    % even though the regression itself is performed in log10 coordinates.
+    fitCountLo = 10;
+    fitCountHigh = 2^16 - 11;
 
     for ch = 1:n_detector_channels
         acrossNdfFig = figure('Name', sprintf("MS_Linearity_%s_Channel_%d", chip, ch));
@@ -220,21 +229,50 @@ for cc = 1:numel(chips)
         hold(across_NDF_channel_ax, 'on');
         figureHandles{end+1,1} = acrossNdfFig;
 
+        % Accumulate all plotted NDF levels so a single model can be fit to
+        % the complete log-log response of this channel.
         measured_all_NDF_this_chip = nan(n_ndfs_to_plot, n_settings_levels);
+        predicted_all_NDF_this_chip = nan(n_ndfs_to_plot, n_settings_levels);
 
         for nn = 1:n_ndfs_to_plot
             detectorCounts = countsAndCalculatedRadiance{nn}{1};
             calculatedRadiance = countsAndCalculatedRadiance{nn}{2};
 
+            % Save this NDF's predicted radiance and measured counts in
+            % log10 units. Rows identify NDFs and columns identify stimulus
+            % settings.
+            predicted_all_NDF_this_chip(nn,:) = log10(calculatedRadiance(:, ch)).';
+            measured_all_NDF_this_chip(nn,:) = log10(detectorCounts(:, ch)).';
+
             h = scatter(across_NDF_channel_ax, ...
-                log10(calculatedRadiance(:, ch)), log10(detectorCounts(:, ch)), ...
-                'o', 'MarkerFaceColor', colorList(nn,:));
+                predicted_all_NDF_this_chip(nn,:), measured_all_NDF_this_chip(nn,:), ...
+                'o', 'MarkerFaceColor', colorList(nn,:), ...
+                'DisplayName', sprintf('NDF-%g', calibration_metadata.NDFs(nn)));
 
             %'DisplayName', sprintf("NDF%.1g (%.2f lux)", calibration_metadata.NDFs(nn), round(PR670_Illum_by_NDF(cc,nn,5), 2, "significant")));
 
             h.MarkerFaceAlpha = 0.4;
             h.MarkerEdgeAlpha = 0.4;
         end
+
+        % Combine the NDF-by-setting matrices into one pair of vectors for
+        % this channel's regression.
+        fitX = predicted_all_NDF_this_chip(:);
+        fitY = measured_all_NDF_this_chip(:);
+
+        % Keep finite values whose measured counts fall inside the desired
+        % raw-count range. Comparing against log10 thresholds is equivalent
+        % to applying the thresholds before the log transform.
+        validFitIdx = isfinite(fitX) & isfinite(fitY) & ...
+            fitY >= log10(fitCountLo) & fitY <= log10(fitCountHigh);
+
+        % Fit log10(counts) = slope*log10(radiance) + intercept, then draw
+        % the fitted segment only across the radiance values used to fit it.
+        logLogFitCoefficients(ch,:) = polyfit(fitX(validFitIdx), fitY(validFitIdx), 1);
+        fitXRange = [min(fitX(validFitIdx)), max(fitX(validFitIdx))];
+        plot(across_NDF_channel_ax, fitXRange, polyval(logLogFitCoefficients(ch,:), fitXRange), ...
+            '-k', 'LineWidth', 1.5, ...
+            'DisplayName', sprintf('Linear fit'));
 
         plot(across_NDF_channel_ax, [limits(1), limits(2)], [limits(1), limits(2)], ':k', "DisplayName", "IdentityLine");
 
@@ -250,6 +288,13 @@ for cc = 1:numel(chips)
 
 
     end % channel loop
+
+    % Persist the channel fits and their raw-count inclusion thresholds for
+    % downstream conversion code.
+    fitObj.coeff = logLogFitCoefficients;
+
+    save(fullfile(projectRoot, 'derived', 'MSLinearityLogLogFits.mat'), ...
+        'fitObj');
 end % chip loop
 
 end % function loop
