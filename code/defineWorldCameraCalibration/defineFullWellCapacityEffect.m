@@ -37,12 +37,7 @@
 % function. The exponential ("n") parameter of the fit is the only free
 % parameter that is of consequence for the non-linearity. We then call
 % a linearization function that transforms raw sensor values to a
-% linearized form. In practice, this adjusts the original value range of
-% 16-254 to the linearized range of 0-254 (removing the dark value). Raw
-% sensor values of >254 are set to 255. The linearization function lives
-% within the utilities sub-folder and is called:
-%
-%       linearizeIMX219SensorCounts
+% linearized form. 
 %
 % We find a clipping exponent of 5.3918. With linearization, we gain an
 % increased ability to represent higher levels of illumination, with some
@@ -120,9 +115,9 @@ nexttile
 yLinear = linearizeIMX219SensorCounts(y(idxSort), p(1));
 plot(y(idxSort),yLinear,'-k','LineWidth',2);
 xlabel('Raw sensor value');
-ylabel('Linearized sensor value');
+ylabel('Linearized sensor value (Unbounded)');
 xlim([0 255]);
-ylim([0 255]);
+% Removed the ylim bound to accommodate the unbounded yLinear values
 a = gca();
 a.XTick = 0:50:250;
 box off
@@ -134,19 +129,23 @@ plot(yLinear,xRel(idxSort),'.k','LineWidth',2);
 hold on
 mdl = fitlm(yLinear,xRel(idxSort), 'y ~ x1 - 1');
 b = [mdl.Coefficients.Estimate, 0];
-yFit = polyval(b,0:1:255);
-plot(0:1:255,yFit,'-r');
+
+% Dynamically scale the polyval support to match the unbounded data
+max_yLin = max(yLinear(~isinf(yLinear)));
+x_range = linspace(0, max_yLin, 100);
+yFit = polyval(b, x_range);
+plot(x_range,yFit,'-r');
+
 [~,idxCen] = min(abs(yFit-1));
-plot([idxCen idxCen],[0 1],':k');
-plot([0 idxCen],[1 1],':k');
-text(idxCen,0.5,sprintf('<-- %d',idxCen));
-xlim([0 255]);
+linearizedSetPoint = x_range(idxCen);
+plot([linearizedSetPoint linearizedSetPoint],[0 1],':k');
+plot([0 linearizedSetPoint],[1 1],':k');
+text(linearizedSetPoint,0.5,sprintf('<-- %2.1f',linearizedSetPoint));
+xlim([0 max_yLin]);
 xlabel('Linearized sensor value');
 ylabel('Relative radiance [AU]');
 title('Linear sensor interpretation');
 box off
-a = gca();
-a.XTick = 0:50:250;
 
 % Save the exponent of the fit in the "derived" directory for use in the
 % linearization stage, and some other things
@@ -155,18 +154,25 @@ saveFileName = fullfile(...
     'derived',...
     'nonLinearClippingExponent.mat');
 clippingExponent = p(1);
-linearizedSetPoint = idxCen;
 readme = ['Created by defineFullWellCapacityEffect.\n'...
     'clippingExponent -- the exponent of the soft non-linear function that\ndefines the roll-off of sensor values with higher light levels.\n',...
-    'linearizedSetPoint -- the sensor value in the linearized values that reflects\nthe set point of the automatic gain control (127 in the original sensor values).\n'];
+    'linearizedSetPoint -- the unbounded sensor value in the linearized values that reflects\nthe set point of the automatic gain control (127 in the original sensor values).\n'];
 save(saveFileName,'readme','clippingExponent','linearizedSetPoint');
 
 
 %% Local function to implement algebraic soft-clipping
 function y = myClippedVal(x,p)
 
-% Define the minimum dark value
-Smin = 8*2;
+% Load the empirically measured dark signal
+persistent darkSignal
+if isempty(darkSignal)
+    paramFileName = fullfile(...
+        tbLocateProjectSilent('lightLoggerAnalysis'),...
+        'derived',...
+        'darkSignal.mat');
+    load(paramFileName,'darkSignal');
+end
+Smin = darkSignal;
 
 % Define the fixed asymptotic value
 Smax = 2^8-1 - Smin;

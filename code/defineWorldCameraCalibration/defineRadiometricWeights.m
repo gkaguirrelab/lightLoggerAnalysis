@@ -1,6 +1,7 @@
 % This script derives the multiplicative adjustments that should be applied
 % to the R, G, and B channels so that the sensor values reflect the
-% radiometric power of the light source.
+% radiometric power of the light source, correcting for the differing peak 
+% transmission efficiencies of the Bayer filters.
 %
 % The PR670 was used to measure the SPD of a cloudy sky, at the same time
 % that the IMX219 camera was used to collect images of the sky. We
@@ -37,7 +38,7 @@ dataFileName = fullfile(...
     '*.tiff');
 fileSet = dir(dataFileName);
 
-% Define a crop region from  these images that includes just the sky.
+% Define a crop region from these images that includes just the sky.
 cropRegionLRTB = [211,410,151,300];
 cropMask = zeros(480,640);
 cropMask(cropRegionLRTB(3):cropRegionLRTB(4),cropRegionLRTB(1):cropRegionLRTB(2))=1;
@@ -84,10 +85,13 @@ for ii = 1:length(fileSet)
     [rgbIdx{1}, rgbIdx{2}, rgbIdx{3}] = ...
         returnBayerIndices(linearFlatI, bayerPattern);
 
-    % Store the non-nan R, G, and B pixel values in the growing array
+% Store the valid, non-saturated R, G, and B pixel values in the growing array
     for cc=1:3
         theseVals = linearFlatI(rgbIdx{cc});
-        theseVals = theseVals(~isnan(theseVals));
+        
+        % Filter out both NaNs (outside crop region) and Infs (saturated pixels)
+        theseVals = theseVals(isfinite(theseVals));
+        
         pixelValsRGB{cc} = [pixelValsRGB{cc}; theseVals(:)];
     end
 end
@@ -95,9 +99,6 @@ end
 % Take the mean of the pixel values within each channel (R,G,B) across
 % images and pixels within the region of interest
 sensorValues = cellfun(@(x) mean(x),pixelValsRGB);
-
-% Normalize the sensor values to the blue channel
-sensorValuesNormed = sensorValues / sensorValues(3);
 
 % Obtain the relative predicted channel values based upon the cloudy sky
 % SPD. We first need to match up the wavelength support of the two
@@ -118,24 +119,23 @@ title('SPD of cloudy sky and weighted channel sensitivity functions');
 
 % Loop through the channels
 channelNames = {'red','green','blue'};
+predictedSensorValue = zeros(1,3);
 for ii = 1:3
     thisChannelSensitivity = T.(channelNames{ii})(1:endIdx);
+    % We use the max-normalized curves as requested
     thisChannelSensitivityNormed = thisChannelSensitivity ./ max(thisChannelSensitivity);
     predictedSensorValue(ii) = radiance' * thisChannelSensitivityNormed;
     plot(T.wls(1:endIdx),thisChannelSensitivityNormed*predictedSensorValue(ii)/100,['-' channelNames{ii}(1)]);
 end
 
-% Normalize the predicted sensor values to the blue channel
-predictedSensorValueNormed = predictedSensorValue / predictedSensorValue(3);
+% Calculate raw mapping weights. These map the camera counts to the theoretical 
+% max-normalized radiance. These weights embed the AGC state of the sky photo.
+rawWeights = predictedSensorValue ./ sensorValues;
 
-% Calculate the radiometric correction that must be applied to the observed
-% sensor values to have them match the predicted sensor values
-radiometricCorrectionRGB = predictedSensorValueNormed ./  sensorValuesNormed;
-
-% We further adjust this triplet so that the mean sensor value (across RGB)
-% is unchanged by this operation
-k = 3/sum(radiometricCorrectionRGB);
-radiometricCorrectionRGB = radiometricCorrectionRGB * k;
+% Anchor the weights to the Green channel (index 2). This explicitly factors out 
+% the sky photo's AGC scalar, leaving exactly the ratio of the Bayer filters' 
+% peak quantum efficiencies relative to green.
+radiometricCorrectionRGB = rawWeights / rawWeights(2);
 
 % Construct a map to apply this correction
 radiometricCorrectionMap = ones(size(I));
@@ -144,9 +144,8 @@ for cc = 1:3
     radiometricCorrectionMap(bayerIdx{cc}) = radiometricCorrectionRGB(cc);
 end
 
-
 % Report the correction to the console
-fprintf('The radiometric correction tuple (RGB) is: [%2.2f, %2.2f, %2.2f]\n',radiometricCorrectionRGB);
+fprintf('The relative radiometric correction tuple (RGB) is: [%2.4f, %2.4f, %2.4f]\n',radiometricCorrectionRGB);
 
 % Save the radiometric correction to the "derived" directory
 saveFileName = fullfile(...
@@ -154,6 +153,6 @@ saveFileName = fullfile(...
     'derived',...
     'radiometricCorrectionRGB.mat');
 readme = ['Created by defineRadiometricWeights.\n'...
-    'radiometricCorrectionRGB -- multiple the (linearized) sensor values by these correction factors.\n'...
+    'radiometricCorrectionRGB -- multiply the (linearized) sensor values by these correction factors.\n'...
     'radiometricCorrectionMap -- a map of these corrections that can be applied to an entire image.\n'];
 save(saveFileName,'readme','radiometricCorrectionRGB','radiometricCorrectionMap');

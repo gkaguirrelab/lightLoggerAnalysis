@@ -27,7 +27,7 @@ imageStages{2} = linearizeIMX219SensorCounts(...
 
 % Set any pixel that is saturated to inf
 I = imageStages{2};
-I(I>250)=Inf;
+%I(I>250)=Inf;
 imageStages{3}=I;
 
 % Flat fielding function

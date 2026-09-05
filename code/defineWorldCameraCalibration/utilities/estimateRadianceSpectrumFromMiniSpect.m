@@ -1,4 +1,4 @@
-function [spectralRadiance,S] = estimateRadianceSpectrumFromMiniSpect(miniSpectValues)
+function [spectralRadiance,S] = estimateRadianceSpectrumFromMinispect(miniSpectValues)
 % Spectral Reconstruction from 9-Channel AS7341 Sensor using Tikhonov Regularization
 % This function estimates the mean environmental radiance from the
 % minispect values
@@ -9,7 +9,7 @@ miniSpectValues = minispectValue.AS(1:9);
 plot(SToWls(S),spectralRadiance)
 %}
 
-showPlots = false;
+showPlots = true;
 
 persistent miniSpectT miniSpectWls
 if isempty(miniSpectT)
@@ -31,7 +31,7 @@ if isempty(miniSpectKVals)
     paramFileName = fullfile(...
         tbLocateProjectSilent('lightLoggerAnalysis'),...
         'derived',...
-        'MSLinearityLogLogFits.mat');
+        'minispectRadianceWeights.mat');
     load(paramFileName,"fitObj");
     miniSpectKVals = fitObj.coeff(1:nChannels,2);
 end
@@ -49,8 +49,12 @@ y = V ./ 10.^k;
 % Create the second-derivative matrix D to enforce smoothness
 D = diff(eye(N), 2);
 
-% Define the regularization parameter alpha.
-alpha = 1e5;
+% Dynamic alpha scaling: Adjust regularization inversely to signal magnitude (SNR proxy)
+baseAlpha = 1e5;
+referenceIntensity = 0.05; % Replace with the empirical mean(y) from your typical calibration exposure
+
+% Inverse scaling enforces heavier smoothing for dim (low SNR) scenes
+alpha = baseAlpha * (referenceIntensity / (mean(y) + eps));
 
 % Combine the data fidelity and smoothing terms for lsqlin
 C = [A; sqrt(alpha) * D];

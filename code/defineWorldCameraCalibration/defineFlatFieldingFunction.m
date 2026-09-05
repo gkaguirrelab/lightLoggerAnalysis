@@ -76,26 +76,34 @@ for ii = 1:numel(avgImageByChannel)
     results(ii).residual = residual;
 end
 
-% Create separate correction maps for the channels
+% Create separate correction maps for the channels normalized to peak sensitivity
 corrR = max(results(1).modelFit(:)) ./ results(1).modelFit;
 corrG = max(results(2).modelFit(:)) ./ results(2).modelFit;
 corrB = max(results(3).modelFit(:)) ./ results(3).modelFit;
 
-% Create an integrated correction map
-[Hsmall, Wsmall] = size(modelFit);
+% Determine full image dimensions
+[Hsmall, Wsmall] = size(results(1).modelFit);
 Hfull = Hsmall * 2;
 Wfull = Wsmall * 2;
+
+% Upsample the sub-array correction models to smoothly map the spatial envelope 
+% across the full geometric extent of the camera chip
+corrR_full = imresize(corrR, [Hfull, Wfull], 'bilinear');
+corrG_full = imresize(corrG, [Hfull, Wfull], 'bilinear');
+corrB_full = imresize(corrB, [Hfull, Wfull], 'bilinear');
+
+% Create an integrated correction map
 correctionMap = nan(Hfull, Wfull);
 
 % Must match the Bayer pattern used in fitting: BGGR
-correctionMap(1:2:end, 1:2:end) = corrB;
-correctionMap(1:2:end, 2:2:end) = corrG;
-correctionMap(2:2:end, 1:2:end) = corrG;
-correctionMap(2:2:end, 2:2:end) = corrR;
+% Sample the upsampled spatial envelopes at the respective physical pixel locations
+correctionMap(1:2:end, 1:2:end) = corrB_full(1:2:end, 1:2:end);
+correctionMap(1:2:end, 2:2:end) = corrG_full(1:2:end, 2:2:end);
+correctionMap(2:2:end, 1:2:end) = corrG_full(2:2:end, 1:2:end);
+correctionMap(2:2:end, 2:2:end) = corrR_full(2:2:end, 2:2:end);
 
-% We need the correction map to preserve the mean value of the image after
-% the correction
-correctionMap = correctionMap / mean(correctionMap(:));
+% The correction map is NOT mean-normalized. Peak sensitivity (the center of the lens)
+% remains exactly 1.0, preserving the absolute physical radiance scaling of the pixels.
 
 % Plot the correction map
 figure
@@ -132,7 +140,6 @@ readme = ['Created by defineFlatFieldingFunction.\n'...
 save(saveFileName,'readme',...
     'correctionMap', ...
     'corrR', 'corrG', 'corrB')
-
 
 
 %% LOCAL FUNCTIONS
@@ -175,7 +182,6 @@ avg_B = sum_B ./ nFrames;
 avgImageByChannel = {avg_R,avg_G,avg_B};
 
 end
-
 
 
 % A flattened Gaussian that fits our spatial intensity variation well
