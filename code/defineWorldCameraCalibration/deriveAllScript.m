@@ -13,3 +13,4 @@ defineRadiometricWeights
 % defineFisheyeCameraIntrinsics -- This is run in an interactive GUI
 defineDeltaSteradians
 defineAGCToMeanRadiance
+defineMinispectRadianceWeights

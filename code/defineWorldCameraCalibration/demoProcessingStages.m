@@ -3,7 +3,7 @@
 clear
 
 % Pick a measurement
-measurementName = 'outdoor_AGCandMS_01.mat';
+measurementName = 'planetarium_AGCandMS_01.mat';
 
 % Identify a raw TIFF
 fileName = fullfile(...
@@ -25,18 +25,13 @@ load(paramFileName,'clippingExponent');
 imageStages{2} = linearizeIMX219SensorCounts(...
     imageStages{1},clippingExponent);
 
-% Set any pixel that is saturated to inf
-I = imageStages{2};
-%I(I>250)=Inf;
-imageStages{3}=I;
-
 % Flat fielding function
 paramFileName = fullfile(...
     tbLocateProjectSilent('lightLoggerAnalysis'),...
     'derived',...
     'flatFieldingFunction.mat');
 load(paramFileName,'correctionMap');
-imageStages{4} = imageStages{3} .* correctionMap;
+imageStages{3} = imageStages{2} .* correctionMap;
 
 % Radiometric correction
 paramFileName = fullfile(...
@@ -44,24 +39,24 @@ paramFileName = fullfile(...
     'derived',...
     'radiometricCorrectionRGB.mat');
 load(paramFileName,'radiometricCorrectionMap');
-imageStages{5} = imageStages{4} .* radiometricCorrectionMap;
+imageStages{4} = imageStages{3} .* radiometricCorrectionMap;
 
 % Convert to radiance units
-imageStages{6} = convertSensorValuesToRadiance(imageStages{5},AGCSettings);
+imageStages{5} = convertSensorValuesToRadiance(imageStages{4},AGCSettings);
 
 % Impute radiance values for saturated areas
-imageStages{7} = imputeSaturatedPixelValues(imageStages{6},minispectValue);
+imageStages{6} = imputeSaturatedPixelValues(imageStages{5},minispectValue);
 
 % Plot
-stages = {'raw','linearized','threshold','flattened','radiometric correction','absolute radiance','impute saturated'};
+stages = {'raw','linearized','flattened','radiometric correction','absolute radiance','impute saturated'};
 nStages = length(stages);
 channelColor = {'r','g','b'};
 
 figure
-tiledlayout(4,ceil(nStages/2),"TileSpacing","tight");
+tiledlayout(2,nStages,"TileSpacing","tight");
 for ss = 1:nStages
 
-    nexttile
+    nexttile(ss)
 
     % Get the image and some basic stats
     I = imageStages{ss};
@@ -76,7 +71,7 @@ for ss = 1:nStages
     title([sprintf('%d. ',ss),stages{ss}]);
 
     % Show a histogram
-    nexttile
+    nexttile(ss+nStages)
     I(isinfI) = nan;
     [rgbIdx{1},rgbIdx{2},rgbIdx{3}] = returnBayerIndices(I, 'BGGR');
     edges = (0:255)/255;
