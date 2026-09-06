@@ -17,20 +17,34 @@ end
 
 % Load the correction map used for flat fielding to determine the 
 % scale factor that altered the mean of the image array.
-persistent meanCorrection
-if isempty(meanCorrection)
+persistent meanCorrectionFielding
+if isempty(meanCorrectionFielding)
     paramFileName = fullfile(...
         tbLocateProjectSilent('lightLoggerAnalysis'),...
         'derived',...
         'flatFieldingFunction.mat');
     load(paramFileName,'correctionMap');
     % Use omitnan in case the spatial map includes masked boundaries
-    meanCorrection = mean(correctionMap(:), 'omitnan');
+    meanCorrectionFielding = mean(correctionMap(:), 'omitnan');
 end
+
+% Load the correction map used for RGB radiometric adjustment to determine
+% the scale factor that altered the mean of the image array.
+persistent meanCorrectionRGB
+if isempty(meanCorrectionRGB)
+    paramFileName = fullfile(...
+        tbLocateProjectSilent('lightLoggerAnalysis'),...
+        'derived',...
+        'radiometricCorrectionRGB.mat');
+    load(paramFileName,'radiometricCorrectionMap');
+    % Use omitnan in case the spatial map includes masked boundaries
+    meanCorrectionRGB = mean(radiometricCorrectionMap(:), 'omitnan');
+end
+
 
 % Adjust the expected set point to account for the overall spatial 
 % scaling caused by the flat fielding normalization step.
-effectiveSetPoint = linearizedSetPoint * meanCorrection;
+effectiveSetPoint = linearizedSetPoint * meanCorrectionFielding * meanCorrectionRGB;
 
 % Load the mapping of camera AGCSettings to mean environmental radiance
 persistent avgSceneRadiance cameraScore

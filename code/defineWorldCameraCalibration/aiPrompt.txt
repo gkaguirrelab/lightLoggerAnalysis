@@ -1,0 +1,51 @@
+I have a scientific instrument that includes an ASM7341 chip and an IMX219 camera chip.
+
+The ASM7341 contains 8 narrow-band spectral sensors, and a 9th "clear" channel that is broad band. The chip measures light intensity with 16 bit resolution. The chip is behind a cosine integrator and has a 2pi steradian field of view. I have available the tabular spectral sensitivities of each of the channels of the ASM7341 chip.
+
+The IMX219 camera chip records 8 bit RAW images (obtained by a strict bit-shift of the raw signal). It is behind a fisheye lens that subtends 120 x 90° of visual angle (with a 640x480 pixel array). The sensitivity of the IMX219 sensor is adjusted using a custom automatic gain control (AGC) routine, which modulates exposure time and analog gain (digital gain is locked at unity) in an attempt to maintain the mean of the chip sensor values at 127. I have available the tabular spectral sensitivities of the three channels of the IMX219 chip.
+
+The fields of view of the ASM7341 and IMX219 are aligned and share the same center point.
+
+I have made measurements from the ASM7341 and IMX219 while they are exposed to a light integrating sphere. I modulate the intensity of light within the sphere over several orders of magnitude using the output of a digital spectral synthesizer (the “CombiLED”), with neutral density filters of varying strength placed within the optical path. I have made measures of the radiance spectrum of a point within the interior of the sphere using a PR670 spectrophotometer. These measurements will be used to derive the calibrated radiometric properties of the chips.
+
+The ultimate goal is to convert the sensor values from the IMX219 chip into absolute radiance units. Further, I wish to impute the value of saturated pixels in the IMX219 image by making use of the simultaneous measurement of mean scene radiance available from the ASM7341 sensor.
+
+A few key properties of this approach:
+- The AGC settings are recorded along with each frame that is collected with the IMX219 chip. We will characterize the relationship between the AGC settings and the mean scene radiance to which the IMX219 camera is exposed. This will allow us to subsequently convert IMX219 sensor values into absolute values of radiance.
+- Simultaneous measurements with the ASM7341 chip are obtained with each IMX219 image frame. We will characterize the relationship between the channel sensor weights and the mean scene radiance to which the ASM7341 is exposed. This will allow us to subsequently estimate the continuous, mean scene spectral radiance.
+- We will assume that the IMX219 and ASM7341 chips experience the same mean scene spectral radiance. Note that this assumption of equal mean scene radiance between the chips requires only that the mean scene radiance does not differ systematically between the overlapping and non-overlapping portions the fields of view of the two cameras. This assumption of equivalent spatial distribution of radiance at large spatial scales also allows us to ignore the difference in the pre-sensor optics of the two chips (i.e., cosine integrator vs. fisheye lens).
+- Because the mean scene radiance as measured by the ASM7341 chip is not subject to saturation within our usual operating range, we will use the mean scene radiance as measured by the ASM7341 chip to impute the radiance values of pixels that are at ceiling or floor in the IMX219 image. To do so, we will use an energy conservation approach that distributes the total energy as seen by the ASM7341 to the saturated and unsaturated pixels of the IMX219 chip. Further, the imputation assumes that the distribution of power across wavelength bands in the continuous spectral radiance as seen by the ASM7341 is the same spectral distribution as experienced by the saturated IMX219 pixels. This allows us to project the estimated spectral power distribution onto the spectral sensitivities of the IMX219 chip. Finally, we assign the same imputed value to all saturated pixels as we cannot reconstruct the spatial variation in radiance across the saturated pixels.
+- In our analyses we at times compute the integrated radiance as seen by a sensor with a particular spectral sensitivity function. We have access only to versions of the spectral sensitivity functions that have been scaled to have a maximum value of unity. Our analytical approach must account for this property of the tabular spectral sensitivities in all cases. This includes obtaining a separate calibration scalar (gain constant) for every channel in both of the chips.
+- In many cases, integrated radiance is calculated by taking the dot product of a sensitivity function and the empirical spectral power distribution as measured using the PR670 spectroradiometer with 2 nm wavelength band sampling. The units of these spectral radiance measurements are in W/m2/sr/wavelength band, where wavelength band equals 2 nm. If the sensitivity function is resampled to have 2 nm sampling, then the dot product of the sensitivity function at the SPD yields the correct (true) radiance, albeit with the property that the sensitivity function has been scaled to have unit sensitivity.
+
+Next is a description of the stages of this analysis as implemented in MATLAB code.
+
+Stage 1:
+
+The first stage of analysis is to identify the weights that relate sensor values in each of the channels of the ASM7341 chip to the mean environmental radiance to which the chip was exposed. This is performed by the routine “defineMinispectRadianceWeights” which makes use of the sensor counts recorded by the ASM7341 chip while it was exposed within the light integrating sphere to light sources with known radiance spectrums. The resulting derived values (“minispectRadianceWeights”) are then used to support an estimate of the mean scene radiance continuous radiance spectrum given the sensor counts recorded by the chip. This estimation is performed by the second routine “estimateRadianceSpectrumFromMinispect”.
+
+Stage 2:
+
+In the routine “defineFullWellCapacityEffect” we characterize a non-linearity in the response of the IMX219 chip across light intensity, making use of measurements from within the light integrating sphere for which we have measured the radiance spectrum of the light source. The routine “linearizeIMX219SensorCounts” uses the derived parameter of the non-linearity function to convert raw images to linearized sensor values.
+
+Stage 3:
+
+Next, we characterize the spatial flat fielding function of the IMX219 chip (“defineFlatFieldingFunction”), and then correct for this by multiplying the linearized image by the derived correctionMap.
+
+Stage 4:
+
+At the next stage, we characterize the radiometric sensitivity of the R, G, and B channels of the IMX219 chip (“defineRadiometricWeights”), and then adjust the image by multiplying by the radiometricCorrectionMap.
+
+Stage 5:
+
+At the next stage we characterize the mapping between mean scene radiance and the automatic gain control settings of the IMX219 camera (“defineAGCToMeanRadiance”). With this relationship characterized, we can then convert the IMX219 sensor values into absolute units of radiance (“convertSensorValuesToRadiance"). Prior to this stage the IMX219 image has been linearized, flat fielded, and adjusted for the relative sensitivity of the R, G, and B channels.
+
+Stage 6:
+
+We characterize the camera intrinsics of the fisheye lens on the IMX219 chip, and from this derive a mapping of pixel locations to positions in degrees of visual angle, as well as the area (in steradians) subtended by each pixel.
+
+Stage 7:
+
+At the final stage we will attempt to impute the radiance of saturated pixels in the IMX219 image. At this stage the IMX219 image has been linearized, flat fielding corrected, adjusted for the relative sensitivity of the R, G, and B channels, and converted to units of absolute radiance by making use of the known relationship between the automatic gain control (AGC) settings and the mean radiance of the environment as seen by the IMX219 chip. To impute values for the saturated pixels, we begin by assuming that the IMX219 chip and the ASM7341 chip have overlapping fields of view, and moreover experience the same average scene radiance. The values recorded from the ASM7341 are used to estimate the scene spectral radiance (“estimateRadianceSpectrumFromMinispect.m”). This estimated spectrum is then used to calculate the radiance that would be needed in the saturated IMX219 pixels (“imputeSaturatedPixelValues”), after accounting for the radiance values observed in the unsaturated pixel partition.
+
+Attached are components of this analysis. The current version of the code produces imputed radiance values for saturated pixels that are an order of magnitude too large. Identify the error that is producing this. 

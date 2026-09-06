@@ -1,16 +1,15 @@
 % The purpose of this script is to define the relationship between the
 % custom AGC settings we use to control the sensitivity of the IMX219
-% camera, the irradiance to which the camera is exposed, and the mean
-% radiance of each pixel in the camera array.
+% camera, the irradiance to which the camera is exposed, and the true 
+% broad-band radiance of the environment.
 %
-% We observe a slight difference between the color channels in this
-% relationship. These differences can arise from several sources
-% (interaction of the source spectrum with the particular sensitivity
-% functions of the channels; differences in radiometric sensitivity between
-% the channels). We make the general assumption that the spectral
-% distribution of the environment in which the camera will be used will be
-% similarly broadband. Therefore, we simply save the mean relationship
-% between radiance and camera sensitivity.
+% We observe a slight difference between the color channels in their
+% effective radiometric sensitivity. These differences can arise from 
+% several sources (interaction of the source spectrum with the particular 
+% sensitivity functions of the channels; differences in radiometric 
+% sensitivity between the channels). However, because we must map the AGC
+% settings to the true energy-conserved radiance of the scene, we calculate
+% the true integrated broad-band radiance directly from the source spectrum.
 
 % Housekeeping
 clear
@@ -40,6 +39,9 @@ wlsSensor = T.wls;
 channelNames = {'red','green','blue'};
 channelCodes = {'r','g','b'};
 
+% Preallocate array for the true broad-band radiance
+avgSceneRadiance = zeros(length(agcData.ndf), 1);
+
 % Next, load the "maxSpectrum" calibration files and extract for each the
 % radiance of the sphere interior. Account for the settings level of the
 % combiLED during the measurement.
@@ -50,10 +52,16 @@ for ii = 1:length(agcData.ndf)
     cal = cals{end};
     S = cal.rawData.S;
     wlsSource = SToWls(S);
-    % This is the average radiance in units of Watts/m2/sr/[S(3)*nm],
-    % adjusted for the settings level of the combiLED.
+    % This is the average radiance in units of Watts/m2/sr/[S(2)*nm],
+    % adjusted for the settings level of the CombiLED.
     spdSource = cal.rawData.gammaCurveMeanMeasurements * settings;
-    % Loop over the channels
+    
+    % Calculate the true integrated broad-band radiance by 
+    % summing the spectral power distribution across all wavelength bands.
+    avgSceneRadiance(ii) = sum(spdSource);
+    
+    % Loop over the channels to calculate the sensor-weighted effective 
+    % radiance (retained exclusively for plotting comparisons).
     for cc = 1:length(channelNames)
         % Spline the sensor sensitivity to match the source SPD
         sensitivitySensor = SplineRaw(wlsSensor,T.(channelNames{cc}),wlsSource);
@@ -61,9 +69,6 @@ for ii = 1:length(agcData.ndf)
         effectiveRadiance(ii,cc) = spdSource' * sensitivitySensor;
     end
 end
-
-% Derive the average effective radiance across the camera channels
-avgSceneRadiance = mean(effectiveRadiance,2);
 
 % Plot the measurements
 figure;
@@ -83,7 +88,7 @@ xlabel('Log camera sensitivity score');
 ylabel('Log mean radiance (W/m2/sr)');
 title('Average radiance vs. camera AGC sensitivity');
 
-% Save the values that relate camera score to average scene radiance
+% Save the values that relate camera score to true broad-band radiance
 saveFileName = fullfile(...
     tbLocateProjectSilent('lightLoggerAnalysis'),...
     'derived',...
@@ -91,5 +96,5 @@ saveFileName = fullfile(...
 readme = ['Created by defineAGCToMeanRadiance.\n'...
     'A linear interpolation between these values (in log10 space) maps AGC values to radiance.\n',...
     'cameraScore -- the product of the AGC settings (analog gain, digital gain, exposure).\n',...
-    'avgSceneRadiance -- the average broad-band radiance (W/m2/sr) of the scene viewed by the camera.\n'];
+    'avgSceneRadiance -- the true broad-band radiance (W/m2/sr) of the scene viewed by the camera.\n'];
 save(saveFileName,'readme','cameraScore','avgSceneRadiance');

@@ -33,6 +33,13 @@ miniSpectS = WlsToS(cameraWls);
 % Obtain the expected mean scene radiance for each channel (R, G, B) independently.
 expectedChannelRadiance = miniSpectSPD' * (cameraT ./ max(cameraT,[],2))';
 
+% Calculate the broad-band continuous radiance from the reconstructed spectrum
+broadbandRadiance = sum(miniSpectSPD);
+
+% Derive the spectral scalar for each channel to convert sensor-weighted 
+% expectations to broad-band equivalents
+spectralScalar = broadbandRadiance ./ expectedChannelRadiance;
+
 % Get Bayer indices for the 2D image array to isolate the color channels
 bayerPattern = "BGGR";
 [rgbIdx{1}, rgbIdx{2}, rgbIdx{3}] = returnBayerIndices(I, bayerPattern);
@@ -65,8 +72,9 @@ for cc = 1:3
     
     % Proceed only if there are actually pixels to impute in this channel
     if targetSteradians > 0
-        % 1. Total energy over the camera's FOV for this specific color channel
-        totalCameraEnergy = expectedChannelRadiance(cc) * channelTotalSteradians;
+        % 1. Total energy over the camera's FOV for this specific color channel,
+        % adjusted by the spectral scalar to broad-band equivalents
+        totalCameraEnergy = (expectedChannelRadiance(cc) * spectralScalar(cc)) * channelTotalSteradians;
         
         % 2. Obtain the total radiant intensity of the valid (non-target) pixels
         validPartition = sum(channelVals(~targetMask) .* channelSteradians(~targetMask));
