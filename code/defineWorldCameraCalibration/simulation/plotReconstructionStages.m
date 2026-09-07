@@ -1,27 +1,13 @@
-% Housekeeping
-clear
-close all
+function plotReconstructionStages(imageStages)
 
-% Pick a measurement
-measurementName = 'outdoor_AGCandMS_01.mat';
+% How many stages did we get?
+nStages = length(imageStages);
 
-% Load the data
-fileName = fullfile(...
-    tbLocateProjectSilent('lightLoggerAnalysis'),...
-    'data',...
-    'exampleWorldCameraImages',...
-    measurementName);
-load(fileName,'worldFrame','AGCSettings','minispectValue')
+% Stage labels (we may or may not have the source, depending upon whether
+% we are working with actual data or a simulation)
+stages = {'raw','linearized','flattened','radiometric correction','absolute radiance','impute saturated','source'};
 
-% Reconstruct the radiance image
-[radianceMap,imageStages] = reconstructionPipeline(worldFrame,AGCSettings);
-
-% Impute radiance values for saturated areas
-imageStages{end+1} = imputePixelValues(radianceMap,minispectValue);
-
-% Plot
-stages = {'raw','linearized','flattened','radiometric correction','absolute radiance','impute saturated'};
-nStages = length(stages);
+% Plot colors for the histograms
 channelColor = {'r','g','b'};
 
 figure
@@ -83,4 +69,6 @@ for ss = 1:nStages
         axis off
     end
     box off
+end
+
 end

@@ -1,15 +1,9 @@
-function [spectralRadiance,S] = estimateRadianceSpectrumFromMinispect(miniSpectValues)
+function [spectralRadiance,S] = estimateRadianceSpectrumFromMinispect(minispectValues)
 % Spectral Reconstruction from 9-Channel AS7341 Sensor using Tikhonov Regularization
 % This function estimates the mean environmental radiance from the
 % minispect values
-%{
-load("/Users/aguirre/Documents/MATLAB/projects/lightLoggerAnalysis/data/exampleWorldCameraImages/outdoor_AGCandMS_01.mat")
-miniSpectValues = minispectValue.AS(1:9);
-[spectralRadiance,S] = estimateRadianceSpectrumFromMiniSpect(miniSpectValues);
-plot(SToWls(S),spectralRadiance)
-%}
 
-showPlots = true;
+showPlots = false;
 
 persistent miniSpectT miniSpectWls
 if isempty(miniSpectT)
@@ -37,7 +31,7 @@ if isempty(miniSpectKVals)
 end
 
 N = length(miniSpectWls);
-V = double(miniSpectValues');
+V = double(minispectValues');
 k = double(miniSpectKVals);
 A = miniSpectT; % Reverted: A is the max-normalized sensitivity matrix
 

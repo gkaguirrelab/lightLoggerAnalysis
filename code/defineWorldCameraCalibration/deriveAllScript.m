@@ -4,7 +4,6 @@
 % Housekeeping
 clear
 close all
-addpath(fullfile(fileparts(mfilename('fullpath')),'utilities'))
 
 defineDarkSignal
 defineFullWellCapacityEffect
