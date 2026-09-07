@@ -8,7 +8,7 @@ persistent clippingExponent linearizedSetPoint darkSignal ...
     correctionMap radiometricCorrectionMap ...
     avgSceneRadiance cameraScore ...
     meanCorrectionFielding meanCorrectionRGB Smax ...
-    azimuthMap elevationMap T channelNames endIdx bayerPattern
+    azimuthMap elevationMap T channelNames bayerPattern
 
 % Load non-linear clipping exponent and linearized set point
 if isempty(clippingExponent)
@@ -87,7 +87,6 @@ if isempty(T)
         'data',...
         'IMX219_spectralSensitivity.mat');
     load(dataFileName, 'T');
-    endIdx = find(T.wls == 780);
     channelNames = {'red', 'green', 'blue'};
     bayerPattern = "BGGR";
 end
@@ -104,9 +103,13 @@ radianceMap = zeros(rows, columns);
 % Get Bayer channel indices
 [bayerIdx{1}, bayerIdx{2}, bayerIdx{3}] = returnBayerIndices(radianceMap, bayerPattern);
 
+% Get model wavelengths from radianceModelS
+modelWls = SToWls(radianceModelS);
+
 % Project spectral radiance onto each max-normalized Bayer channel sensitivity function
 for cc = 1:3
-    thisSensitivity = T.(channelNames{cc})(1:endIdx);
+    % Interpolate tabular sensitivity onto model wavelengths and zero-pad outside bounds
+    thisSensitivity = interp1(T.wls, T.(channelNames{cc}), modelWls, 'linear', 0);
     thisSensitivityNormed = thisSensitivity ./ max(thisSensitivity);
     
     % Compute dot product across wavelengths and scale by wavelength bin width

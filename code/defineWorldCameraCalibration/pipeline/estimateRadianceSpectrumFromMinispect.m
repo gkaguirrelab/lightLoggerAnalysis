@@ -13,7 +13,7 @@ if isempty(miniSpectT)
         'ASM7341_spectralSensitivity.mat');
     load(paramFileName,'T');
     miniSpectWls = T.wl;
-    miniSpectT = table2array(T(:,["F1" "F2" "F3","F4","F5","F6","F7","F8","Clear"]))';
+    miniSpectT = table2array(T(:,["F1" "F2" "F3","F4","F5","F6","F7","F8","Clear","NIR"]))';
     % Sensitivity is max-normalized, matching the calibration dot product
     miniSpectT = miniSpectT ./ max(miniSpectT')';
 end
@@ -31,7 +31,7 @@ if isempty(miniSpectKVals)
 end
 
 N = length(miniSpectWls);
-V = double(minispectValues');
+V = double(minispectValues(1:nChannels)');
 k = double(miniSpectKVals);
 A = miniSpectT; % Reverted: A is the max-normalized sensitivity matrix
 
@@ -44,7 +44,7 @@ y = V ./ 10.^k;
 D = diff(eye(N), 2);
 
 % Dynamic alpha scaling: Adjust regularization inversely to signal magnitude (SNR proxy)
-baseAlpha = 1e5;
+baseAlpha = 1e8;
 referenceIntensity = 0.05; % Replace with the empirical mean(y) from your typical calibration exposure
 
 % Inverse scaling enforces heavier smoothing for dim (low SNR) scenes
@@ -82,7 +82,7 @@ if showPlots
         plot(miniSpectWls, miniSpectT(i,:) * max(y_mean), 'k--', 'Color', [0.7 0.7 0.7 0.5], 'HandleVisibility', 'off');
     end
 
-    xlim([400 800]);
+    xlim([400 1000]);
     xlabel('Wavelength (nm)');
     ylabel('Spectral Radiance');
     title('Environmental Spectrum Reconstruction');
@@ -93,7 +93,7 @@ if showPlots
     y_predicted = A * x_est;
     bar(1:nChannels, [y, y_predicted], 'FaceColor', 'flat');
     grid on;
-    xlabel('Sensor Channel (1-8 Narrow, 9 Clear)');
+    xlabel('Sensor Channel (1-8 Narrow, 9 Clear, 10 NIR)');
     ylabel('Integrated Radiance (Dot Product)');
     title('Verification: Measured vs. Predicted Integrated Radiance');
     legend('Measured (y)', 'Predicted (A*x_{est})', 'Location', 'northwest');

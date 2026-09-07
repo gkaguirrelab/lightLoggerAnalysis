@@ -3,7 +3,7 @@ clear
 %close all
 
 % Pick a measurement
-measurementName = 'outdoor_AGCandMS_02.mat';
+measurementName = 'outdoor_AGCandMS_01.mat';
 
 % Load the data
 fileName = fullfile(...

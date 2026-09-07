@@ -14,7 +14,7 @@ if isempty(deltaSteradians)
     load(paramFileName,'deltaSteradians');
 end
 
-persistent cameraT cameraWls
+persistent cameraT cameraWls cameraS
 if isempty(cameraT)
     paramFileName = fullfile(...
         tbLocateProjectSilent('lightLoggerAnalysis'),...
@@ -23,30 +23,13 @@ if isempty(cameraT)
     load(paramFileName,'T');
     cameraT = table2array(T(:,["red" "green" "blue"]))';
     cameraWls = T.wls;
+    cameraS = WlsToS(cameraWls);
 end
 
-% Load absolute radiometric calibration factors derived from defineRadiometricWeights.m
-persistent radiometricCorrectionRGB
-if isempty(radiometricCorrectionRGB)
-    paramFileName = fullfile(...
-        tbLocateProjectSilent('lightLoggerAnalysis'),...
-        'derived',...
-        'radiometricCorrectionRGB.mat');
-    load(paramFileName,'radiometricCorrectionRGB');
-end
-
-% Derive an estimate of the environmental SPD from the minispect
-[miniSpectSPD,miniSpectS] = estimateRadianceSpectrumFromMinispect(minispectData.AS(1:9));
+% Derive an estimate of the environmental SPD from the minispect, and
+% spline this to match the cameraT
+[miniSpectSPD,miniSpectS] = estimateRadianceSpectrumFromMinispect(minispectData.AS);
 miniSpectSPD = SplineRaw(SToWls(miniSpectS),miniSpectSPD,cameraWls);
-miniSpectS = WlsToS(cameraWls);
-
-% Obtain max-normalized sensitivities, normalize by their filter integrals
-% (area under the curve) to eliminate bandwidth-driven discrepancies, and
-% scale by the radiometric correction factors from
-% defineRadiometricWeights.m
-cameraT_norm = cameraT ./ max(cameraT, [], 2);
-rawChannelRadiance = miniSpectSPD' * cameraT_norm';
-expectedChannelRadiance = rawChannelRadiance ./ radiometricCorrectionRGB;
 
 % Get Bayer indices for the 2D image array to isolate the color channels
 bayerPattern = "BGGR";
@@ -57,9 +40,9 @@ globalHasInf = any(isinf(I(:)));
 
 % Loop through each color channel (R=1, G=2, B=3) to perform independent imputation
 for cc = 1:3
-    thisChannelIdx = rgbIdx{cc};
 
     % Extract values and solid angles for this specific color channel
+    thisChannelIdx = rgbIdx{cc};
     channelVals = I(thisChannelIdx);
     channelSteradians = deltaSteradians(thisChannelIdx);
 
@@ -67,53 +50,36 @@ for cc = 1:3
     if globalHasInf
         % If there is a mixture (or only Inf), we strictly target Inf pixels.
         % Any 0 values will remain 0 and contribute 0 to the valid partition.
-        targetMask = isinf(channelVals);
-        imputingCeiling = true;
+        imputeMask = isinf(channelVals);
     else
         % If there are no Inf pixels, we target the floor (0) pixels.
-        targetMask = (channelVals == 0);
-        imputingCeiling = false;
+        imputeMask = (channelVals == 0);
     end
 
-    targetSteradians = sum(channelSteradians(targetMask));
-    channelTotalSteradians = sum(channelSteradians);
+    % What are the steradians of the to-be-imputed pixels?
+    imputeSteradians = sum(channelSteradians(imputeMask));
 
-    % Proceed only if there are actually pixels to impute in this channel
-    if targetSteradians > 0
-        % 1. Total energy over the camera's FOV for this specific color channel
-        totalCameraEnergy = expectedChannelRadiance(cc) * channelTotalSteradians;
+    % Do we have any pixels to impute?
+    if imputeSteradians > 0
 
-        % 2. Obtain the total radiant intensity of the valid (non-target) pixels
-        validPartition = sum(channelVals(~targetMask) .* channelSteradians(~targetMask));
+        % The normed spectral sensitivity for this IMX219 chanel
+        thisSensitivity = cameraT(cc,:);
+        thisSensitivityNormed = thisSensitivity ./ max(thisSensitivity);
 
-        % 3. Isolate the residual energy belonging to the target pixels
-        energyTarget = totalCameraEnergy - validPartition;
+        % The total energy expected for this IMX219 channel based upon the mean
+        % radiance spectrum as observed by the minispect
+        channelRadianceEst = (thisSensitivityNormed * miniSpectSPD) * cameraS(2);
+        channelSolidAngleSum = sum(channelSteradians);
+        totalChannelEnergy = channelRadianceEst * channelSolidAngleSum;
 
-        % 4. Calculate the mean radiance for the target pixels
-        targetAvgRadiance = energyTarget / targetSteradians;
+        % The energy present in the non-saturated pixels
+        unsaturatedChannelEnergy = sum(channelVals(~imputeMask) .* channelSteradians(~imputeMask));
 
-        % 5. Bounding logic
-        % if any(~targetMask)
-        %     if imputingCeiling
-        %         % Ceiling bounding: Imputed radiance cannot be lower than the brightest valid pixel
-        %         maxValidRadiance = max(channelVals(~targetMask));
-        %         if targetAvgRadiance < maxValidRadiance
-        %             targetAvgRadiance = maxValidRadiance;
-        %         end
-        %     else
-        %         % Floor bounding: Imputed radiance cannot be negative or higher than the dimmest valid pixel
-        %         minValidRadiance = min(channelVals(~targetMask));
-        %         if targetAvgRadiance < 0
-        %             targetAvgRadiance = 0;
-        %         elseif targetAvgRadiance > minValidRadiance
-        %             targetAvgRadiance = minValidRadiance;
-        %         end
-        %     end
-        % end
+        % Distribute the remaining energy amongst the imputable pixels
+        imputableChannelEnergy = totalChannelEnergy - unsaturatedChannelEnergy;
+        imputableChannelEnergyPerPixel = imputableChannelEnergy / imputeSteradians;
+        I(thisChannelIdx(imputeMask)) = imputableChannelEnergyPerPixel;
 
-        % Assign the imputed radiance back to the main image array
-        targetIndices = thisChannelIdx(targetMask);
-        I(targetIndices) = targetAvgRadiance;
     end
 end
 

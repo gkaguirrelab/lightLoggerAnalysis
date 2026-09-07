@@ -14,7 +14,7 @@ if isempty(miniSpectT)
         'ASM7341_spectralSensitivity.mat');
     load(sensFileName, 'T');
     miniSpectWls = T.wl;
-    rawT = table2array(T(:, ["F1" "F2" "F3", "F4", "F5", "F6", "F7", "F8", "Clear"]))';
+    rawT = table2array(T(:, ["F1" "F2" "F3", "F4", "F5", "F6", "F7", "F8", "Clear","NIR"]))';
     % Max-normalize sensitivity matrix matching calibration dot product
     miniSpectT = rawT ./ max(rawT, [], 2);
 end
