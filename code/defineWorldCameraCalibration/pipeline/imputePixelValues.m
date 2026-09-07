@@ -45,8 +45,7 @@ miniSpectS = WlsToS(cameraWls);
 % scale by the radiometric correction factors from
 % defineRadiometricWeights.m
 cameraT_norm = cameraT ./ max(cameraT, [], 2);
-filterIntegrals = sum(cameraT_norm, 2);
-rawChannelRadiance = (miniSpectSPD' * cameraT_norm') ./ filterIntegrals';
+rawChannelRadiance = miniSpectSPD' * cameraT_norm';
 expectedChannelRadiance = rawChannelRadiance ./ radiometricCorrectionRGB;
 
 % Get Bayer indices for the 2D image array to isolate the color channels
@@ -94,23 +93,23 @@ for cc = 1:3
         targetAvgRadiance = energyTarget / targetSteradians;
 
         % 5. Bounding logic
-        if any(~targetMask)
-            if imputingCeiling
-                % Ceiling bounding: Imputed radiance cannot be lower than the brightest valid pixel
-                maxValidRadiance = max(channelVals(~targetMask));
-                if targetAvgRadiance < maxValidRadiance
-                    targetAvgRadiance = maxValidRadiance;
-                end
-            else
-                % Floor bounding: Imputed radiance cannot be negative or higher than the dimmest valid pixel
-                minValidRadiance = min(channelVals(~targetMask));
-                if targetAvgRadiance < 0
-                    targetAvgRadiance = 0;
-                elseif targetAvgRadiance > minValidRadiance
-                    targetAvgRadiance = minValidRadiance;
-                end
-            end
-        end
+        % if any(~targetMask)
+        %     if imputingCeiling
+        %         % Ceiling bounding: Imputed radiance cannot be lower than the brightest valid pixel
+        %         maxValidRadiance = max(channelVals(~targetMask));
+        %         if targetAvgRadiance < maxValidRadiance
+        %             targetAvgRadiance = maxValidRadiance;
+        %         end
+        %     else
+        %         % Floor bounding: Imputed radiance cannot be negative or higher than the dimmest valid pixel
+        %         minValidRadiance = min(channelVals(~targetMask));
+        %         if targetAvgRadiance < 0
+        %             targetAvgRadiance = 0;
+        %         elseif targetAvgRadiance > minValidRadiance
+        %             targetAvgRadiance = minValidRadiance;
+        %         end
+        %     end
+        % end
 
         % Assign the imputed radiance back to the main image array
         targetIndices = thisChannelIdx(targetMask);

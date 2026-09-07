@@ -9,28 +9,30 @@ clear
 close all
 
 % Create the radiance model
-[radianceModel,radianceModelS] = generateSimulatedLightField();
+
+
+%[radianceModel,radianceModelS] = generateSimulatedLightField();
+
+[radianceModel,radianceModelS] = generateUniformLightField();
 visualizeRadianceModel(radianceModel,radianceModelS);
 
-% Obtain the camera radiance map
-cameraRadianceMap = projectRadianceModelToCameraRadiance(radianceModel,radianceModelS);
-
-% Find the camera score that would be predicted for this radiance map. This
-% non-linear search is necessary as the pixel saturation as a function of
-% the camera settings has a non-linear interaction with the calculated
+% Find the camera score that would be predicted for this radianceModel.
+% This non-linear search is necessary as the pixel saturation as a function
+% of the camera settings has a non-linear interaction with the calculated
 % camera score.
-myMap = @(x) synthesisPipeline(cameraRadianceMap, cameraScoreToAGCSettings(x));
+myMap = @(x) synthesisPipeline(radianceModel,radianceModelS,cameraScoreToAGCSettings(x));
 myObj = @(x) norm(mean(mean(myMap(x)))-127);
 cameraScore = fminsearch(myObj,8000);
 AGCSettings = cameraScoreToAGCSettings(cameraScore);
 
 % Synthesize the raw camera image for this radianceModel and camera score
-I = synthesisPipeline(cameraRadianceMap, AGCSettings);
+[I, cameraRadianceMap] = synthesisPipeline(radianceModel,radianceModelS, AGCSettings);
 
 % Reconstruct the radiance map from the image and AGCSettings
 [~,imageStages] = reconstructionPipeline(I,AGCSettings);
 
-% Derive the minispect for this radianceModel
+% Derive the minispect values for this radianceModel. We also save the mean
+% spectral radiance of the 
 [minispectValues, meanSpectralRadiance] = estimateMinispectValuesFromRadianceModel(radianceModel, radianceModelS);
 minispectData.AS = minispectValues;
 

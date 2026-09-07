@@ -20,7 +20,7 @@ load(fileName,'worldFrame','AGCSettings','minispectValue')
 imageStages{end+1} = imputePixelValues(radianceMap,minispectValue);
 
 % Plot
-stages = {'raw','linearized','flattened','radiometric correction','absolute radiance','impute saturated'};
+stages = {'raw','linearized','flattened','radiometric','radiance','imputed'};
 nStages = length(stages);
 channelColor = {'r','g','b'};
 

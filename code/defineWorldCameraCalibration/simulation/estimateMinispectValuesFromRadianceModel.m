@@ -1,4 +1,4 @@
-function [minispectValues, meanSpectralRadiance] = estimateMinispectValuesFromRadianceModel(radianceModel, radianceModelS)
+function [minispectValues, meanSpectralRadiance, meanSpectralRadianceS] = estimateMinispectValuesFromRadianceModel(radianceModel, radianceModelS)
 % ESTIMATEMINISPECTVALUESFROMRADIANCEMODEL Computes expected ASM7341 sensor counts
 % from a hemispheric radiance model and its wavelength sampling S.
 %
@@ -72,4 +72,8 @@ minispectValues = y .* (10 .^ k);
 
 % Return as an integer row vector matching standard sensor reading formats
 minispectValues = round(minispectValues(:)');
+
+% Get the S ready to return
+meanSpectralRadianceS = WlsToS(modelWls);
+
 end
