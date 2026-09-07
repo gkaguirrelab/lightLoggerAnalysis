@@ -59,13 +59,15 @@ title('Reconstruction of hemifield mean spectral radiance')
 
 % Visualize our ability to reconstruct the camera radiance map
 figure
-tiledlayout(1,3)
+tiledlayout(1,4)
 nexttile
-imagesc(cameraRadianceMap); colorbar; title('Source radiance map');
+surf(cameraRadianceMap, 'EdgeColor', 'none'); colorbar; title('Source'); zlim([0 30]);
 nexttile
-imagesc(cameraRadianceMapEstimated); colorbar; title('Reconstructed radiance map');
+surf(imageStages{end-2}, 'EdgeColor', 'none'); colorbar; title('Reconstructed'); zlim([0 30]);
 nexttile
-imagesc(cameraRadianceMap-cameraRadianceMapEstimated); colorbar; title('error map');
+surf(cameraRadianceMapEstimated, 'EdgeColor', 'none'); colorbar; title('Imputed'); zlim([0 30]);
+nexttile
+surf(cameraRadianceMapEstimated-cameraRadianceMap, 'EdgeColor', 'none'); colorbar; title('Error');
 
 % Show the reconstruction stages
 plotReconstructionStages(imageStages)

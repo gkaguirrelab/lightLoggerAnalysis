@@ -26,7 +26,7 @@ The first stage of analysis is to identify the weights that relate sensor values
 
 Stage 2:
 
-In the routine “defineFullWellCapacityEffect” we characterize a non-linearity in the response of the IMX219 chip across light intensity, making use of measurements from within the light integrating sphere for which we have measured the radiance spectrum of the light source. The routine “linearizeIMX219SensorCounts” uses the derived parameter of the non-linearity function to convert raw images to linearized sensor values.
+In the routine “defineFullWellCapacityEffect” we characterize a non-linearity in the response of the IMX219 chip across light intensity, making use of measurements from within the light integrating sphere for which we have measured the radiance spectrum of the light source. We subsequently use the derived parameter of the non-linearity function to convert raw images to linearized sensor values.
 
 Stage 3:
 
@@ -48,15 +48,6 @@ Stage 7:
 
 At the final stage we will attempt to impute the radiance of saturated pixels in the IMX219 image. At this stage the IMX219 image has been linearized, flat fielding corrected, adjusted for the relative sensitivity of the R, G, and B channels, and converted to units of absolute radiance by making use of the known relationship between the automatic gain control (AGC) settings and the mean radiance of the environment as seen by the IMX219 chip. To impute values for the saturated pixels, we begin by assuming that the IMX219 chip and the ASM7341 chip have overlapping fields of view, and moreover experience the same average scene radiance. The values recorded from the ASM7341 are used to estimate the scene spectral radiance (“estimateRadianceSpectrumFromMinispect.m”). This estimated spectrum is then used to calculate the radiance that would be needed in the saturated IMX219 pixels (“imputeSaturatedPixelValues”), after accounting for the radiance values observed in the unsaturated pixel partition.
 
-Attached are components of this analysis that relate to the calibration of the minispect, and the estimation of a continuous mean scene radiance spectrum from the minispect values. Also attached is the function "generateSimulatedLightField" that simulates a hemispheric light field with variation in spectral radiance. Produce a function that takes as input the radianceModel and radianceModelS and returns the minispect sensor values that would be expected. This function will need to load as a persistent variable the derived file that contains the weights for the minispect channels. 
-
-We are now going to produce a simulation that will test the ability of the analysis pipeline to recover the radiance map of the environment from the IMX219 chip.
+******************
 
 
-Produce a matlab routine that generates simulated data that may be used to test how accurately the routine estimates pixel-wise radiance values, including the imputed values within saturated areas of the image. The simulation should have the following components:
-- Assume that the ASM7341 is exposed to a 2pi steradian light field with an irradiance typical of outdoor daytime conditions
-- Define a light field that has this outdoor irradiance value with smooth, local spatial variation in radiance of an order of magnitude around the mean
-- Derive the ASM7341 sensor values that would result
-- Derive the AGC settings that would result
-- Derive the IMX219 image that would result
-- Then, run the resulting IMX219 image through the analysis pipeline and determine how closely the resulting radiance image (with imputed values) matches the corresponding portion of the original, simulated light field.

@@ -1,9 +1,9 @@
 % Housekeeping
 clear
-close all
+%close all
 
 % Pick a measurement
-measurementName = 'outdoor_AGCandMS_01.mat';
+measurementName = 'outdoor_AGCandMS_02.mat';
 
 % Load the data
 fileName = fullfile(...
