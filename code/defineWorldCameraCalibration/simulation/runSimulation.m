@@ -35,13 +35,14 @@ AGCSettings = cameraScoreToAGCSettings(cameraScore);
 [I, cameraRadianceMap] = synthesisPipeline(radianceModel,radianceModelS, AGCSettings);
 
 % Report the channel energies for the cameraRadianceMap directly, and as
-% seen by the minispect
+% seen by the minispect. This was used for debugging
 channelEnergy = calculateIMX219ChannelRadiantEnergyDirect(cameraRadianceMap);
+fprintf('Total ground truth camera channel energy = %2.2f\n',channelEnergy.red+channelEnergy.green+channelEnergy.blue);
 channelEnergy = calculateIMX219ChannelRadiantEnergyViaMS(radianceModel, radianceModelS);
+fprintf('Total camera channel energy (via minispect) = %2.2f\n',channelEnergy.red+channelEnergy.green+channelEnergy.blue);
 
 % Reconstruct the radiance map from the image and AGCSettings
 [~,imageStages] = reconstructionPipeline(I,AGCSettings);
-
 
 % Impute the missing values in the cameraRadianceMapEstimated
 imageStages{end+1} = imputePixelValues(imageStages{end},minispectData);

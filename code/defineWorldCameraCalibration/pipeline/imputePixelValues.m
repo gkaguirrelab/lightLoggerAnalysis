@@ -39,6 +39,7 @@ bayerPattern = "BGGR";
 globalHasInf = any(isinf(I(:)));
 
 % Loop through each color channel (R=1, G=2, B=3) to perform independent imputation
+unsaturatedChannelEnergy = [nan,nan,nan];
 for cc = 1:3
 
     % Extract values and solid angles for this specific color channel
@@ -73,14 +74,16 @@ for cc = 1:3
         totalChannelEnergy = channelRadianceEst * channelSolidAngleSum;
 
         % The energy present in the non-saturated pixels
-        unsaturatedChannelEnergy = sum(channelVals(~imputeMask) .* channelSteradians(~imputeMask));
+        unsaturatedChannelEnergy(cc) = sum(channelVals(~imputeMask) .* channelSteradians(~imputeMask));
 
         % Distribute the remaining energy amongst the imputable pixels
-        imputableChannelEnergy = totalChannelEnergy - unsaturatedChannelEnergy;
+        imputableChannelEnergy = totalChannelEnergy - unsaturatedChannelEnergy(cc);
         imputableChannelEnergyPerPixel = imputableChannelEnergy / imputeSteradians;
         I(thisChannelIdx(imputeMask)) = imputableChannelEnergyPerPixel;
 
     end
 end
+
+fprintf('Total unsaturated camera energy = %2.2f\n',sum(unsaturatedChannelEnergy,'omitnan'));
 
 end
