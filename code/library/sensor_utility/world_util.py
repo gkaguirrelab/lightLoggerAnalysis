@@ -21,6 +21,11 @@ import dill
 import pandas as pd
 from numba import njit, prange
 import scipy.io
+
+# Define constants for the project root and the derived calibration dir that we will consult later
+_PROJECT_ROOT: pathlib.Path = pathlib.Path(__file__).resolve().parents[3]
+_DERIVED_CALIBRATION_DIR: pathlib.Path = _PROJECT_ROOT / "derived"
+
  
 def _load_pyagc():
     """Locate and import the optional ``PyAGC`` dependency.
@@ -69,12 +74,10 @@ AGC_LIB = _load_agc_lib()
 
 # Function to load in the fielding functions per dimension. Measured and saved in MATLAB.
 def _import_fielding_functions() -> dict[tuple[int], np.ndarray]:
-    project_root: pathlib.Path = pathlib.Path(__file__).resolve().parents[3]
-    derived_filepath: pathlib.Path = project_root / "derived" / "flatFieldingFunction.mat"
-    assert derived_filepath.exists(), f"Fielding function file not found at {derived_filepath}"
-
     fielding_functions: dict[tuple[int], np.ndarray] = {}
-    fielding_function: np.ndarray = scipy.io.loadmat(derived_filepath)["correctionMap"].astype(np.float64, copy=False)
+    fielding_function = scipy.io.loadmat(
+        _DERIVED_CALIBRATION_DIR / "flatFieldingFunction.mat"
+    )["correctionMap"].astype(np.float64, copy=False)
 
     fielding_functions[fielding_function.shape] = fielding_function
 
@@ -251,32 +254,6 @@ WORLD_AGC_DISCRETE_STATES: dict[str, dict[str, int | float]] = PyAGC.retrieve_di
 # timestamp column before it
 WORLD_AGC_METADATA_COLS: tuple = ("cameraAgain", "AGCDgain", "cameraExposure", "AGCAgain", "AGCExposure")
 
-# Store the scalar multipliers for all of the different colors of pixel's in an image 
-# We calculated this by making a measurement with the light logger device 
-# on the roof of Goddard on a cloudy day. We took the asymptotic RGB values of 
-# the center region of this recording, scaled them relative to the blue channel, 
-# and found individual multiplers a, b, c such that the original RGB values 
-# times these numbers equaled the relative weights according to the PR670, 
-# which Geoff also used to take a measurement of this cloudy day. We then 
-# Solved the following formula to make sure the mean of these new weights 
-# was equal to 1 
-"""
-Ra Ga Ba
-Example:
-1. 1.1. 1.2
-
-Solve for:
-Rb Gb Bb
-
-where:
-Mean[Rb Gb Bb] = 1
-Gb/Rb = Ga/Ra Gb/Bb = Ga/Ba Rb/Bb = Ra/Ba
-"""
-WORLD_RGB_SCALARS: np.ndarray = np.array([1.032, 0.803, 1.164], dtype=np.float64) 
-
-# Define a mapping between frame sizes and fielding functions of the camera
-WORLD_FIELDING_FUNCTIONS: dict[tuple[int], np.ndarray] = _import_fielding_functions()
-
 WORLD_RGB_MASK: np.ndarray = np.zeros(WORLD_FRAME_SHAPE, dtype=np.uint8)
 WORLD_R_PIXELS: np.ndarray = np.array([(r, c)
                                        for r in range(WORLD_FRAME_SHAPE[0])
@@ -296,11 +273,27 @@ WORLD_B_PIXELS: np.ndarray = np.array([(r, c)
 for idx, pixel_indices in enumerate((WORLD_R_PIXELS, WORLD_G_PIXELS, WORLD_B_PIXELS)):
     WORLD_RGB_MASK[pixel_indices[:, 0], pixel_indices[:, 1]] = idx
 
-# This the dark noise of the camera. That is, we measured a recording 
-# from the camera when it is entirely wrapped in black cloth 
-# and this was the result. This is 
-WORLD_DARK_NOISE: float = 16
-WORLD_FULL_WELL_CLIPPING_EXPONENT: float = 5.3918
+
+"""
+BEGIN PROCESSING PIPELINE CONSTANTS
+"""
+
+WORLD_FULL_WELL_CLIPPING_EXPONENT: float = float(scipy.io.loadmat(_DERIVED_CALIBRATION_DIR / "nonLinearClippingExponent.mat")["clippingExponent"].item())
+WORLD_LINEARIZED_SET_POINT: float = float(scipy.io.loadmat(_DERIVED_CALIBRATION_DIR / "nonLinearClippingExponent.mat")["linearizedSetPoint"].item())
+
+WORLD_DARK_SIGNAL: float = float(scipy.io.loadmat(_DERIVED_CALIBRATION_DIR / "darkSignal.mat")["darkSignal"].item())
+
+WORLD_FIELDING_FUNCTIONS: dict[tuple[int], np.ndarray] = _import_fielding_functions()
+
+WORLD_RGB_SCALARS: np.ndarray = scipy.io.loadmat(_DERIVED_CALIBRATION_DIR / "radiometricCorrectionRGB.mat")["radiometricCorrectionRGB"].astype(np.float64, copy=False).reshape(-1)
+WORLD_RADIOMETRIC_CORRECTION_MAP: np.ndarray = scipy.io.loadmat(_DERIVED_CALIBRATION_DIR / "radiometricCorrectionRGB.mat")["radiometricCorrectionMap"].astype(np.float64, copy=False)
+
+WORLD_AVG_SCENE_RADIANCE: np.ndarray = scipy.io.loadmat(_DERIVED_CALIBRATION_DIR / "cameraScoreToAverageRadiance.mat")["avgSceneRadiance"].astype(np.float64, copy=False).reshape(-1)
+WORLD_CAMERA_SCORE: np.ndarray = scipy.io.loadmat(_DERIVED_CALIBRATION_DIR / "cameraScoreToAverageRadiance.mat")["cameraScore"].astype(np.float64, copy=False).reshape(-1)
+
+"""
+END PROCESSING PIPELINE CONSTANTS
+"""
 
 
 def get_world_contrast_level_ndf_settings(
@@ -657,35 +650,32 @@ def debayer_image(image: np.ndarray,
 
 
 def linearize_camera_responsivity(image_or_video: np.ndarray,
+                                  dst: np.ndarray,
                                   original_bit_depth: int = 8,
-                                  dark_noise: float = WORLD_DARK_NOISE,
+                                  dark_noise: float = WORLD_DARK_SIGNAL,
                                   clipping_exponent: float = WORLD_FULL_WELL_CLIPPING_EXPONENT,
-                                  dst: np.ndarray | None = None,
                                   visualize_results: bool=False
                                   ) -> np.ndarray | tuple[np.ndarray, object]:
     """Linearize world-camera values using the fitted full-well model.
 
-    This is the Python translation of ``linearizeY`` in
-    ``fitFullWellCapacityEffect.m``. Inputs at or below ``dark_noise`` are
-    mapped to zero, the top sensor value is treated as saturated, and the
-    valid range ``dark_noise`` through ``2 ** original_bit_depth - 2`` is
-    expanded onto ``0`` through ``2 ** original_bit_depth - 2``.
+    This uses the same equation as Stage 2 of ``reconstructionPipeline.m``.
+    Values below ``dark_noise`` are raised to the dark-signal floor before
+    that signal is subtracted and the full-well nonlinearity is inverted.
 
     Args:
         image_or_video: Raw camera frame or frame buffer to linearize.
+        dst: Floating-point destination array with the same shape as
+            ``image_or_video``. This array is also used as the working buffer.
         original_bit_depth: Bit depth of the input image values.
         dark_noise: The measured dark offset to remove before inversion.
         clipping_exponent: The fitted soft-clipping exponent from the
             full-well calibration.
-        dst: Optional output array with the same shape as ``image_or_video``.
-            When provided, the result is written into this array and the same
-            array is returned.
         visualize_results: When ``True``, display a before/after figure and
             return it with the linearized result. Visualization supports only
             a single ``(rows, cols)`` frame and asserts otherwise.
 
     Returns:
-        A rounded linearized array, or ``(linearized, figure)`` when
+        The unscaled linearized counts, or ``(linearized, figure)`` when
         visualization is requested.
     """
     unmodified_image_or_video: np.ndarray | None = None
@@ -698,38 +688,27 @@ def linearize_camera_responsivity(image_or_video: np.ndarray,
         unmodified_image_or_video = image_or_video.copy() 
 
     max_sensor_value: float = float(2 ** original_bit_depth - 1)
-    max_linearized_value: float = float(2 ** original_bit_depth - 2)
-    smin: float = float(dark_noise)
-    smax: float = max_sensor_value - smin
+    dark_signal: float = float(dark_noise)
+    smax: float = max_sensor_value - dark_signal
 
-    if(smax <= 1):
+    if(smax <= 0):
         raise ValueError(
             f"dark_noise={dark_noise} leaves no usable range for "
             f"original_bit_depth={original_bit_depth}."
         )
 
-    y_prime: np.ndarray = np.clip(image_or_video.astype(np.float64, copy=False) - smin, 0, smax)
-    y_max: float = smax - 1
-    a_max: float = y_max / (1 - (y_max / smax) ** clipping_exponent) ** (1 / clipping_exponent)
-    saturated_mask: np.ndarray = y_prime >= smax
-    positive_mask: np.ndarray = (y_prime > 0) & ~saturated_mask
+    assert dst.shape == image_or_video.shape, "dst must have the same shape as image_or_video"
+    assert np.issubdtype(dst.dtype, np.floating), "dst must have a floating-point dtype"
 
-    if(dst is None):
-        dst = np.empty_like(y_prime, dtype=np.float64)
+    # Copy and convert the input directly into the output buffer. Match
+    # MATLAB's y(y < darkSignal) = darkSignal, followed by yPrime = y - darkSignal.
+    np.copyto(dst, image_or_video, casting="unsafe")
+    dst[dst < dark_signal] = dark_signal
+    dst -= dark_signal
 
-    dst[~positive_mask & ~saturated_mask] = 0
-    dst[saturated_mask] = max_sensor_value
-    dst[positive_mask] = (
-        (
-            y_prime[positive_mask]
-            / (1 - (y_prime[positive_mask] / smax) ** clipping_exponent) ** (1 / clipping_exponent)
-        )
-        / a_max
-        * max_linearized_value
-    )
-
-    np.round(dst, out=dst)
-    np.clip(dst, 0, max_sensor_value, out=dst)
+    # Match MATLAB's yPrime ./ (1 - (yPrime ./ Smax).^n).^(1./n).
+    with np.errstate(divide="ignore", invalid="ignore"):
+        dst[:] = dst / (1 - (dst / smax) ** clipping_exponent) ** (1 / clipping_exponent)
 
     # If visualize results is true, we will print an output of what the image looks like 
     if(visualize_results is True):
@@ -752,7 +731,8 @@ def linearize_camera_responsivity(image_or_video: np.ndarray,
     return dst
 
 def apply_fielding_function(image_or_video: np.ndarray, 
-                            visualize_results: bool=False
+                            visualize_results: bool=False,
+                            fielding_function: np.ndarray | None = None
                            ) -> None | tuple[np.ndarray, object]:
     """Apply the registered fielding correction in place.
 
@@ -783,16 +763,17 @@ def apply_fielding_function(image_or_video: np.ndarray,
         )
         unmodified_image_or_video = image_or_video.copy() 
 
-    # Get the fielding function for this frame size (depending on if we passed in a frame buffer)
-    # or a single image
-    image_size: tuple = image_or_video.shape[1:3] if image_or_video.ndim == 3 else image_or_video.shape[:2]
-    fielding_function: np.ndarray = WORLD_FIELDING_FUNCTIONS[image_size]
-    assert image_size == fielding_function.shape, (
-        f"Fielding function shape: {fielding_function.shape} is not equal to "
-        f"frame shape: {image_size}"
-    )
+    # If the fielding function was not passed in,
+    # load it manually.
+    image_shape: np.ndarary = image_or_video.shape if image_or_video.ndim == 2 else image_or_video.shape[1:]
+    if(fielding_function is None):
+        fielding_function: np.ndarray = WORLD_FIELDING_FUNCTIONS[image_shape]
 
-    # Apply the fielding function 
+    # Assert the fielding function is the same size and apply the fielding function.
+    two_d_case: bool = image_or_video.ndim == 2 and fielding_function.ndim == 2 and image_shape == fielding_function.shape
+    three_d_case: bool = image_or_video.ndim == 3 and fielding_function.ndim == 2 and image_shape == fielding_function.shape
+    assert two_d_case or three_d_case, f"ERROR: Unsupported shape"
+
     image_or_video *= fielding_function
 
     # Visualize the results if desired 
@@ -2162,6 +2143,115 @@ def world_raw_frames_from_chunks(path_to_recording: str,
 
     return np.array(frames)
 
+def world_counts_to_radiance(image_or_video: np.ndarray,
+                             agc_settings: dict[str, float | np.ndarray],
+                             visualize_results: bool=False
+                            ) -> np.ndarray | tuple[np.ndarray, object]:
+    """Convert corrected world-camera counts to absolute radiance units.
+
+    Args:
+        image_or_video: Flat-fielded and color-corrected world-camera counts
+            with shape ``(rows, cols)`` or ``(frames, rows, cols)``. The input
+            is scaled in place.
+        agc_settings: Camera settings containing either the legacy keys
+            ``exposure``, ``Again``, and ``Dgain`` or the modern keys
+            ``cameraExposure``, ``cameraAgain``, and ``AGCDgain``. Values may
+            be scalars or one-dimensional arrays containing one value per
+            frame.
+        visualize_results: When ``True``, display the counts before and after
+            conversion. Visualization supports a single frame only.
+
+    Returns:
+        The input array after in-place conversion to radiance, or a tuple of
+        the converted array and its figure when visualization is requested.
+    """
+    unmodified_image_or_video: np.ndarray | None = None
+    if(visualize_results is True):
+        assert image_or_video.ndim == 2, "Radiance visualization only supports a single frame"
+        unmodified_image_or_video = image_or_video.copy()
+
+    # Accept both generations of world-camera metadata names.
+    exposure: float | np.ndarray = agc_settings["exposure"] if "exposure" in agc_settings else agc_settings["cameraExposure"]
+    analog_gain: float | np.ndarray = agc_settings["Again"] if "Again" in agc_settings else agc_settings["cameraAgain"]
+    digital_gain: float | np.ndarray = agc_settings["Dgain"] if "Dgain" in agc_settings else agc_settings["AGCDgain"]
+
+    # The calibration set point must include the mean scale introduced by the
+    # flat-field and RGB correction stages.
+    effective_set_point: float = float(WORLD_LINEARIZED_SET_POINT * np.nanmean(WORLD_FIELDING_FUNCTIONS[image_or_video.shape[-2:]]) * np.nanmean(WORLD_RADIOMETRIC_CORRECTION_MAP))
+
+    # Reproduce MATLAB's exposure * Again * Dgain camera score and interpolate
+    # the corresponding mean scene radiance in log10 space.
+    this_camera_score: np.ndarray = np.asarray(np.asarray(exposure) * np.asarray(analog_gain) * np.asarray(digital_gain), dtype=np.float64)
+    log_mean_scene_radiance: np.ndarray = np.asarray(np.interp(np.log10(this_camera_score), np.log10(WORLD_CAMERA_SCORE), np.log10(WORLD_AVG_SCENE_RADIANCE), left=np.nan, right=np.nan), dtype=np.float64)
+    mean_scene_radiance: np.ndarray = np.asarray(10 ** log_mean_scene_radiance, dtype=np.float64)
+
+    # Give each buffered frame its own broadcastable radiance scale. Scalar
+    # settings naturally apply the same scale to every frame.
+    if(image_or_video.ndim == 3 and mean_scene_radiance.ndim > 0):
+        mean_scene_radiance = mean_scene_radiance.reshape(-1, 1, 1)
+
+    # Match MATLAB's (correctedCounts / effectiveSetPoint) * meanSceneRadiance.
+    image_or_video *= mean_scene_radiance / effective_set_point
+
+    if(visualize_results is True):
+        fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+        fig.suptitle("World Counts to Radiance (Before / After)", fontweight='bold', fontsize=18)
+        axes[0].imshow(unmodified_image_or_video, cmap="gray")
+        axes[0].set_title("Before")
+        axes[0].axis("off")
+        axes[1].imshow(image_or_video, cmap="gray")
+        axes[1].set_title("After")
+        axes[1].axis("off")
+        plt.tight_layout()
+        plt.show()
+        return image_or_video, fig
+
+    return image_or_video
+
+
+def world_transformation_pipeline(raw_frame_or_buffer: np.ndarray,
+                                  agc_settings: dict[str, float | np.ndarray]
+                                 ) -> np.ndarray:
+    # Stage 1: Ensure the frame or buffer is of float type 
+    # copy = False means that if it is already this type, just use a pointer to the original data
+    # if not, make a copy
+    raw_frame_or_buffer_float: np.ndarray = np.empty(raw_frame_or_buffer.shape, dtype=np.float64)
+
+    # Stage 2: Linearize sensor counts 
+    linearized: np.ndarray = linearize_camera_responsivity(raw_frame_or_buffer,
+                                                           dst=raw_frame_or_buffer_float,
+                                                           original_bit_depth=8,
+                                                           dark_noise=WORLD_DARK_SIGNAL,
+                                                           clipping_exponent=WORLD_FULL_WELL_CLIPPING_EXPONENT,
+                                                           visualize_results=False
+                                                        )
+
+
+    # Stage 3: Flat fielding correction
+    # This operation will happen IN PLACE for maximum speed
+    apply_fielding_function(linearized, visualize_results=False)
+    # This is fast because it is just assigning a pointer, not copying the array 
+    # We are simply renaming for clarity here, this is not even really necessary 
+    fielding_corrected: np.ndarray = linearized 
+
+    # Stage 4: Radiometric correction RGB 
+    # We will also perform this in place for speed
+    apply_color_correction(fielding_corrected, 
+                           bayer_pixel_locations=[WORLD_R_PIXELS, WORLD_G_PIXELS, WORLD_B_PIXELS], 
+                           visualize_results=False
+                        )
+    # Once again, we just use a pointer here for clarity of what stage we are on
+    color_corrected: np.ndarray = fielding_corrected 
+
+    # Stage 5: Convert to absolute radiance units
+    radiance_map: np.ndarray = world_counts_to_radiance(color_corrected,
+                                                        agc_settings=agc_settings,
+                                                        visualize_results=False
+                                                       )
+
+    return radiance_map
+
+
 
 def visualize_pipeline(recording_path: str,
                         chunk_range: tuple[int | None, int | None] = (0, None)
@@ -2821,7 +2911,8 @@ def visualize_pipeline(recording_path: str,
         # Stage 1: invert the camera response curve. The operation returns a
         # floating-point Bayer image; original saturated samples remain Inf.
         linearized_before = transformed_frame.copy()
-        linearized = linearize_camera_responsivity(transformed_frame, 8)
+        linearized = np.empty_like(transformed_frame)
+        linearize_camera_responsivity(transformed_frame, dst=linearized, original_bit_depth=8)
         linearized[raw_saturated_pixel_mask] = np.inf # We need to reply the INF here because the INFs got crushed in this operation
         assert linearized.dtype == np.float64, f"Failed at stage 1"
         steps.append(("Linearized Camera Response", linearized_before, linearized.copy()))
