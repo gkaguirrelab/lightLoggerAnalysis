@@ -45,7 +45,7 @@ else
 end
 
 % 1. Evaluate hemispheric mean spectral radiance from radianceModel
-gridRes = 200;
+gridRes = 550;
 azGrid = linspace(-pi, pi, gridRes * 2);
 elGrid = linspace(-pi / 2, pi / 2, gridRes);
 [AZ, EL] = meshgrid(azGrid, elGrid);

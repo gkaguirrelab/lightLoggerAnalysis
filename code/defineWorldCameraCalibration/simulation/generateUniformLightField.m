@@ -5,7 +5,7 @@ function [radianceModel, radianceModelS ] = generateUniformLightField(wls)
 %   (W/m2/sr/nm) for arbitrary azimuth and elevation coordinates. 
 
     if nargin < 1
-        wls = 380:1:780; % Default to visual spectrum with 2nm bins
+        wls = 380:1:980; % Default to visual spectrum with 2nm bins
     end
     wls = wls(:);
 

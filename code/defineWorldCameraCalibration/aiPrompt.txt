@@ -50,6 +50,4 @@ At the final stage we will attempt to impute the radiance of saturated pixels in
 
 ******************
 
-I am evaluating this approach via simulation. I begin by defining a continuous, uniform field of spectral radiance variation. This field is used to synthesize a raw camera image, as well as a "cameraRadianceMap", which is the radiance measured at each pixel. Create a function that takes as input this cameraRadianceMap and returns the total radiant energy in each channel (R, G, B). Describe how the visual field area in steradians subtended by each channel influences this calculation.
-
-I have provided several relevant functions in MATLAB.
+I am evaluating this approach via simulation. I begin by defining a continuous field of spectral radiance variation. I then calculate the radiance energy captured by the IMX219 camera sensor as a direct function of this radiance field (calculateIMX219ChannelRadiantEnergyDirect), and after modeling the mean radiance spectrum as seen by and then reconstructed from the ASM7341 chip and then projected through the IMX219 chip (calculateIMX219ChannelRadiantEnergyViaMS). When the modeled radiance field is spatially uniform with a single radiance spectrum, the calculated total camera radiance energy is the same as calculated by these two approaches. When spatial variation is introduced into the radiance field, however, the channel energy calculated after passing through the minispect reconstruction is always less. Why is this so, and does it reflect an error in the processing algorithm?

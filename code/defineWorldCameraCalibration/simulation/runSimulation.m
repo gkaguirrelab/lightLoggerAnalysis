@@ -9,8 +9,8 @@ clear
 close all
 
 % Create the radiance model
-[radianceModel,radianceModelS] = generateSimulatedLightField();
 %[radianceModel,radianceModelS] = generateUniformLightField();
+[radianceModel,radianceModelS] = generateSimulatedLightField();
 visualizeRadianceModel(radianceModel,radianceModelS);
 
 % Derive the minispect values for this radianceModel. We also save the mean
