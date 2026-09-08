@@ -465,7 +465,7 @@ def world_chunk_parser(chunk_paths: tuple[str],
     # Linearize the recording data to account for the full well effect of the camera
     if(linearize_camera_responsivitiy is True):
         assert v.dtype == np.float64 and v.ndim == 3, f"Frame buffer dtype must be float 64 and bayer format to linearize the camera responsivity. Current dtype is: {v.dtype} and ndim is {v.ndim}"
-        world_util.linearize_camera_responsivity(v, original_bit_depth, dark_noise=world_util.WORLD_DARK_NOISE, dst=v)
+        world_util.linearize_camera_responsivity(v, dst=v, original_bit_depth=original_bit_depth, dark_noise=world_util.WORLD_DARK_SIGNAL)
 
     # Apply the fielding function of the camera that we measured in the planetarium
     if(apply_fielding_function is True):
