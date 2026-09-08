@@ -1,4 +1,4 @@
-function [spectralRadiance,S] = estimateRadianceSpectrumFromMinispect(minispectValues)
+function [spectralRadiance,S,fVal] = estimateRadianceSpectrumFromMinispect(minispectValues)
 % Spectral Reconstruction from 9-Channel AS7341 Sensor using Tikhonov Regularization
 % This function estimates the mean environmental radiance from the
 % minispect values
@@ -60,6 +60,10 @@ ub = [];
 
 options = optimoptions('lsqlin', 'Display', 'off');
 x_est = lsqlin(C, d, [], [], [], [], lb, ub, [], options);
+
+% Calculate the RMSE of the predicted vs. observed minispect values
+y_predicted = A * x_est;
+fVal = norm(y - y_predicted);
 
 %% 5. Visualization
 if showPlots

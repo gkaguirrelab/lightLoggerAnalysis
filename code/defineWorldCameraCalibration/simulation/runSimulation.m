@@ -20,7 +20,8 @@ minispectData.AS = minispectValues;
 
 % Obtain the estimate of the mean spectral radiance of the radianceModel
 % from the minispect values so we can compare how well all this worked.
-[spectralRadianceFromMinispect,spectralRadianceFromMinispectS] = estimateRadianceSpectrumFromMinispect(minispectValues);
+[spectralRadianceFromMinispect,spectralRadianceFromMinispectS,fVal] = estimateRadianceSpectrumFromMinispect(minispectValues);
+fprintf('RMSE in fitting the minispect values with the estimated spectrum is %2.2f.\n',fVal);
 
 % Find the camera score that would be predicted for this radianceModel.
 % This non-linear search is necessary as the pixel saturation as a function
