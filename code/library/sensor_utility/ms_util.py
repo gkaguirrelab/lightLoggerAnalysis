@@ -15,6 +15,36 @@ from typing import Any, Iterable
 import sys
 import matplotlib.pyplot as plt
 import pandas as pd
+import scipy.io
+from scipy.optimize import lsq_linear
+
+
+# Define constants for the project calibration data used to reconstruct the
+# environmental radiance spectrum from minispectrometer values.
+_PROJECT_ROOT: Path = Path(__file__).resolve().parents[3]
+_DATA_DIR: Path = _PROJECT_ROOT / "data"
+_DERIVED_CALIBRATION_DIR: Path = _PROJECT_ROOT / "derived"
+
+_MS_SPECTRAL_SENSITIVITY_DATA: dict[str, Any] = scipy.io.loadmat(
+    _DATA_DIR / "ASM7341_spectralSensitivity_numeric.mat"
+)
+MS_SPECTRAL_WAVELENGTHS: np.ndarray = _MS_SPECTRAL_SENSITIVITY_DATA["miniSpectWls"].astype(np.float64, copy=False).reshape(-1)
+MS_SPECTRAL_SENSITIVITY: np.ndarray = _MS_SPECTRAL_SENSITIVITY_DATA["miniSpectT"].astype(np.float64, copy=False)
+
+_MS_RADIANCE_WEIGHT_DATA: dict[str, Any] = scipy.io.loadmat(
+    _DERIVED_CALIBRATION_DIR / "minispectRadianceWeights.mat",
+    simplify_cells=True,
+)
+MS_RADIANCE_WEIGHTS: np.ndarray = np.asarray(_MS_RADIANCE_WEIGHT_DATA["fitObj"]["coeff"], dtype=np.float64)[:MS_SPECTRAL_SENSITIVITY.shape[0], 1]
+MS_SPECTRAL_SAMPLING: np.ndarray = np.array(
+    [MS_SPECTRAL_WAVELENGTHS[0], np.diff(MS_SPECTRAL_WAVELENGTHS)[0], MS_SPECTRAL_WAVELENGTHS.size],
+    dtype=np.float64,
+)
+MS_RADIANCE_SECOND_DERIVATIVE: np.ndarray = np.diff(
+    np.eye(MS_SPECTRAL_WAVELENGTHS.size), n=2, axis=0
+)
+MS_RADIANCE_REGULARIZATION_BASE_ALPHA: float = 1e8
+MS_RADIANCE_REGULARIZATION_REFERENCE_INTENSITY: float = 0.05
 
 
 # World temporal offset relative to other sensors. The world is the target and is 0 
@@ -56,6 +86,266 @@ MS_NAMES_AND_CHANNELS: dict[str, int] = {sensor_name: num_channels
                                          for sensor_name, num_channels 
                                          in zip(MS_SENSOR_NAMES, (MS_AS_CHANNELS, MS_TS_CHANNELS, MS_LS_CHANNELS, MS_TEMP_CHANNELS))
                                         }
+
+
+def estimate_radiance_spectrum_form_ms(minispect_values: np.ndarray,
+                                       visualize_results: bool=False
+                                    ) -> tuple[np.ndarray, np.ndarray, float | np.ndarray]:
+    """Estimate mean environmental spectral radiance from AS7341 readings.
+
+    This is the Python equivalent of the MATLAB function
+    ``estimateRadianceSpectrumFromMinispect``. It converts the ten calibrated
+    minispectrometer channels to integrated radiance and performs a
+    nonnegative, second-derivative Tikhonov reconstruction of the continuous
+    spectrum.
+
+    Args:
+        minispect_values: Either one minispectrometer reading shaped
+            ``(n_channels,)`` or a buffer shaped ``(n_readings, n_channels)``.
+            Each reading must contain at least the ten AS7341 channels (F1-F8,
+            Clear, and NIR). Values after the first ten channels are ignored,
+            matching MATLAB.
+        visualize_results: When ``True``, display the reconstructed spectrum,
+            effective channel measurements, sensitivity curves, and a
+            measured-versus-predicted verification plot. Visualization is
+            supported only for a single reading.
+
+    Returns:
+        A tuple of ``(spectral_radiance, S, f_val)``. For one reading,
+        ``spectral_radiance`` has shape ``(n_wavelengths,)``. For a buffer, it
+        has shape ``(n_readings, n_wavelengths)``. ``S`` is the three-element
+        wavelength sampling descriptor ``[start_nm, step_nm, sample_count]``.
+        ``f_val`` is the Euclidean norm of the observed-versus-predicted
+        channel-radiance residual for one reading, or one such value per row
+        for a buffer.
+
+    Raises:
+        ValueError: If the input is not one- or two-dimensional, or if its
+            readings contain fewer than ten minispectrometer channels.
+        RuntimeError: If the constrained least-squares solver cannot converge.
+    """
+    # Retrieve the number of calibrated channels from the sensitivity matrix.
+    n_channels: int = MS_SPECTRAL_SENSITIVITY.shape[0]
+
+    # Convert the input to a floating-point array so that the same calculations
+    # work for lists, integer sensor values, and floating-point sensor values.
+    values: np.ndarray = np.asarray(minispect_values, dtype=np.float64)
+
+    # A single reading has one dimension and a buffer of readings has two.
+    # Reject other shapes because it is unclear which axis contains channels.
+    if(values.ndim not in (1, 2)):
+        raise ValueError(
+            "Minispect values must be one reading shaped (n_channels,) or a "
+            f"buffer shaped (n_readings, n_channels). Got shape {values.shape}."
+        )
+
+    # Record the original input form so that we can return the matching output
+    # form after performing all calculations with a two-dimensional buffer.
+    is_single_reading: bool = values.ndim == 1
+
+    # As with the image transformations, visualization is only supported for
+    # one reading so that each plotted line and marker has a clear meaning.
+    if(visualize_results is True):
+        assert is_single_reading, (
+            "Radiance-spectrum visualization only supports a single reading "
+            f"with shape (n_channels,). Got shape {values.shape}."
+        )
+
+    # Add a leading reading axis to a single reading. A supplied buffer already
+    # has this shape and can pass through unchanged.
+    values_buffer: np.ndarray = values[np.newaxis, :] if is_single_reading else values
+
+    # Confirm that every reading contains all ten calibrated AS7341 channels.
+    if(values_buffer.shape[1] < n_channels):
+        raise ValueError(
+            f"Each minispect reading must contain at least {n_channels} channels. "
+            f"Got shape {values.shape}."
+        )
+
+    # Keep only the ten modeled channels. This also ignores any extra values in
+    # each reading in the same way as the MATLAB implementation.
+    selected_values: np.ndarray = values_buffer[:, :n_channels]
+
+    # Convert raw channel counts to calibrated integrated radiance by dividing
+    # each channel by its fitted radiance calibration scale.
+    calibrated_radiance_buffer: np.ndarray = (
+        selected_values / np.power(10.0, MS_RADIANCE_WEIGHTS)
+    )
+
+    # Retrieve the number of wavelength bins in each reconstructed spectrum.
+    n_wavelengths: int = MS_SPECTRAL_WAVELENGTHS.size
+
+    # Allocate one output spectrum for every input reading.
+    spectral_radiance_buffer: np.ndarray = np.empty(
+        (values_buffer.shape[0], n_wavelengths), dtype=np.float64
+    )
+
+    # Allocate one residual norm for every reconstructed input reading.
+    f_val_buffer: np.ndarray = np.empty(values_buffer.shape[0], dtype=np.float64)
+
+    # The regularization rows target a second derivative of zero, which favors
+    # a smoothly changing spectrum without forcing its absolute level to zero.
+    regularization_target: np.ndarray = np.zeros(n_wavelengths - 2, dtype=np.float64)
+
+    # Reconstruct each reading independently because its signal level controls
+    # the amount of smoothing applied to that reading.
+    for reading_idx, calibrated_radiance in enumerate(calibrated_radiance_buffer):
+        # Apply stronger smoothing to dim, noisy readings and less smoothing to
+        # bright readings. Epsilon prevents division by zero for a dark sample.
+        alpha: float = MS_RADIANCE_REGULARIZATION_BASE_ALPHA * (
+            MS_RADIANCE_REGULARIZATION_REFERENCE_INTENSITY
+            / (np.mean(calibrated_radiance) + np.finfo(np.float64).eps)
+        )
+
+        # Stack the sensor forward model above the weighted smoothness model so
+        # that both requirements can be solved in one least-squares problem.
+        system_matrix: np.ndarray = np.vstack(
+            (
+                MS_SPECTRAL_SENSITIVITY,
+                np.sqrt(alpha) * MS_RADIANCE_SECOND_DERIVATIVE,
+            )
+        )
+
+        # Pair the measured channel radiances with the zero-curvature targets.
+        target: np.ndarray = np.concatenate(
+            (calibrated_radiance, regularization_target)
+        )
+
+        # Solve for a nonnegative spectrum because physical radiance cannot be
+        # negative. The larger iteration limit accommodates difficult samples.
+        fit = lsq_linear(
+            system_matrix,
+            target,
+            bounds=(0.0, np.inf),
+            max_iter=5000,
+        )
+
+        # Stop with the reading index if the numerical solver cannot converge.
+        if(not fit.success):
+            raise RuntimeError(
+                f"Spectral radiance reconstruction failed for reading "
+                f"{reading_idx}: {fit.message}"
+            )
+
+        # Store this reconstructed spectrum in its corresponding buffer row.
+        spectral_radiance_buffer[reading_idx] = fit.x
+
+        # Pass the reconstructed spectrum through the sensor model and measure
+        # the Euclidean distance from the calibrated observations, matching the
+        # fVal calculation in the MATLAB implementation.
+        predicted_radiance: np.ndarray = MS_SPECTRAL_SENSITIVITY @ fit.x
+        f_val_buffer[reading_idx] = np.linalg.norm(
+            calibrated_radiance - predicted_radiance
+        )
+
+    # Remove the temporary reading axis for a single input while preserving it
+    # for a buffer, matching the input/output convention of the image tools.
+    spectral_radiance: np.ndarray = (
+        spectral_radiance_buffer[0]
+        if is_single_reading
+        else spectral_radiance_buffer
+    )
+
+    # Return a scalar residual for one reading or one residual per buffer row.
+    f_val: float | np.ndarray = (
+        float(f_val_buffer[0])
+        if is_single_reading
+        else f_val_buffer
+    )
+
+    # Generate the two diagnostic plots from the MATLAB implementation when
+    # visualization was requested for a single reading.
+    if(visualize_results is True):
+        # Select the only calibrated reading from the internal buffer.
+        calibrated_radiance: np.ndarray = calibrated_radiance_buffer[0]
+
+        # Create the first figure for the reconstructed continuous spectrum.
+        _, spectrum_axis = plt.subplots()
+
+        # Plot the estimated spectral radiance at every modeled wavelength.
+        spectrum_axis.plot(
+            MS_SPECTRAL_WAVELENGTHS,
+            spectral_radiance,
+            color="blue",
+            linewidth=2,
+            label="Reconstructed Spectrum",
+        )
+
+        # Convert each integrated channel measurement to an effective mean
+        # radiance for display alongside the continuous reconstruction.
+        effective_mean_radiance: np.ndarray = calibrated_radiance / np.sum(
+            MS_SPECTRAL_SENSITIVITY, axis=1
+        )
+
+        # Locate the wavelength at which each sensor channel is most sensitive.
+        peak_indices: np.ndarray = np.argmax(MS_SPECTRAL_SENSITIVITY, axis=1)
+
+        # Plot each effective channel measurement at its peak wavelength.
+        spectrum_axis.plot(
+            MS_SPECTRAL_WAVELENGTHS[peak_indices],
+            effective_mean_radiance,
+            "ro",
+            markersize=8,
+            markerfacecolor="red",
+            label="Effective Mean Measurement",
+        )
+
+        # Draw each normalized channel sensitivity behind the data to show the
+        # wavelength region that contributed to each measurement.
+        for sensitivity in MS_SPECTRAL_SENSITIVITY:
+            spectrum_axis.plot(
+                MS_SPECTRAL_WAVELENGTHS,
+                sensitivity * np.max(effective_mean_radiance),
+                linestyle="--",
+                color=(0.7, 0.7, 0.7, 0.5),
+            )
+
+        # Match the limits, labels, title, grid, and legend of the MATLAB plot.
+        spectrum_axis.set_xlim(400, 1000)
+        spectrum_axis.set_xlabel("Wavelength (nm)")
+        spectrum_axis.set_ylabel("Spectral Radiance")
+        spectrum_axis.set_title("Environmental Spectrum Reconstruction")
+        spectrum_axis.grid(True)
+        spectrum_axis.legend(loc="best")
+
+        # Create the second figure to check how closely the reconstruction
+        # reproduces the calibrated channel measurements.
+        _, verification_axis = plt.subplots()
+
+        # Pass the estimated spectrum back through the sensor forward model.
+        predicted_radiance: np.ndarray = MS_SPECTRAL_SENSITIVITY @ spectral_radiance
+
+        # Use one-based channel numbers to match the MATLAB figure.
+        channel_indices: np.ndarray = np.arange(1, n_channels + 1)
+
+        # Place measured and predicted bars next to one another at each channel.
+        bar_width: float = 0.4
+        verification_axis.bar(
+            channel_indices - bar_width / 2,
+            calibrated_radiance,
+            width=bar_width,
+            label="Measured (y)",
+        )
+        verification_axis.bar(
+            channel_indices + bar_width / 2,
+            predicted_radiance,
+            width=bar_width,
+            label="Predicted (A*x_est)",
+        )
+
+        # Label and format the forward-model verification plot.
+        verification_axis.set_xlabel("Sensor Channel (1-8 Narrow, 9 Clear, 10 NIR)")
+        verification_axis.set_ylabel("Integrated Radiance (Dot Product)")
+        verification_axis.set_title("Verification: Measured vs. Predicted Integrated Radiance")
+        verification_axis.grid(True)
+        verification_axis.legend(loc="upper left")
+
+        # Display both completed diagnostic figures.
+        plt.show()
+
+    # Return a copy of the sampling descriptor so callers cannot accidentally
+    # modify the module-level calibration constant.
+    return spectral_radiance, MS_SPECTRAL_SAMPLING.copy(), f_val
 
 
 def _write_illuminance_channel_diagnostics(output_path: str | os.PathLike[str], matlab_diagnostics: Any, timestamps: np.ndarray | None) -> None:
