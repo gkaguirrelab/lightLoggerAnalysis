@@ -650,7 +650,7 @@ def debayer_image(image: np.ndarray,
 
 
 def linearize_camera_responsivity(image_or_video: np.ndarray,
-                                  dst: np.ndarray,
+                                  dst: np.ndarray | None=None,
                                   original_bit_depth: int = 8,
                                   dark_noise: float = WORLD_DARK_SIGNAL,
                                   clipping_exponent: float = WORLD_FULL_WELL_CLIPPING_EXPONENT,
@@ -664,8 +664,10 @@ def linearize_camera_responsivity(image_or_video: np.ndarray,
 
     Args:
         image_or_video: Raw camera frame or frame buffer to linearize.
-        dst: Floating-point destination array with the same shape as
+        dst: Optional floating-point destination array with the same shape as
             ``image_or_video``. This array is also used as the working buffer.
+            When omitted, ``image_or_video`` itself is modified in place and
+            must therefore have a floating-point dtype.
         original_bit_depth: Bit depth of the input image values.
         dark_noise: The measured dark offset to remove before inversion.
         clipping_exponent: The fitted soft-clipping exponent from the
@@ -687,6 +689,15 @@ def linearize_camera_responsivity(image_or_video: np.ndarray,
         )
         unmodified_image_or_video = image_or_video.copy() 
 
+    # If a destination was not provided, use the input itself as the working
+    # buffer so the complete linearization happens in place without allocation.
+    if(dst is None):
+        assert np.issubdtype(image_or_video.dtype, np.floating), (
+            "image_or_video must have a floating-point dtype when dst is not "
+            f"supplied. Got {image_or_video.dtype}."
+        )
+        dst = image_or_video
+
     max_sensor_value: float = float(2 ** original_bit_depth - 1)
     dark_signal: float = float(dark_noise)
     smax: float = max_sensor_value - dark_signal
@@ -700,9 +711,13 @@ def linearize_camera_responsivity(image_or_video: np.ndarray,
     assert dst.shape == image_or_video.shape, "dst must have the same shape as image_or_video"
     assert np.issubdtype(dst.dtype, np.floating), "dst must have a floating-point dtype"
 
-    # Copy and convert the input directly into the output buffer. Match
-    # MATLAB's y(y < darkSignal) = darkSignal, followed by yPrime = y - darkSignal.
-    np.copyto(dst, image_or_video, casting="unsafe")
+    # Copy and convert the input only when the caller supplied a separate
+    # destination. The no-dst path already uses the input as its working buffer.
+    if(dst is not image_or_video):
+        np.copyto(dst, image_or_video, casting="unsafe")
+
+    # Match MATLAB's y(y < darkSignal) = darkSignal, followed by
+    # yPrime = y - darkSignal.
     dst[dst < dark_signal] = dark_signal
     dst -= dark_signal
 
@@ -2212,14 +2227,11 @@ def world_counts_to_radiance(image_or_video: np.ndarray,
 def world_transformation_pipeline(raw_frame_or_buffer: np.ndarray,
                                   agc_settings: dict[str, float | np.ndarray]
                                  ) -> np.ndarray:
-    # Stage 1: Ensure the frame or buffer is of float type 
-    # copy = False means that if it is already this type, just use a pointer to the original data
-    # if not, make a copy
-    raw_frame_or_buffer_float: np.ndarray = np.empty(raw_frame_or_buffer.shape, dtype=np.float64)
-
-    # Stage 2: Linearize sensor counts 
+    # Stage 1: Ensure the raw frame buffer is float so we can operate on it 
+    # Subsequent operations will be either in place to the input array if it is float 
+    # or to the copy 
+    raw_frame_or_buffer = raw_frame_or_buffer.astype(np.float64, copy=False)
     linearized: np.ndarray = linearize_camera_responsivity(raw_frame_or_buffer,
-                                                           dst=raw_frame_or_buffer_float,
                                                            original_bit_depth=8,
                                                            dark_noise=WORLD_DARK_SIGNAL,
                                                            clipping_exponent=WORLD_FULL_WELL_CLIPPING_EXPONENT,
@@ -2227,14 +2239,14 @@ def world_transformation_pipeline(raw_frame_or_buffer: np.ndarray,
                                                         )
 
 
-    # Stage 3: Flat fielding correction
+    # Stage 2: Flat fielding correction
     # This operation will happen IN PLACE for maximum speed
     apply_fielding_function(linearized, visualize_results=False)
     # This is fast because it is just assigning a pointer, not copying the array 
     # We are simply renaming for clarity here, this is not even really necessary 
     fielding_corrected: np.ndarray = linearized 
 
-    # Stage 4: Radiometric correction RGB 
+    # Stage 3: Radiometric correction RGB
     # We will also perform this in place for speed
     apply_color_correction(fielding_corrected, 
                            bayer_pixel_locations=[WORLD_R_PIXELS, WORLD_G_PIXELS, WORLD_B_PIXELS], 
@@ -2243,11 +2255,14 @@ def world_transformation_pipeline(raw_frame_or_buffer: np.ndarray,
     # Once again, we just use a pointer here for clarity of what stage we are on
     color_corrected: np.ndarray = fielding_corrected 
 
-    # Stage 5: Convert to absolute radiance units
-    radiance_map: np.ndarray = world_counts_to_radiance(color_corrected,
-                                                        agc_settings=agc_settings,
-                                                        visualize_results=False
-                                                       )
+    # Stage 4: Convert to absolute radiance units
+    # We will also perform this in place for speed 
+    world_counts_to_radiance(color_corrected,
+                              agc_settings=agc_settings,
+                              visualize_results=False
+                            )
+    # Once again, we just use a pointer here for clarity of what stage we are on
+    radiance_map: np.ndarray = color_corrected
 
     return radiance_map
 
