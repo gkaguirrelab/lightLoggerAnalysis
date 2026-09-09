@@ -1,9 +1,21 @@
-function I = imputePixelValues(I,minispectData)
+function I = imputePixelValues(I, minispectData, equalizeChannels)
 % This function imputes absolute values for saturated (Inf) or
-% floor (0) pixels by balancing energy across the camera FOV independently
-% for the R, G, and B channels, using the reconstructed spectrum from the ASM7341.
+% floor (0) pixels by balancing energy across the camera FOV,
+% using the reconstructed spectrum from the ASM7341.
 %
 % If the image contains both Inf and 0 pixels, only the Inf pixels are imputed.
+%
+% Inputs:
+%   I                 - 2D image array
+%   minispectData     - structure containing ASM7341 measurements
+%   equalizeChannels  - logical flag (optional, default = true). 
+%                       If true, pools the total imputable energy across all 
+%                       channels and assigns a uniform radiance value to all 
+%                       saturated pixels. If false, imputes independently per channel.
+
+if nargin < 3 || isempty(equalizeChannels)
+    equalizeChannels = true;
+end
 
 persistent deltaSteradians
 if isempty(deltaSteradians)
@@ -38,8 +50,14 @@ bayerPattern = "BGGR";
 % Determine the global imputation state for the image
 globalHasInf = any(isinf(I(:)));
 
-% Loop through each color channel (R=1, G=2, B=3) to perform independent imputation
-unsaturatedChannelEnergy = [nan,nan,nan];
+% Preallocate storage for channel metrics
+totalChannelEnergy = zeros(1, 3);
+unsaturatedChannelEnergy = nan(1, 3);
+imputableChannelEnergy = zeros(1, 3);
+imputeSteradiansArr = zeros(1, 3);
+imputeMasks = cell(1, 3);
+
+% Loop through each color channel (R=1, G=2, B=3) to collect metrics
 for cc = 1:3
 
     % Extract values and solid angles for this specific color channel
@@ -56,14 +74,16 @@ for cc = 1:3
         % If there are no Inf pixels, we target the floor (0) pixels.
         imputeMask = (channelVals == 0);
     end
+    imputeMasks{cc} = imputeMask;
 
     % What are the steradians of the to-be-imputed pixels?
     imputeSteradians = sum(channelSteradians(imputeMask));
+    imputeSteradiansArr(cc) = imputeSteradians;
 
-    % Do we have any pixels to impute?
+    % Do we have any pixels to impute in this channel?
     if imputeSteradians > 0
 
-        % The normed spectral sensitivity for this IMX219 chanel
+        % The normed spectral sensitivity for this IMX219 channel
         thisSensitivity = cameraT(cc,:);
         thisSensitivityNormed = thisSensitivity ./ max(thisSensitivity);
 
@@ -71,19 +91,45 @@ for cc = 1:3
         % radiance spectrum as observed by the minispect
         channelRadianceEst = (thisSensitivityNormed * miniSpectSPD) * cameraS(2);
         channelSolidAngleSum = sum(channelSteradians);
-        totalChannelEnergy = channelRadianceEst * channelSolidAngleSum;
+        totalChannelEnergy(cc) = channelRadianceEst * channelSolidAngleSum;
 
         % The energy present in the non-saturated pixels
         unsaturatedChannelEnergy(cc) = sum(channelVals(~imputeMask) .* channelSteradians(~imputeMask));
 
-        % Distribute the remaining energy amongst the imputable pixels
-        imputableChannelEnergy = totalChannelEnergy - unsaturatedChannelEnergy(cc);
-        imputableChannelEnergyPerPixel = imputableChannelEnergy / imputeSteradians;
-        I(thisChannelIdx(imputeMask)) = imputableChannelEnergyPerPixel;
+        % The energy available for imputation in this channel
+        imputableChannelEnergy(cc) = totalChannelEnergy(cc) - unsaturatedChannelEnergy(cc);
 
     end
 end
 
-fprintf('Total unsaturated camera energy = %2.2f\n',sum(unsaturatedChannelEnergy,'omitnan'));
+if equalizeChannels
+    % Estimate overall imputable energy and divide equally across all saturated pixels
+    totalExpectedEnergy = sum(totalChannelEnergy);
+    totalUnsaturatedEnergy = sum(unsaturatedChannelEnergy, 'omitnan');
+    totalImputableEnergy = totalExpectedEnergy - totalUnsaturatedEnergy;
+    totalImputableSteradians = sum(imputeSteradiansArr);
+
+    if totalImputableSteradians > 0
+        uniformImputableEnergyPerPixel = totalImputableEnergy / totalImputableSteradians;
+        for cc = 1:3
+            if imputeSteradiansArr(cc) > 0
+                imputeMask = imputeMasks{cc};
+                I(rgbIdx{cc}(imputeMask)) = uniformImputableEnergyPerPixel;
+            end
+        end
+    end
+else
+    % Impute each channel independently (original behavior)
+    for cc = 1:3
+        imputeSteradians = imputeSteradiansArr(cc);
+        if imputeSteradians > 0
+            imputeMask = imputeMasks{cc};
+            imputableChannelEnergyPerPixel = imputableChannelEnergy(cc) / imputeSteradians;
+            I(rgbIdx{cc}(imputeMask)) = imputableChannelEnergyPerPixel;
+        end
+    end
+end
+
+fprintf('Total unsaturated camera energy = %2.2f\n', sum(unsaturatedChannelEnergy, 'omitnan'));
 
 end

@@ -30,6 +30,10 @@ if isempty(miniSpectKVals)
     miniSpectKVals = fitObj.coeff(1:nChannels, 2);
 end
 
+% We replace the NIR K val with the mean of the other channels, as we do
+% not have a good way to measure this k value empirically
+miniSpectKVals(10) = mean(miniSpectKVals(1:9));
+
 % Get wavelengths from radianceModelS
 modelWls = SToWls(radianceModelS);
 
