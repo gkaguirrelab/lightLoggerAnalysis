@@ -30,6 +30,10 @@ if isempty(miniSpectKVals)
     miniSpectKVals = fitObj.coeff(1:nChannels,2);
 end
 
+% We replace the NIR K val with the mean of the other channels, as we do
+% not have a good way to measure this k value empirically
+miniSpectKVals(10) = mean(miniSpectKVals(1:9));
+
 N = length(miniSpectWls);
 V = double(minispectValues(1:nChannels)');
 k = double(miniSpectKVals);
@@ -44,7 +48,7 @@ y = V ./ 10.^k;
 D = diff(eye(N), 2);
 
 % Dynamic alpha scaling: Adjust regularization inversely to signal magnitude (SNR proxy)
-baseAlpha = 1e8;
+baseAlpha = 1e6;
 referenceIntensity = 0.05; % Replace with the empirical mean(y) from your typical calibration exposure
 
 % Inverse scaling enforces heavier smoothing for dim (low SNR) scenes
