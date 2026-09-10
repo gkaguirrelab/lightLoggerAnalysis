@@ -3,7 +3,7 @@ clear
 %close all
 
 % Pick a measurement
-measurementName = 'outdoor_AGCandMS_02.mat';
+measurementName = 'indoor_AGCandMS_01.mat';
 
 % Load the data
 fileName = fullfile(...
@@ -18,6 +18,9 @@ load(fileName,'worldFrame','AGCSettings','minispectValue')
 
 % Impute radiance values for saturated areas
 imageStages{end+1} = imputePixelValues(radianceMap,minispectValue);
+
+% Convert to cone excitations
+lmsMap = radianceMapToConeExcitations(radianceMap);
 
 % Plot
 stages = {'raw','linearized','flattened','radiometric','radiance','imputed'};
