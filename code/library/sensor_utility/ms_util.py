@@ -43,7 +43,7 @@ MS_SPECTRAL_SAMPLING: np.ndarray = np.array(
 MS_RADIANCE_SECOND_DERIVATIVE: np.ndarray = np.diff(
     np.eye(MS_SPECTRAL_WAVELENGTHS.size), n=2, axis=0
 )
-MS_RADIANCE_REGULARIZATION_BASE_ALPHA: float = 1e8
+MS_RADIANCE_REGULARIZATION_BASE_ALPHA: float = 1e6
 MS_RADIANCE_REGULARIZATION_REFERENCE_INTENSITY: float = 0.05
 
 
@@ -89,8 +89,8 @@ MS_NAMES_AND_CHANNELS: dict[str, int] = {sensor_name: num_channels
 
 
 def estimate_radiance_spectrum_form_ms(minispect_values: np.ndarray,
-                                       visualize_results: bool=False
-                                    ) -> tuple[np.ndarray, np.ndarray, float | np.ndarray]:
+                                       visualize_results: bool=False,
+                                    ) -> tuple[np.ndarray, np.ndarray, float | np.ndarray, np.ndarray]:
     """Estimate mean environmental spectral radiance from AS7341 readings.
 
     This is the Python equivalent of the MATLAB function
@@ -111,13 +111,15 @@ def estimate_radiance_spectrum_form_ms(minispect_values: np.ndarray,
             supported only for a single reading.
 
     Returns:
-        A tuple of ``(spectral_radiance, S, f_val)``. For one reading,
+        A tuple of ``(spectral_radiance, S, f_val, fit_errors)``. For one reading,
         ``spectral_radiance`` has shape ``(n_wavelengths,)``. For a buffer, it
         has shape ``(n_readings, n_wavelengths)``. ``S`` is the three-element
         wavelength sampling descriptor ``[start_nm, step_nm, sample_count]``.
         ``f_val`` is the Euclidean norm of the observed-versus-predicted
         channel-radiance residual for one reading, or one such value per row
-        for a buffer.
+        for a buffer. ``fit_errors`` contains the signed residual for each
+        sensor channel and has shape ``(n_channels,)`` for one reading or
+        ``(n_readings, n_channels)`` for a buffer.
 
     Raises:
         ValueError: If the input is not one- or two-dimensional, or if its
@@ -166,10 +168,16 @@ def estimate_radiance_spectrum_form_ms(minispect_values: np.ndarray,
     # each reading in the same way as the MATLAB implementation.
     selected_values: np.ndarray = values_buffer[:, :n_channels]
 
+    # The NIR calibration measurement does not provide enough leverage to
+    # estimate its channel weight reliably. Match the MATLAB implementation by
+    # replacing it with the mean of the other nine channel weights.
+    radiance_weights: np.ndarray = MS_RADIANCE_WEIGHTS.copy()
+    radiance_weights[9] = np.mean(radiance_weights[:9])
+
     # Convert raw channel counts to calibrated integrated radiance by dividing
     # each channel by its fitted radiance calibration scale.
     calibrated_radiance_buffer: np.ndarray = (
-        selected_values / np.power(10.0, MS_RADIANCE_WEIGHTS)
+        selected_values / np.power(10.0, radiance_weights)
     )
 
     # Retrieve the number of wavelength bins in each reconstructed spectrum.
@@ -182,6 +190,11 @@ def estimate_radiance_spectrum_form_ms(minispect_values: np.ndarray,
 
     # Allocate one residual norm for every reconstructed input reading.
     f_val_buffer: np.ndarray = np.empty(values_buffer.shape[0], dtype=np.float64)
+
+    # Allocate the signed per-channel residuals for every input reading.
+    fit_errors_buffer: np.ndarray = np.empty(
+        (values_buffer.shape[0], n_channels), dtype=np.float64
+    )
 
     # The regularization rows target a second derivative of zero, which favors
     # a smoothly changing spectrum without forcing its absolute level to zero.
@@ -234,8 +247,11 @@ def estimate_radiance_spectrum_form_ms(minispect_values: np.ndarray,
         # the Euclidean distance from the calibrated observations, matching the
         # fVal calculation in the MATLAB implementation.
         predicted_radiance: np.ndarray = MS_SPECTRAL_SENSITIVITY @ fit.x
-        f_val_buffer[reading_idx] = np.linalg.norm(
+        fit_errors_buffer[reading_idx] = (
             calibrated_radiance - predicted_radiance
+        )
+        f_val_buffer[reading_idx] = np.linalg.norm(
+            fit_errors_buffer[reading_idx]
         )
 
     # Remove the temporary reading axis for a single input while preserving it
@@ -251,6 +267,14 @@ def estimate_radiance_spectrum_form_ms(minispect_values: np.ndarray,
         float(f_val_buffer[0])
         if is_single_reading
         else f_val_buffer
+    )
+
+    # Remove the temporary reading axis for a single input while preserving it
+    # for a buffer, matching the spectral-radiance output convention.
+    fit_errors: np.ndarray = (
+        fit_errors_buffer[0]
+        if is_single_reading
+        else fit_errors_buffer
     )
 
     # Generate the two diagnostic plots from the MATLAB implementation when
@@ -345,7 +369,7 @@ def estimate_radiance_spectrum_form_ms(minispect_values: np.ndarray,
 
     # Return a copy of the sampling descriptor so callers cannot accidentally
     # modify the module-level calibration constant.
-    return spectral_radiance, MS_SPECTRAL_SAMPLING.copy(), f_val
+    return spectral_radiance, MS_SPECTRAL_SAMPLING.copy(), f_val, fit_errors
 
 
 def _write_illuminance_channel_diagnostics(output_path: str | os.PathLike[str], matlab_diagnostics: Any, timestamps: np.ndarray | None) -> None:

@@ -2,6 +2,7 @@
 
 import os
 import sys
+from typing import Literal
 from collections.abc import Callable, Iterable
 
 import hdf5storage
@@ -55,6 +56,7 @@ def group_sensors_files(recording_path: str) -> dict[str, list[tuple[str, str]]]
 def _process_raw_world_helper(
     files: list[tuple[str, str]],
     output_path: str,
+    chunk_range: tuple[int | None]=(0, None), 
     overwrite_existing: bool = False,
     verbose: bool = False,
 ) -> None:
@@ -73,6 +75,12 @@ def _process_raw_world_helper(
         AssertionError: If a world metadata array does not use the supported
             legacy or modern column layout.
     """
+    # Get the start and end chunk we wish to process 
+    # while replacing the None sentiel if it exists
+    start_chunk, end_chunk = chunk_range
+    end_chunk = len(files) if end_chunk is None else end_chunk
+    desired_chunk_range: object = range(start_chunk, end_chunk)
+
     # Ensure the world-camera output directory exists.
     os.makedirs(output_path, exist_ok=True)
 
@@ -87,6 +95,10 @@ def _process_raw_world_helper(
 
     # Iterate over the paired metadata and frame-buffer files.
     for file_num, (metadata_path, data_path) in file_iterator:
+        # Skip files not in the desired range 
+        if(file_num not in desired_chunk_range):
+            continue
+
         # Form the output path and skip an existing file unless overwrite was
         # requested.
         output_filepath: str = os.path.join(
@@ -158,6 +170,7 @@ def _process_raw_world_helper(
 def _process_raw_ms_helper(
     files: list[tuple[str, str]],
     output_path: str,
+    chunk_range: tuple[int | None]=(0, None),
     overwrite_existing: bool = False,
     verbose: bool = False,
 ) -> None:
@@ -172,6 +185,13 @@ def _process_raw_ms_helper(
     Returns:
         None. Processed chunks are written to ``output_path``.
     """
+
+    # Get the start and end chunk we wish to process 
+    # while replacing the None sentiel if it exists
+    start_chunk, end_chunk = chunk_range
+    end_chunk = len(files) if end_chunk is None else end_chunk
+    desired_chunk_range: object = range(start_chunk, end_chunk)
+
     # Ensure the minispectrometer output directory exists.
     os.makedirs(output_path, exist_ok=True)
 
@@ -186,6 +206,10 @@ def _process_raw_ms_helper(
 
     # Iterate over the paired metadata and reading-buffer files.
     for file_num, (metadata_path, data_path) in file_iterator:
+        # Skip files not in the desired range 
+        if(file_num not in desired_chunk_range):
+            continue
+
         # Form the output path and skip an existing file unless overwrite was
         # requested.
         output_filepath: str = os.path.join(
@@ -207,7 +231,8 @@ def _process_raw_ms_helper(
         radiance: np.ndarray
         sampling: np.ndarray
         fit_value: float | np.ndarray
-        radiance, sampling, fit_value = (
+        fit_errors: np.ndarray
+        radiance, sampling, fit_value, fit_errors = (
             ms_util.estimate_radiance_spectrum_form_ms(
                 frame_buffer,
                 visualize_results=False,
@@ -219,6 +244,7 @@ def _process_raw_ms_helper(
                 "radiance": radiance,
                 "S": sampling,
                 "fVal": fit_value,
+                "fitErrors": fit_errors,
             },
             "metadata": {"timestamps": timestamps},
         }
@@ -237,6 +263,7 @@ def process_raw_recording(
     output_path: str,
     overwrite_existing: bool = False,
     verbose: bool = False,
+    chunk_ranges: dict[Literal["W", "M"], tuple[int | None]] = {sensor_name: (0, None) for sensor_name in "WM"}
 ) -> None:
     """Process all world-camera and minispectrometer chunks in a recording.
 
@@ -279,15 +306,15 @@ def process_raw_recording(
 
     # Process each supported sensor into its own output subdirectory.
     for sensor_name, helper in helper_map.items():
+        # Skip this because it was from a legacy implementation. 
+        # This does not exist in any of our recordings now
         if(sensor_name == "P"):
-            continue
-
-        if(sensor_name != "M"):
             continue
 
         helper(
             files_by_sensor[sensor_name],
             os.path.join(output_path, sensor_name),
+            chunk_ranges[sensor_name], 
             overwrite_existing,
             verbose,
         )
