@@ -10,8 +10,9 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
 %   connection to the recording device, loads the Python and MATLAB helper
 %   libraries used by the individual calibration stages, constructs or
 %   rebuilds the calibration metadata struct, and then runs the MS
-%   linearity, world-camera linearity, temporal-sensitivity, phase-fitting,
-%   and contrast-gamma collection routines in sequence. After each stage it
+%   linearity, spectral-reconstruction, world-camera linearity,
+%   temporal-sensitivity, phase-fitting, and contrast-gamma collection
+%   routines in sequence. After each stage it
 %   persists the current metadata so partially completed calibrations can
 %   be resumed after transport or hardware failures without redoing
 %   finished measurements.
@@ -43,6 +44,7 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
     device_num = 1; 
     sensor_ids = [1, 1, 1]; 
     NDFs.ms_linearity = [0, 1, 2, 3, 4, 5, 6]; 
+    NDFs.spectral_reconstruction = [0, 1, 2, 3, 4, 5, 6];
     NDFs.world_linearity = [];
     NDFs.temporal_sensitivity = [];
     NDFs.phase_fitting = [];
@@ -197,7 +199,30 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
     tbUseProject('lightLogger');
     addpath(current_dir);
 
-    % B. Calculate the world camera linearity at all NDF levels
+    % B. Collect paired minispect and world-camera spectral reconstruction data
+    disp("Calibration | Collecting spectral reconstruction data with struct:");
+    disp(calibration_metadata.spectral_reconstruction)
+
+    [success, spectral_reconstruction_calibration_metadata] = collect_spectral_reconstruction_data(device_num,...
+                                                                                                     calibration_metadata.spectral_reconstruction,...
+                                                                                                     bluetooth_central,...
+                                                                                                     bluetooth_client,...
+                                                                                                     "",...
+                                                                                                     cloud_output_dir,...
+                                                                                                     external_output_dir,...
+                                                                                                     @wait_for_combiLED_cooldown_between_NDFs...
+                                                                                                    );
+    calibration_metadata.spectral_reconstruction = spectral_reconstruction_calibration_metadata;
+    upload_calibration_data(calibration_metadata, dropbox_savedir, upload_mode);
+
+    if(~success)
+        raise_calibration_failure("Spectral reconstruction calibration quit early on the light logger.", calibration_metadata.spectral_reconstruction);
+    end
+
+    tbUseProject('lightLogger');
+    addpath(current_dir);
+
+    % C. Calculate the world camera linearity at all NDF levels
     disp("Calibration | Collecting world camera linearity with struct:");
     disp(calibration_metadata.world_linearity)
 
@@ -221,7 +246,7 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
     tbUseProject('lightLogger');
     addpath(current_dir);
 
-    % C. Calibrate the temporal sensitivity of the different sensors 
+    % D. Calibrate the temporal sensitivity of the different sensors
     %    Only collect this measurement at NDF [0, 5) 
     disp("Calibration | Collecting Temporal Sensitivity with struct: ");
     disp(calibration_metadata.temporal_sensitivity) ;
@@ -247,7 +272,7 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
     tbUseProject('lightLogger');
     addpath(current_dir);
 
-    % D. Characterize the phase offset between the pairs of sensors 
+    % E. Characterize the phase offset between the pairs of sensors
     %    Only collect this measurement at the 1 NDF level 
     disp("Calibration | Collecting Phase Fitting with struct: ");
     disp(calibration_metadata.phase_fitting);
@@ -270,7 +295,7 @@ function collect_light_logger_calibration_data(experiment_name, device_num, sens
         raise_calibration_failure("Phase fitting calibration quit early on the light logger.", calibration_metadata.phase_fitting);
     end 
 
-    % E. Calculate the contrast gamma function
+    % F. Calculate the contrast gamma function
     % Only collect this measurement at the 1 NDF level
     disp("Calibration | Collecting Contrast Gamma with struct: ");
     disp(calibration_metadata.contrast_gamma);
@@ -392,6 +417,7 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
 
     % A. Set up the substructs we will use for each of the Calibration measures 
     CalibrationData.ms_linearity = struct; 
+    CalibrationData.spectral_reconstruction = struct;
     CalibrationData.world_linearity = struct;
     CalibrationData.temporal_sensitivity = struct; 
     CalibrationData.phase_fitting = struct; 
@@ -432,6 +458,62 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
     CalibrationData.ms_linearity.n_measures = n_measures;
     CalibrationData.ms_linearity.recording_seconds = recording_seconds;  
     CalibrationData.ms_linearity.completed_measurements = completed_measurements; 
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+    % { SPECTRAL RECONSTRUCTION }
+    k_settings_levels = 10; % Define the number of randomized 8-primary settings vectors to record per NDF
+    n_measures = 3; % The number of measurements to make at each settings vector
+    recording_seconds = 12; % Define how long a given recording will be per setting
+    settings_min = 0.1;
+    settings_max = 0.9;
+
+    % Generate 10 eight-primary vectors per NDF, with every primary value
+    % independently sampled from a uniform distribution between 0.1 and 0.9.
+    combiLED_settings = settings_min + ...
+        (settings_max - settings_min) * rand(numel(NDFs.spectral_reconstruction), k_settings_levels, numel(background));
+    settings_indices = 1:k_settings_levels;
+    measurement_orders = randomize_settings_orders(numel(NDFs.spectral_reconstruction), ...
+                                                    settings_indices, ...
+                                                    n_measures);
+    completed_measurements = false(numel(NDFs.spectral_reconstruction), k_settings_levels, n_measures);
+
+    % Build the minispect and fixed world-camera settings per NDF.
+    clear sensors_and_settings;
+    sensors_and_settings = {};
+    for ii = 1:numel(NDFs.spectral_reconstruction)
+        NDF = NDFs.spectral_reconstruction(ii);
+
+        try
+            fixed_settings = double(py_getitem(world_settings_by_ndf, py.float(NDF)));
+        catch
+            error("Missing spectral reconstruction world-camera settings for NDF %.3f.", NDF);
+        end
+
+        sensors.M.use_LED = false;
+        sensors.W.Again = fixed_settings(1);
+        sensors.W.Dgain = fixed_settings(2);
+        sensors.W.exposure = int32(fixed_settings(3));
+        sensors.W.agc = false;
+        sensors.W.save_agc_metadata = true;
+        sensors.W.sensor_mode_idx = sensor_mode_idx;
+        sensors.W.awb = false;
+        sensors.W.noise_mode = false;
+
+        sensors_and_settings{ii} = sensors;
+    end
+    clear NDF;
+    clear sensors;
+
+    CalibrationData.spectral_reconstruction.NDFs = NDFs.spectral_reconstruction;
+    CalibrationData.spectral_reconstruction.cal_files = cell(numel(NDFs.spectral_reconstruction), 1);
+    CalibrationData.spectral_reconstruction.sensors_and_settings = sensors_and_settings;
+    CalibrationData.spectral_reconstruction.combiLED_settings = combiLED_settings;
+    CalibrationData.spectral_reconstruction.settings_min = settings_min;
+    CalibrationData.spectral_reconstruction.settings_max = settings_max;
+    CalibrationData.spectral_reconstruction.measurement_orders = measurement_orders;
+    CalibrationData.spectral_reconstruction.n_measures = n_measures;
+    CalibrationData.spectral_reconstruction.recording_seconds = recording_seconds;
+    CalibrationData.spectral_reconstruction.completed_measurements = completed_measurements;
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
     % { WORLD CAMERA LINEARITY }
@@ -707,7 +789,7 @@ function calibration_metadata = rebuild_calibration_metadata(loaded_calibration_
 
     calibration_metadata = loaded_calibration_metadata;
 
-    calibration_fields = {"world_linearity", "temporal_sensitivity", "phase_fitting", "contrast_gamma"};
+    calibration_fields = {"spectral_reconstruction", "world_linearity", "temporal_sensitivity", "phase_fitting", "contrast_gamma"};
     for field_idx = 1:numel(calibration_fields)
         calibration_field = calibration_fields{field_idx};
         if(~isfield(calibration_metadata, calibration_field))
