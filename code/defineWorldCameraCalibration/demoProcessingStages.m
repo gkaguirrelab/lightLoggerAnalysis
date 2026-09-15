@@ -3,7 +3,7 @@ clear
 %close all
 
 % Pick a measurement
-measurementName = 'outdoor_AGCandMS_01.mat';
+measurementName = 'indoor_AGCandMS_01.mat';
 %measurementName = 'planetarium_AGCandMS_01.mat';
 
 % Load the data
@@ -25,5 +25,8 @@ figure
 plotReconstructionStages(imageStages)
 
 figure
-imagesc(log10(imageStages{end}))
+logImage = log10(imageStages{end});
+logImage = logImage-min(logImage(:));
+logImage = logImage/max(logImage(:));
+imagesc(logImage)
 title('log10 radiance');

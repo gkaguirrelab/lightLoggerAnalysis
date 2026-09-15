@@ -57,8 +57,19 @@ if isempty(avgSceneRadiance)
     load(paramFileName, 'avgSceneRadiance', 'cameraScore');
 end
 
-% Change this to be a derived value
-saturationThreshold = 235;
+%% Set the saturation threshold
+
+% Define the maximum allowable noise amplification (derivative)
+% A value of 3.0 to 5.0 is typically a safe boundary for Bayesian conditioning
+maxAllowedDerivative = 4.0; 
+
+% Dynamically calculate the saturation threshold based on the derivative
+exponentRatio = clippingExponent / (clippingExponent + 1);
+yPrimeThresh = Smax * (1 - maxAllowedDerivative^(-exponentRatio))^(1/clippingExponent);
+
+% Add dark signal to map back to absolute raw sensor counts
+saturationThreshold = floor(yPrimeThresh + darkSignal);
+
 
 % --- Processing Pipeline Stages ---
 
@@ -79,9 +90,7 @@ linearized = yPrime .* asymptoticGain;
 
 % Flag the unstable non-linear shoulder for Bayesian reconstruction
 linearized(y >= saturationThreshold) = Inf;
-
 imageStages{2} = linearized;
-
 
 % Stage 3: Impute values for ceiling and floor pixels
 imageStages{3} = imputeRawRadianceBayes(imageStages{2});
