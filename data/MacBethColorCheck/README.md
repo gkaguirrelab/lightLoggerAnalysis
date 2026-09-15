@@ -42,6 +42,8 @@ Five patches were selected for measurement. Patch locations use **one-indexed ro
 2. Place the PR-670 in front of the ColorChecker and align it with the target patch.
 3. Run `measureUncontrolledSourceSpectrum.m` to acquire **five measurements** from each selected patch.
 4. Repeat the measurement sequence for all five patches listed above.
+5. Record from various distances with the world camera and MS on the light logger 
+6. Extract suitable world camera frames
 
 ## Objective
 
