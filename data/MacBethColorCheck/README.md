@@ -34,7 +34,7 @@ Identification references: [BabelColor ColorChecker formats and history](https:/
 
 The Macbeth ColorChecker was positioned upright against a box in the Flicker Room. The PR-670 was placed in front of the chart and aligned with the selected color patches. The Light Logger camera was positioned nearby to capture the same target for comparison.
 
-![Experimental setup showing the Light Logger camera, Macbeth ColorChecker, and PR-670 spectroradiometer](setup.jpeg)
+![Experimental setup showing the Light Logger camera, Macbeth ColorChecker, and PR-670 spectroradiometer](.READMEAssets/setup.jpeg)
 
 *Figure 1. Experimental setup in the Flicker Room.*
 
@@ -50,7 +50,7 @@ Five patches were selected for measurement. Patch indices, rows, and columns are
 | 12 | Orange Yellow | 2 | 6 | `PR670/Index-12_OrangeYellow_radianceSpectrum.mat` |
 | 22 | Neutral 5 | 4 | 4 | `PR670/Index-22_Neutral5_radianceSpectrum.mat` |
 
-![Macbeth ColorChecker with the five selected patches marked in red](selectedColors.jpeg)
+![Macbeth ColorChecker with the five selected patches marked in red](.READMEAssets/selectedColors.jpeg)
 
 *Figure 2. Selected ColorChecker patches, marked in red.*
 
