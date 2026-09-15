@@ -257,22 +257,73 @@ WORLD_AGC_DISCRETE_STATES: dict[str, dict[str, int | float]] = PyAGC.retrieve_di
 # timestamp column before it
 WORLD_AGC_METADATA_COLS: tuple = ("cameraAgain", "AGCDgain", "cameraExposure", "AGCAgain", "AGCExposure")
 
+def return_bayer_indices(image_shape: tuple[int, int] | np.ndarray,
+                         bayer_pattern: str="BGGR"
+                        ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return the red, green, and blue sample coordinates of a Bayer frame.
+
+    This is the Python equivalent of MATLAB ``returnBayerIndices``. MATLAB
+    returns column vectors of linear indices; this returns the same samples in
+    the same order as ``(n, 2)`` arrays of ``(row, column)``.
+
+    The order is part of the contract. MATLAB concatenates green as
+    ``[idxG1(:); idxG2(:)]``, which is deliberately not sorted, and
+    ``scatteredInterpolant`` resolves equidistant nearest-neighbour ties toward
+    the highest input index. Re-sorting these samples would therefore change the
+    values extrapolated outside the convex hull.
+
+    Args:
+        image_shape: The ``(rows, cols)`` shape of the raw Bayer frame.
+        bayer_pattern: The sensor's Bayer layout.
+
+    Returns:
+        ``(idx_r, idx_g, idx_b)``, each an ``(n, 2)`` array of row/column pairs.
+
+    Raises:
+        ValueError: If the Bayer pattern is not one of the four supported layouts.
+    """
+    rows, cols = int(image_shape[0]), int(image_shape[1])
+
+    def sample_block(row_start: int, col_start: int) -> np.ndarray:
+        """Return one parity block, ordered the way MATLAB's idx(...)(:) is."""
+        # Every second row and every second column, starting at this parity.
+        block_rows: np.ndarray = np.arange(row_start, rows, 2)
+        block_cols: np.ndarray = np.arange(col_start, cols, 2)
+
+        # MATLAB flattens a matrix column-major, so the column index advances
+        # slowest and the row index advances fastest.
+        return np.column_stack((np.tile(block_rows, block_cols.size),
+                                np.repeat(block_cols, block_rows.size)))
+
+    # Assign each of the four Bayer positions to a colour, matching the switch
+    # statement in returnBayerIndices.m.
+    pattern: str = str(bayer_pattern).upper()
+    if(pattern == "BGGR"):
+        idx_b, idx_g1, idx_g2, idx_r = sample_block(0, 0), sample_block(0, 1), sample_block(1, 0), sample_block(1, 1)
+    elif(pattern == "RGGB"):
+        idx_r, idx_g1, idx_g2, idx_b = sample_block(0, 0), sample_block(0, 1), sample_block(1, 0), sample_block(1, 1)
+    elif(pattern == "GRBG"):
+        idx_g1, idx_r, idx_b, idx_g2 = sample_block(0, 0), sample_block(0, 1), sample_block(1, 0), sample_block(1, 1)
+    elif(pattern == "GBRG"):
+        idx_g1, idx_b, idx_r, idx_g2 = sample_block(0, 0), sample_block(0, 1), sample_block(1, 0), sample_block(1, 1)
+    else:
+        raise ValueError(f"Unknown Bayer pattern: {bayer_pattern}")
+
+    # Green is sampled at two positions per Bayer cell, so its two blocks are
+    # concatenated in the order MATLAB concatenates them.
+    return idx_r, np.vstack((idx_g1, idx_g2)), idx_b
+
+
+# The world camera is a BGGR sensor, so resolve its Bayer sample locations once
+# at import. These are the same coordinates return_bayer_indices produces for
+# any frame of this shape, kept as constants because the world frame size is
+# fixed and several pipeline stages index with them on every frame.
+WORLD_R_PIXELS, WORLD_G_PIXELS, WORLD_B_PIXELS = (
+    indices.astype(np.uint64) for indices in return_bayer_indices(WORLD_FRAME_SHAPE, "BGGR")
+)
+
+# Label every pixel with the index of its colour: 0 for red, 1 for green, 2 for blue.
 WORLD_RGB_MASK: np.ndarray = np.zeros(WORLD_FRAME_SHAPE, dtype=np.uint8)
-WORLD_R_PIXELS: np.ndarray = np.array([(r, c)
-                                       for r in range(WORLD_FRAME_SHAPE[0])
-                                       for c in range(WORLD_FRAME_SHAPE[1])
-                                       if(r % 2 != 0 and c % 2 != 0)],
-                                      dtype=np.uint64)
-WORLD_G_PIXELS: np.ndarray = np.array([(r, c)
-                                       for r in range(WORLD_FRAME_SHAPE[0])
-                                       for c in range(WORLD_FRAME_SHAPE[1])
-                                       if((r % 2 == 0 and c % 2 != 0) or (r % 2 != 0 and c % 2 == 0))],
-                                      dtype=np.uint64)
-WORLD_B_PIXELS: np.ndarray = np.array([(r, c)
-                                       for r in range(WORLD_FRAME_SHAPE[0])
-                                       for c in range(WORLD_FRAME_SHAPE[1])
-                                       if(r % 2 == 0 and c % 2 == 0)],
-                                      dtype=np.uint64)
 for idx, pixel_indices in enumerate((WORLD_R_PIXELS, WORLD_G_PIXELS, WORLD_B_PIXELS)):
     WORLD_RGB_MASK[pixel_indices[:, 0], pixel_indices[:, 1]] = idx
 
@@ -307,15 +358,6 @@ WORLD_MAX_ALLOWED_LINEARIZATION_DERIVATIVE: float = 4.0
 # diagonal is affected. Any positive value works; the diagonal MATLAB picks is
 # already selected at 1e-9 and stays selected at 1e-2.
 WORLD_TRIANGULATION_SHEAR: float = 1e-4
-
-# The Bayer pattern names which colour sits at each (row, column) parity, given
-# as ((even row/even col, even row/odd col), (odd row/even col, odd row/odd col)).
-WORLD_BAYER_LAYOUTS: dict[str, tuple[tuple[str, str], tuple[str, str]]] = {
-    "BGGR": (("B", "G"), ("G", "R")),
-    "RGGB": (("R", "G"), ("G", "B")),
-    "GRBG": (("G", "R"), ("B", "G")),
-    "GBRG": (("G", "B"), ("R", "G")),
-}
 
 """
 END PROCESSING PIPELINE CONSTANTS
@@ -822,119 +864,43 @@ def linearize_camera_responsivity(image_or_video: np.ndarray,
     return dst
 
 
-def _bayer_channel_masks(image_shape: tuple[int, int],
-                         bayer_pattern: str="BGGR"
-                        ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Return boolean red, green, and blue masks over a full Bayer frame.
+def _scattered_interpolant(sample_x: np.ndarray,
+                           sample_y: np.ndarray,
+                           sample_values: np.ndarray,
+                           image_shape: tuple[int, int]
+                          ) -> np.ndarray:
+    """Evaluate MATLAB ``scatteredInterpolant(x, y, v, 'linear', 'nearest')``.
 
-    This is the mask form of MATLAB ``returnBayerIndices``. Use it when the
-    question is "is this pixel red?"; use :func:`_bayer_channel_samples` when
-    the sample *order* matters.
-    """
-    # Reject an unknown pattern rather than silently mislabeling every pixel.
-    if(bayer_pattern.upper() not in WORLD_BAYER_LAYOUTS):
-        raise ValueError(
-            f"Unsupported Bayer pattern {bayer_pattern!r}. "
-            f"Expected one of {tuple(WORLD_BAYER_LAYOUTS)}."
-        )
+    MATLAB builds the interpolant and then evaluates it over the full pixel
+    grid with ``F(X, Y)``. Both steps happen here, so this returns the grid
+    directly rather than a callable.
 
-    # Build a row index and a column index for every pixel in the frame.
-    rows, cols = np.indices(image_shape)
+    Args:
+        sample_x: One-based column coordinate of each sample.
+        sample_y: One-based row coordinate of each sample.
+        sample_values: Value at each sample.
+        image_shape: The ``(rows, cols)`` grid to evaluate over.
 
-    # Look up the colour letter at each pixel using its row and column parity.
-    layout: np.ndarray = np.asarray(WORLD_BAYER_LAYOUTS[bayer_pattern.upper()])
-    labels: np.ndarray = layout[rows % 2, cols % 2]
-
-    # Turn the letters into one boolean mask per channel, in R, G, B order.
-    return tuple(labels == channel for channel in "RGB")
-
-
-def _bayer_channel_samples(image_shape: tuple[int, int],
-                           bayer_pattern: str="BGGR"
-                          ) -> tuple[tuple[np.ndarray, np.ndarray], ...]:
-    """Return each channel's sample coordinates in MATLAB's index order.
-
-    MATLAB ``returnBayerIndices`` returns green as ``[idxG1(:); idxG2(:)]``,
-    which is deliberately not sorted. That order is preserved here because
-    MATLAB breaks equidistant nearest-neighbour ties toward the highest input
-    index, so reordering the samples would change the extrapolated values.
+    Returns:
+        The interpolated grid, shaped ``image_shape``.
     """
     rows, cols = image_shape
 
-    # Reject an unknown pattern before using it to index the layout table.
-    if(bayer_pattern.upper() not in WORLD_BAYER_LAYOUTS):
-        raise ValueError(
-            f"Unsupported Bayer pattern {bayer_pattern!r}. "
-            f"Expected one of {tuple(WORLD_BAYER_LAYOUTS)}."
-        )
-    layout: tuple[tuple[str, str], tuple[str, str]] = WORLD_BAYER_LAYOUTS[bayer_pattern.upper()]
-
-    samples: list[tuple[np.ndarray, np.ndarray]] = []
-    for channel in "RGB":
-        sample_rows: list[np.ndarray] = []
-        sample_cols: list[np.ndarray] = []
-
-        # Walk the four Bayer positions in the order MATLAB indexes them, so
-        # that green collects its (even row, odd col) block before its
-        # (odd row, even col) block.
-        for row_parity in (0, 1):
-            for col_parity in (0, 1):
-                # Skip the positions that do not belong to this channel.
-                if(layout[row_parity][col_parity] != channel):
-                    continue
-
-                # Every second row and column starting from this parity.
-                block_rows: np.ndarray = np.arange(row_parity, rows, 2)
-                block_cols: np.ndarray = np.arange(col_parity, cols, 2)
-
-                # MATLAB flattens idx(rowSel, colSel) column-major, so the
-                # column index advances slowest and the row index fastest.
-                sample_rows.append(np.tile(block_rows, block_cols.size))
-                sample_cols.append(np.repeat(block_cols, block_rows.size))
-
-        # Join this channel's blocks into one ordered list of coordinates.
-        samples.append((np.concatenate(sample_rows), np.concatenate(sample_cols)))
-
-    return tuple(samples)
-
-
-def _scattered_interpolation(value_frame: np.ndarray,
-                             sample_rows: np.ndarray,
-                             sample_cols: np.ndarray,
-                             invalid_mask: np.ndarray,
-                             empty_value: float
-                            ) -> np.ndarray:
-    """Reproduce MATLAB ``scatteredInterpolant(x, y, v, 'linear', 'nearest')``.
-
-    Samples are taken from ``value_frame`` at ``(sample_rows, sample_cols)``,
-    which must arrive in MATLAB's ``returnBayerIndices`` order, and the result
-    is evaluated over the whole frame.
-    """
-    rows, cols = value_frame.shape
-
-    # Read this channel's samples and drop the ones MATLAB masks out with NaN.
-    sample_values: np.ndarray = value_frame[sample_rows, sample_cols]
-    valid: np.ndarray = ~invalid_mask[sample_rows, sample_cols] & ~np.isnan(sample_values)
-
-    # With nothing left to interpolate from, MATLAB leaves the output untouched.
-    if(not np.any(valid)):
-        return np.full((rows, cols), empty_value, dtype=np.float64)
-
-    # MATLAB works in one-based (x=column, y=row) coordinates.
-    sample_x: np.ndarray = sample_cols[valid].astype(np.float64) + 1
-    sample_y: np.ndarray = sample_rows[valid].astype(np.float64) + 1
-    values: np.ndarray = sample_values[valid].astype(np.float64)
-
-    # Query every pixel of the frame, in row-major order.
+    # MATLAB queries every pixel via [X, Y] = meshgrid(1:W, 1:H).
     query_x, query_y = np.meshgrid(np.arange(1, cols + 1, dtype=np.float64),
                                    np.arange(1, rows + 1, dtype=np.float64))
     query_x = query_x.ravel()
     query_y = query_y.ravel()
 
-    # Shear y by a multiple of x to break the cocircular ties the same way
-    # MATLAB breaks them. Triangulating the sheared points and querying the
-    # sheared points leaves the interpolated values unchanged.
-    sample_points: np.ndarray = np.column_stack((sample_x, sample_y))
+    sample_x = np.asarray(sample_x, dtype=np.float64)
+    sample_y = np.asarray(sample_y, dtype=np.float64)
+    sample_values = np.asarray(sample_values, dtype=np.float64)
+
+    # Shear y by a multiple of x before triangulating. Every four neighbouring
+    # Bayer samples lie on a common circle, which makes a Delaunay
+    # triangulation of them non-unique; the shear breaks that tie the same way
+    # MATLAB breaks it. It is affine, so barycentric weights and therefore the
+    # interpolated values are unchanged.
     sheared_samples: np.ndarray = np.column_stack(
         (sample_x, sample_y + WORLD_TRIANGULATION_SHEAR * sample_x)
     )
@@ -942,10 +908,10 @@ def _scattered_interpolation(value_frame: np.ndarray,
         (query_x, query_y + WORLD_TRIANGULATION_SHEAR * query_x)
     )
 
-    # Linearly interpolate inside the convex hull, leaving NaN outside it.
+    # 'linear' interpolates inside the convex hull of the samples.
     try:
         interpolated: np.ndarray = np.asarray(
-            LinearNDInterpolator(Delaunay(sheared_samples), values, fill_value=np.nan)(sheared_queries),
+            LinearNDInterpolator(Delaunay(sheared_samples), sample_values, fill_value=np.nan)(sheared_queries),
             dtype=np.float64,
         )
     except QhullError:
@@ -953,190 +919,184 @@ def _scattered_interpolation(value_frame: np.ndarray,
         # every query falls through to the nearest-neighbour step below.
         interpolated = np.full(query_x.size, np.nan, dtype=np.float64)
 
-    # Fill the outside-hull queries by nearest neighbour, matching MATLAB's
-    # 'nearest' extrapolation method.
+    # 'nearest' extrapolates every query that fell outside the convex hull.
     outside_hull: np.ndarray = np.isnan(interpolated)
     if(np.any(outside_hull)):
-        tree: cKDTree = cKDTree(sample_points)
+        tree: cKDTree = cKDTree(np.column_stack((sample_x, sample_y)))
         outside_points: np.ndarray = np.column_stack((query_x[outside_hull], query_y[outside_hull]))
 
-        # Find the distance to the closest sample, then collect every sample at
-        # that distance. MATLAB keeps the highest input index among equals.
+        # Take the distance to the closest sample, then gather every sample
+        # sitting at that same distance. MATLAB keeps the highest input index
+        # among equally close samples, which is why the caller must preserve
+        # the sample order returned by return_bayer_indices.
         nearest_distance, _ = tree.query(outside_points)
         tied_samples: list[list[int]] = tree.query_ball_point(
             outside_points, nearest_distance * (1 + 1e-9) + 1e-12
         )
-        interpolated[outside_hull] = values[[max(tied) for tied in tied_samples]]
+        interpolated[outside_hull] = sample_values[[max(tied) for tied in tied_samples]]
 
-    # Reshape the flat result back into an image.
     return interpolated.reshape(rows, cols)
 
 
-def _log_expectation_beyond_bound(bound_log: float,
-                                  conditional_mean: np.ndarray,
-                                  conditional_std: np.ndarray,
-                                  above_bound: bool
-                                 ) -> np.ndarray:
-    """Return the mean of a Gaussian restricted to one side of ``bound_log``.
-
-    This is the closed-form truncated-normal expectation MATLAB
-    ``imputePixelValues`` writes out separately for ceiling and floor pixels.
-    A ceiling pixel is known to lie above the bound and a floor pixel below it.
-    """
-    # Express the bound in standard deviations from the conditional mean.
-    z_score: np.ndarray = (bound_log - conditional_mean) / conditional_std
-
-    # Probability mass on the side of the bound the true value must lie on.
-    tail_probability: np.ndarray = (1 - ndtr(z_score)) if above_bound else ndtr(z_score)
-
-    # Gaussian density at the bound, scaled by the conditional width.
-    density: np.ndarray = conditional_std / np.sqrt(2 * np.pi) * np.exp(-(z_score ** 2) / 2)
-
-    # The truncated mean sits a density/probability step beyond the bound,
-    # upward for a ceiling pixel and downward for a floor pixel. A vanishing
-    # tail makes that ratio numerically meaningless, so those pixels fall back
-    # to the bound itself exactly as MATLAB does.
-    with np.errstate(divide="ignore", invalid="ignore"):
-        step: np.ndarray = density / tail_probability
-        shifted: np.ndarray = conditional_mean + step if above_bound else conditional_mean - step
-        return np.where(tail_probability < 1e-15, bound_log, shifted)
-
-
-def _impute_pixel_values_single(linearized_frame: np.ndarray,
+def _impute_pixel_values_single(radiance_map: np.ndarray,
                                 bayer_pattern: str
                                ) -> np.ndarray:
-    """Impute the floor and ceiling samples of one linearized Bayer frame."""
-    rows, cols = linearized_frame.shape
-    channel_masks = _bayer_channel_masks((rows, cols), bayer_pattern)
-    channel_samples = _bayer_channel_samples((rows, cols), bayer_pattern)
+    """Impute the ceiling and floor samples of one linearized Bayer frame."""
+    rows, cols = radiance_map.shape
 
-    # Step 1: interpolate each channel across the whole frame so that every
-    # pixel has an estimate for all three colours, not just its own.
+    # Obtain channel sample coordinates (R=0, G=1, B=2).
+    bayer_idx: tuple[np.ndarray, np.ndarray, np.ndarray] = return_bayer_indices(
+        (rows, cols), bayer_pattern
+    )
+
+    # Interpolate to get cross-channel conditioning data. After this loop every
+    # pixel carries an estimate of all three colours, not only the one its own
+    # Bayer position measured.
     rgb_map: np.ndarray = np.zeros((rows, cols, 3), dtype=np.float64)
-    for channel_index, channel_mask in enumerate(channel_masks):
-        # A ceiling sample is Inf and a floor sample is exactly zero. Neither
-        # carries usable information, so both are excluded from the fit.
-        ceiling_mask: np.ndarray = channel_mask & np.isinf(linearized_frame)
-        floor_mask: np.ndarray = channel_mask & (linearized_frame == 0)
+    for channel in range(3):
+        channel_rows: np.ndarray = bayer_idx[channel][:, 0]
+        channel_cols: np.ndarray = bayer_idx[channel][:, 1]
 
-        sample_rows, sample_cols = channel_samples[channel_index]
-        channel_grid: np.ndarray = _scattered_interpolation(
-            linearized_frame, sample_rows, sample_cols,
-            ceiling_mask | floor_mask, empty_value=0.0,
-        )
+        # Read this channel's own samples out of the raw map.
+        sub_val: np.ndarray = radiance_map[channel_rows, channel_cols]
 
-        # Put the Inf and zero markers back at their own sample positions so the
-        # imputation step below can still find which pixels need replacing.
-        channel_grid[ceiling_mask] = np.inf
-        channel_grid[floor_mask] = 0.0
-        rgb_map[..., channel_index] = channel_grid
+        # A ceiling sample is Inf and a floor sample is exactly zero.
+        inf_mask: np.ndarray = np.isinf(sub_val)
+        floor_mask: np.ndarray = (sub_val == 0)
 
-    # Step 2: learn the scene's colour statistics in log space, using only the
-    # pixels whose three channels are all present and positive.
+        # Neither carries usable information, so blank both out for the fit.
+        work_sub: np.ndarray = sub_val.copy()
+        work_sub[inf_mask | floor_mask] = np.nan
+        valid_idx: np.ndarray = ~np.isnan(work_sub)
+
+        # MATLAB works in one-based (x=column, y=row) coordinates.
+        sub_x: np.ndarray = channel_cols.astype(np.float64) + 1
+        sub_y: np.ndarray = channel_rows.astype(np.float64) + 1
+
+        # With no usable sample the channel plane is left at zero.
+        if(np.any(valid_idx)):
+            rgb_map[:, :, channel] = _scattered_interpolant(
+                sub_x[valid_idx], sub_y[valid_idx], work_sub[valid_idx], (rows, cols)
+            )
+
+        # Restore Inf and 0 at sub-grid locations so the imputation step can
+        # find them again after the interpolation has smoothed over them.
+        channel_grid: np.ndarray = rgb_map[:, :, channel]
+        channel_grid[channel_rows[inf_mask], channel_cols[inf_mask]] = np.inf
+        channel_grid[channel_rows[floor_mask], channel_cols[floor_mask]] = 0.0
+        rgb_map[:, :, channel] = channel_grid
+
+    # Extract prior statistics. Only pixels whose three channels are all
+    # present and positive describe the scene's colour distribution.
     pixels: np.ndarray = rgb_map.reshape(-1, 3)
-    complete: np.ndarray = ~np.any(np.isinf(pixels) | (pixels == 0), axis=1)
-    if(np.count_nonzero(complete) < 2):
+    valid_pixels: np.ndarray = pixels[~np.any(np.isinf(pixels) | (pixels == 0), axis=1)]
+    if(valid_pixels.shape[0] < 2):
         raise ValueError(
             "At least two complete, positive RGB samples are required for "
             "Bayesian floor/ceiling imputation."
         )
-    log_complete: np.ndarray = np.log(pixels[complete])
-    mean_log: np.ndarray = np.mean(log_complete, axis=0)
-    covariance_log: np.ndarray = np.cov(log_complete, rowvar=False, ddof=1)
 
-    # Step 3: record how bright a ceiling pixel must be, and how dim a floor
-    # pixel must be, from the observed range of each channel.
-    ceiling_log: np.ndarray = np.empty(3, dtype=np.float64)
-    floor_log: np.ndarray = np.empty(3, dtype=np.float64)
-    for channel_index in range(3):
-        channel_values: np.ndarray = pixels[:, channel_index]
-        observed: np.ndarray = channel_values[(channel_values > 0) & ~np.isinf(channel_values)]
-        # MATLAB falls back to a fixed range when a channel has no valid sample.
-        ceiling_log[channel_index] = np.log(np.max(observed)) if observed.size else np.log(1.0)
-        floor_log[channel_index] = np.log(np.min(observed)) if observed.size else np.log(1e-4)
+    # The model is Gaussian in log space, so the prior is fit to log radiance.
+    log_valid: np.ndarray = np.log(valid_pixels)
+    mu: np.ndarray = np.mean(log_valid, axis=0)
+    covariance: np.ndarray = np.cov(log_valid, rowvar=False, ddof=1)
 
-    # Step 4: replace each floor and ceiling sample with its expected value,
-    # conditioned on whichever of the other two channels are known there.
-    imputed_frame: np.ndarray = linearized_frame.astype(np.float64, copy=True)
+    # Record how bright a ceiling sample must be, and how dim a floor sample
+    # must be, from each channel's observed range.
+    s_log: np.ndarray = np.zeros(3, dtype=np.float64)
+    f_log: np.ndarray = np.zeros(3, dtype=np.float64)
+    for channel in range(3):
+        channel_values: np.ndarray = pixels[:, channel]
+        valid_c: np.ndarray = channel_values[(channel_values > 0) & ~np.isinf(channel_values)]
+        if(valid_c.size == 0):
+            # Fall back to a fixed range when a channel has no valid sample.
+            s_log[channel] = np.log(1.0)
+            f_log[channel] = np.log(1e-4)
+        else:
+            s_log[channel] = np.log(np.max(valid_c))
+            f_log[channel] = np.log(np.min(valid_c))
+
+    # Targeted imputation and direct remosaicing. Every pixel the pipeline
+    # keeps is copied through untouched; only ceiling and floor samples change.
+    raw_fixed: np.ndarray = radiance_map.astype(np.float64, copy=True)
+
+    # Pre-compute the log of every interpolated pixel once. log(0) is -Inf and
+    # log(Inf) is Inf, so the finiteness test below rejects both.
     with np.errstate(divide="ignore", invalid="ignore"):
-        log_pixels: np.ndarray = np.log(pixels)
+        log_fixed_pixels: np.ndarray = np.log(rgb_map)
 
-    for target_channel, channel_mask in enumerate(channel_masks):
-        # The pixels of this channel that are at the ceiling or on the floor.
-        target_mask: np.ndarray = channel_mask & (
-            np.isinf(linearized_frame) | (linearized_frame == 0)
-        )
-        if(not np.any(target_mask)):
-            continue
+    # Constant factor of the Gaussian density, hoisted out of the pixel loop.
+    sqrt_two_pi: float = np.sqrt(2 * np.pi)
 
-        # Look up this channel's log values for the pixels we are replacing.
-        target_logs: np.ndarray = log_pixels[target_mask.ravel()]
+    for c_target in range(3):
+        # Every ceiling or floor pixel in the frame.
+        target_mask: np.ndarray = np.isinf(radiance_map) | (radiance_map == 0)
 
-        # A neighbouring channel can be conditioned on only where it is finite,
-        # which excludes log(0) and log(Inf).
-        usable: np.ndarray = np.isfinite(target_logs)
-        usable[:, target_channel] = False
+        # Restricted to the Bayer positions belonging to this channel.
+        bayer_target_mask: np.ndarray = np.zeros((rows, cols), dtype=bool)
+        bayer_target_mask[bayer_idx[c_target][:, 0], bayer_idx[c_target][:, 1]] = True
 
-        conditional_mean: np.ndarray = np.empty(target_logs.shape[0], dtype=np.float64)
-        conditional_variance: np.ndarray = np.empty(target_logs.shape[0], dtype=np.float64)
+        # The pixels this pass will replace. MATLAB walks these in column-major
+        # order; each pixel is independent, so the order does not matter.
+        active_impute_indices: np.ndarray = np.argwhere(target_mask & bayer_target_mask)
 
-        # Only the two non-target channels can be known, giving four possible
-        # combinations. Handling them as groups computes each small conditional
-        # Gaussian once instead of once per pixel.
-        other_channels: tuple[int, ...] = tuple(c for c in range(3) if c != target_channel)
-        for known_channels in ((), other_channels[:1], other_channels[1:], other_channels):
-            # Select the pixels whose known channels are exactly this group.
-            wanted: np.ndarray = np.zeros(3, dtype=bool)
-            wanted[list(known_channels)] = True
-            group: np.ndarray = np.all(usable == wanted, axis=1)
-            if(not np.any(group)):
-                continue
+        for pixel_row, pixel_col in active_impute_indices:
+            # Condition on whichever of the other two channels are known here.
+            # A channel is known only if its log value is finite, which rules
+            # out a neighbour that is itself at the ceiling or on the floor.
+            valid_k_mask: np.ndarray = np.isfinite(log_fixed_pixels[pixel_row, pixel_col])
+            valid_k_mask[c_target] = False
+            valid_k_cols: np.ndarray = np.flatnonzero(valid_k_mask)
 
-            # With nothing to condition on, fall back to the scene-wide prior.
-            if(not known_channels):
-                conditional_mean[group] = mean_log[target_channel]
-                conditional_variance[group] = covariance_log[target_channel, target_channel]
-                continue
+            if(valid_k_cols.size > 0):
+                # Standard Gaussian conditioning of the target channel on the
+                # known ones. The ridge term keeps the small covariance block
+                # invertible when two channels move together.
+                mu_k: np.ndarray = mu[valid_k_cols]
+                s_k: np.ndarray = covariance[np.ix_(valid_k_cols, valid_k_cols)]
+                s_sk: np.ndarray = covariance[c_target, valid_k_cols]
+                s_k_inv: np.ndarray = np.linalg.inv(s_k + 1e-6 * np.eye(valid_k_cols.size))
+                k: np.ndarray = log_fixed_pixels[pixel_row, pixel_col, valid_k_cols]
 
-            known: list[int] = list(known_channels)
+                # Shift the prior mean by how far the known channels sit from
+                # their own means, and subtract the variance they explain.
+                mu_xs: float = float(mu[c_target] + s_sk @ s_k_inv @ (k - mu_k))
+                s_xs: float = float(covariance[c_target, c_target] - s_sk @ s_k_inv @ s_sk.T)
+            else:
+                # Nothing to condition on, so fall back to the scene-wide prior.
+                mu_xs = float(mu[c_target])
+                s_xs = float(covariance[c_target, c_target])
 
-            # Standard Gaussian conditioning. The ridge term keeps the small
-            # covariance block invertible when two channels move together.
-            known_covariance: np.ndarray = covariance_log[np.ix_(known, known)]
-            cross_covariance: np.ndarray = covariance_log[target_channel, known]
-            regression: np.ndarray = cross_covariance @ np.linalg.inv(
-                known_covariance + 1e-6 * np.eye(len(known))
-            )
+            # Keep the width strictly positive before taking its square root.
+            s_xs = max(s_xs, 1e-8)
+            std_xs: float = np.sqrt(s_xs)
 
-            # Shift the prior mean by the regression applied to how far the
-            # known channels sit from their own means.
-            centered: np.ndarray = target_logs[group][:, known] - mean_log[known]
-            conditional_mean[group] = mean_log[target_channel] + centered @ regression
+            if(np.isinf(radiance_map[pixel_row, pixel_col])):
+                # A ceiling pixel is known to be brighter than the observed
+                # maximum, so take the mean of the truncated tail above it.
+                z_score: float = (s_log[c_target] - mu_xs) / std_xs
+                tail: float = float(1 - ndtr(z_score))
+                if(tail < 1e-15):
+                    # A vanishing tail makes the ratio below meaningless.
+                    expected_val_log: float = float(s_log[c_target])
+                else:
+                    numerator_term: float = (std_xs / sqrt_two_pi) * np.exp(-(z_score ** 2) / 2)
+                    expected_val_log = mu_xs + numerator_term / tail
+            else:
+                # A floor pixel is known to be dimmer than the observed
+                # minimum, so take the mean of the truncated tail below it.
+                z_score = (f_log[c_target] - mu_xs) / std_xs
+                tail = float(ndtr(z_score))
+                if(tail < 1e-15):
+                    expected_val_log = float(f_log[c_target])
+                else:
+                    numerator_term = (std_xs / sqrt_two_pi) * np.exp(-(z_score ** 2) / 2)
+                    expected_val_log = mu_xs - numerator_term / tail
 
-            # Knowing the other channels removes part of the target's variance.
-            conditional_variance[group] = (
-                covariance_log[target_channel, target_channel] - regression @ cross_covariance.T
-            )
+            # Return from log space to linear sensor units.
+            raw_fixed[pixel_row, pixel_col] = np.exp(expected_val_log)
 
-        # Keep the width strictly positive before taking its square root.
-        conditional_std: np.ndarray = np.sqrt(np.maximum(conditional_variance, 1e-8))
-
-        # A ceiling pixel is known to be brighter than the observed maximum; a
-        # floor pixel is known to be dimmer than the observed minimum.
-        is_ceiling: np.ndarray = np.isinf(linearized_frame[target_mask])
-        expected_log: np.ndarray = np.empty(conditional_mean.shape, dtype=np.float64)
-        for at_ceiling, bound in ((True, ceiling_log), (False, floor_log)):
-            side: np.ndarray = is_ceiling if at_ceiling else ~is_ceiling
-            if(np.any(side)):
-                expected_log[side] = _log_expectation_beyond_bound(
-                    bound[target_channel], conditional_mean[side], conditional_std[side],
-                    above_bound=at_ceiling,
-                )
-
-        # Return from log space to linear sensor units.
-        imputed_frame[target_mask] = np.exp(expected_log)
-
-    return imputed_frame
+    return raw_fixed
 
 
 def impute_pixel_values(linearized_image_or_buffer: np.ndarray,
@@ -1145,10 +1105,20 @@ def impute_pixel_values(linearized_image_or_buffer: np.ndarray,
                        ) -> np.ndarray | tuple[np.ndarray, object]:
     """Impute floor and ceiling Bayer samples using Geoff's Bayesian model.
 
-    This is the Python equivalent of MATLAB ``imputePixelValues``. A single
-    image has shape ``(rows, cols)`` and a buffer has shape
-    ``(frames, rows, cols)``. Each buffered frame is modeled independently,
-    matching repeated calls to the MATLAB function.
+    This is the Python equivalent of MATLAB ``imputePixelValues``, which
+    implements a Bayesian estimate of the linearized sensor value at pixels
+    that sit at the ceiling (``Inf``) or on the floor (zero), following:
+
+        Zhang X, Brainard DH. Estimation of saturated pixel values in digital
+        color imaging. Journal of the Optical Society of America A. 2004 Dec
+        1;21(12):2301-10.
+
+    Modified to add imputation of floor values, and to consider the
+    distribution of pixel values in the log transformed space.
+
+    MATLAB handles one frame. A ``(frames, rows, cols)`` buffer is accepted
+    here and each frame is modeled independently, matching repeated calls to
+    the MATLAB function.
 
     Args:
         linearized_image_or_buffer: Linearized frame or frame buffer whose
@@ -1205,28 +1175,106 @@ def impute_pixel_values(linearized_image_or_buffer: np.ndarray,
     return result
 
 
-def _interpolate_bayer_channel(value_frame: np.ndarray,
-                               channel_mask: np.ndarray,
-                               channel_samples: tuple[np.ndarray, np.ndarray],
-                               radiance_map: np.ndarray
-                              ) -> np.ndarray:
-    """Interpolate one Bayer channel, keeping Inf where the raw map was Inf.
+def _interpolate_channel(radiance_map: np.ndarray,
+                         channel_idx: np.ndarray,
+                         image_shape: tuple[int, int]
+                        ) -> np.ndarray:
+    """Interpolate one Bayer channel across the frame, preserving Inf.
 
-    This is MATLAB ``interpolateChannel``, which both the green guide and the
-    red and blue ratio channels of ``demosaicRadianceMapRCD`` are built on.
+    This is the ``interpolateChannel`` subfunction of MATLAB
+    ``demosaicRadianceMapRCD``.
     """
-    # Saturated samples cannot be interpolated through, so exclude them.
-    channel_inf: np.ndarray = channel_mask & np.isinf(radiance_map)
+    rows, cols = image_shape
+    channel_rows: np.ndarray = channel_idx[:, 0]
+    channel_cols: np.ndarray = channel_idx[:, 1]
 
-    # Fit over this channel's finite samples and evaluate across the frame.
-    full_grid: np.ndarray = _scattered_interpolation(
-        value_frame, channel_samples[0], channel_samples[1],
-        channel_inf | np.isnan(value_frame), empty_value=np.nan,
+    # Extract values for this channel from the raw radiance map.
+    sub_val: np.ndarray = radiance_map[channel_rows, channel_cols]
+
+    # Identify which specific sub-pixel locations are Inf in the raw map.
+    inf_mask_sub: np.ndarray = np.isinf(sub_val)
+
+    # Prepare work values by turning Inf and NaN into NaN for the interpolant.
+    work_sub: np.ndarray = sub_val.copy()
+    work_sub[np.isinf(work_sub)] = np.nan
+
+    # Filter out NaN values for fitting.
+    sub_x: np.ndarray = channel_cols.astype(np.float64) + 1
+    sub_y: np.ndarray = channel_rows.astype(np.float64) + 1
+    valid_idx: np.ndarray = ~np.isnan(work_sub)
+
+    # Nothing to fit, so the whole plane is undefined.
+    if(not np.any(valid_idx)):
+        return np.full((rows, cols), np.nan, dtype=np.float64)
+
+    # Perform bilinear interpolation with nearest extrapolation for edge robustness.
+    full_grid: np.ndarray = _scattered_interpolant(
+        sub_x[valid_idx], sub_y[valid_idx], work_sub[valid_idx], (rows, cols)
     )
 
-    # Restore saturation at the sample positions that were saturated to begin
-    # with, so Inf survives demosaicing instead of being smoothed away.
-    full_grid[channel_inf] = np.inf
+    # Restore Inf values at their original sub-grid locations.
+    if(np.any(inf_mask_sub)):
+        full_grid[channel_rows[inf_mask_sub], channel_cols[inf_mask_sub]] = np.inf
+
+    return full_grid
+
+
+def _interpolate_ratio_channel(radiance_map: np.ndarray,
+                               channel_idx: np.ndarray,
+                               full_grid_g: np.ndarray,
+                               image_shape: tuple[int, int]
+                              ) -> np.ndarray:
+    """Interpolate one Bayer channel as a ratio to the green guide.
+
+    This is the ``interpolateRatioChannel`` subfunction of MATLAB
+    ``demosaicRadianceMapRCD``. Colour ratios vary far more smoothly across a
+    scene than raw radiance does, so interpolating the ratio and multiplying
+    back by green keeps the detail green resolves instead of blurring it.
+    """
+    rows, cols = image_shape
+    channel_rows: np.ndarray = channel_idx[:, 0]
+    channel_cols: np.ndarray = channel_idx[:, 1]
+
+    # Extract values for the target colour channel (R or B).
+    sub_val: np.ndarray = radiance_map[channel_rows, channel_cols]
+
+    # Identify which specific sub-pixel locations are Inf in the raw map.
+    inf_mask_sub: np.ndarray = np.isinf(sub_val)
+
+    # Prepare work values by turning Inf into NaN for the interpolant.
+    work_sub: np.ndarray = sub_val.copy()
+    work_sub[np.isinf(work_sub)] = np.nan
+
+    # Extract corresponding Green guide values at these specific locations.
+    guide_val: np.ndarray = full_grid_g[channel_rows, channel_cols]
+
+    # Compute the colour ratio (R/G or B/G) using the NaN-masked working values.
+    # Add a small epsilon to the denominator to prevent division by zero.
+    epsilon: float = 1e-6
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ratio_sub: np.ndarray = work_sub / (guide_val + epsilon)
+
+    # Filter out NaN values for fitting.
+    sub_x: np.ndarray = channel_cols.astype(np.float64) + 1
+    sub_y: np.ndarray = channel_rows.astype(np.float64) + 1
+    valid_idx: np.ndarray = ~np.isnan(ratio_sub)
+
+    # Nothing to fit, so the whole plane is undefined.
+    if(not np.any(valid_idx)):
+        return np.full((rows, cols), np.nan, dtype=np.float64)
+
+    # Perform bilinear interpolation of the colour ratio.
+    full_ratio_grid: np.ndarray = _scattered_interpolant(
+        sub_x[valid_idx], sub_y[valid_idx], ratio_sub[valid_idx], (rows, cols)
+    )
+
+    # Calculate the final grid by multiplying the interpolated ratio by the full Green guide.
+    full_grid: np.ndarray = full_ratio_grid * full_grid_g
+
+    # Restore Inf values at their original sub-grid locations.
+    if(np.any(inf_mask_sub)):
+        full_grid[channel_rows[inf_mask_sub], channel_cols[inf_mask_sub]] = np.inf
+
     return full_grid
 
 
@@ -1235,51 +1283,46 @@ def _demosaic_radiance_map_rcd_single(radiance_map: np.ndarray,
                                      ) -> np.ndarray:
     """Demosaic one Bayer radiance map with ratio-corrected interpolation."""
     rows, cols = radiance_map.shape
-    red_mask, green_mask, blue_mask = _bayer_channel_masks((rows, cols), bayer_pattern)
-    red_samples, green_samples, blue_samples = _bayer_channel_samples((rows, cols), bayer_pattern)
 
-    # Green is interpolated first because it samples the frame twice as densely
-    # as red or blue, so it is the best available guide to spatial detail.
-    full_green: np.ndarray = _interpolate_bayer_channel(
-        radiance_map, green_mask, green_samples, radiance_map
+    # Obtain channel indices using return_bayer_indices (R=0, G=1, B=2).
+    rgb_idx: tuple[np.ndarray, np.ndarray, np.ndarray] = return_bayer_indices(
+        (rows, cols), bayer_pattern
     )
 
-    # Red and blue are interpolated as ratios to green rather than directly.
-    # Colour ratios vary far more smoothly across a scene than raw radiance, so
-    # interpolating the ratio and then re-multiplying by green keeps the edges
-    # that green resolves instead of blurring them.
-    full_channels: list[np.ndarray] = []
-    for channel_mask, channel_samples in ((red_mask, red_samples), (blue_mask, blue_samples)):
-        # Saturated samples become NaN so they are excluded from the fit.
-        channel_values: np.ndarray = np.where(
-            channel_mask & np.isinf(radiance_map), np.nan, radiance_map
-        )
+    # 1. Interpolate Green channel first to act as the spatial luminance guide.
+    # Green is sampled twice as densely as red or blue, so it carries the most
+    # spatial detail.
+    full_grid_g: np.ndarray = _interpolate_channel(radiance_map, rgb_idx[1], (rows, cols))
 
-        # Divide by the green guide, offset to keep the division finite.
-        with np.errstate(divide="ignore", invalid="ignore"):
-            ratios: np.ndarray = channel_values / (full_green + 1e-6)
+    # 2. Interpolate Red and Blue channels using the Ratio-Corrected approach.
+    # This interpolates the R/G and B/G ratios, then multiplies by the full Green channel.
+    full_grid_r: np.ndarray = _interpolate_ratio_channel(
+        radiance_map, rgb_idx[0], full_grid_g, (rows, cols)
+    )
+    full_grid_b: np.ndarray = _interpolate_ratio_channel(
+        radiance_map, rgb_idx[2], full_grid_g, (rows, cols)
+    )
 
-        # Interpolate the ratio field, then convert back to radiance.
-        full_ratio: np.ndarray = _interpolate_bayer_channel(
-            ratios, channel_mask, channel_samples, radiance_map
-        )
-        full_channel: np.ndarray = full_ratio * full_green
-
-        # Multiplying by green can wash out the Inf markers, so restore them.
-        full_channel[channel_mask & np.isinf(radiance_map)] = np.inf
-        full_channels.append(full_channel)
-
-    # Stack the channels into one RGB radiance image.
-    return np.stack((full_channels[0], full_green, full_channels[1]), axis=-1)
+    # Assemble into a rows x cols x 3 matrix (R, G, B).
+    return np.stack((full_grid_r, full_grid_g, full_grid_b), axis=-1)
 
 
 def demosaic_radiance_map_rcd(radiance_map_or_buffer: np.ndarray,
                               bayer_pattern: str="BGGR",
                               visualize_results: bool=False
                              ) -> np.ndarray | tuple[np.ndarray, object]:
-    """Demosaic one Bayer radiance map or a buffer using RCD interpolation.
+    """Demosaic a Bayer-pattern radiance map into a 3-D RGB image.
 
-    This is the Python equivalent of MATLAB ``demosaicRadianceMapRCD``.
+    This is the Python equivalent of MATLAB ``demosaicRadianceMapRCD``. It
+    takes a 2-D radiance map with a specified Bayer pattern and returns a
+    ``rows x cols x 3`` array containing the interpolated Red, Green, and Blue
+    channels using a Ratio-Corrected Demosaicing (RCD) algorithm.
+
+    Pixels assigned an ``Inf`` value in the input retain their ``Inf`` value in
+    their respective output channel after demosaicing.
+
+    MATLAB handles one map. A ``(frames, rows, cols)`` buffer is accepted here
+    and each frame is demosaiced independently.
 
     Args:
         radiance_map_or_buffer: Bayer radiance map shaped ``(rows, cols)`` or a
