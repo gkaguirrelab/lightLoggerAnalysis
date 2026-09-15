@@ -164,6 +164,7 @@ function [success, spectral_reconstruction_calibration_metadata] = collect_spect
                 end
 
                 spectral_reconstruction_calibration_metadata.completed_measurements(nn, settings_idx, measurement_idx) = true;
+                pause(2);
             end
         end
 
