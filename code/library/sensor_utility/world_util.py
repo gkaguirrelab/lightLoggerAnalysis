@@ -257,73 +257,22 @@ WORLD_AGC_DISCRETE_STATES: dict[str, dict[str, int | float]] = PyAGC.retrieve_di
 # timestamp column before it
 WORLD_AGC_METADATA_COLS: tuple = ("cameraAgain", "AGCDgain", "cameraExposure", "AGCAgain", "AGCExposure")
 
-def return_bayer_indices(image_shape: tuple[int, int] | np.ndarray,
-                         bayer_pattern: str="BGGR"
-                        ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Return the red, green, and blue sample coordinates of a Bayer frame.
-
-    This is the Python equivalent of MATLAB ``returnBayerIndices``. MATLAB
-    returns column vectors of linear indices; this returns the same samples in
-    the same order as ``(n, 2)`` arrays of ``(row, column)``.
-
-    The order is part of the contract. MATLAB concatenates green as
-    ``[idxG1(:); idxG2(:)]``, which is deliberately not sorted, and
-    ``scatteredInterpolant`` resolves equidistant nearest-neighbour ties toward
-    the highest input index. Re-sorting these samples would therefore change the
-    values extrapolated outside the convex hull.
-
-    Args:
-        image_shape: The ``(rows, cols)`` shape of the raw Bayer frame.
-        bayer_pattern: The sensor's Bayer layout.
-
-    Returns:
-        ``(idx_r, idx_g, idx_b)``, each an ``(n, 2)`` array of row/column pairs.
-
-    Raises:
-        ValueError: If the Bayer pattern is not one of the four supported layouts.
-    """
-    rows, cols = int(image_shape[0]), int(image_shape[1])
-
-    def sample_block(row_start: int, col_start: int) -> np.ndarray:
-        """Return one parity block, ordered the way MATLAB's idx(...)(:) is."""
-        # Every second row and every second column, starting at this parity.
-        block_rows: np.ndarray = np.arange(row_start, rows, 2)
-        block_cols: np.ndarray = np.arange(col_start, cols, 2)
-
-        # MATLAB flattens a matrix column-major, so the column index advances
-        # slowest and the row index advances fastest.
-        return np.column_stack((np.tile(block_rows, block_cols.size),
-                                np.repeat(block_cols, block_rows.size)))
-
-    # Assign each of the four Bayer positions to a colour, matching the switch
-    # statement in returnBayerIndices.m.
-    pattern: str = str(bayer_pattern).upper()
-    if(pattern == "BGGR"):
-        idx_b, idx_g1, idx_g2, idx_r = sample_block(0, 0), sample_block(0, 1), sample_block(1, 0), sample_block(1, 1)
-    elif(pattern == "RGGB"):
-        idx_r, idx_g1, idx_g2, idx_b = sample_block(0, 0), sample_block(0, 1), sample_block(1, 0), sample_block(1, 1)
-    elif(pattern == "GRBG"):
-        idx_g1, idx_r, idx_b, idx_g2 = sample_block(0, 0), sample_block(0, 1), sample_block(1, 0), sample_block(1, 1)
-    elif(pattern == "GBRG"):
-        idx_g1, idx_b, idx_r, idx_g2 = sample_block(0, 0), sample_block(0, 1), sample_block(1, 0), sample_block(1, 1)
-    else:
-        raise ValueError(f"Unknown Bayer pattern: {bayer_pattern}")
-
-    # Green is sampled at two positions per Bayer cell, so its two blocks are
-    # concatenated in the order MATLAB concatenates them.
-    return idx_r, np.vstack((idx_g1, idx_g2)), idx_b
-
-
-# The world camera is a BGGR sensor, so resolve its Bayer sample locations once
-# at import. These are the same coordinates return_bayer_indices produces for
-# any frame of this shape, kept as constants because the world frame size is
-# fixed and several pipeline stages index with them on every frame.
-WORLD_R_PIXELS, WORLD_G_PIXELS, WORLD_B_PIXELS = (
-    indices.astype(np.uint64) for indices in return_bayer_indices(WORLD_FRAME_SHAPE, "BGGR")
-)
-
-# Label every pixel with the index of its colour: 0 for red, 1 for green, 2 for blue.
 WORLD_RGB_MASK: np.ndarray = np.zeros(WORLD_FRAME_SHAPE, dtype=np.uint8)
+WORLD_R_PIXELS: np.ndarray = np.array([(r, c)
+                                       for r in range(WORLD_FRAME_SHAPE[0])
+                                       for c in range(WORLD_FRAME_SHAPE[1])
+                                       if(r % 2 != 0 and c % 2 != 0)],
+                                      dtype=np.uint64)
+WORLD_G_PIXELS: np.ndarray = np.array([(r, c)
+                                       for r in range(WORLD_FRAME_SHAPE[0])
+                                       for c in range(WORLD_FRAME_SHAPE[1])
+                                       if((r % 2 == 0 and c % 2 != 0) or (r % 2 != 0 and c % 2 == 0))],
+                                      dtype=np.uint64)
+WORLD_B_PIXELS: np.ndarray = np.array([(r, c)
+                                       for r in range(WORLD_FRAME_SHAPE[0])
+                                       for c in range(WORLD_FRAME_SHAPE[1])
+                                       if(r % 2 == 0 and c % 2 == 0)],
+                                      dtype=np.uint64)
 for idx, pixel_indices in enumerate((WORLD_R_PIXELS, WORLD_G_PIXELS, WORLD_B_PIXELS)):
     WORLD_RGB_MASK[pixel_indices[:, 0], pixel_indices[:, 1]] = idx
 
@@ -864,6 +813,134 @@ def linearize_camera_responsivity(image_or_video: np.ndarray,
     return dst
 
 
+def _sort_samples_column_major(pixel_locations: np.ndarray) -> np.ndarray:
+    """Reorder ``(row, column)`` pairs the way MATLAB's ``idx(...)(:)`` orders them.
+
+    The module constants list their pixels row by row, because they are built by
+    looping over rows on the outside and columns on the inside. MATLAB instead
+    flattens a matrix column by column, so its first few red samples run down
+    column 2 before moving to column 4.
+    """
+    rows: np.ndarray = pixel_locations[:, 0]
+    cols: np.ndarray = pixel_locations[:, 1]
+
+    # np.lexsort treats its LAST key as the primary one, so this sorts by
+    # column first and then by row within each column, which is exactly what
+    # reading a matrix down its columns produces.
+    return pixel_locations[np.lexsort((rows, cols))]
+
+
+def _bayer_pixel_locations(image_shape: tuple[int, int],
+                           bayer_pattern: str
+                          ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Build row-major red, green, and blue pixel lists for any frame and pattern.
+
+    This is the general-case equivalent of the ``WORLD_*_PIXELS`` constants,
+    which only cover a BGGR sensor at ``WORLD_FRAME_SHAPE``. The output is in
+    the same row-major form as those constants, so both feed the same reorder.
+    """
+    rows, cols = int(image_shape[0]), int(image_shape[1])
+
+    # Name the colour sitting at each of the four positions in the 2x2 Bayer
+    # cell, indexed as [row parity][column parity].
+    layouts: dict[str, tuple[tuple[str, str], tuple[str, str]]] = {
+        "BGGR": (("B", "G"), ("G", "R")),
+        "RGGB": (("R", "G"), ("G", "B")),
+        "GRBG": (("G", "R"), ("B", "G")),
+        "GBRG": (("G", "B"), ("R", "G")),
+    }
+    if(str(bayer_pattern).upper() not in layouts):
+        raise ValueError(f"Unknown Bayer pattern: {bayer_pattern}")
+
+    # Label every pixel of the frame with its colour letter by looking up the
+    # layout using that pixel's row and column parity.
+    row_indices, col_indices = np.indices((rows, cols))
+    labels: np.ndarray = np.asarray(layouts[str(bayer_pattern).upper()])[row_indices % 2, col_indices % 2]
+
+    # np.argwhere walks the frame row by row, matching how the constants list
+    # their pixels.
+    return tuple(np.argwhere(labels == channel).astype(np.uint64) for channel in "RGB")
+
+
+def return_bayer_indices(image_shape: tuple[int, int] | np.ndarray | None=None,
+                         bayer_pattern: str="BGGR"
+                        ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return red, green, and blue sample coordinates in MATLAB's sample order.
+
+    This is the Python equivalent of MATLAB ``returnBayerIndices``. MATLAB
+    returns column vectors of linear indices; this returns the same samples,
+    in the same order, as ``(n, 2)`` arrays of ``(row, column)``.
+
+    For the world camera this is a thin wrapper over the ``WORLD_R_PIXELS``,
+    ``WORLD_G_PIXELS`` and ``WORLD_B_PIXELS`` constants. Those constants list
+    their pixels row by row; MATLAB lists them column by column, so the only
+    work done here is putting them into MATLAB's order.
+
+    Why the order matters, and why it cannot simply be sorted:
+
+    * MATLAB reads a matrix down its columns, so ``idx(2:2:end, 2:2:end)(:)``
+      gives every red pixel of column 2, then every red pixel of column 4, and
+      so on. Sorting by column then row reproduces that.
+    * Green is the exception. MATLAB returns it as ``[idxG1(:); idxG2(:)]``,
+      the two green positions of the Bayer cell as two separate blocks, one
+      after the other. That is deliberately not sorted overall, so green has to
+      be split by row parity and each block sorted on its own.
+
+    This matters because ``scatteredInterpolant`` resolves a tie between two
+    equally close samples by taking the one that came later in its input. Feed
+    the samples in a different order and every value extrapolated outside the
+    convex hull of the samples can change.
+
+    Args:
+        image_shape: The ``(rows, cols)`` shape of the raw Bayer frame. Defaults
+            to the world camera frame shape.
+        bayer_pattern: The sensor's Bayer layout.
+
+    Returns:
+        ``(idx_r, idx_g, idx_b)``, each an ``(n, 2)`` array of row/column pairs
+        in MATLAB's sample order.
+
+    Raises:
+        ValueError: If the Bayer pattern is not one of the four supported layouts.
+    """
+    # Default to the world camera frame, which is what the constants describe.
+    if(image_shape is None):
+        image_shape = WORLD_FRAME_SHAPE
+
+    # Reuse the precomputed constants when the caller is asking about the world
+    # camera, and fall back to building the lists only for another sensor or
+    # another frame size. Copy so that a caller reordering the result below can
+    # never write through to the module constants.
+    describes_world_camera: bool = (
+        int(image_shape[0]) == int(WORLD_FRAME_SHAPE[0])
+        and int(image_shape[1]) == int(WORLD_FRAME_SHAPE[1])
+        and str(bayer_pattern).upper() == "BGGR"
+    )
+    if(describes_world_camera):
+        red, green, blue = WORLD_R_PIXELS.copy(), WORLD_G_PIXELS.copy(), WORLD_B_PIXELS.copy()
+    else:
+        red, green, blue = _bayer_pixel_locations(image_shape, bayer_pattern)
+
+    # Red and blue each occupy a single position in the Bayer cell, so reading
+    # them down the columns is all MATLAB does.
+    idx_r: np.ndarray = _sort_samples_column_major(red)
+    idx_b: np.ndarray = _sort_samples_column_major(blue)
+
+    # Green occupies two positions, and MATLAB keeps them as two blocks rather
+    # than interleaving them. In every supported pattern the first green block
+    # sits on an even row of the cell and the second on an odd row, so splitting
+    # on row parity recovers MATLAB's G1 and G2.
+    green_block_one: np.ndarray = green[green[:, 0] % 2 == 0]
+    green_block_two: np.ndarray = green[green[:, 0] % 2 == 1]
+
+    # Sort each block down its own columns, then lay the first block ahead of
+    # the second, matching MATLAB's [idxG1(:); idxG2(:)].
+    idx_g: np.ndarray = np.vstack((_sort_samples_column_major(green_block_one),
+                                   _sort_samples_column_major(green_block_two)))
+
+    return idx_r, idx_g, idx_b
+
+
 def _scattered_interpolant(sample_x: np.ndarray,
                            sample_y: np.ndarray,
                            sample_values: np.ndarray,
@@ -874,6 +951,16 @@ def _scattered_interpolant(sample_x: np.ndarray,
     MATLAB builds the interpolant and then evaluates it over the full pixel
     grid with ``F(X, Y)``. Both steps happen here, so this returns the grid
     directly rather than a callable.
+
+    What the MATLAB call does, and therefore what this reproduces:
+
+    * It triangulates the scattered sample points, splitting the plane into
+      triangles whose corners are samples (a Delaunay triangulation).
+    * For a query inside a triangle, the value is a weighted blend of that
+      triangle's three corners. That is the ``'linear'`` method.
+    * A query outside the outer boundary of all the samples sits in no
+      triangle, so it instead copies its single closest sample. That is the
+      ``'nearest'`` extrapolation method.
 
     Args:
         sample_x: One-based column coordinate of each sample.
@@ -938,6 +1025,44 @@ def _scattered_interpolant(sample_x: np.ndarray,
     return interpolated.reshape(rows, cols)
 
 
+# ---------------------------------------------------------------------------
+# How the imputation works, in plain terms
+#
+# The problem. A pixel that blew out sits at the sensor ceiling and a pixel
+# that saw nothing sits on the floor. Either way the true radiance was lost:
+# all we know is that it was "at least this bright" or "at most this dim". The
+# linearization stage marks those pixels Inf and 0 respectively. This function
+# replaces them with a best estimate of what they would have read.
+#
+# The idea. Colour channels are correlated. If a red pixel blew out but the
+# green and blue around it are still valid, those neighbours say a lot about
+# how bright red must have been. So the estimate is built by conditioning on
+# whichever other channels survived at that pixel.
+#
+# The four steps below:
+#
+#   1. Every pixel physically measures only ONE colour, because of the Bayer
+#      filter. Interpolate each channel across the whole frame so that every
+#      pixel carries an estimate of all three colours. That gives us something
+#      to condition on. This grid is rgb_map.
+#
+#   2. Fit a 3-D Gaussian (a mean vector and a 3x3 covariance) to log RGB over
+#      the pixels whose three channels are all valid. This is the prior: it
+#      captures what colours this particular scene tends to contain, and how
+#      the channels move together. Logs are used because radiance spans orders
+#      of magnitude and is far closer to Gaussian once logged.
+#
+#   3. Record the brightest and dimmest value actually observed in each
+#      channel. A ceiling pixel must be at least as bright as the brightest
+#      thing we did manage to measure; a floor pixel at most as dim as the
+#      dimmest. These become the bounds in step 4.
+#
+#   4. For each ruined pixel, condition the prior on its surviving channels.
+#      That yields a mean and variance for the missing channel. But we also
+#      know the answer lies beyond the step-3 bound, so the estimate is the
+#      mean of that Gaussian restricted to the far side of the bound, which
+#      has a closed form. Exponentiate to get back to linear sensor units.
+# ---------------------------------------------------------------------------
 def _impute_pixel_values_single(radiance_map: np.ndarray,
                                 bayer_pattern: str
                                ) -> np.ndarray:
@@ -1041,29 +1166,49 @@ def _impute_pixel_values_single(radiance_map: np.ndarray,
         active_impute_indices: np.ndarray = np.argwhere(target_mask & bayer_target_mask)
 
         for pixel_row, pixel_col in active_impute_indices:
-            # Condition on whichever of the other two channels are known here.
-            # A channel is known only if its log value is finite, which rules
-            # out a neighbour that is itself at the ceiling or on the floor.
+            # Work out which of the other two channels survived at this pixel,
+            # because those are the evidence we get to condition on. A channel
+            # counts as known only if its log is finite: log(0) is -Inf for a
+            # floor sample and log(Inf) is +Inf for a ceiling one, so this test
+            # rejects a neighbour that is itself ruined. The target channel is
+            # excluded because it is the thing we are trying to estimate.
             valid_k_mask: np.ndarray = np.isfinite(log_fixed_pixels[pixel_row, pixel_col])
             valid_k_mask[c_target] = False
             valid_k_cols: np.ndarray = np.flatnonzero(valid_k_mask)
 
             if(valid_k_cols.size > 0):
-                # Standard Gaussian conditioning of the target channel on the
-                # known ones. The ridge term keeps the small covariance block
-                # invertible when two channels move together.
+                # Condition the 3-D prior on the channels we still have. This
+                # is the textbook Gaussian conditioning formula: given a joint
+                # Gaussian over (target, known), observing the known part
+                # shifts the target's mean and shrinks its variance.
+                #
+                #   mu_k   the prior means of the known channels
+                #   s_k    covariance among the known channels
+                #   s_sk   covariance between the target and the known ones
+                #   k      this pixel's actual log values for the known channels
                 mu_k: np.ndarray = mu[valid_k_cols]
                 s_k: np.ndarray = covariance[np.ix_(valid_k_cols, valid_k_cols)]
                 s_sk: np.ndarray = covariance[c_target, valid_k_cols]
+
+                # The ridge term keeps this invertible. Two channels of a real
+                # scene often move almost in lockstep, which makes s_k close to
+                # singular, and inverting it unaided would blow up.
                 s_k_inv: np.ndarray = np.linalg.inv(s_k + 1e-6 * np.eye(valid_k_cols.size))
                 k: np.ndarray = log_fixed_pixels[pixel_row, pixel_col, valid_k_cols]
 
-                # Shift the prior mean by how far the known channels sit from
-                # their own means, and subtract the variance they explain.
+                # Start from the prior mean, then slide it by however far the
+                # known channels sit from their own means. A pixel whose green
+                # is unusually bright drags the red estimate up with it.
                 mu_xs: float = float(mu[c_target] + s_sk @ s_k_inv @ (k - mu_k))
+
+                # Knowing the neighbours explains away part of the target's
+                # spread, so subtract that from the prior variance. What is
+                # left is the uncertainty that remains after the evidence.
                 s_xs: float = float(covariance[c_target, c_target] - s_sk @ s_k_inv @ s_sk.T)
             else:
-                # Nothing to condition on, so fall back to the scene-wide prior.
+                # Both neighbours are ruined too, which happens in the middle of
+                # a large blown-out region. With no evidence to condition on,
+                # fall back to the scene-wide prior for this channel.
                 mu_xs = float(mu[c_target])
                 s_xs = float(covariance[c_target, c_target])
 
@@ -1071,29 +1216,50 @@ def _impute_pixel_values_single(radiance_map: np.ndarray,
             s_xs = max(s_xs, 1e-8)
             std_xs: float = np.sqrt(s_xs)
 
+            # We now have a Gaussian belief about this pixel's log radiance.
+            # The final piece of information is the bound: the sensor told us
+            # the true value lies beyond it. So the answer is the mean of that
+            # Gaussian restricted to the far side of the bound, which is the
+            # standard truncated-normal expectation
+            #
+            #     E[X | X > bound] = mean + std * phi(z) / (1 - Phi(z))
+            #
+            # where z is the bound in standard deviations, phi is the normal
+            # density and Phi its cumulative. The floor case is the mirror
+            # image, subtracting instead of adding.
             if(np.isinf(radiance_map[pixel_row, pixel_col])):
-                # A ceiling pixel is known to be brighter than the observed
-                # maximum, so take the mean of the truncated tail above it.
+                # Ceiling pixel: the truth is brighter than anything we measured.
                 z_score: float = (s_log[c_target] - mu_xs) / std_xs
+
+                # Probability the prior assigns to being above the bound.
                 tail: float = float(1 - ndtr(z_score))
                 if(tail < 1e-15):
-                    # A vanishing tail makes the ratio below meaningless.
+                    # The prior says being this bright is essentially
+                    # impossible, so the ratio below is numerically
+                    # meaningless. Pin the estimate to the bound itself.
                     expected_val_log: float = float(s_log[c_target])
                 else:
+                    # Normal density at the bound, scaled by the width.
                     numerator_term: float = (std_xs / sqrt_two_pi) * np.exp(-(z_score ** 2) / 2)
+
+                    # Step upward from the mean into the surviving tail.
                     expected_val_log = mu_xs + numerator_term / tail
             else:
-                # A floor pixel is known to be dimmer than the observed
-                # minimum, so take the mean of the truncated tail below it.
+                # Floor pixel: the truth is dimmer than anything we measured.
                 z_score = (f_log[c_target] - mu_xs) / std_xs
+
+                # Probability the prior assigns to being below the bound.
                 tail = float(ndtr(z_score))
                 if(tail < 1e-15):
                     expected_val_log = float(f_log[c_target])
                 else:
                     numerator_term = (std_xs / sqrt_two_pi) * np.exp(-(z_score ** 2) / 2)
+
+                    # Step downward from the mean into the surviving tail.
                     expected_val_log = mu_xs - numerator_term / tail
 
-            # Return from log space to linear sensor units.
+            # Everything above happened in log space, so undo the log to get
+            # back to the linear sensor units the rest of the pipeline expects.
             raw_fixed[pixel_row, pixel_col] = np.exp(expected_val_log)
 
     return raw_fixed
@@ -1278,6 +1444,30 @@ def _interpolate_ratio_channel(radiance_map: np.ndarray,
     return full_grid
 
 
+# ---------------------------------------------------------------------------
+# How the ratio-corrected demosaicing works, in plain terms
+#
+# The problem. Because of the Bayer filter each pixel measured only one colour.
+# Demosaicing fills in the other two so that every pixel has a full RGB triple.
+#
+# The naive approach interpolates each channel on its own. That blurs edges,
+# because red and blue are sampled at only a quarter of the pixels each and so
+# carry very little spatial detail on their own.
+#
+# The RCD idea. Green is sampled at half of all pixels, twice as densely as red
+# or blue, so green is the sharpest record of where the edges in the scene are.
+# Meanwhile the RATIO of red to green varies slowly and smoothly across a
+# scene, even across an edge, because an edge usually changes brightness rather
+# than hue. So instead of interpolating red directly:
+#
+#   1. Interpolate green across the whole frame. This is the guide.
+#   2. At each red sample, form the ratio red / green.
+#   3. Interpolate that smooth ratio field across the whole frame.
+#   4. Multiply back by the full green guide to recover red everywhere.
+#
+# Red inherits its detail from green, which actually resolved it, while the
+# ratio supplies the colour. Blue is handled identically.
+# ---------------------------------------------------------------------------
 def _demosaic_radiance_map_rcd_single(radiance_map: np.ndarray,
                                       bayer_pattern: str
                                      ) -> np.ndarray:
