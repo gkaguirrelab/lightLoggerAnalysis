@@ -5,6 +5,7 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+*scratch*
 API-tokens/
 /code/library/matlabIO/python_libraries/__pycache__/video_io.cpython-311.pyc
 *.mp4
@@ -12,3 +13,6 @@ code/analyzePupilData/*_timeseriesData/
 
 # Local exploratory notebook for locating example world-camera frames.
 /data/exampleWorldCameraImages/find_DGain.ipynb
+
+# Generated numeric copy of the ASM7341 spectral-sensitivity data.
+/data/ASM7341_spectralSensitivity_numeric.mat
