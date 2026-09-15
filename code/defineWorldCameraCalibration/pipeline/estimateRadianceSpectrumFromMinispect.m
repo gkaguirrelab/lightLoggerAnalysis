@@ -1,7 +1,7 @@
 function [spectralRadiance,S,fVal,fitErrors] = estimateRadianceSpectrumFromMinispect(minispectValues)
-% Spectral Reconstruction from 9-Channel AS7341 Sensor using Tikhonov Regularization
-% This function estimates the mean environmental radiance from the
-% minispect values
+% Spectral Reconstruction from 9-Channel AS7341 Sensor using Tikhonov
+% Regularization This function estimates the mean environmental radiance
+% from the minispect values
 
 showPlots = false;
 

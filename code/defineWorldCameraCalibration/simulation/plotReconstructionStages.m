@@ -5,7 +5,7 @@ nStages = length(imageStages);
 
 % Stage labels (we may or may not have the source, depending upon whether
 % we are working with actual data or a simulation)
-stages = {'raw','linear','impute','flat','equalRGB','radiance','demosaic'};
+stages = {'raw','linear','impute','flat','equalRGB','radiance','source'};
 
 % Plot colors for the histograms
 channelColor = {'r','g','b'};
