@@ -1,26 +1,7 @@
-% This script derives the multiplicative adjustments that should be applied
-% to the R, G, and B channels so that the sensor values reflect the
-% radiometric power of the light source, correcting for the differing peak
-% transmission efficiencies of the Bayer filters.
-%
-% The PR670 was used to measure the SPD of a cloudy sky, at the same time
-% that the IMX219 camera was used to collect images of the sky. We
-% separately obtained the tabular spectral sensitivity functions of the R,
-% G, and B channels of the camera chip.
-%
-% These measurements are processed below to yield the needed corrections.
+% Validation
 
 % Housekeeping
 clear
-
-% Load the data for the "close" camera acquisition of the color checker 
-dataFileName = fullfile(...
-    tbLocateProjectSilent('lightLoggerAnalysis'),...
-    'data',...
-    'macbethColorCheck',...
-    'lightLogger',...
-    'close_AGCandMS_01.mat');
-load(dataFileName,'worldFrame','AGCSettings');
 
 % Get the list of spectral radiometric measurements of checks
 dirName = fullfile(...
@@ -37,143 +18,78 @@ for ii = 1:length(fileList)
     load(fileName,'measurement','S')
     myIndex = int32(sscanf(fileList(ii).name, 'Index-%d'));
     [col, row] = ind2sub([6 4], myIndex);
-    measuredSpectra{col, row} = measurement;
+    spectralRadiance{col, row} = mean(measurement,1);
 end
+spectralRadianceS = S;
 
+% Get the table of reflectance spectra of the macbeth color checker
+[spectralReflectance,spectralReflectanceS] = loadMacbethReflectance();
 
-% Load the channel spectral sensitivity functions. This is a table with the
-% first column providing the wavelength support.
-dataFileName = fullfile(...
-    tbLocateProjectSilent('lightLoggerAnalysis'),...
-    'data',...
-    'IMX219_spectralSensitivity.mat');
-load(dataFileName,'T');
+% Define the common wavelength domain (380 to 730 nm with 2 nm spacing).
+% Number of samples: (730 - 380)/2 + 1 = 176 samples.
+commonS = [380, 2, 176]; 
 
-% Identify the location of the IMX219 image(s) of the cloudy sky.
-dataFileName = fullfile(...
-    tbLocateProjectSilent('lightLoggerAnalysis'),...
-    'data',...
-    'radiometricCorrectionRGB',...
-    'rawFrames',...
-    '*.tiff');
-fileSet = dir(dataFileName);
+% Initialize an array to hold the estimated illuminant spectrum from each measured patch
+illuminantEstimates = [];
 
-% Define a crop region from these images that includes just the sky.
-cropRegionLRTB = [211,410,151,300];
-cropMask = zeros(480,640);
-cropMask(cropRegionLRTB(3):cropRegionLRTB(4),cropRegionLRTB(1):cropRegionLRTB(2))=1;
+% 1. Estimate the shared illuminant
+for c = 1:6
+    for r = 1:4
+        if ~isempty(spectralRadiance{c, r})
+            % Convert to W/m2/sr/nm and ensure column vector format
+            rad_nm = spectralRadiance{c, r}(:) / 2;
+            ref_patch = spectralReflectance{c, r}(:);
 
-% Prepare to linearize the raw sensor values. To do so, we load the the
-% derived, nonLinearClippingExponent, and then call the linearization
-% function
-paramFileName = fullfile(...
-    tbLocateProjectSilent('lightLoggerAnalysis'),...
-    'derived',...
-    'nonLinearClippingExponent.mat');
-load(paramFileName,'clippingExponent');
+            % Resample both radiance and reflectance to the common wavelength domain
+            rad_common = SplineSpd(SToWls(spectralRadianceS), rad_nm, SToWls(commonS));
+            ref_common = SplineSpd(SToWls(spectralReflectanceS), ref_patch, SToWls(commonS));
 
-% Prepare to correct for the fielding function
-paramFileName = fullfile(...
-    tbLocateProjectSilent('lightLoggerAnalysis'),...
-    'derived',...
-    'flatFieldingFunction.mat');
-load(paramFileName,'correctionMap');
-
-% What is the Bayer pattern in these data?
-bayerPattern = "BGGR";
-
-% Loop through the images
-pixelValsRGB = {[],[],[]};
-for ii = 1:length(fileSet)
-
-    % Load the image
-    fileName = fullfile(fileSet(ii).folder,fileSet(ii).name);
-    I = double(imread(fileName));
-
-    % Linearize
-    linearI = linearizeIMX219SensorCounts(I,clippingExponent);
-
-    % Correct for the fielding function
-    linearFlatI = linearI .* correctionMap;
-
-    % Set values outside the crop zone to nan
-    outside = ~cropMask;
-    linearFlatI(outside)=nan;
-
-    % Obtain the R, G, and B components
-    imageVals = {};
-    [rgbIdx{1}, rgbIdx{2}, rgbIdx{3}] = ...
-        returnBayerIndices(linearFlatI, bayerPattern);
-
-    % Store the valid, non-saturated R, G, and B pixel values in the growing array
-    for cc=1:3
-        theseVals = linearFlatI(rgbIdx{cc});
-
-        % Filter out both NaNs (outside crop region) and Infs (saturated pixels)
-        theseVals = theseVals(isfinite(theseVals));
-
-        pixelValsRGB{cc} = [pixelValsRGB{cc}; theseVals(:)];
+            % Estimate effective illuminant
+            illuminantEstimates(:, end+1) = rad_common ./ ref_common;
+        end
     end
 end
 
-% Take the mean of the pixel values within each channel (R,G,B) across
-% images and pixels within the region of interest
-sensorValues = cellfun(@(x) mean(x),pixelValsRGB);
+% Average across the 5 measured patches
+sharedIlluminant = mean(illuminantEstimates, 2);
 
-% Obtain the relative predicted channel values based upon the cloudy sky
-% SPD. We first need to match up the wavelength support of the two
-% measurements. This is hard-coded at the moment, given that the data
-% inputs are known fixed.
-endIdx = find(T.wls == 780);
-assert(wls(1) == T.wls(1));
-assert(wls(end) == T.wls(endIdx));
-assert(diff(wls(1:2)) == diff(T.wls(1:2)));
+% 2. Predict spectral radiance for unmeasured patches
+for c = 1:6
+    for r = 1:4
+        if isempty(spectralRadiance{c, r})
+            ref_patch = spectralReflectance{c, r}(:);
+            ref_common = SplineSpd(SToWls(spectralReflectanceS), ref_patch, SToWls(commonS));
 
-% Set up a figure
-figure
-plot(wls,radiance,'.k');
-hold on
-xlabel('wavelength [nm]');
-ylabel('radiance [w/m^2/sr/nm]');
-title('SPD of cloudy sky and weighted channel sensitivity functions');
-
-% Loop through the channels
-channelNames = {'red','green','blue'};
-predictedSensorValue = zeros(1,3);
-for ii = 1:3
-    thisChannelSensitivity = T.(channelNames{ii})(1:endIdx);
-    % We use the max-normalized curves as requested
-    thisChannelSensitivityNormed = thisChannelSensitivity ./ max(thisChannelSensitivity);
-    predictedSensorValue(ii) = radiance' * thisChannelSensitivityNormed;
-    plot(T.wls(1:endIdx),thisChannelSensitivityNormed*predictedSensorValue(ii)/100,['-' channelNames{ii}(1)]);
+            % Predict radiance in W/m2/sr/nm, convert back to measurement units (* 2)
+            spectralRadiance{c, r} = (sharedIlluminant .* ref_common) * 2;
+        else
+            rad_nm = spectralRadiance{c, r}(:) / 2;
+            rad_common = SplineSpd(SToWls(spectralRadianceS), rad_nm, SToWls(commonS));
+            spectralRadiance{c, r} = rad_common * 2;
+        end
+    end
 end
 
-% Calculate the radiometric correction that must be applied to the observed
-% sensor values to have them match the predicted sensor values
-radiometricCorrectionRGB = predictedSensorValue ./  sensorValues;
+% Update the radiance S vector to reflect the new common wavelength domain
+spectralRadianceS = commonS;
 
-% Adjust this triplet so that the mean sensor value (across RGB) is
-% unchanged by this operation. Need to account for the twice as numerous G
-% pixels.
-k = 4 / (radiometricCorrectionRGB(1) + 2*radiometricCorrectionRGB(2) + radiometricCorrectionRGB(3));
-radiometricCorrectionRGB = radiometricCorrectionRGB * k;
 
-% Construct a map to apply this correction
-radiometricCorrectionMap = ones(size(I));
-[bayerIdx{1}, bayerIdx{2}, bayerIdx{3}] = returnBayerIndices(radiometricCorrectionMap, bayerPattern);
-for cc = 1:3
-    radiometricCorrectionMap(bayerIdx{cc}) = radiometricCorrectionRGB(cc);
-end
 
-% Report the correction to the console
-fprintf('The absolute radiometric calibration scalar tuple (RGB) is: [%2.4f, %2.4f, %2.4f]\n',radiometricCorrectionRGB);
-
-% Save the radiometric correction to the "derived" directory
-saveFileName = fullfile(...
-    tbLocateProjectSilent('lightLoggerAnalysis'),...
-    'derived',...
-    'radiometricCorrectionRGB.mat');
-readme = ['Created by defineRadiometricWeights.\n'...
-    'radiometricCorrectionRGB -- multiply the (linearized) sensor values by these absolute calibration factors.\n'...
-    'radiometricCorrectionMap -- a map of these absolute corrections that can be applied to an entire image.\n'];
-save(saveFileName,'readme','radiometricCorrectionRGB','radiometricCorrectionMap');
+% UNUSED
+% 
+% % Load the data for the "close" camera acquisition of the color checker 
+% dataFileName = fullfile(...
+%     tbLocateProjectSilent('lightLoggerAnalysis'),...
+%     'data',...
+%     'macbethColorCheck',...
+%     'lightLogger',...
+%     'close_AGCandMS_01.mat');
+% load(dataFileName,'worldFrame','AGCSettings');
+%
+% % Load the world camera channel spectral sensitivity functions. This is a
+% % table with the first column providing the wavelength support.
+% dataFileName = fullfile(...
+%     tbLocateProjectSilent('lightLoggerAnalysis'),...
+%     'data',...
+%     'IMX219_spectralSensitivity.mat');
+% load(dataFileName,'T');
