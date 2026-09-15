@@ -13,16 +13,6 @@ close all
 [radianceModel,radianceModelS] = generateSimulatedLightField();
 visualizeRadianceModel(radianceModel,radianceModelS);
 
-% Derive the minispect values for this radianceModel. We also save the mean
-% spectral radiance of the 
-[minispectValues, meanSpectralRadiance] = estimateMinispectValuesFromRadianceModel(radianceModel, radianceModelS);
-minispectData.AS = minispectValues;
-
-% Obtain the estimate of the mean spectral radiance of the radianceModel
-% from the minispect values so we can compare how well all this worked.
-[spectralRadianceFromMinispect,spectralRadianceFromMinispectS,fVal] = estimateRadianceSpectrumFromMinispect(minispectValues);
-fprintf('RMSE in fitting the minispect values with the estimated spectrum is %2.2f.\n',fVal);
-
 % Find the camera score that would be predicted for this radianceModel.
 % This non-linear search is necessary as the pixel saturation as a function
 % of the camera settings has a non-linear interaction with the calculated
@@ -37,20 +27,54 @@ AGCSettings = cameraScoreToAGCSettings(cameraScore);
 
 % Report the channel energies for the cameraRadianceMap directly, and as
 % seen by the minispect. This was used for debugging
+%{
 channelEnergy = calculateIMX219ChannelRadiantEnergyDirect(cameraRadianceMap);
 fprintf('Total ground truth camera channel energy = %2.2f\n',channelEnergy.red+channelEnergy.green+channelEnergy.blue);
 channelEnergy = calculateIMX219ChannelRadiantEnergyViaMS(radianceModel, radianceModelS);
 fprintf('Total camera channel energy (via minispect) = %2.2f\n',channelEnergy.red+channelEnergy.green+channelEnergy.blue);
+%}
 
 % Reconstruct the radiance map from the image and AGCSettings
-[~,imageStages] = reconstructionPipeline(I,AGCSettings);
-
-% Impute the missing values in the cameraRadianceMapEstimated
-imageStages{end+1} = imputePixelValues(imageStages{end},minispectData);
-cameraRadianceMapEstimated = imageStages{end};
+[cameraRadianceMapEstimated,imageStages] = reconstructionPipeline(I,AGCSettings);
 
 % Save the source radiance map in the end of the imageStages
 imageStages{end+1} = cameraRadianceMap;
+
+% Show the reconstruction stages
+plotReconstructionStages(imageStages)
+
+% Visualize our ability to reconstruct the camera radiance map
+figure
+tiledlayout(1,3)
+nexttile
+surf(cameraRadianceMap, 'EdgeColor', 'none'); colorbar; title('Source'); zlim([0 30]);
+nexttile
+surf(cameraRadianceMapEstimated, 'EdgeColor', 'none'); colorbar; title('Reconstructed'); zlim([0 30]);
+nexttile
+surf(cameraRadianceMapEstimated-cameraRadianceMap, 'EdgeColor', 'none'); colorbar; title('Error');
+
+% Obtain the demosaiced image and show this
+radianceMapDemosaiced = demosaicRadianceMapRCD(imageStages{end});
+
+figure
+logImage = log10(radianceMapDemosaiced);
+logImage = logImage-min(logImage(:));
+logImage = logImage/max(logImage(:));
+imagesc(logImage)
+box off
+axis off
+axis equal
+title('log10 radiance');
+
+% Derive the minispect values for this radianceModel. We also save the mean
+% spectral radiance of the light field
+[minispectValues, meanSpectralRadiance] = estimateMinispectValuesFromRadianceModel(radianceModel, radianceModelS);
+minispectData.AS = minispectValues;
+
+% Obtain the estimate of the mean spectral radiance of the radianceModel
+% from the minispect values so we can compare how well all this worked.
+[spectralRadianceFromMinispect,spectralRadianceFromMinispectS,fVal] = estimateRadianceSpectrumFromMinispect(minispectValues);
+fprintf('RMSE in fitting the minispect values with the estimated spectrum is %2.2f.\n',fVal);
 
 % Visualize how well we did reconstruction the mean spectral radiance of
 % the light field
@@ -63,18 +87,3 @@ xlabel('wavelength [nm]');
 ylabel('Radiance [W/m2/sr/nm]');
 legend({'source','reconstruction'});
 title('Reconstruction of hemifield mean spectral radiance')
-
-% Visualize our ability to reconstruct the camera radiance map
-figure
-tiledlayout(1,4)
-nexttile
-surf(cameraRadianceMap, 'EdgeColor', 'none'); colorbar; title('Source'); zlim([0 30]);
-nexttile
-surf(imageStages{end-2}, 'EdgeColor', 'none'); colorbar; title('Reconstructed'); zlim([0 30]);
-nexttile
-surf(cameraRadianceMapEstimated, 'EdgeColor', 'none'); colorbar; title('Imputed'); zlim([0 30]);
-nexttile
-surf(cameraRadianceMapEstimated-cameraRadianceMap, 'EdgeColor', 'none'); colorbar; title('Error');
-
-% Show the reconstruction stages
-plotReconstructionStages(imageStages)

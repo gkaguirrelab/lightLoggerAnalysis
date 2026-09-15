@@ -1,135 +1,123 @@
-function I = imputePixelValues(I, minispectData, equalizeChannels)
-% This function imputes absolute values for saturated (Inf) or
-% floor (0) pixels by balancing energy across the camera FOV,
-% using the reconstructed spectrum from the ASM7341.
+function rawFixed = imputePixelValues(radianceMap, bayerPattern)
+% Implements a Bayesian estimation of linearized sensor values for pixels
+% at ceiling (Inf) or floor (zero). Based upon Zhang & Brainard approach:
 %
-% If the image contains both Inf and 0 pixels, only the Inf pixels are imputed.
+% Zhang X, Brainard DH. Estimation of saturated pixel values in digital
+% color imaging. Journal of the Optical Society of America A. 2004 Dec
+% 1;21(12):2301-10.
 %
-% Inputs:
-%   I                 - 2D image array
-%   minispectData     - structure containing ASM7341 measurements
-%   equalizeChannels  - logical flag (optional, default = true). 
-%                       If true, pools the total imputable energy across all 
-%                       channels and assigns a uniform radiance value to all 
-%                       saturated pixels. If false, imputes independently per channel.
+% Modified to add imputation of floor values, and to consider the
+% distribution of pixel values in the log transformed space.
+%
 
-if nargin < 3 || isempty(equalizeChannels)
-    equalizeChannels = true;
+if nargin < 2 || isempty(bayerPattern)
+    bayerPattern = "BGGR";
 end
 
-persistent deltaSteradians
-if isempty(deltaSteradians)
-    paramFileName = fullfile(...
-        tbLocateProjectSilent('lightLoggerAnalysis'),...
-        'derived',...
-        'deltaSteradians.mat');
-    load(paramFileName,'deltaSteradians');
+% Interpolate to get cross-channel conditioning data
+[H, W] = size(radianceMap);
+[X, Y] = meshgrid(1:W, 1:H);
+[bayerIdx{1}, bayerIdx{2}, bayerIdx{3}] = returnBayerIndices(radianceMap, bayerPattern);
+
+rgbMap = zeros(H, W, 3);
+for c = 1:3
+    subVal = radianceMap(bayerIdx{c});
+    infMask = isinf(subVal);
+    floorMask = (subVal == 0);
+
+    workSub = subVal;
+    workSub(infMask | floorMask) = NaN;
+
+    validIdx = ~isnan(workSub);
+    subX = X(bayerIdx{c}); subY = Y(bayerIdx{c});
+
+    if any(validIdx(:))
+        F = scatteredInterpolant(subX(validIdx), subY(validIdx), workSub(validIdx), 'linear', 'nearest');
+        rgbMap(:,:,c) = F(X, Y);
+    end
+
+    % Restore Inf and 0 at sub-grid locations so the imputation step can find them
+    channelGrid = rgbMap(:,:,c);
+    channelGrid(bayerIdx{c}(infMask)) = Inf;
+    channelGrid(bayerIdx{c}(floorMask)) = 0;
+    rgbMap(:,:,c) = channelGrid;
 end
 
-persistent cameraT cameraWls cameraS
-if isempty(cameraT)
-    paramFileName = fullfile(...
-        tbLocateProjectSilent('lightLoggerAnalysis'),...
-        'data',...
-        'IMX219_spectralSensitivity.mat');
-    load(paramFileName,'T');
-    cameraT = table2array(T(:,["red" "green" "blue"]))';
-    cameraWls = T.wls;
-    cameraS = WlsToS(cameraWls);
-end
+% Extract Prior Statistics
+pixels = reshape(rgbMap, [], 3);
+validPixels = pixels(~any(isinf(pixels) | pixels == 0, 2), :);
+logValid = log(validPixels);
+mu = mean(logValid, 1)';
+S = cov(logValid);
 
-% Derive an estimate of the environmental SPD from the minispect, and
-% spline this to match the cameraT
-[miniSpectSPD,miniSpectS] = estimateRadianceSpectrumFromMinispect(minispectData.AS);
-miniSpectSPD = SplineRaw(SToWls(miniSpectS),miniSpectSPD,cameraWls);
-
-% Get Bayer indices for the 2D image array to isolate the color channels
-bayerPattern = "BGGR";
-[rgbIdx{1}, rgbIdx{2}, rgbIdx{3}] = returnBayerIndices(I, bayerPattern);
-
-% Determine the global imputation state for the image
-globalHasInf = any(isinf(I(:)));
-
-% Preallocate storage for channel metrics
-totalChannelEnergy = zeros(1, 3);
-unsaturatedChannelEnergy = nan(1, 3);
-imputableChannelEnergy = zeros(1, 3);
-imputeSteradiansArr = zeros(1, 3);
-imputeMasks = cell(1, 3);
-
-% Loop through each color channel (R=1, G=2, B=3) to collect metrics
-for cc = 1:3
-
-    % Extract values and solid angles for this specific color channel
-    thisChannelIdx = rgbIdx{cc};
-    channelVals = I(thisChannelIdx);
-    channelSteradians = deltaSteradians(thisChannelIdx);
-
-    % Define the target mask based on the global state
-    if globalHasInf
-        % If there is a mixture (or only Inf), we strictly target Inf pixels.
-        % Any 0 values will remain 0 and contribute 0 to the valid partition.
-        imputeMask = isinf(channelVals);
+s_log = zeros(3, 1); f_log = zeros(3, 1);
+for c = 1:3
+    validC = pixels(pixels(:, c) > 0 & ~isinf(pixels(:, c)), c);
+    if isempty(validC)
+        s_log(c) = log(1.0);
+        f_log(c) = log(1e-4);
     else
-        % If there are no Inf pixels, we target the floor (0) pixels.
-        imputeMask = (channelVals == 0);
-    end
-    imputeMasks{cc} = imputeMask;
-
-    % What are the steradians of the to-be-imputed pixels?
-    imputeSteradians = sum(channelSteradians(imputeMask));
-    imputeSteradiansArr(cc) = imputeSteradians;
-
-    % Do we have any pixels to impute in this channel?
-    if imputeSteradians > 0
-
-        % The normed spectral sensitivity for this IMX219 channel
-        thisSensitivity = cameraT(cc,:);
-        thisSensitivityNormed = thisSensitivity ./ max(thisSensitivity);
-
-        % The total energy expected for this IMX219 channel based upon the mean
-        % radiance spectrum as observed by the minispect
-        channelRadianceEst = (thisSensitivityNormed * miniSpectSPD) * cameraS(2);
-        channelSolidAngleSum = sum(channelSteradians);
-        totalChannelEnergy(cc) = channelRadianceEst * channelSolidAngleSum;
-
-        % The energy present in the non-saturated pixels
-        unsaturatedChannelEnergy(cc) = sum(channelVals(~imputeMask) .* channelSteradians(~imputeMask));
-
-        % The energy available for imputation in this channel
-        imputableChannelEnergy(cc) = totalChannelEnergy(cc) - unsaturatedChannelEnergy(cc);
-
+        s_log(c) = log(max(validC));
+        f_log(c) = log(min(validC));
     end
 end
 
-if equalizeChannels
-    % Estimate overall imputable energy and divide equally across all saturated pixels
-    totalExpectedEnergy = sum(totalChannelEnergy);
-    totalUnsaturatedEnergy = sum(unsaturatedChannelEnergy, 'omitnan');
-    totalImputableEnergy = totalExpectedEnergy - totalUnsaturatedEnergy;
-    totalImputableSteradians = sum(imputeSteradiansArr);
+% Targeted Imputation and Direct Remosaicing
+rawFixed = radianceMap;
+logFixedPixels = log(pixels);
 
-    if totalImputableSteradians > 0
-        uniformImputableEnergyPerPixel = totalImputableEnergy / totalImputableSteradians;
-        for cc = 1:3
-            if imputeSteradiansArr(cc) > 0
-                imputeMask = imputeMasks{cc};
-                I(rgbIdx{cc}(imputeMask)) = uniformImputableEnergyPerPixel;
+for cTarget = 1:3
+    targetMask = (isinf(radianceMap) | radianceMap == 0);
+    bayerTargetMask = false(H, W);
+    bayerTargetMask(bayerIdx{cTarget}) = true;
+
+    activeImputeIndices = find(targetMask & bayerTargetMask);
+
+    for pIdx = activeImputeIndices'
+        valid_k_mask = isfinite(logFixedPixels(pIdx, :));
+        valid_k_mask(cTarget) = false;
+        valid_k_cols = find(valid_k_mask);
+
+        if ~isempty(valid_k_cols)
+            muK = mu(valid_k_cols);
+            SK = S(valid_k_cols, valid_k_cols);
+            SSK = S(cTarget, valid_k_cols);
+            SKInv = inv(SK + 1e-6 * eye(length(valid_k_cols)));
+            k = logFixedPixels(pIdx, valid_k_cols)';
+
+            muXs = mu(cTarget) + SSK * SKInv * (k - muK);
+            Sxs = S(cTarget, cTarget) - SSK * SKInv * SSK';
+        else
+            muXs = mu(cTarget);
+            Sxs = S(cTarget, cTarget);
+        end
+
+        Sxs = max(Sxs, 1e-8);
+        stdXs = sqrt(Sxs);
+
+        if isinf(radianceMap(pIdx))
+            zScore = (s_log(cTarget) - muXs) / stdXs;
+            Z = 1 - normcdf(zScore);
+
+            if Z < 1e-15
+                expectedVal_log = s_log(cTarget);
+            else
+                numeratorTerm = (stdXs / sqrt(2 * pi)) * exp(-(zScore^2) / 2);
+                expectedVal_log = muXs + numeratorTerm / Z;
+            end
+        else
+            zScore = (f_log(cTarget) - muXs) / stdXs;
+            Z = normcdf(zScore);
+
+            if Z < 1e-15
+                expectedVal_log = f_log(cTarget);
+            else
+                numeratorTerm = (stdXs / sqrt(2 * pi)) * exp(-(zScore^2) / 2);
+                expectedVal_log = muXs - numeratorTerm / Z;
             end
         end
-    end
-else
-    % Impute each channel independently (original behavior)
-    for cc = 1:3
-        imputeSteradians = imputeSteradiansArr(cc);
-        if imputeSteradians > 0
-            imputeMask = imputeMasks{cc};
-            imputableChannelEnergyPerPixel = imputableChannelEnergy(cc) / imputeSteradians;
-            I(rgbIdx{cc}(imputeMask)) = imputableChannelEnergyPerPixel;
-        end
+
+        rawFixed(pIdx) = exp(expectedVal_log);
     end
 end
-
-fprintf('Total unsaturated camera energy = %2.2f\n', sum(unsaturatedChannelEnergy, 'omitnan'));
-
 end
