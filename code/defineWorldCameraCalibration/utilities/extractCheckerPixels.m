@@ -15,6 +15,7 @@ function [rawPixelIndices, corners] = extractCheckerPixels(I, camIntrinsicsData,
 %                       check in the raw image I.
 %   corners           - The 4x2 array of [x, y] coordinates used for the grid corners.
 %{
+% These are the corners for the "close" image of the macbeth color checker
 corners = [
   128.6063  103.3571
   530.4668  109.7359

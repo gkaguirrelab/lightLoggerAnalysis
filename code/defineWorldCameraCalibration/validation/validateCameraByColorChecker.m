@@ -13,13 +13,33 @@
 % Housekeeping
 clear
 
-% Load the SPD of the cloudy sky
+% Load the data for the "close" camera acquisition of the color checker 
 dataFileName = fullfile(...
     tbLocateProjectSilent('lightLoggerAnalysis'),...
     'data',...
-    'radiometricCorrectionRGB',...
-    'cloudySkySPD_37degSolarElevation.mat');
-load(dataFileName,'radiance','wls');
+    'macbethColorCheck',...
+    'lightLogger',...
+    'close_AGCandMS_01.mat');
+load(dataFileName,'worldFrame','AGCSettings');
+
+% Get the list of spectral radiometric measurements of checks
+dirName = fullfile(...
+    tbLocateProjectSilent('lightLoggerAnalysis'),...
+    'data',...
+    'macbethColorCheck',...
+    'PR670',...
+    '*.mat');
+fileList = dir(dirName);
+
+% Load the spectral measurements
+for ii = 1:length(fileList)
+    fileName = fullfile(fileList(ii).folder,fileList(ii).name);
+    load(fileName,'measurement','S')
+    myIndex = int32(sscanf(fileList(ii).name, 'Index-%d'));
+    [col, row] = ind2sub([6 4], myIndex);
+    measuredSpectra{col, row} = measurement;
+end
+
 
 % Load the channel spectral sensitivity functions. This is a table with the
 % first column providing the wavelength support.
