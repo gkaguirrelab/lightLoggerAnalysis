@@ -6,6 +6,9 @@ This directory contains calibration inputs, processed calibration measurements, 
 
 Spectral sensitivity functions for the first 10 channels of the "minispect" chip. These values were taken from the spreadsheet "AS7341_Filter_Templates.xlsx" which was supplied by the manufacturer. The values in this table correspond to Figures 18 and 19 of the white paper AMS Datasheet DS000504 "AS7341; 11-Channel Multi-Spectral Digital Sensor; v3-00 • 2020-Jun-25"
 
+## `ColorChecker_RGB_and_spectra.xls`
+Spectral reflectance data for the Macbeth color checker chart, downloaded from https://babelcolor.com/colorchecker.htm
+
 ## `agc_empirical_kernels.mat`
 
 The simulated temporal impulse response of the world-camera automatic gain
@@ -125,3 +128,5 @@ Spectral sensitivity functions for the three channels (RGB) of the IMX camera ch
 Directory that contains measurements used to derive the RGB radiometric correction in `defineRadiometricWeights.m`. This includes `CloudySkySPD_37degSolarElevation.mat`, Geoff's PR670 measurement of the cloudy sky outside Goddard Labs when the sun was at 37° elevation, along with IMX219 cloudy-sky frame material. The source of this cloudy sky measurement and the example frames taken from it can be found in DropBox under `FLIC_data/lightLoggerRadCal/W1P1M1/radiometricCorrectionRGB`. The directory's [`README.md`](radiometricCorrectionRGB/README.md) records the exact temporary-video frame indices used to regenerate the TIFFs.
 
 Raw data location: `FLIC_admin/Equipment/ArduCam B0392 IMX219 Wide Angle M12/radiometricCorrectionRGB`
+
+
