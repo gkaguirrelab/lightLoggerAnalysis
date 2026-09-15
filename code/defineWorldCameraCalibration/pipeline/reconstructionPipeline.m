@@ -57,6 +57,9 @@ if isempty(avgSceneRadiance)
     load(paramFileName, 'avgSceneRadiance', 'cameraScore');
 end
 
+% Change this to be a derived value
+saturationThreshold = 235;
+
 % --- Processing Pipeline Stages ---
 
 % Stage 1: Convert from uint8 to double float
@@ -67,22 +70,36 @@ y = imageStages{1};
 y(y < darkSignal) = darkSignal;
 yPrime = y - darkSignal;
 n = clippingExponent;
-imageStages{2} = yPrime ./ (1 - (yPrime ./ Smax).^n).^(1./n);
 
-% Stage 3: Flat fielding correction
-imageStages{3} = imageStages{2} .* correctionMap;
+% Isolate the raw asymptotic gain multiplier
+asymptoticGain = 1 ./ (1 - (yPrime ./ Smax).^n).^(1./n);
 
-% Stage 4: Radiometric correction RGB
-imageStages{4} = imageStages{3} .* radiometricCorrectionMap;
+% Apply the cohesive gain
+linearized = yPrime .* asymptoticGain;
 
-% Stage 5: Convert to absolute radiance units
+% Flag the unstable non-linear shoulder for Bayesian reconstruction
+linearized(y >= saturationThreshold) = Inf;
+
+imageStages{2} = linearized;
+
+
+% Stage 3: Impute values for ceiling and floor pixels
+imageStages{3} = imputeRawRadianceBayes(imageStages{2});
+
+% Stage 4: Flat fielding correction
+imageStages{4} = imageStages{3} .* correctionMap;
+
+% Stage 5: Radiometric correction RGB
+imageStages{5} = imageStages{4} .* radiometricCorrectionMap;
+
+% Stage 6: Convert to absolute radiance units
 effectiveSetPoint = linearizedSetPoint * meanCorrectionFielding * meanCorrectionRGB;
 thisCameraScore = AGCSettings.exposure * AGCSettings.Again * AGCSettings.Dgain;
 logMeanSceneRadiance = interp1(log10(cameraScore), log10(avgSceneRadiance), log10(thisCameraScore), 'linear');
 meanSceneRadiance = 10.^logMeanSceneRadiance;
-imageStages{5} = (imageStages{4} / effectiveSetPoint) * meanSceneRadiance;
+imageStages{6} = (imageStages{5} / effectiveSetPoint) * meanSceneRadiance;
 
 % Return the final stage as the radiance map
-radianceMap = imageStages{5};
+radianceMap = imageStages{6};
 
 end

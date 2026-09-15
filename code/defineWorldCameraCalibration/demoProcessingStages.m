@@ -17,11 +17,13 @@ load(fileName,'worldFrame','AGCSettings','minispectValue')
 % Reconstruct the radiance image
 [radianceMap,imageStages] = reconstructionPipeline(worldFrame,AGCSettings);
 
-% Bilinear demosaic
-imageStages{end+1} = demosaicRadianceMap(imageStages{end});
+% Demosaic the image
+imageStages{end+1} = demosaicRadianceMapRCD(imageStages{end});
 
-% Impute radiance values for saturated areas
-imageStages{end+1} = imputePixelValueBayes(imageStages{end});
-
+% Display
+figure
 plotReconstructionStages(imageStages)
 
+figure
+imagesc(log10(imageStages{end}))
+title('log10 radiance');
