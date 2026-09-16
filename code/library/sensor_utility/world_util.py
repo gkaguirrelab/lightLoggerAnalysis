@@ -813,134 +813,6 @@ def linearize_camera_responsivity(image_or_video: np.ndarray,
     return dst
 
 
-def _sort_samples_column_major(pixel_locations: np.ndarray) -> np.ndarray:
-    """Reorder ``(row, column)`` pairs the way MATLAB's ``idx(...)(:)`` orders them.
-
-    The module constants list their pixels row by row, because they are built by
-    looping over rows on the outside and columns on the inside. MATLAB instead
-    flattens a matrix column by column, so its first few red samples run down
-    column 2 before moving to column 4.
-    """
-    rows: np.ndarray = pixel_locations[:, 0]
-    cols: np.ndarray = pixel_locations[:, 1]
-
-    # np.lexsort treats its LAST key as the primary one, so this sorts by
-    # column first and then by row within each column, which is exactly what
-    # reading a matrix down its columns produces.
-    return pixel_locations[np.lexsort((rows, cols))]
-
-
-def _bayer_pixel_locations(image_shape: tuple[int, int],
-                           bayer_pattern: str
-                          ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Build row-major red, green, and blue pixel lists for any frame and pattern.
-
-    This is the general-case equivalent of the ``WORLD_*_PIXELS`` constants,
-    which only cover a BGGR sensor at ``WORLD_FRAME_SHAPE``. The output is in
-    the same row-major form as those constants, so both feed the same reorder.
-    """
-    rows, cols = int(image_shape[0]), int(image_shape[1])
-
-    # Name the colour sitting at each of the four positions in the 2x2 Bayer
-    # cell, indexed as [row parity][column parity].
-    layouts: dict[str, tuple[tuple[str, str], tuple[str, str]]] = {
-        "BGGR": (("B", "G"), ("G", "R")),
-        "RGGB": (("R", "G"), ("G", "B")),
-        "GRBG": (("G", "R"), ("B", "G")),
-        "GBRG": (("G", "B"), ("R", "G")),
-    }
-    if(str(bayer_pattern).upper() not in layouts):
-        raise ValueError(f"Unknown Bayer pattern: {bayer_pattern}")
-
-    # Label every pixel of the frame with its colour letter by looking up the
-    # layout using that pixel's row and column parity.
-    row_indices, col_indices = np.indices((rows, cols))
-    labels: np.ndarray = np.asarray(layouts[str(bayer_pattern).upper()])[row_indices % 2, col_indices % 2]
-
-    # np.argwhere walks the frame row by row, matching how the constants list
-    # their pixels.
-    return tuple(np.argwhere(labels == channel).astype(np.uint64) for channel in "RGB")
-
-
-def return_bayer_indices(image_shape: tuple[int, int] | np.ndarray | None=None,
-                         bayer_pattern: str="BGGR"
-                        ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Return red, green, and blue sample coordinates in MATLAB's sample order.
-
-    This is the Python equivalent of MATLAB ``returnBayerIndices``. MATLAB
-    returns column vectors of linear indices; this returns the same samples,
-    in the same order, as ``(n, 2)`` arrays of ``(row, column)``.
-
-    For the world camera this is a thin wrapper over the ``WORLD_R_PIXELS``,
-    ``WORLD_G_PIXELS`` and ``WORLD_B_PIXELS`` constants. Those constants list
-    their pixels row by row; MATLAB lists them column by column, so the only
-    work done here is putting them into MATLAB's order.
-
-    Why the order matters, and why it cannot simply be sorted:
-
-    * MATLAB reads a matrix down its columns, so ``idx(2:2:end, 2:2:end)(:)``
-      gives every red pixel of column 2, then every red pixel of column 4, and
-      so on. Sorting by column then row reproduces that.
-    * Green is the exception. MATLAB returns it as ``[idxG1(:); idxG2(:)]``,
-      the two green positions of the Bayer cell as two separate blocks, one
-      after the other. That is deliberately not sorted overall, so green has to
-      be split by row parity and each block sorted on its own.
-
-    This matters because ``scatteredInterpolant`` resolves a tie between two
-    equally close samples by taking the one that came later in its input. Feed
-    the samples in a different order and every value extrapolated outside the
-    convex hull of the samples can change.
-
-    Args:
-        image_shape: The ``(rows, cols)`` shape of the raw Bayer frame. Defaults
-            to the world camera frame shape.
-        bayer_pattern: The sensor's Bayer layout.
-
-    Returns:
-        ``(idx_r, idx_g, idx_b)``, each an ``(n, 2)`` array of row/column pairs
-        in MATLAB's sample order.
-
-    Raises:
-        ValueError: If the Bayer pattern is not one of the four supported layouts.
-    """
-    # Default to the world camera frame, which is what the constants describe.
-    if(image_shape is None):
-        image_shape = WORLD_FRAME_SHAPE
-
-    # Reuse the precomputed constants when the caller is asking about the world
-    # camera, and fall back to building the lists only for another sensor or
-    # another frame size. Copy so that a caller reordering the result below can
-    # never write through to the module constants.
-    describes_world_camera: bool = (
-        int(image_shape[0]) == int(WORLD_FRAME_SHAPE[0])
-        and int(image_shape[1]) == int(WORLD_FRAME_SHAPE[1])
-        and str(bayer_pattern).upper() == "BGGR"
-    )
-    if(describes_world_camera):
-        red, green, blue = WORLD_R_PIXELS.copy(), WORLD_G_PIXELS.copy(), WORLD_B_PIXELS.copy()
-    else:
-        red, green, blue = _bayer_pixel_locations(image_shape, bayer_pattern)
-
-    # Red and blue each occupy a single position in the Bayer cell, so reading
-    # them down the columns is all MATLAB does.
-    idx_r: np.ndarray = _sort_samples_column_major(red)
-    idx_b: np.ndarray = _sort_samples_column_major(blue)
-
-    # Green occupies two positions, and MATLAB keeps them as two blocks rather
-    # than interleaving them. In every supported pattern the first green block
-    # sits on an even row of the cell and the second on an odd row, so splitting
-    # on row parity recovers MATLAB's G1 and G2.
-    green_block_one: np.ndarray = green[green[:, 0] % 2 == 0]
-    green_block_two: np.ndarray = green[green[:, 0] % 2 == 1]
-
-    # Sort each block down its own columns, then lay the first block ahead of
-    # the second, matching MATLAB's [idxG1(:); idxG2(:)].
-    idx_g: np.ndarray = np.vstack((_sort_samples_column_major(green_block_one),
-                                   _sort_samples_column_major(green_block_two)))
-
-    return idx_r, idx_g, idx_b
-
-
 def _scattered_interpolant(sample_x: np.ndarray,
                            sample_y: np.ndarray,
                            sample_values: np.ndarray,
@@ -1015,7 +887,7 @@ def _scattered_interpolant(sample_x: np.ndarray,
         # Take the distance to the closest sample, then gather every sample
         # sitting at that same distance. MATLAB keeps the highest input index
         # among equally close samples, which is why the caller must preserve
-        # the sample order returned by return_bayer_indices.
+        # the MATLAB sample order the callers build.
         nearest_distance, _ = tree.query(outside_points)
         tied_samples: list[list[int]] = tree.query_ball_point(
             outside_points, nearest_distance * (1 + 1e-9) + 1e-12
@@ -1069,10 +941,38 @@ def _impute_pixel_values_single(radiance_map: np.ndarray,
     """Impute the ceiling and floor samples of one linearized Bayer frame."""
     rows, cols = radiance_map.shape
 
-    # Obtain channel sample coordinates (R=0, G=1, B=2).
-    bayer_idx: tuple[np.ndarray, np.ndarray, np.ndarray] = return_bayer_indices(
-        (rows, cols), bayer_pattern
-    )
+    # Obtain channel sample coordinates (R=0, G=1, B=2), matching MATLAB
+    # returnBayerIndices.
+    #
+    # Two details of the ordering matter, because scatteredInterpolant settles
+    # a tie between two equally close samples by taking whichever came later in
+    # its input, so a different order changes the extrapolated values:
+    #
+    #   * MATLAB reads a matrix down its columns, so the column loop below is
+    #     the outer one. This is the opposite of the WORLD_*_PIXELS constants,
+    #     which loop over rows on the outside.
+    #   * Green occupies two positions in the Bayer cell, and MATLAB returns
+    #     them as two separate blocks, [idxG1(:); idxG2(:)], rather than one
+    #     sorted list. Walking the cell positions in the fixed order below
+    #     collects green's blocks in that same order.
+    #
+    # A pattern name spells out its own cell directly: "BGGR" means B at
+    # (0, 0), G at (0, 1), G at (1, 0), and R at (1, 1), which is exactly the
+    # order of bayer_cell_positions.
+    pattern: str = str(bayer_pattern).upper()
+    if(pattern not in ("BGGR", "RGGB", "GRBG", "GBRG")):
+        raise ValueError(f"Unknown Bayer pattern: {bayer_pattern}")
+
+    bayer_cell_positions: tuple[tuple[int, int], ...] = ((0, 0), (0, 1), (1, 0), (1, 1))
+    bayer_idx: list[np.ndarray] = [
+        np.array([(r, c)
+                  for position, (row_parity, col_parity) in enumerate(bayer_cell_positions)
+                  if(pattern[position] == channel)
+                  for c in range(col_parity, cols, 2)
+                  for r in range(row_parity, rows, 2)],
+                 dtype=np.uint64)
+        for channel in "RGB"
+    ]
 
     # Interpolate to get cross-channel conditioning data. After this loop every
     # pixel carries an estimate of all three colours, not only the one its own
@@ -1474,10 +1374,25 @@ def _demosaic_radiance_map_rcd_single(radiance_map: np.ndarray,
     """Demosaic one Bayer radiance map with ratio-corrected interpolation."""
     rows, cols = radiance_map.shape
 
-    # Obtain channel indices using return_bayer_indices (R=0, G=1, B=2).
-    rgb_idx: tuple[np.ndarray, np.ndarray, np.ndarray] = return_bayer_indices(
-        (rows, cols), bayer_pattern
-    )
+    # Obtain channel sample coordinates (R=0, G=1, B=2), matching MATLAB
+    # returnBayerIndices. The column loop is the outer one because MATLAB reads
+    # a matrix down its columns, and walking the cell positions in the fixed
+    # order below keeps green's two blocks in MATLAB's [idxG1(:); idxG2(:)]
+    # order. See the fuller explanation in _impute_pixel_values_single.
+    pattern: str = str(bayer_pattern).upper()
+    if(pattern not in ("BGGR", "RGGB", "GRBG", "GBRG")):
+        raise ValueError(f"Unknown Bayer pattern: {bayer_pattern}")
+
+    bayer_cell_positions: tuple[tuple[int, int], ...] = ((0, 0), (0, 1), (1, 0), (1, 1))
+    rgb_idx: list[np.ndarray] = [
+        np.array([(r, c)
+                  for position, (row_parity, col_parity) in enumerate(bayer_cell_positions)
+                  if(pattern[position] == channel)
+                  for c in range(col_parity, cols, 2)
+                  for r in range(row_parity, rows, 2)],
+                 dtype=np.uint64)
+        for channel in "RGB"
+    ]
 
     # 1. Interpolate Green channel first to act as the spatial luminance guide.
     # Green is sampled twice as densely as red or blue, so it carries the most
