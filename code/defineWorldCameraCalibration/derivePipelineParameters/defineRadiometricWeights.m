@@ -13,7 +13,8 @@
 % Housekeeping
 clear
 
-% Load the SPD of the cloudy sky
+% Load the SPD of the cloudy sky. Note that this measurement is in 1nm
+% sampling.
 dataFileName = fullfile(...
     tbLocateProjectSilent('lightLoggerAnalysis'),...
     'data',...

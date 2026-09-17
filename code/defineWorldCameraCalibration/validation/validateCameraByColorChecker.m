@@ -1,7 +1,7 @@
 % Validation
 
 % Housekeeping
-clear
+clear all
 
 % Get the list of spectral radiometric measurements of checks
 dirName = fullfile(...
@@ -12,22 +12,26 @@ dirName = fullfile(...
     '*.mat');
 fileList = dir(dirName);
 
-% Load the spectral measurements
+% Load the spectral measurements and resample to 1 nm. Note that SplineSpd
+% automatically handles the change in power due to the resampling from the
+% 2 nm sampling originally (with units of W/m2/sr/wavelength band) to the 1
+% nm sampling (with units which are now W/m2/sr/nm).
 for ii = 1:length(fileList)
     fileName = fullfile(fileList(ii).folder,fileList(ii).name);
     load(fileName,'measurement','S')
     myIndex = int32(sscanf(fileList(ii).name, 'Index-%d'));
     [col, row] = ind2sub([6 4], myIndex);
-    spectralRadiance{col, row} = mean(measurement,1);
+    newS = S; newS(2) = 1; newS(3) = S(3)*2;
+    mySPD = mean(measurement,1);
+    spectralRadiance{col, row} = SplineSpd(SToWls(S), mySPD', SToWls(newS));    
 end
-spectralRadianceS = S;
+spectralRadianceS = newS;
 
 % Get the table of reflectance spectra of the macbeth color checker
 [spectralReflectance,spectralReflectanceS] = loadMacbethReflectance();
 
-% Define the common wavelength domain (380 to 730 nm with 2 nm spacing).
-% Number of samples: (730 - 380)/2 + 1 = 176 samples.
-commonS = [380, 2, 176]; 
+% Define the common wavelength domain (380 to 730 nm with 1 nm spacing).
+commonS = [380, 1, 352]; 
 
 % Initialize arrays to hold the estimated illuminant spectrum and its grid coordinates
 illuminantEstimates = [];
@@ -38,13 +42,10 @@ measRows = [];
 for c = 1:6
     for r = 1:4
         if ~isempty(spectralRadiance{c, r})
-            % Convert to W/m2/sr/nm and ensure column vector format
-            rad_nm = spectralRadiance{c, r}(:) / 2;
-            ref_patch = spectralReflectance{c, r}(:);
 
             % Resample both radiance and reflectance to the common wavelength domain
-            rad_common = SplineSpd(SToWls(spectralRadianceS), rad_nm, SToWls(commonS));
-            ref_common = SplineSpd(SToWls(spectralReflectanceS), ref_patch, SToWls(commonS));
+            rad_common = SplineSpd(SToWls(spectralRadianceS), spectralRadiance{c, r}(:), SToWls(commonS));
+            ref_common = SplineRaw(SToWls(spectralReflectanceS), spectralReflectance{c, r}(:), SToWls(commonS));
 
             % Estimate effective illuminant and record its coordinate position
             illuminantEstimates(:, end+1) = rad_common ./ ref_common;
@@ -60,8 +61,11 @@ end
 X_meas = [ones(length(measCols), 1), measCols, measRows];
 
 % Solve for the coefficients across all wavelengths simultaneously
-% (5 x 3) \ (5 x 176) = (3 x 176 matrix of betas)
 illuminantBetas = X_meas \ illuminantEstimates';
+
+% We end up with some nans in the last entry of illuminantBetas from this
+% regression. Not sure why. Replace these with the nearest value
+illuminantBetas(:,end) = illuminantBetas(:,end-1);
 
 % Evaluate if the spatial model is satisfactory by calculating R-squared
 % Model predictions for the 5 measured locations
@@ -75,19 +79,15 @@ fprintf('Mean spatial model R-squared across all wavelengths: %.4f\n', mean(rSqu
 for c = 1:6
     for r = 1:4
         % Predict the illuminant for this specific [col, row] position
-        % Extract a 1 x 176 vector, transpose to 176 x 1
         localIlluminant = ([1, c, r] * illuminantBetas)'; 
 
         if isempty(spectralRadiance{c, r})
             ref_patch = spectralReflectance{c, r}(:);
-            ref_common = SplineSpd(SToWls(spectralReflectanceS), ref_patch, SToWls(commonS));
-
-            % Predict radiance in W/m2/sr/nm, convert back to measurement units (* 2)
-            spectralRadiance{c, r} = (localIlluminant .* ref_common) * 2;
+            ref_common = SplineRaw(SToWls(spectralReflectanceS), ref_patch, SToWls(commonS));
+            spectralRadiance{c, r} = localIlluminant .* ref_common;
         else
-            rad_nm = spectralRadiance{c, r}(:) / 2;
-            rad_common = SplineSpd(SToWls(spectralRadianceS), rad_nm, SToWls(commonS));
-            spectralRadiance{c, r} = rad_common * 2;
+            rad_common = SplineSpd(SToWls(spectralRadianceS), spectralRadiance{c, r}(:), SToWls(commonS));
+            spectralRadiance{c, r} = rad_common;
         end
     end
 end
@@ -160,12 +160,47 @@ for r = 1:4
     end
 end
 
-% Load RGB radiometric correction values
-    paramFileName = fullfile(...
-        tbLocateProjectSilent('lightLoggerAnalysis'),...
-        'derived',...
-        'radiometricCorrectionRGB.mat');
-    load(paramFileName, 'radiometricCorrectionRGB');
+% Create a figure to compare measured and modeled spectral radiance
+figure('Name', 'Measured vs Modeled Spectral Radiance', 'Position', [200, 200, 700, 500]);
+hold on;
+
+% Select the first available measured patch to plot
+if ~isempty(measCols) && ~isempty(measRows)
+    c = measCols(1);
+    r = measRows(1);
+
+    % Get wavelength support from the common domain
+    wls = SToWls(commonS);
+
+    % 1. Retrieve the Measured Radiance
+    measRad = spectralRadiance{c, r};
+
+    % 2. Calculate the Modeled Radiance
+    localIlluminant = ([1, c, r] * illuminantBetas)';
+
+    % Resample the patch reflectance to the common domain
+    ref_patch = spectralReflectance{c, r}(:);
+    ref_common = SplineRaw(SToWls(spectralReflectanceS), ref_patch, SToWls(commonS));
+
+    % Calculate modeled radiance and convert to W/m2/sr/2nm-band
+    modRad = localIlluminant .* ref_common;
+
+    % Plot both spectra
+    plot(wls, measRad, 'r-', 'LineWidth', 2, 'DisplayName', 'Measured Radiance');
+    plot(wls, modRad, 'k--', 'LineWidth', 2, 'DisplayName', 'Modeled Radiance');
+
+    % Formatting
+    title(sprintf('Spectral Radiance Match for Patch (Col %d, Row %d)', c, r));
+    xlabel('Wavelength (nm)');
+    ylabel('Radiance (W/m^2/sr/nm');
+    legend('Location', 'best');
+    grid on;
+    box on;
+else
+    disp('No measured patches available to plot.');
+end
+hold off;
+
 
 % Load the world camera lens intrinsics.
 dataFileName = fullfile(...
@@ -217,10 +252,10 @@ rawPixelIndices = extractCheckerPixels(worldFrame,arducamB0392cameraIntrinsics.r
 % Extract wavelength support and sensor sensitivities from the table T
 % Assuming the first column is Wavelength and the next three are R, G, B
 sensorWls = T{:, 1};
-sensorSensitivities = T{:, 2:4};
+sensorSensitivities = [T.red, T.green, T.blue];
 
-% Resample spectral sensitivities to the common wavelength domain (380-730 nm, 2 nm spacing)
-T_common = SplineSpd(sensorWls, sensorSensitivities, SToWls(commonS));
+% Resample spectral sensitivities to the common wavelength domain (380-730 nm)
+T_common = SplineRaw(sensorWls, sensorSensitivities, SToWls(commonS));
 
 % Scale the camera spectral sensitivity functions so their maximum value is unity
 T_scaled = T_common ./ max(T_common, [], 1);
@@ -228,9 +263,6 @@ T_scaled = T_common ./ max(T_common, [], 1);
 % Initialize storage arrays for the predicted and measured RGB radiance
 predictedRGBRadiance = zeros(4, 6, 3);
 measuredRGBRadiance = zeros(4, 6, 3);
-
-% The wavelength bin width from commonS for numerical integration
-deltaLambda = commonS(2);
 
 % Loop through the rows (1-4) and columns (1-6) of the color checker
 for r = 1:4
@@ -241,14 +273,14 @@ for r = 1:4
         
         % Resample this check's reflectance to the common wavelength domain
         ref_patch = spectralReflectance{c, r}(:);
-        ref_common = SplineSpd(SToWls(spectralReflectanceS), ref_patch, SToWls(commonS));
+        ref_common = SplineRaw(SToWls(spectralReflectanceS), ref_patch, SToWls(commonS));
         
         % Calculate the source spectral radiance (W/m2/sr/nm)
         sourceRadiance = localIlluminant .* ref_common;
         
         % Calculate the predicted RGB radiance via dot product of the source 
-        % radiance and scaled sensitivities, multiplied by the wavelength bin width
-        predictedRGBRadiance(r, c, :) = (sourceRadiance' * T_scaled) * deltaLambda;
+        % radiance and scaled sensitivities
+        predictedRGBRadiance(r, c, :) = (sourceRadiance' * T_scaled);
         
         % --- 2. Calculate Measured RGB Radiance ---
         % Extract linear indices for the 75% central region of this check[cite: 6]
@@ -307,6 +339,54 @@ ylim([minVal, maxVal]);
 xlabel('Predicted RGB Radiance');
 ylabel('Measured RGB Radiance');
 title(sprintf('Camera Validation: Predicted vs. Measured RGB Radiance\nOverall R^2 = %.4f', rSq));
+legend('Location', 'northwest');
+grid on;
+box on;
+hold off;
+
+% --- Append to validateCameraByColorChecker_2.m ---
+
+% Calculate the total radiance across all channels for each patch
+predSum = predR + predG + predB;
+measSum = measR + measG + measB;
+
+% Normalize each channel to obtain the relative ratio (chromaticity)
+predRatioR = predR ./ predSum;
+predRatioG = predG ./ predSum;
+predRatioB = predB ./ predSum;
+
+measRatioR = measR ./ measSum;
+measRatioG = measG ./ measSum;
+measRatioB = measB ./ measSum;
+
+% Create a new figure for the ratio agreement plot
+figure('Name', 'Predicted vs Measured RGB Ratios', 'Position', [150, 150, 800, 600]);
+hold on;
+
+% Plot each channel ratio with a distinct color
+scatter(predRatioR, measRatioR, 75, 'r', 'filled', 'MarkerEdgeColor', 'k', 'DisplayName', 'Red Ratio');
+scatter(predRatioG, measRatioG, 75, 'g', 'filled', 'MarkerEdgeColor', 'k', 'DisplayName', 'Green Ratio');
+scatter(predRatioB, measRatioB, 75, 'b', 'filled', 'MarkerEdgeColor', 'k', 'DisplayName', 'Blue Ratio');
+
+% Plot the 1:1 identity line for ratios (which strictly bound between 0 and 1)
+plot([0, 1], [0, 1], 'k--', 'LineWidth', 1.5, 'DisplayName', '1:1 Agreement');
+
+% Calculate overall R-squared for the relative ratios
+allPredRatios = [predRatioR; predRatioG; predRatioB];
+allMeasRatios = [measRatioR; measRatioG; measRatioB];
+
+% Remove any potential NaN values before fitting
+validRatioIdx = ~isnan(allPredRatios) & ~isnan(allMeasRatios);
+mdlRatio = fitlm(allPredRatios(validRatioIdx), allMeasRatios(validRatioIdx));
+rSqRatio = mdlRatio.Rsquared.Ordinary;
+
+% Formatting
+axis equal;
+xlim([0, 1]);
+ylim([0, 1]);
+xlabel('Predicted Channel Ratio (Channel / (R+G+B))');
+ylabel('Measured Channel Ratio (Channel / (R+G+B))');
+title(sprintf('Camera Validation: Predicted vs. Measured RGB Ratios\nOverall R^2 = %.4f', rSqRatio));
 legend('Location', 'northwest');
 grid on;
 box on;
