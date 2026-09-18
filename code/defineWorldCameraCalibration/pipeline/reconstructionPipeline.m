@@ -6,7 +6,7 @@ function [radianceMap, imageStages] = reconstructionPipeline(I, AGCSettings)
 % Declare persistent variables for all derived parameters and maps
 persistent clippingExponent linearizedSetPoint darkSignal ...
     correctionMap radiometricCorrectionMap ...
-    avgSceneRadiance cameraScore ...
+    effectiveRadiance cameraScore ...
     meanCorrectionFielding meanCorrectionRGB Smax
 
 % Load non-linear clipping exponent and linearized set point
@@ -35,6 +35,8 @@ if isempty(correctionMap)
         'derived',...
         'flatFieldingFunction.mat');
     load(paramFileName, 'correctionMap');
+    % Calculate the mean of the lens profile (1 / correctionMap) 
+    % and invert it to obtain the scaling factor
     meanCorrectionFielding = mean(correctionMap(:), 'omitnan');
 end
 
@@ -48,13 +50,13 @@ if isempty(radiometricCorrectionMap)
     meanCorrectionRGB = mean(radiometricCorrectionMap(:), 'omitnan');
 end
 
-% Load camera score to average radiance mapping parameters
-if isempty(avgSceneRadiance)
+% Load camera score to effective integrated radiance mapping parameters
+if isempty(effectiveRadiance)
     paramFileName = fullfile(...
         tbLocateProjectSilent('lightLoggerAnalysis'),...
         'derived',...
-        'cameraScoreToAverageRadiance.mat');
-    load(paramFileName, 'avgSceneRadiance', 'cameraScore');
+        'cameraScoreToEffectiveRadiance.mat');
+    load(paramFileName, 'effectiveRadiance', 'cameraScore');
 end
 
 
@@ -100,9 +102,16 @@ imageStages{5} = imageStages{4} .* radiometricCorrectionMap;
 % Stage 6: Convert to absolute radiance units
 effectiveSetPoint = linearizedSetPoint * meanCorrectionFielding * meanCorrectionRGB;
 thisCameraScore = AGCSettings.exposure * AGCSettings.Again * AGCSettings.Dgain;
-logMeanSceneRadiance = interp1(log10(cameraScore), log10(avgSceneRadiance), log10(thisCameraScore), 'linear');
-meanSceneRadiance = 10.^logMeanSceneRadiance;
-imageStages{6} = (imageStages{5} / effectiveSetPoint) * meanSceneRadiance;
+
+% Interpolate the 1x3 effective radiance vector for this camera score
+logThisEffectiveRadiance = interp1(log10(cameraScore), log10(effectiveRadiance), log10(thisCameraScore), 'linear');
+thisEffectiveRadiance = 10.^logThisEffectiveRadiance;
+
+% Calculate the Bayer-weighted mean effective radiance (1 Red, 2 Green, 1 Blue)
+meanEffectiveRadiance = (thisEffectiveRadiance(1) + 2*thisEffectiveRadiance(2) + thisEffectiveRadiance(3)) / 4;
+
+% Scale the radiometrically balanced image to absolute radiance
+imageStages{6} = (imageStages{5} / effectiveSetPoint) * meanEffectiveRadiance;
 
 % Return the final stage as the radiance map
 radianceMap = imageStages{6};

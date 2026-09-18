@@ -2,7 +2,7 @@
 % camera parameters. These steps must be run in the specified order.
 
 % Housekeeping
-clear
+clear all
 close all
 
 defineDarkSignal

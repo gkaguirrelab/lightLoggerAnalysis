@@ -66,13 +66,13 @@ for nn = 1:numel(calibration_metadata.NDFs)
     detectorCounts = extract_detector_counts(nn, measurements);
     detectorCounts = squeeze(mean(detectorCounts, [2, 3]));
 
-    calculatedRadiance = nan(n_settings_levels, n_detector_channels);
+    integratedRadiance = nan(n_settings_levels, n_detector_channels);
     for ss = 1:n_settings_levels
         source_settings = background * background_scalars(ss);
         sphereSPDs = sourceP_abs * source_settings';
-        calculatedRadiance(ss,:) = sphereSPDs' * detectorP_rel;
+        integratedRadiance(ss,:) = sphereSPDs' * detectorP_rel;
     end
-    countsAndCalculatedRadiance{nn} = {detectorCounts, calculatedRadiance};
+    countsAndCalculatedRadiance{nn} = {detectorCounts, integratedRadiance};
 end 
 
 % Plot linearity directly into a single 3x4 grid figure
@@ -92,9 +92,9 @@ for ch = 1:n_detector_channels
 
     for nn = 1:n_ndfs_to_plot
         detectorCounts = countsAndCalculatedRadiance{nn}{1};
-        calculatedRadiance = countsAndCalculatedRadiance{nn}{2};
+        integratedRadiance = countsAndCalculatedRadiance{nn}{2};
 
-        predicted_all_NDF_this_chip(nn,:) = log10(calculatedRadiance(:, ch)).';
+        predicted_all_NDF_this_chip(nn,:) = log10(integratedRadiance(:, ch)).';
         measured_all_NDF_this_chip(nn,:) = log10(detectorCounts(:, ch)).';
 
         h = scatter(ax, ...
@@ -130,7 +130,7 @@ for ch = 1:n_detector_channels
 end
 
 title(tl, sprintf("MS Linearity | %s | All Channels", chip));
-xlabel(tl, sprintf('%s predicted radiance [log W/m^2/sr]', chip));
+xlabel(tl, sprintf('%s predicted integrated radiance [log W/m^2/sr]', chip));
 ylabel(tl, sprintf('%s measured counts [log]', chip));
 
 fitObj.coeff = logLogFitCoefficients;

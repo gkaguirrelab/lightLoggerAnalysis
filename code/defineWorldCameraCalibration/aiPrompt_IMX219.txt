@@ -4,11 +4,11 @@ The IMX219 camera chip records 8 bit RAW images (obtained by a strict bit-shift 
 
 I have made measurements from the IMX219 while it is exposed to a light integrating sphere. I modulate the intensity of light within the sphere over several orders of magnitude using the output of a digital spectral synthesizer (the “CombiLED”), with neutral density filters of varying strength placed within the optical path. I have made measures of the radiance spectrum of a point within the interior of the sphere using a PR670 spectrophotometer. These measurements will be used to derive the calibrated radiometric properties of the chip.
 
-The ultimate goal is to convert the sensor values from the IMX219 chip into absolute radiance units.
+The ultimate goal is to convert the sensor values from the IMX219 chip into absolute units of integrated radiance as seen by each channel (R, G, B) of the sensor.
 
 A few key properties of this approach:
-- The AGC settings are recorded along with each frame that is collected with the IMX219 chip. We will characterize the relationship between the AGC settings and the mean scene radiance to which the IMX219 camera is exposed. This will allow us to subsequently convert IMX219 sensor values into absolute values of radiance.
-- In our analyses we at times compute the integrated radiance as seen by a sensor with a particular spectral sensitivity function. We have access only to versions of the spectral sensitivity functions that have been scaled to have a maximum value of unity. Our analytical approach must account for this property of the tabular spectral sensitivities in all cases. This includes obtaining a separate calibration scalar (gain constant) for every channel in both of the chips.
+- The AGC settings are recorded along with each frame that is collected with the IMX219 chip. We characterize the relationship between the AGC settings and the mean scene integrated radiance to which the IMX219 camera is exposed. This will allow us to subsequently convert IMX219 sensor values into absolute values of integrated radiance.
+- In our analyses we at times compute the integrated radiance as seen by a sensor with a particular spectral sensitivity function. We have access only to versions of the spectral sensitivity functions that have been scaled to have a maximum value of unity. Our analytical approach must account for this property of the tabular spectral sensitivities in all cases.
 - In many cases, integrated radiance is calculated by taking the dot product of a sensitivity function and the empirical spectral power distribution as measured using the PR670 spectroradiometer with 2 nm wavelength band sampling. The units of these spectral radiance measurements are in W/m2/sr/wavelength band, where wavelength band equals 2 nm. If the sensitivity function is resampled to have 2 nm sampling, then the dot product of the sensitivity function at the SPD yields the correct (true) radiance, albeit with the property that the sensitivity function has been scaled to have unit sensitivity. At times in the code we resample an SPD using the function "SplineSpd". Note that this function accounts for the change in the power that accompanies the change in sampling density.
 
 Next is a description of the stages of this analysis as implemented in MATLAB code.
@@ -16,7 +16,6 @@ Next is a description of the stages of this analysis as implemented in MATLAB co
 Stage 1:
 
 In the routine “defineDarkSignal” we characterize the dark signal emitted by the IMX219 chip. This is found to be 16.
-
 
 Stage 2:
 
@@ -37,4 +36,8 @@ At the next stage we characterize the mapping between mean scene radiance and th
 
 ******************
 
-I have att
+I have attached some of these "define" routines, as well as the pipeline that is used to convert the raw IMX219 camera image into absolute integrated radiance units (reconstructionPipeline) in unites of W/m2/sr as sampled by each color channel (R, G, B).
+
+I now wish to validate the output of this pipeline. To do so, I measured a Macbeth color checker board with the IMX219 camera, and also obtained measurements using a spectroradiometer of the 5 of the individual square checks from the board. In the routine "validateCameraByColorChecker", supported by tabular measures of the spectral reflectance of each color check, I estimate the illuminant at each location on the board and then produce an estimate of the spectral radiance at every check. I then wish to compare the integrated radiance values derived from the RGB sensors in the IMX219 camera image with the predicted values derived from the empirical spectral radiance measurements at each check.
+
+I find that the predicted and measured integrated radiance across the RGB channels and the color checker squares is lawful, with an overall R2 of a linear fit of 0.9. The absolute measured integrated irradiance, however, is 5x lower than predicted. 

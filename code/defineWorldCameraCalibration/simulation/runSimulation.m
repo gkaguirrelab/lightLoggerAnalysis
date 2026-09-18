@@ -51,7 +51,7 @@ surf(cameraRadianceMap, 'EdgeColor', 'none'); colorbar; title('Source'); zlim([0
 nexttile
 surf(cameraRadianceMapEstimated, 'EdgeColor', 'none'); colorbar; title('Reconstructed'); zlim([0 30]);
 nexttile
-surf(cameraRadianceMapEstimated-cameraRadianceMap, 'EdgeColor', 'none'); colorbar; title('Error');
+surf(cameraRadianceMap-cameraRadianceMapEstimated, 'EdgeColor', 'none'); colorbar; title('Source-Recon'); zlim([-15 15]);
 
 % Obtain the demosaiced image and show this
 radianceMapDemosaiced = demosaicRadianceMapRCD(imageStages{end});

@@ -6,7 +6,7 @@ function [I_raw, radianceMap] = synthesisPipeline(radianceModel, radianceModelS,
 % Declare persistent variables for derived parameters and correction maps
 persistent clippingExponent linearizedSetPoint darkSignal ...
     correctionMap radiometricCorrectionMap ...
-    avgSceneRadiance cameraScore ...
+    effectiveRadiance cameraScore ...
     meanCorrectionFielding meanCorrectionRGB Smax ...
     azimuthMap elevationMap T channelNames bayerPattern
 
@@ -49,13 +49,13 @@ if isempty(radiometricCorrectionMap)
     meanCorrectionRGB = mean(radiometricCorrectionMap(:), 'omitnan');
 end
 
-% Load camera score to average radiance mapping parameters
-if isempty(avgSceneRadiance)
+% Load camera score to effective integrated radiance mapping parameters
+if isempty(effectiveRadiance)
     paramFileName = fullfile(...
         tbLocateProjectSilent('lightLoggerAnalysis'),...
         'derived',...
-        'cameraScoreToAverageRadiance.mat');
-    load(paramFileName, 'avgSceneRadiance', 'cameraScore');
+        'cameraScoreToEffectiveRadiance.mat');
+    load(paramFileName, 'effectiveRadiance', 'cameraScore');
 end
 
 % Load camera intrinsics and compute azimuth/elevation maps
@@ -124,21 +124,26 @@ end
 % Calculate the effective set point accounting for spatial scaling
 effectiveSetPoint = linearizedSetPoint * meanCorrectionFielding * meanCorrectionRGB;
 
-% Determine mean environmental radiance implied by the given AGCSettings
+% Determine mean effective radiance implied by the given AGCSettings
 thisCameraScore = AGCSettings.exposure * AGCSettings.Again * AGCSettings.Dgain;
-logMeanSceneRadiance = interp1(log10(cameraScore), log10(avgSceneRadiance), log10(thisCameraScore), 'linear');
-meanSceneRadiance = 10.^logMeanSceneRadiance;
+logThisEffectiveRadiance = interp1(log10(cameraScore), log10(effectiveRadiance), log10(thisCameraScore), 'linear');
+thisEffectiveRadiance = 10.^logThisEffectiveRadiance;
 
-% 1. Inverse of Radiance Conversion (Stage 5 -> Stage 4)
-I_sensor_corrected = (radianceMap / meanSceneRadiance) * effectiveSetPoint;
+% Calculate the Bayer-weighted mean effective radiance (1 Red, 2 Green, 1 Blue)
+meanEffectiveRadiance = (thisEffectiveRadiance(1) + 2*thisEffectiveRadiance(2) + thisEffectiveRadiance(3)) / 4;
 
-% 2. Inverse of RGB Radiometric Correction (Stage 4 -> Stage 3)
+% 1. Inverse of Radiance Conversion (Stage 6 -> Stage 5)
+I_sensor_corrected = (radianceMap / meanEffectiveRadiance) * effectiveSetPoint;
+
+% 2. Inverse of RGB Radiometric Correction (Stage 5 -> Stage 4)
 I_flat = I_sensor_corrected ./ radiometricCorrectionMap;
 
-% 3. Inverse of Flat Fielding Correction (Stage 3 -> Stage 2)
+% 3. Inverse of Flat Fielding Correction (Stage 4 -> Stage 3/2)
 yLinear = I_flat ./ correctionMap;
 
 % 4. Inverse of Sensor Linearization (Stage 2 -> Stage 1 double)
+% Note: The inverse of Stage 3 (imputing ceiling/floor pixels) is skipped 
+% because absolute pixel loss at saturation boundaries cannot be deterministically inverted.
 n = clippingExponent;
 yPrime = (yLinear * Smax) ./ (Smax.^n + yLinear.^n).^(1./n);
 y = yPrime + darkSignal;

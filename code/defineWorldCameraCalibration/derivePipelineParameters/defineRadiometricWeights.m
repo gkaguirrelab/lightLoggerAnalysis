@@ -1,7 +1,7 @@
 % This script derives the multiplicative adjustments that should be applied
 % to the R, G, and B channels so that the sensor values reflect the
-% radiometric power of the light source, correcting for the differing peak
-% transmission efficiencies of the Bayer filters.
+% integrated radiance of the light source, correcting for the differing
+% peak transmission efficiencies of the Bayer filters.
 %
 % The PR670 was used to measure the SPD of a cloudy sky, at the same time
 % that the IMX219 camera was used to collect images of the sky. We
@@ -13,7 +13,8 @@
 % Housekeeping
 clear
 
-% Load the SPD of the cloudy sky
+% Load the SPD of the cloudy sky. Note that this measurement is in 1nm
+% sampling.
 dataFileName = fullfile(...
     tbLocateProjectSilent('lightLoggerAnalysis'),...
     'data',...
@@ -146,7 +147,7 @@ for cc = 1:3
 end
 
 % Report the correction to the console
-fprintf('The absolute radiometric calibration scalar tuple (RGB) is: [%2.4f, %2.4f, %2.4f]\n',radiometricCorrectionRGB);
+fprintf('The absolute integrated radiance calibration scalar tuple (RGB) is: [%2.4f, %2.4f, %2.4f]\n',radiometricCorrectionRGB);
 
 % Save the radiometric correction to the "derived" directory
 saveFileName = fullfile(...
