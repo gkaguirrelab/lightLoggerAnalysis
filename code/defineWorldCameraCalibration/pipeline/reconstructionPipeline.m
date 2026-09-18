@@ -35,6 +35,8 @@ if isempty(correctionMap)
         'derived',...
         'flatFieldingFunction.mat');
     load(paramFileName, 'correctionMap');
+    % Calculate the mean of the lens profile (1 / correctionMap) 
+    % and invert it to obtain the scaling factor
     meanCorrectionFielding = mean(correctionMap(:), 'omitnan');
 end
 
