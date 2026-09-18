@@ -314,8 +314,33 @@ WORLD_BAYER_CORRECTION_MATRICES: dict[tuple[int, int], np.ndarray] = {
     (480, 640): _build_bayer_correction_matrix((480, 640)),
 }
 
-WORLD_AVG_SCENE_RADIANCE: np.ndarray = scipy.io.loadmat(_DERIVED_CALIBRATION_DIR / "cameraScoreToAverageRadiance.mat")["avgSceneRadiance"].astype(np.float64, copy=False).reshape(-1)
-WORLD_CAMERA_SCORE: np.ndarray = scipy.io.loadmat(_DERIVED_CALIBRATION_DIR / "cameraScoreToAverageRadiance.mat")["cameraScore"].astype(np.float64, copy=False).reshape(-1)
+_effective_radiance_calibration = scipy.io.loadmat(
+    _DERIVED_CALIBRATION_DIR / "cameraScoreToEffectiveRadiance.mat"
+)
+WORLD_CAMERA_SCORE: np.ndarray = np.asarray(
+    _effective_radiance_calibration["cameraScore"], dtype=np.float64
+).reshape(-1)
+WORLD_EFFECTIVE_RADIANCE: np.ndarray = np.asarray(
+    _effective_radiance_calibration["effectiveRadiance"], dtype=np.float64
+)
+if(WORLD_EFFECTIVE_RADIANCE.shape != (WORLD_CAMERA_SCORE.size, 3)
+   or not np.all(np.isfinite(WORLD_CAMERA_SCORE))
+   or not np.all(np.isfinite(WORLD_EFFECTIVE_RADIANCE))
+   or np.any(WORLD_CAMERA_SCORE <= 0)
+   or np.any(WORLD_EFFECTIVE_RADIANCE <= 0)
+   or np.any(np.diff(WORLD_CAMERA_SCORE) <= 0)):
+    raise ValueError("Invalid camera-score to RGB effective-radiance calibration")
+
+# MATLAB interpolates each RGB channel in log10 space before taking the Bayer
+# weighted mean. Cache both logs and the fixed spatial scale once per import.
+WORLD_LOG_CAMERA_SCORE: np.ndarray = np.log10(WORLD_CAMERA_SCORE)
+WORLD_LOG_EFFECTIVE_RADIANCE: np.ndarray = np.log10(WORLD_EFFECTIVE_RADIANCE)
+WORLD_EFFECTIVE_SET_POINTS: dict[tuple[int, int], float] = {
+    shape: float(WORLD_LINEARIZED_SET_POINT
+                 * np.nanmean(fielding)
+                 * np.nanmean(WORLD_RADIOMETRIC_CORRECTION_MAP))
+    for shape, fielding in WORLD_FIELDING_FUNCTIONS.items()
+}
 
 # Geoff's MATLAB reconstruction treats response-curve inversion as unreliable
 # once its derivative exceeds this value. The fitted response parameters turn
@@ -3033,21 +3058,28 @@ def world_counts_to_radiance(image_or_video: np.ndarray,
 
     # The calibration set point must include the mean scale introduced by the
     # flat-field and RGB correction stages.
-    effective_set_point: float = float(WORLD_LINEARIZED_SET_POINT * np.nanmean(WORLD_FIELDING_FUNCTIONS[image_or_video.shape[-2:]]) * np.nanmean(WORLD_RADIOMETRIC_CORRECTION_MAP))
+    effective_set_point: float = WORLD_EFFECTIVE_SET_POINTS[image_or_video.shape[-2:]]
 
-    # Reproduce MATLAB's exposure * Again * Dgain camera score and interpolate
-    # the corresponding mean scene radiance in log10 space.
+    # Reproduce MATLAB's exposure * Again * Dgain camera score. Interpolate
+    # each channel in log space, exponentiate, then use Bayer weights 1:2:1.
     this_camera_score: np.ndarray = np.asarray(np.asarray(exposure) * np.asarray(analog_gain) * np.asarray(digital_gain), dtype=np.float64)
-    log_mean_scene_radiance: np.ndarray = np.asarray(np.interp(np.log10(this_camera_score), np.log10(WORLD_CAMERA_SCORE), np.log10(WORLD_AVG_SCENE_RADIANCE), left=np.nan, right=np.nan), dtype=np.float64)
-    mean_scene_radiance: np.ndarray = np.asarray(10 ** log_mean_scene_radiance, dtype=np.float64)
+    log_camera_score = np.log10(this_camera_score)
+    channel_radiances = [
+        np.power(10.0, np.interp(log_camera_score, WORLD_LOG_CAMERA_SCORE,
+                                 WORLD_LOG_EFFECTIVE_RADIANCE[:, channel],
+                                 left=np.nan, right=np.nan))
+        for channel in range(3)
+    ]
+    mean_effective_radiance = (channel_radiances[0] + 2 * channel_radiances[1]
+                               + channel_radiances[2]) * 0.25
 
     # Give each buffered frame its own broadcastable radiance scale. Scalar
     # settings naturally apply the same scale to every frame.
-    if(image_or_video.ndim == 3 and mean_scene_radiance.ndim > 0):
-        mean_scene_radiance = mean_scene_radiance.reshape(-1, 1, 1)
+    if(image_or_video.ndim == 3 and np.ndim(mean_effective_radiance) > 0):
+        mean_effective_radiance = mean_effective_radiance.reshape(-1, 1, 1)
 
-    # Match MATLAB's (correctedCounts / effectiveSetPoint) * meanSceneRadiance.
-    image_or_video *= mean_scene_radiance / effective_set_point
+    # Match MATLAB's (correctedCounts / effectiveSetPoint) * meanEffectiveRadiance.
+    image_or_video *= mean_effective_radiance / effective_set_point
 
     if(visualize_results is True):
         fig, axes = plt.subplots(1, 2, figsize=(12, 4))
