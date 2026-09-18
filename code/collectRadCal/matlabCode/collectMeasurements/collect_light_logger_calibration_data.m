@@ -463,7 +463,7 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
     % { SPECTRAL RECONSTRUCTION }
     k_settings_levels = 10; % Define the number of randomized 8-primary settings vectors to record per NDF
     n_measures = 3; % The number of measurements to make at each settings vector
-    recording_seconds = 15; % Define how long a given recording will be per setting
+    recording_seconds = 60; % Define how long a given recording will be per setting
     settings_min = 0.1;
     settings_max = 0.9;
 
@@ -493,7 +493,7 @@ function CalibrationData = initialize_calibration_data(CalibrationData,...
         sensors.W.Again = fixed_settings(1);
         sensors.W.Dgain = fixed_settings(2);
         sensors.W.exposure = int32(fixed_settings(3));
-        sensors.W.agc = false;
+        sensors.W.agc = true;
         sensors.W.save_agc_metadata = true;
         sensors.W.sensor_mode_idx = sensor_mode_idx;
         sensors.W.awb = false;
