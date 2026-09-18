@@ -17,7 +17,6 @@ Stage 1:
 
 In the routine “defineDarkSignal” we characterize the dark signal emitted by the IMX219 chip. This is found to be 16.
 
-
 Stage 2:
 
 In the routine “defineFullWellCapacityEffect” we characterize a non-linearity in the response of the IMX219 chip across light intensity, making use of measurements from within the light integrating sphere for which we have measured the radiance spectrum of the light source. We subsequently use the derived parameter of the non-linearity function to convert raw images to linearized sensor values.
@@ -37,10 +36,8 @@ At the next stage we characterize the mapping between mean scene radiance and th
 
 ******************
 
-I have attached some of these "define" routines, as well as the pipeline that is used to convert the raw IMX219 camera image into absolute radiance units (reconstructionPipeline). Analyze these elements to identify any changes that are needed to support the overall goal of expressing the measurement at each pixel as the integrated radiance in W/m2/sr as sampled by each color channel (R, G, B).
+I have attached some of these "define" routines, as well as the pipeline that is used to convert the raw IMX219 camera image into absolute integrated radiance units (reconstructionPipeline) in unites of W/m2/sr as sampled by each color channel (R, G, B).
 
+I now wish to validate the output of this pipeline. To do so, I measured a Macbeth color checker board with the IMX219 camera, and also obtained measurements using a spectroradiometer of the 5 of the individual square checks from the board. In the routine "validateCameraByColorChecker", supported by tabular measures of the spectral reflectance of each color check, I estimate the illuminant at each location on the board and then produce an estimate of the spectral radiance at every check. I then wish to compare the integrated radiance values derived from the RGB sensors in the IMX219 camera image with the predicted values derived from the empirical spectral radiance measurements at each check.
 
-
-I now wish to validate the output of this pipeline. To do so, I measured a Macbeth color checker board with the IMX219 camera, and also obtained measurements using a spectroradiometer of the 5 of the individual square checks from the board. In the routine "validateCameraByColorChecker", supported by tabular measures of the spectral reflectance of each color check, I estimate the illuminant at each location on the board and then produce an estimate of the spectral radiance at every check. I then wish to compare the radiance values derived from the RGB sensors in the IMX219 camera image with the predicted values derived from the empirical spectral radiance measurements at each check.
-
-As a first step, examine the validateCameraByColorChecker routine and identify any errors in the prediction of radiance as seen by R, G, and B channels of the IMX219 chip.
+I find that the predicted and measured integrated radiance across the RGB channels and the color checker squares is lawful, with an overall R2 of a linear fit of 0.9. The absolute measured integrated irradiance, however, is 5x lower than predicted. 
