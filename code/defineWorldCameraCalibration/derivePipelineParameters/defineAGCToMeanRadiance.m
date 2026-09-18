@@ -31,8 +31,8 @@ wlsSensor = T.wls;
 channelNames = {'red','green','blue'};
 channelCodes = {'r','g','b'};
 
-% Preallocate an Nx3 array for the sensor-weighted effective radiance
-effectiveRadiance = zeros(length(agcData.ndf), 3);
+% Preallocate an Nx3 array for the sensor-weighted integrated radiance
+integratedRadiance = zeros(length(agcData.ndf), 3);
 
 % Next, load the "maxSpectrum" calibration files and extract for each the
 % radiance of the sphere interior. Account for the settings level of the
@@ -58,14 +58,14 @@ for ii = 1:length(agcData.ndf)
         sensitivitySensor = sensitivitySensor ./ max(sensitivitySensor);
         
         % Calculate absolute integrated radiance for this channel
-        effectiveRadiance(ii,cc) = spdSource' * sensitivitySensor;
+        integratedRadiance(ii,cc) = spdSource' * sensitivitySensor;
     end
 end
 
 % Plot the measurements
 figure;
 for cc = 1:3
-    loglog(cameraScore, effectiveRadiance(:,cc),['-' channelCodes{cc}],'LineWidth',2,'MarkerSize',10); 
+    loglog(cameraScore, integratedRadiance(:,cc),['-' channelCodes{cc}],'LineWidth',2,'MarkerSize',10); 
     hold on
 end
 a = gca();
@@ -76,8 +76,8 @@ hold on; grid off; box off;
 
 % Clean up, label, legend
 xlabel('Log camera sensitivity score');
-ylabel('Log effective integrated radiance (W/m^2/sr)');
-title('Effective Radiance vs. Camera AGC Sensitivity');
+ylabel('Log integrated radiance (W/m^2/sr)');
+title('Integrated Radiance vs. Camera AGC Sensitivity');
 legend('Red Channel', 'Green Channel', 'Blue Channel', 'Location', 'northwest');
 
 % Save the values that relate camera score to channel-specific effective radiance
@@ -86,7 +86,7 @@ saveFileName = fullfile(...
     'derived',...
     'cameraScoreToEffectiveRadiance.mat');
 readme = ['Created by defineAGCToMeanRadiance.\n'...
-    'A linear interpolation between these values (in log10 space) maps AGC values to effective radiance.\n',...
+    'A linear interpolation between these values (in log10 space) maps AGC values to integrated radiance.\n',...
     'cameraScore -- the product of the AGC settings (analog gain, digital gain, exposure).\n',...
-    'effectiveRadiance -- the true integrated radiance (W/m2/sr) seen by the R, G, and B channels (Nx3 matrix).\n'];
-save(saveFileName,'readme','cameraScore','effectiveRadiance');
+    'effectiveRadiance -- the integrated radiance (W/m2/sr) seen by the R, G, and B channels (Nx3 matrix).\n'];
+save(saveFileName,'readme','cameraScore','integratedRadiance');
