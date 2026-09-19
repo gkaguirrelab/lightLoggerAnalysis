@@ -1,10 +1,10 @@
-function [rawPixelIndices, corners] = extractCheckerPixels(I, camIntrinsicsData, showTwoPanels, inCorners)
+function [rawPixelIndices, corners] = extractCheckerPixels(I, camIntrinsicsData, inCorners, showPlot)
 % EXTRACTCHECKERPIXELS Extracts raw pixel indices for a 6x4 checkerboard.
 %
 % Inputs:
 %   I                 - The raw, optically distorted image (2D grayscale or 3D RGB).
 %   camIntrinsicsData - The variable containing the fisheye intrinsics.
-%   showTwoPanels     - Optional boolean (default: true).
+%   showPlot          - Optional boolean (default: true). Controls if a figure is created.
 %   inCorners         - Optional 4x2 array of [x, y] coordinates for the grid
 %                       corners (Order: TL, TR, BR, BL). If provided, skips
 %                       manual selection.
@@ -14,22 +14,17 @@ function [rawPixelIndices, corners] = extractCheckerPixels(I, camIntrinsicsData,
 %                       pixel indices from the central 75% of the corresponding 
 %                       check in the raw image I.
 %   corners           - The 4x2 array of [x, y] coordinates used for the grid corners.
-%{
-% These are the corners for the "close" image of the macbeth color checker
-corners = [
-  128.6063  103.3571
-  530.4668  109.7359
-  530.4668  364.8854
-  122.2276  376.5797];
-rawPixelIndices = extractCheckerPixels(worldFrame,arducamB0392cameraIntrinsics.results.Intrinsics,true,corners);
-%}
 
     % --- 1. Parse Inputs ---
-    if nargin < 3 || isempty(showTwoPanels)
-        showTwoPanels = true;
+    if nargin < 3
+        inCorners = [];
     end
     if nargin < 4
-        inCorners = [];
+        showPlot = false;
+    end
+
+    if ~showPlot && isempty(inCorners)
+        error('Cannot perform manual corner selection without a figure. Provide ''inCorners'' or set ''showPlot'' to true.');
     end
 
     % Safely extract the fisheyeIntrinsics object
@@ -58,9 +53,8 @@ rawPixelIndices = extractCheckerPixels(worldFrame,arducamB0392cameraIntrinsics.r
     if size(I, 3) == 3, I_disp = rgb2gray(I); else, I_disp = I; end
 
     % --- 3. Figure and Axes Setup ---
-    fig = figure('Name', 'Checkerboard Extraction', 'NumberTitle', 'off');
-    
-    if showTwoPanels
+    if showPlot
+        fig = figure('Name', 'Checkerboard Extraction', 'NumberTitle', 'off');
         set(fig, 'Position', [100, 100, 1200, 500]); 
         
         ax1 = subplot(1, 2, 1);
@@ -72,17 +66,11 @@ rawPixelIndices = extractCheckerPixels(worldFrame,arducamB0392cameraIntrinsics.r
         imshow(I_disp, 'Parent', ax2);
         title(ax2, 'Raw Distorted (I): Re-projected Boundaries');
         hold(ax2, 'on');
-    else
-        ax1 = axes(fig);
-        imshow(J_disp, 'Parent', ax1);
-        title(ax1, 'Undistorted (J)');
-        hold(ax1, 'on');
     end
     
     % --- 4. Corner Selection ---
-    axes(ax1); 
-    
     if isempty(inCorners)
+        axes(ax1);
         subtitle(ax1, 'Click 4 Outer Corners of the COLORED PATCHES (Order: TL, TR, BR, BL)');
         
         corners = zeros(4, 2);
@@ -93,19 +81,22 @@ rawPixelIndices = extractCheckerPixels(worldFrame,arducamB0392cameraIntrinsics.r
             corners(i, :) = hPt.Position;
             hPt.InteractionsAllowed = 'none'; 
         end
-        
-        x = corners(:, 1);
-        y = corners(:, 2);
     else
-        subtitle(ax1, 'Using provided corner coordinates');
         corners = inCorners;
-        x = corners(:, 1);
-        y = corners(:, 2);
+        if showPlot
+            axes(ax1);
+            subtitle(ax1, 'Using provided corner coordinates');
+        end
     end
     
-    plot(ax1, x, y, 'rO', 'MarkerSize', 8, 'LineWidth', 2);
-    plot(ax1, [x; x(1)], [y; y(1)], 'r-', 'LineWidth', 1.5);
-    drawnow;
+    x = corners(:, 1);
+    y = corners(:, 2);
+    
+    if showPlot
+        plot(ax1, x, y, 'rO', 'MarkerSize', 8, 'LineWidth', 2);
+        plot(ax1, [x; x(1)], [y; y(1)], 'r-', 'LineWidth', 1.5);
+        drawnow;
+    end
     
     % --- 5. Fit the Grid Geometry ---
     cols = 6;
@@ -152,13 +143,13 @@ rawPixelIndices = extractCheckerPixels(worldFrame,arducamB0392cameraIntrinsics.r
                 x_left,  y_bot
             ];
             
-            % Map full bounds to undistorted space and plot
-            undist_bounds = transformPointsForward(tform, canonical_bounds_full);
-            plot(ax1, [undist_bounds(:,1); undist_bounds(1,1)], ...
-                      [undist_bounds(:,2); undist_bounds(1,2)], 'g-', 'LineWidth', 1);
-            
-            % Get distorted full boundaries for the raw image plot
-            if showTwoPanels
+            if showPlot
+                % Map full bounds to undistorted space and plot
+                undist_bounds = transformPointsForward(tform, canonical_bounds_full);
+                plot(ax1, [undist_bounds(:,1); undist_bounds(1,1)], ...
+                          [undist_bounds(:,2); undist_bounds(1,2)], 'g-', 'LineWidth', 1);
+                
+                % Get distorted full boundaries for the raw image plot
                 distPtsFull = getDistortedBoundary(canonical_bounds_full, numPtsPerEdge, tform, K, camIntrinsics);
                 plot(ax2, [distPtsFull(:,1); distPtsFull(1,1)], ...
                           [distPtsFull(:,2); distPtsFull(1,2)], 'c-', 'LineWidth', 1);
@@ -183,7 +174,7 @@ rawPixelIndices = extractCheckerPixels(worldFrame,arducamB0392cameraIntrinsics.r
             % Get distorted extraction boundaries
             distPtsExt = getDistortedBoundary(canonical_bounds_extract, numPtsPerEdge, tform, K, camIntrinsics);
             
-            if showTwoPanels
+            if showPlot
                 plot(ax2, [distPtsExt(:,1); distPtsExt(1,1)], ...
                           [distPtsExt(:,2); distPtsExt(1,2)], 'm--', 'LineWidth', 1.5);
                 
@@ -199,12 +190,11 @@ rawPixelIndices = extractCheckerPixels(worldFrame,arducamB0392cameraIntrinsics.r
         end
     end
     
-    hold(ax1, 'off');
-    if showTwoPanels
+    if showPlot
+        hold(ax1, 'off');
         hold(ax2, 'off');
         disp('Extraction complete. Figure left open for inspection.');
     else
-        close(fig); 
         disp('Extraction complete.');
     end
 end

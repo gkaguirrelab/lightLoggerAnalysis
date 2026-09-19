@@ -1,9 +1,44 @@
-% Validation
+% Validation with Macbeth Color Checker. We obtained an image of the
+% Macbeth color checker with the IMX219 camera. We also measured the
+% spectral radiance of 5 of the 24 patches using the PR670. We have
+% available that tabular reflectance spectra of all 24 color squares. Usimg
+% these data, we test the ability of the camera reconstruction pipeline to
+% produce integrated radiance values for the R, G, and B channels of the
+% camera that match what we predict based upon the direct spectral
+% radiance measurements. To do so we:
+%
+% - Estimate the illuminant present in the scene
+% - Combine the illuminant with the tabular spectral reflectance to obtain
+%   the estimated spectral radiance for all 24 checks
+% - Using the tabular spectral sensitivities of the IMX219 camera and the
+%   estimated spectral radiances, obtain the predicted integrated radiance
+%   for the three channels (RGB) for each of the 24 checks.
+% - Convert the raw IMX219 image into a map of integrated spectral radiance
+% - Identify the pixels within the IMX219 image that correspond to each of
+%   the 24 Macbeth patches and obtain the mean integrated radiance values
+%   for each of the color channels for each of the color patches
+% - Compare these reconstructed integrated radiance values with the
+%   predicted values.
+%
 
-% Housekeeping
+
+%%%%%%%%%%%%%%%%%%%%
+%% SETUP AND LOADING
+%%%%%%%%%%%%%%%%%%%%
+
+
+% Housekeeping. We clear all to make sure we have fresh persistent vals
 clear all
 
-% Get the list of spectral radiometric measurements of checks
+% Define the common wavelength domain (380 to 730 nm with 1 nm spacing) for
+% this analysis
+commonS = [380, 1, 352]; 
+
+% Set the rows and columns of the Macbeth chart
+nRows = 4;
+nColumns = 6;
+
+% Get the list of spectral radiance measurements of checks
 dirName = fullfile(...
     tbLocateProjectSilent('lightLoggerAnalysis'),...
     'data',...
@@ -20,35 +55,55 @@ for ii = 1:length(fileList)
     fileName = fullfile(fileList(ii).folder,fileList(ii).name);
     load(fileName,'measurement','S')
     myIndex = int32(sscanf(fileList(ii).name, 'Index-%d'));
-    [col, row] = ind2sub([6 4], myIndex);
-    newS = S; newS(2) = 1; newS(3) = S(3)*2;
+    [c, r] = ind2sub([nColumns nRows], myIndex);
     mySPD = mean(measurement,1);
-    spectralRadiance{col, row} = SplineSpd(SToWls(S), mySPD', SToWls(newS));    
+    spectralRadiance{c, r} = SplineSpd(SToWls(S), mySPD', SToWls(commonS));    
 end
-spectralRadianceS = newS;
 
-% Get the table of reflectance spectra of the macbeth color checker
+% Get the table of reflectance spectra of the Macbeth color checker and
+% then spline the reflectance to the commonS
 [spectralReflectance,spectralReflectanceS] = loadMacbethReflectance();
+for c = 1:nColumns
+    for r = 1:nRows
+            spectralReflectance{c, r} = SplineRaw(SToWls(spectralReflectanceS), spectralReflectance{c, r}(:), SToWls(commonS));
+    end
+end
 
-% Define the common wavelength domain (380 to 730 nm with 1 nm spacing).
-commonS = [380, 1, 352]; 
+% Load the world camera channel spectral sensitivity functions. This is a
+% table with the first column providing the wavelength support.
+dataFileName = fullfile(...
+    tbLocateProjectSilent('lightLoggerAnalysis'),...
+    'data',...
+    'IMX219_spectralSensitivity.mat');
+load(dataFileName,'T');
+
+% Extract wavelength support and sensor sensitivities from the table T
+% Assuming the first column is Wavelength and the next three are R, G, B
+sensorWls = T{:, 1};
+
+% Resample spectral sensitivities to the common wavelength domain (380-730 nm)
+T_common = SplineRaw(sensorWls, [T.red, T.green, T.blue], SToWls(commonS));
+
+% Scale the camera spectral sensitivity functions so their maximum value is unity
+sensorSensitivities = T_common ./ max(T_common, [], 1);
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% ESTIMATE THE ILLUMINANT
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+
 
 % Initialize arrays to hold the estimated illuminant spectrum and its grid coordinates
 illuminantEstimates = [];
 measCols = [];
 measRows = [];
 
-% 1. Estimate the illuminant at the measured locations
-for c = 1:6
-    for r = 1:4
+% Loop over the columns and rows of the color checker
+for c = 1:nColumns
+    for r = 1:nRows
         if ~isempty(spectralRadiance{c, r})
-
-            % Resample both radiance and reflectance to the common wavelength domain
-            rad_common = SplineSpd(SToWls(spectralRadianceS), spectralRadiance{c, r}(:), SToWls(commonS));
-            ref_common = SplineRaw(SToWls(spectralReflectanceS), spectralReflectance{c, r}(:), SToWls(commonS));
-
             % Estimate effective illuminant and record its coordinate position
-            illuminantEstimates(:, end+1) = rad_common ./ ref_common;
+            illuminantEstimates(:, end+1) = spectralRadiance{c, r} ./ spectralReflectance{c, r};
             measCols(end+1, 1) = c;
             measRows(end+1, 1) = r;
         end
@@ -68,138 +123,47 @@ illuminantBetas = X_meas \ illuminantEstimates';
 illuminantBetas(:,end) = illuminantBetas(:,end-1);
 
 % Evaluate if the spatial model is satisfactory by calculating R-squared
-% Model predictions for the 5 measured locations
+% model predictions for the 5 measured locations. Report the value.
 predictedMeasIlluminants = X_meas * illuminantBetas;
 ssTotal = sum((illuminantEstimates' - mean(illuminantEstimates', 1)).^2, 1);
 ssResid = sum((illuminantEstimates' - predictedMeasIlluminants).^2, 1);
 rSquared = 1 - (ssResid ./ ssTotal);
 fprintf('Mean spatial model R-squared across all wavelengths: %.4f\n', mean(rSquared, 'omitnan'));
 
-% 2. Predict spectral radiance for unmeasured patches using the spatial model
-for c = 1:6
-    for r = 1:4
-        % Predict the illuminant for this specific [col, row] position
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% ESTIMATE SPECTRAL RADIANCE 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+% Initialize storage arrays for the predicted and measured RGB radiance
+predictedRGBRadiance = zeros(nRows, nColumns, 3);
+measuredRGBRadiance = zeros(nRows, nColumns, 3);
+
+% Loop over the columns and rows of the color checker
+for c = 1:nColumns
+    for r = 1:nRows
+
+        % Obtain the modeled illuminant for this specific [col, row]
+        % position
         localIlluminant = ([1, c, r] * illuminantBetas)'; 
 
+        % Construct the spectral radiance if we did not measure it
         if isempty(spectralRadiance{c, r})
-            ref_patch = spectralReflectance{c, r}(:);
-            ref_common = SplineRaw(SToWls(spectralReflectanceS), ref_patch, SToWls(commonS));
-            spectralRadiance{c, r} = localIlluminant .* ref_common;
-        else
-            rad_common = SplineSpd(SToWls(spectralRadianceS), spectralRadiance{c, r}(:), SToWls(commonS));
-            spectralRadiance{c, r} = rad_common;
+            spectralRadiance{c, r} = localIlluminant .* spectralReflectance{c, r}(:);
         end
+
+        % Calculate the predicted RGB integrated radiance via dot product
+        % of the source radiance and scaled world camera sensitivities
+        predictedRGBRadiance(r, c, :) = (spectralRadiance{c, r}' * sensorSensitivities);
+
     end
 end
 
-% Update the radiance S vector to reflect the new common wavelength domain
-spectralRadianceS = commonS;
 
-% Create a new figure sized for a 6x4 grid
-figure('Name', 'Spatial Illuminant Model vs Measurements', 'Position', [100, 100, 1400, 800]);
-
-% Get wavelength support for the x-axis
-wls = SToWls(commonS);
-
-% Determine global y-axis limits to ensure consistent scaling across all subplots
-% Evaluate the model at all 24 positions to find the maximum predicted value
-allCols = repmat(1:6, 1, 4)';
-allRows = kron(1:4, ones(1, 6))';
-allPredicted = [ones(24, 1), allCols, allRows] * illuminantBetas;
-maxY = max(allPredicted(:)) * 1.1;
-
-% Ensure the empirical measurements don't exceed the calculated maxY
-if exist('illuminantEstimates', 'var') && ~isempty(illuminantEstimates)
-    maxY = max([maxY, max(illuminantEstimates(:)) * 1.1]);
-end
-
-% Loop through the 4 rows and 6 columns of the Macbeth checker
-for r = 1:4
-    for c = 1:6
-        % Calculate subplot index (1 to 24, moving row by row)
-        plotIdx = (r - 1) * 6 + c;
-        subplot(4, 6, plotIdx);
-        hold on;
-
-        % 1. Plot the modeled (estimated) illuminant
-        % Calculate beta0 + beta1*c + beta2*r
-        estIlluminant = ([1, c, r] * illuminantBetas)';
-        plot(wls, estIlluminant, 'k-', 'LineWidth', 1.5, 'DisplayName', 'Model');
-
-        % 2. Plot the measured illuminant if available for this patch
-        % Check if the current (c, r) coordinate exists in the measured data
-        idx = find(measCols == c & measRows == r);
-        if ~isempty(idx)
-            measIlluminant = illuminantEstimates(:, idx);
-            plot(wls, measIlluminant, 'r--', 'LineWidth', 1.5, 'DisplayName', 'Measured');
-        end
-
-        % Formatting
-        title(sprintf('Col %d, Row %d', c, r));
-        xlim([min(wls), max(wls)]);
-        ylim([0, maxY]);
-        grid on;
-
-        % Add legend only to the first subplot
-        if plotIdx == 1
-            legend('Location', 'best');
-        end
-
-        % Clean up axis labels for a cleaner grid layout
-        if r == 4
-            xlabel('Wavelength (nm)');
-        else
-            set(gca, 'XTickLabel', []);
-        end
-
-        if c == 1
-            ylabel('Radiance');
-        else
-            set(gca, 'YTickLabel', []);
-        end
-    end
-end
-
-% Create a figure to compare measured and modeled spectral radiance
-figure('Name', 'Measured vs Modeled Spectral Radiance', 'Position', [200, 200, 700, 500]);
-hold on;
-
-% Select the first available measured patch to plot
-if ~isempty(measCols) && ~isempty(measRows)
-    c = measCols(1);
-    r = measRows(1);
-
-    % Get wavelength support from the common domain
-    wls = SToWls(commonS);
-
-    % 1. Retrieve the Measured Radiance
-    measRad = spectralRadiance{c, r};
-
-    % 2. Calculate the Modeled Radiance
-    localIlluminant = ([1, c, r] * illuminantBetas)';
-
-    % Resample the patch reflectance to the common domain
-    ref_patch = spectralReflectance{c, r}(:);
-    ref_common = SplineRaw(SToWls(spectralReflectanceS), ref_patch, SToWls(commonS));
-
-    % Calculate modeled radiance and convert to W/m2/sr/2nm-band
-    modRad = localIlluminant .* ref_common;
-
-    % Plot both spectra
-    plot(wls, measRad, 'r-', 'LineWidth', 2, 'DisplayName', 'Measured Radiance');
-    plot(wls, modRad, 'k--', 'LineWidth', 2, 'DisplayName', 'Modeled Radiance');
-
-    % Formatting
-    title(sprintf('Spectral Radiance Match for Patch (Col %d, Row %d)', c, r));
-    xlabel('Wavelength (nm)');
-    ylabel('Radiance (W/m^2/sr/nm');
-    legend('Location', 'best');
-    grid on;
-    box on;
-else
-    disp('No measured patches available to plot.');
-end
-hold off;
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% MEASURED SPECTRAL RADIANCE 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 
 % Load the world camera lens intrinsics.
@@ -208,14 +172,6 @@ dataFileName = fullfile(...
     'derived',...
     'arducamB0392cameraIntrinsics.mat');
 load(dataFileName,'arducamB0392cameraIntrinsics');
-
-% Load the world camera channel spectral sensitivity functions. This is a
-% table with the first column providing the wavelength support.
-dataFileName = fullfile(...
-    tbLocateProjectSilent('lightLoggerAnalysis'),...
-    'data',...
-    'IMX219_spectralSensitivity.mat');
-load(dataFileName,'T');
 
 % Load the data for the "close" camera acquisition of the color checker 
 dataFileName = fullfile(...
@@ -233,73 +189,44 @@ radianceMap = reconstructionPipeline(worldFrame, AGCSettings);
 % each pixel
 radianceMap = demosaicRadianceMapRCD(radianceMap);
 
-% Using the "extractCheckerPixels" in the GUI mode, I defined the corner
-% locations for the "close" camera image. We now call this routine again
-% with the defined corners to obtain the locations of pixels within the
-% image corresponding to each of the checks
+% Obtain the pixel indices within the world image for each check. Using the
+% "extractCheckerPixels" in the GUI mode, I defined the corner locations
+% for the "close" camera image. We now call this routine again with the
+% defined corners to obtain the locations of pixels within the image
+% corresponding to each of the checks
 corners = [
     128.6063  103.3571
     530.4668  109.7359
     530.4668  364.8854
     122.2276  376.5797];
-rawPixelIndices = extractCheckerPixels(worldFrame,arducamB0392cameraIntrinsics.results.Intrinsics,true,corners);
+rawPixelIndices = extractCheckerPixels(worldFrame,arducamB0392cameraIntrinsics.results.Intrinsics,corners);
 
 % Now loop through the rows and columns of the checker chart and obtain the
-% estimated RGB radiance values given the estimated illuminant at each
-% location, the spectral reflectance of each check, and the spectral
-% sensitivities of the world camera sensors.
-
-% Extract wavelength support and sensor sensitivities from the table T
-% Assuming the first column is Wavelength and the next three are R, G, B
-sensorWls = T{:, 1};
-sensorSensitivities = [T.red, T.green, T.blue];
-
-% Resample spectral sensitivities to the common wavelength domain (380-730 nm)
-T_common = SplineRaw(sensorWls, sensorSensitivities, SToWls(commonS));
-
-% Scale the camera spectral sensitivity functions so their maximum value is unity
-T_scaled = T_common ./ max(T_common, [], 1);
-
-% Initialize storage arrays for the predicted and measured RGB radiance
-predictedRGBRadiance = zeros(4, 6, 3);
-measuredRGBRadiance = zeros(4, 6, 3);
-
-% Loop through the rows (1-4) and columns (1-6) of the color checker
-for r = 1:4
-    for c = 1:6
-        % --- 1. Calculate Predicted RGB Radiance ---
-        % Reconstruct the estimated local illuminant for this check position
-        localIlluminant = ([1, c, r] * illuminantBetas)';
+% measured RGB radiance values
+for r = 1:nRows
+    for c = 1:nColumns
         
-        % Resample this check's reflectance to the common wavelength domain
-        ref_patch = spectralReflectance{c, r}(:);
-        ref_common = SplineRaw(SToWls(spectralReflectanceS), ref_patch, SToWls(commonS));
-        
-        % Calculate the source spectral radiance (W/m2/sr/nm)
-        sourceRadiance = localIlluminant .* ref_common;
-        
-        % Calculate the predicted RGB radiance via dot product of the source 
-        % radiance and scaled sensitivities
-        predictedRGBRadiance(r, c, :) = (sourceRadiance' * T_scaled);
-        
-        % --- 2. Calculate Measured RGB Radiance ---
-        % Extract linear indices for the 75% central region of this check[cite: 6]
+        % Extract linear indices for the 75% central region of this check
         idx = rawPixelIndices{r, c};
         
-        % Extract the individual channels from the 3D demosaiced radiance map[cite: 5]
+        % Extract the individual channels from the demosaiced radiance map
         R_channel = radianceMap(:, :, 1);
         G_channel = radianceMap(:, :, 2);
         B_channel = radianceMap(:, :, 3);
         
-        % Calculate the mean radiance for this check, ignoring any Inf/NaN values[cite: 5]
+        % Calculate the mean radiance for this check
         measuredRGBRadiance(r, c, 1) = mean(R_channel(idx), 'omitnan');
         measuredRGBRadiance(r, c, 2) = mean(G_channel(idx), 'omitnan');
         measuredRGBRadiance(r, c, 3) = mean(B_channel(idx), 'omitnan');
     end
 end
 
-% Create a new figure for the agreement plot
-figure('Name', 'Predicted vs Measured RGB Radiance', 'Position', [150, 150, 800, 600]);
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% PLOT PREDICTED VS MEASURED INTEGRATED RADIANCE 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+figure('Name', 'Predicted vs Measured Integrated Radiance', 'Position', [150, 150, 800, 600]);
 hold on;
 
 % Flatten the 4x6 matrices into 24x1 vectors for each channel
@@ -311,10 +238,28 @@ measR = reshape(measuredRGBRadiance(:, :, 1), [], 1);
 measG = reshape(measuredRGBRadiance(:, :, 2), [], 1);
 measB = reshape(measuredRGBRadiance(:, :, 3), [], 1);
 
-% Plot each channel with a distinct color
-scatter(predR, measR, 75, 'r', 'filled', 'MarkerEdgeColor', 'k', 'DisplayName', 'Red Channel');
-scatter(predG, measG, 75, 'g', 'filled', 'MarkerEdgeColor', 'k', 'DisplayName', 'Green Channel');
-scatter(predB, measB, 75, 'b', 'filled', 'MarkerEdgeColor', 'k', 'DisplayName', 'Blue Channel');
+% Create an alpha map (0.1 for estimated, 0.5 for measured) and flatten it
+alphaMap = 0.1 * ones(nRows, nColumns);
+for i = 1:length(measCols)
+    alphaMap(measRows(i), measCols(i)) = 0.5;
+end
+alphaFlat = reshape(alphaMap, [], 1);
+
+% Plot each channel with a distinct color and literal transparency values
+sR = scatter(predR, measR, 75, 'r', 'filled', 'MarkerEdgeColor', 'none', 'DisplayName', 'Red Channel');
+sR.AlphaData = alphaFlat;
+sR.MarkerFaceAlpha = 'flat';
+sR.AlphaDataMapping = 'none';
+
+sG = scatter(predG, measG, 75, 'g', 'filled', 'MarkerEdgeColor', 'none', 'DisplayName', 'Green Channel');
+sG.AlphaData = alphaFlat;
+sG.MarkerFaceAlpha = 'flat';
+sG.AlphaDataMapping = 'none';
+
+sB = scatter(predB, measB, 75, 'b', 'filled', 'MarkerEdgeColor', 'none', 'DisplayName', 'Blue Channel');
+sB.AlphaData = alphaFlat;
+sB.MarkerFaceAlpha = 'flat';
+sB.AlphaDataMapping = 'none';
 
 % Determine the axis limits based on the data to create a proportional plot
 maxVal = max([predR; predG; predB; measR; measG; measB]) * 1.05;
@@ -344,7 +289,11 @@ grid on;
 box on;
 hold off;
 
-% --- Append to validateCameraByColorChecker_2.m ---
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% PLOT PREDICTED VS MEASURED CHANNEL RATIOS 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
 
 % Calculate the total radiance across all channels for each patch
 predSum = predR + predG + predB;

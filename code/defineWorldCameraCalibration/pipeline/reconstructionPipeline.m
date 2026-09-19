@@ -90,6 +90,9 @@ linearized = yPrime .* asymptoticGain;
 linearized(y >= saturationThreshold) = Inf;
 imageStages{2} = linearized;
 
+% Apply digital gain
+imageStages{2} = imageStages{2} * AGCSettings.Dgain;
+
 % Stage 3: Impute values for ceiling and floor pixels
 imageStages{3} = imputePixelValues(imageStages{2});
 
