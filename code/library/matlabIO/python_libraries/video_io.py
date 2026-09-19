@@ -1203,9 +1203,6 @@ def world_chunks_to_video(recording_path: str,
     # Declare some global video pieces of knowledge that we 
     # will fill in from the first chunk, 
     # such as the provenance map of debayered pixels to their contributing pixels in the RAW image 
-    # and the RGB bayer pixel locations
-    bayer_RGB_mask: np.ndarray | None = None
-    bayer_RGB_pixel_locations: list[np.ndarray] | None = None
     debayered_provenance_map: np.ndarray | None = None
     try:
         for _ in chunk_iterator:        
@@ -1310,16 +1307,8 @@ def world_chunks_to_video(recording_path: str,
             if(apply_color_weights is True):
                 assert frame_buffer.ndim == 3 and frame_buffer.dtype == np.float64, f"To apply color weights, buffer must be in bayer form np.float64."
 
-                # Apply the radiometric correction
-                # pre-compute the RGB bayer mask once to save time 
-                if(bayer_RGB_mask is None):
-                    bayer_RGB_mask = world_util.generate_RGB_mask(frame_buffer[0])
-                    bayer_RGB_pixel_locations = [ np.argwhere(bayer_RGB_mask == color) for color in "RGB" ]
-                assert bayer_RGB_mask.shape == frame_buffer.shape[1:], f"Bayer RGB mask shape: {bayer_RGB_mask.shape} not equal to frame shape: {frame_buffer.shape[1:]}" 
-
-                # Apply the color corrections IN-PLACE 
-                assert len(bayer_RGB_pixel_locations) == len(world_util.WORLD_RGB_SCALARS)
-                world_util.apply_color_correction(frame_buffer, bayer_RGB_pixel_locations)
+                # Apply the cached spatial weight map in place across all frames.
+                world_util.apply_color_correction(frame_buffer)
 
             # Apply Dgain if requested
             if(apply_digital_gain is True):

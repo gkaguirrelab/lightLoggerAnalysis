@@ -1,6 +1,8 @@
 """Utility functions and constants for the world camera sensor."""
 
 from importlib import metadata
+import multiprocessing
+from multiprocessing.shared_memory import SharedMemory
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -21,6 +23,9 @@ import dill
 import pandas as pd
 from numba import njit, prange
 import scipy.io
+from scipy.interpolate import LinearNDInterpolator
+from scipy.spatial import Delaunay, QhullError, cKDTree
+from scipy.special import ndtr
 
 # Define constants for the project root and the derived calibration dir that we will consult later
 _PROJECT_ROOT: pathlib.Path = pathlib.Path(__file__).resolve().parents[3]
@@ -288,8 +293,71 @@ WORLD_FIELDING_FUNCTIONS: dict[tuple[int], np.ndarray] = _import_fielding_functi
 WORLD_RGB_SCALARS: np.ndarray = scipy.io.loadmat(_DERIVED_CALIBRATION_DIR / "radiometricCorrectionRGB.mat")["radiometricCorrectionRGB"].astype(np.float64, copy=False).reshape(-1)
 WORLD_RADIOMETRIC_CORRECTION_MAP: np.ndarray = scipy.io.loadmat(_DERIVED_CALIBRATION_DIR / "radiometricCorrectionRGB.mat")["radiometricCorrectionMap"].astype(np.float64, copy=False)
 
-WORLD_AVG_SCENE_RADIANCE: np.ndarray = scipy.io.loadmat(_DERIVED_CALIBRATION_DIR / "cameraScoreToAverageRadiance.mat")["avgSceneRadiance"].astype(np.float64, copy=False).reshape(-1)
-WORLD_CAMERA_SCORE: np.ndarray = scipy.io.loadmat(_DERIVED_CALIBRATION_DIR / "cameraScoreToAverageRadiance.mat")["cameraScore"].astype(np.float64, copy=False).reshape(-1)
+
+def _build_bayer_correction_matrix(image_shape: tuple[int, int]) -> np.ndarray:
+    """Build a labeled BGGR image, then fill its RGB sites with their weights."""
+    rows, cols = image_shape
+    bayer_cell = np.array([["B", "G"], ["G", "R"]])
+    bayer_image = np.tile(bayer_cell, ((rows + 1) // 2, (cols + 1) // 2))[:rows, :cols]
+
+    # Locate each color in the Bayer image before assigning calibrated weights.
+    rgb_pixel_locations = [np.where(bayer_image == color) for color in "RGB"]
+    correction = np.empty(image_shape, dtype=np.float64)
+    for pixel_locations, weight in zip(rgb_pixel_locations, WORLD_RGB_SCALARS):
+        correction[pixel_locations] = weight
+    correction.setflags(write=False)
+    return correction
+
+
+# Supported image sizes; buffers broadcast the same spatial map over frames.
+WORLD_BAYER_CORRECTION_MATRICES: dict[tuple[int, int], np.ndarray] = {
+    (480, 640): _build_bayer_correction_matrix((480, 640)),
+}
+
+_effective_radiance_calibration = scipy.io.loadmat(
+    _DERIVED_CALIBRATION_DIR / "cameraScoreToEffectiveRadiance.mat"
+)
+WORLD_CAMERA_SCORE: np.ndarray = np.asarray(
+    _effective_radiance_calibration["cameraScore"], dtype=np.float64
+).reshape(-1)
+WORLD_EFFECTIVE_RADIANCE: np.ndarray = np.asarray(
+    _effective_radiance_calibration["effectiveRadiance"], dtype=np.float64
+)
+if(WORLD_EFFECTIVE_RADIANCE.shape != (WORLD_CAMERA_SCORE.size, 3)
+   or not np.all(np.isfinite(WORLD_CAMERA_SCORE))
+   or not np.all(np.isfinite(WORLD_EFFECTIVE_RADIANCE))
+   or np.any(WORLD_CAMERA_SCORE <= 0)
+   or np.any(WORLD_EFFECTIVE_RADIANCE <= 0)
+   or np.any(np.diff(WORLD_CAMERA_SCORE) <= 0)):
+    raise ValueError("Invalid camera-score to RGB effective-radiance calibration")
+
+# MATLAB interpolates each RGB channel in log10 space before taking the Bayer
+# weighted mean. Cache both logs and the fixed spatial scale once per import.
+WORLD_LOG_CAMERA_SCORE: np.ndarray = np.log10(WORLD_CAMERA_SCORE)
+WORLD_LOG_EFFECTIVE_RADIANCE: np.ndarray = np.log10(WORLD_EFFECTIVE_RADIANCE)
+WORLD_EFFECTIVE_SET_POINTS: dict[tuple[int, int], float] = {
+    shape: float(WORLD_LINEARIZED_SET_POINT
+                 * np.nanmean(fielding)
+                 * np.nanmean(WORLD_RADIOMETRIC_CORRECTION_MAP))
+    for shape, fielding in WORLD_FIELDING_FUNCTIONS.items()
+}
+
+# Geoff's MATLAB reconstruction treats response-curve inversion as unreliable
+# once its derivative exceeds this value. The fitted response parameters turn
+# this into a raw 8-bit saturation threshold of 239 for the current camera.
+WORLD_MAX_ALLOWED_LINEARIZATION_DERIVATIVE: float = 4.0
+
+# Every four neighbouring samples of a Bayer channel sit on a common circle, so
+# a Delaunay triangulation of them is mathematically non-unique and SciPy and
+# MATLAB split each cell along a different diagonal. Shearing the coordinates by
+# (x, y) -> (x, y + shear * x) breaks the tie the same way MATLAB breaks it. The
+# shear is affine, so barycentric weights are unchanged and only the choice of
+# diagonal is affected. Any positive value works; the diagonal MATLAB picks is
+# already selected at 1e-9 and stays selected at 1e-2.
+# This matches the intact Bayer lattice, not every triangulation around missing
+# samples. Irregular holes can still produce different valid Delaunay triangles
+# in MATLAB and SciPy, changing interpolated values and the fitted prior.
+WORLD_TRIANGULATION_SHEAR: float = 1e-4
 
 """
 END PROCESSING PIPELINE CONSTANTS
@@ -649,11 +717,46 @@ def debayer_image(image: np.ndarray,
     return debayer(image, visualize_results=visualize_results)
 
 
+def calculate_world_saturation_threshold(
+    original_bit_depth: int = 8,
+    dark_noise: float = WORLD_DARK_SIGNAL,
+    clipping_exponent: float = WORLD_FULL_WELL_CLIPPING_EXPONENT,
+    max_allowed_derivative: float = WORLD_MAX_ALLOWED_LINEARIZATION_DERIVATIVE,
+) -> int:
+    """Return Geoff's raw-count threshold for unreliable response inversion.
+
+    The threshold is the raw sensor value at which the derivative of the
+    inverse full-well response reaches ``max_allowed_derivative``. Values at
+    or above it are represented as ``Inf`` and subsequently imputed.
+    """
+    if(original_bit_depth <= 0):
+        raise ValueError("original_bit_depth must be positive")
+    if(clipping_exponent <= 0):
+        raise ValueError("clipping_exponent must be positive")
+    if(max_allowed_derivative <= 1):
+        raise ValueError("max_allowed_derivative must be greater than one")
+
+    sensor_max: float = float(2 ** original_bit_depth - 1)
+    smax: float = sensor_max - float(dark_noise)
+    if(smax <= 0):
+        raise ValueError(
+            f"dark_noise={dark_noise} leaves no usable range for "
+            f"original_bit_depth={original_bit_depth}."
+        )
+
+    exponent_ratio: float = clipping_exponent / (clipping_exponent + 1)
+    threshold_above_dark: float = smax * (
+        1 - max_allowed_derivative ** (-exponent_ratio)
+    ) ** (1 / clipping_exponent)
+    return int(np.floor(threshold_above_dark + dark_noise))
+
+
 def linearize_camera_responsivity(image_or_video: np.ndarray,
                                   dst: np.ndarray | None=None,
                                   original_bit_depth: int = 8,
                                   dark_noise: float = WORLD_DARK_SIGNAL,
                                   clipping_exponent: float = WORLD_FULL_WELL_CLIPPING_EXPONENT,
+                                  max_allowed_derivative: float = WORLD_MAX_ALLOWED_LINEARIZATION_DERIVATIVE,
                                   visualize_results: bool=False
                                   ) -> np.ndarray | tuple[np.ndarray, object]:
     """Linearize world-camera values using the fitted full-well model.
@@ -672,6 +775,8 @@ def linearize_camera_responsivity(image_or_video: np.ndarray,
         dark_noise: The measured dark offset to remove before inversion.
         clipping_exponent: The fitted soft-clipping exponent from the
             full-well calibration.
+        max_allowed_derivative: Maximum inverse-response derivative. Raw
+            values at or above the resulting threshold are marked ``Inf``.
         visualize_results: When ``True``, display a before/after figure and
             return it with the linearized result. Visualization supports only
             a single ``(rows, cols)`` frame and asserts otherwise.
@@ -708,6 +813,14 @@ def linearize_camera_responsivity(image_or_video: np.ndarray,
             f"original_bit_depth={original_bit_depth}."
         )
 
+    saturation_threshold: int = calculate_world_saturation_threshold(
+        original_bit_depth=original_bit_depth,
+        dark_noise=dark_noise,
+        clipping_exponent=clipping_exponent,
+        max_allowed_derivative=max_allowed_derivative,
+    )
+    saturation_mask: np.ndarray = image_or_video >= saturation_threshold
+
     assert dst.shape == image_or_video.shape, "dst must have the same shape as image_or_video"
     assert np.issubdtype(dst.dtype, np.floating), "dst must have a floating-point dtype"
 
@@ -724,6 +837,11 @@ def linearize_camera_responsivity(image_or_video: np.ndarray,
     # Match MATLAB's yPrime ./ (1 - (yPrime ./ Smax).^n).^(1./n).
     with np.errstate(divide="ignore", invalid="ignore"):
         dst[:] = dst / (1 - (dst / smax) ** clipping_exponent) ** (1 / clipping_exponent)
+
+    # Match reconstructionPipeline.m: values in the unstable upper part of
+    # the inverse response are treated as ceiling samples even if they have
+    # not reached the integer sensor maximum.
+    dst[saturation_mask] = np.inf
 
     # If visualize results is true, we will print an output of what the image looks like 
     if(visualize_results is True):
@@ -744,6 +862,752 @@ def linearize_camera_responsivity(image_or_video: np.ndarray,
         return dst, fig
 
     return dst
+
+
+def _scattered_interpolant(sample_x: np.ndarray,
+                           sample_y: np.ndarray,
+                           sample_values: np.ndarray,
+                           image_shape: tuple[int, int]
+                          ) -> np.ndarray:
+    """Interpolate Bayer samples using linear interpolation and nearest extrapolation.
+
+    This follows MATLAB ``scatteredInterpolant(x, y, v, 'linear', 'nearest')``,
+    but does not guarantee identical results around missing-sample regions:
+    MATLAB and SciPy can choose different valid Delaunay triangulations there.
+
+    MATLAB builds the interpolant and then evaluates it over the full pixel
+    grid with ``F(X, Y)``. Both steps happen here, so this returns the grid
+    directly rather than a callable.
+
+    What the MATLAB call does, and therefore what this reproduces:
+
+    * It triangulates the scattered sample points, splitting the plane into
+      triangles whose corners are samples (a Delaunay triangulation).
+    * For a query inside a triangle, the value is a weighted blend of that
+      triangle's three corners. That is the ``'linear'`` method.
+    * A query outside the outer boundary of all the samples sits in no
+      triangle, so it instead copies its single closest sample. That is the
+      ``'nearest'`` extrapolation method.
+
+    Args:
+        sample_x: One-based integer column coordinate of each Bayer sample.
+        sample_y: One-based integer row coordinate of each Bayer sample.
+            Samples must belong to one color channel. Input order may vary;
+            nearest-neighbor ties use the MATLAB Bayer-coordinate rank.
+        sample_values: Value at each sample.
+        image_shape: The ``(rows, cols)`` grid to evaluate over.
+
+    Returns:
+        The interpolated grid, shaped ``image_shape``.
+    """
+    rows, cols = image_shape
+
+    # MATLAB queries every pixel via [X, Y] = meshgrid(1:W, 1:H).
+    query_x, query_y = np.meshgrid(np.arange(1, cols + 1, dtype=np.float64),
+                                   np.arange(1, rows + 1, dtype=np.float64))
+    query_x = query_x.ravel()
+    query_y = query_y.ravel()
+
+    sample_x = np.asarray(sample_x, dtype=np.float64)
+    sample_y = np.asarray(sample_y, dtype=np.float64)
+    sample_values = np.asarray(sample_values, dtype=np.float64)
+
+    # Shear y by a multiple of x before triangulating. Every four neighbouring
+    # Bayer samples lie on a common circle, which makes a Delaunay
+    # triangulation of them non-unique; the shear breaks that tie the same way
+    # MATLAB breaks it on an intact lattice. It is affine, so barycentric
+    # weights for a given triangle are unchanged. Missing-sample regions can
+    # still select different triangles and therefore different values.
+    sheared_samples: np.ndarray = np.column_stack(
+        (sample_x, sample_y + WORLD_TRIANGULATION_SHEAR * sample_x)
+    )
+    sheared_queries: np.ndarray = np.column_stack(
+        (query_x, query_y + WORLD_TRIANGULATION_SHEAR * query_x)
+    )
+
+    # 'linear' interpolates inside the convex hull of the samples.
+    try:
+        interpolated: np.ndarray = np.asarray(
+            LinearNDInterpolator(Delaunay(sheared_samples), sample_values, fill_value=np.nan)(sheared_queries),
+            dtype=np.float64,
+        )
+    except QhullError:
+        # Collinear or otherwise degenerate samples cannot be triangulated, so
+        # every query falls through to the nearest-neighbour step below.
+        interpolated = np.full(query_x.size, np.nan, dtype=np.float64)
+
+    # 'nearest' extrapolates every query that fell outside the convex hull.
+    outside_hull: np.ndarray = np.isnan(interpolated)
+    if(np.any(outside_hull)):
+        tree: cKDTree = cKDTree(np.column_stack((sample_x, sample_y)))
+        outside_points: np.ndarray = np.column_stack((query_x[outside_hull], query_y[outside_hull]))
+
+        # Gather equally close samples, then select by MATLAB's Bayer ordering:
+        # cell-position block first, followed by column, then row. This rank
+        # preserves MATLAB's last-sample tie rule regardless of input order.
+        sample_rows = sample_y.astype(np.int64) - 1
+        sample_cols = sample_x.astype(np.int64) - 1
+        cell_blocks = (sample_rows % 2) * 2 + sample_cols % 2
+        matlab_rank = cell_blocks * (rows * cols) + sample_cols * rows + sample_rows
+        nearest_distance, _ = tree.query(outside_points)
+        tied_samples: list[list[int]] = tree.query_ball_point(
+            outside_points, nearest_distance * (1 + 1e-9) + 1e-12
+        )
+        interpolated[outside_hull] = sample_values[[tied[np.argmax(matlab_rank[tied])] for tied in tied_samples]]
+
+    return interpolated.reshape(rows, cols)
+
+
+# ---------------------------------------------------------------------------
+# How the imputation works, in plain terms
+#
+# The problem. A pixel that blew out sits at the sensor ceiling and a pixel
+# that saw nothing sits on the floor. Either way the true radiance was lost:
+# all we know is that it was "at least this bright" or "at most this dim". The
+# linearization stage marks those pixels Inf and 0 respectively. This function
+# replaces them with a best estimate of what they would have read.
+#
+# The idea. Colour channels are correlated. If a red pixel blew out but the
+# green and blue around it are still valid, those neighbours say a lot about
+# how bright red must have been. So the estimate is built by conditioning on
+# whichever other channels survived at that pixel.
+#
+# The four steps below:
+#
+#   1. Every pixel physically measures only ONE colour, because of the Bayer
+#      filter. Interpolate each channel across the whole frame so that every
+#      pixel carries an estimate of all three colours. That gives us something
+#      to condition on. This grid is rgb_map.
+#
+#   2. Fit a 3-D Gaussian (a mean vector and a 3x3 covariance) to log RGB over
+#      the pixels whose three channels are all valid. This is the prior: it
+#      captures what colours this particular scene tends to contain, and how
+#      the channels move together. Logs are used because radiance spans orders
+#      of magnitude and is far closer to Gaussian once logged.
+#
+#   3. Record the brightest and dimmest value actually observed in each
+#      channel. A ceiling pixel must be at least as bright as the brightest
+#      thing we did manage to measure; a floor pixel at most as dim as the
+#      dimmest. These become the bounds in step 4.
+#
+#   4. For each ruined pixel, condition the prior on its surviving channels.
+#      That yields a mean and variance for the missing channel. But we also
+#      know the answer lies beyond the step-3 bound, so the estimate is the
+#      mean of that Gaussian restricted to the far side of the bound, which
+#      has a closed form. Exponentiate to get back to linear sensor units.
+# ---------------------------------------------------------------------------
+def _impute_pixel_values_single(radiance_map: np.ndarray,
+                                bayer_pattern: str,
+                                dst: np.ndarray | None=None
+                               ) -> np.ndarray:
+    """Impute one frame, optionally writing into an independent float64 dst."""
+    rows, cols = radiance_map.shape
+
+    pattern = str(bayer_pattern).upper()
+    if(pattern not in ("BGGR", "RGGB", "GRBG", "GBRG")):
+        raise ValueError(f"Unknown Bayer pattern: {bayer_pattern}")
+
+    # Initialize the output directly in its final storage. Buffered callers
+    # supply a slice, avoiding a separate frame allocation and later stack copy.
+    if(dst is None):
+        dst = np.empty(radiance_map.shape, dtype=np.float64)
+    elif(dst.shape != radiance_map.shape or dst.dtype != np.float64):
+        raise ValueError("Imputation destination must match the frame shape and have dtype float64.")
+    elif(np.shares_memory(dst, radiance_map)):
+        raise ValueError("Imputation destination must not overlap the input frame.")
+    np.copyto(dst, radiance_map, casting="unsafe")
+
+    # A finite, positive frame has no samples to impute. Skip interpolation
+    # and prior fitting, but preserve the function's independent float64 output.
+    if(not np.any(~np.isfinite(radiance_map) | (radiance_map <= 0))):
+        return dst
+
+    if((rows, cols) == tuple(WORLD_FRAME_SHAPE) and pattern == "BGGR"):
+        # Reuse row-ordered coordinates directly for sequential image access.
+        # The interpolant handles MATLAB nearest-neighbor ties explicitly.
+        bayer_idx = (WORLD_R_PIXELS, WORLD_G_PIXELS,
+                     WORLD_B_PIXELS)
+    else:
+        # Preserve support for other Bayer patterns and frame dimensions.
+        cell_positions = ((0, 0), (0, 1), (1, 0), (1, 1))
+        bayer_idx = [
+            np.array([(r, c)
+                      for position, (row_parity, col_parity) in enumerate(cell_positions)
+                      if(pattern[position] == channel)
+                      for c in range(col_parity, cols, 2)
+                      for r in range(row_parity, rows, 2)], dtype=np.uint64)
+            for channel in "RGB"
+        ]
+
+    # Interpolate to get cross-channel conditioning data. After this loop every
+    # pixel carries an estimate of all three colours, not only the one its own
+    # Bayer position measured.
+    rgb_map: np.ndarray = np.zeros((rows, cols, 3), dtype=np.float64)
+    for channel in range(3):
+        channel_rows: np.ndarray = bayer_idx[channel][:, 0]
+        channel_cols: np.ndarray = bayer_idx[channel][:, 1]
+
+        # Read this channel's own samples out of the raw map.
+        sub_val: np.ndarray = radiance_map[channel_rows, channel_cols]
+
+        # A ceiling sample is Inf and a floor sample is exactly zero.
+        inf_mask: np.ndarray = np.isinf(sub_val)
+        floor_mask: np.ndarray = (sub_val == 0)
+
+        # Neither carries usable information, so blank both out for the fit.
+        work_sub: np.ndarray = sub_val.copy()
+        work_sub[inf_mask | floor_mask] = np.nan
+        valid_idx: np.ndarray = ~np.isnan(work_sub)
+
+        # MATLAB works in one-based (x=column, y=row) coordinates.
+        sub_x: np.ndarray = channel_cols.astype(np.float64) + 1
+        sub_y: np.ndarray = channel_rows.astype(np.float64) + 1
+
+        # With no usable sample the channel plane is left at zero.
+        if(np.any(valid_idx)):
+            rgb_map[:, :, channel] = _scattered_interpolant(
+                sub_x[valid_idx], sub_y[valid_idx], work_sub[valid_idx], (rows, cols)
+            )
+
+        # Restore Inf and 0 at sub-grid locations so the imputation step can
+        # find them again after the interpolation has smoothed over them.
+        channel_grid: np.ndarray = rgb_map[:, :, channel]
+        channel_grid[channel_rows[inf_mask], channel_cols[inf_mask]] = np.inf
+        channel_grid[channel_rows[floor_mask], channel_cols[floor_mask]] = 0.0
+        rgb_map[:, :, channel] = channel_grid
+
+    # Extract prior statistics. Only pixels whose three channels are all
+    # present and positive describe the scene's colour distribution.
+    pixels: np.ndarray = rgb_map.reshape(-1, 3)
+    valid_pixels: np.ndarray = pixels[~np.any(np.isinf(pixels) | (pixels == 0), axis=1)]
+    if(valid_pixels.shape[0] < 2):
+        raise ValueError(
+            "At least two complete, positive RGB samples are required for "
+            "Bayesian floor/ceiling imputation."
+        )
+
+    # The model is Gaussian in log space, so the prior is fit to log radiance.
+    log_valid: np.ndarray = np.log(valid_pixels)
+    mu: np.ndarray = np.mean(log_valid, axis=0)
+    covariance: np.ndarray = np.cov(log_valid, rowvar=False, ddof=1)
+
+    # Record how bright a ceiling sample must be, and how dim a floor sample
+    # must be, from each channel's observed range.
+    s_log: np.ndarray = np.zeros(3, dtype=np.float64)
+    f_log: np.ndarray = np.zeros(3, dtype=np.float64)
+    for channel in range(3):
+        channel_values: np.ndarray = pixels[:, channel]
+        valid_c: np.ndarray = channel_values[(channel_values > 0) & ~np.isinf(channel_values)]
+        if(valid_c.size == 0):
+            # Fall back to a fixed range when a channel has no valid sample.
+            s_log[channel] = np.log(1.0)
+            f_log[channel] = np.log(1e-4)
+        else:
+            s_log[channel] = np.log(np.max(valid_c))
+            f_log[channel] = np.log(np.min(valid_c))
+
+    # The destination already contains the original samples; only ceiling
+    # and floor samples are replaced below.
+    raw_fixed: np.ndarray = dst
+
+    # Pre-compute the log of every interpolated pixel once. log(0) is -Inf and
+    # log(Inf) is Inf, so the finiteness test below rejects both.
+    with np.errstate(divide="ignore", invalid="ignore"):
+        log_fixed_pixels: np.ndarray = np.log(rgb_map)
+
+    # Constant factor of the Gaussian density, hoisted out of the pixel loop.
+    sqrt_two_pi: float = np.sqrt(2 * np.pi)
+
+    for c_target in range(3):
+        # Every ceiling or floor pixel in the frame.
+        target_mask: np.ndarray = np.isinf(radiance_map) | (radiance_map == 0)
+
+        # Restricted to the Bayer positions belonging to this channel.
+        bayer_target_mask: np.ndarray = np.zeros((rows, cols), dtype=bool)
+        bayer_target_mask[bayer_idx[c_target][:, 0], bayer_idx[c_target][:, 1]] = True
+
+        # The pixels this pass will replace. MATLAB walks these in column-major
+        # order; each pixel is independent, so the order does not matter.
+        active_impute_indices: np.ndarray = np.argwhere(target_mask & bayer_target_mask)
+
+        if(active_impute_indices.size == 0):
+            continue
+
+        # Within a frame, conditioning depends only on the target color and
+        # which other channels are known. Precompute the three nonempty cases
+        # once per target, rather than repeating matrix inversions per pixel.
+        # This requires at most nine inversions for the entire frame.
+        other_channels = [channel for channel in range(3) if channel != c_target]
+        known_channel_cases = (
+            (other_channels[0],),
+            (other_channels[1],),
+            tuple(other_channels),
+        )
+        conditioning = {}
+        for known_channels in known_channel_cases:
+            known_cols = np.array(known_channels, dtype=np.intp)
+            mu_k = mu[known_cols]
+            s_k = covariance[np.ix_(known_cols, known_cols)]
+            s_sk = covariance[c_target, known_cols]
+            # Preserve the existing ridge regularization and operation order.
+            s_k_inv = np.linalg.inv(s_k + 1e-6 * np.eye(known_cols.size))
+            coefficients = s_sk @ s_k_inv
+            conditional_variance = float(covariance[c_target, c_target] - coefficients @ s_sk.T)
+            conditional_std = np.sqrt(max(conditional_variance, 1e-8))
+            conditioning[known_channels] = (mu_k, coefficients, conditional_std)
+        prior_std = np.sqrt(max(float(covariance[c_target, c_target]), 1e-8))
+
+        for pixel_row, pixel_col in active_impute_indices:
+            # Work out which of the other two channels survived at this pixel,
+            # because those are the evidence we get to condition on. A channel
+            # counts as known only if its log is finite: log(0) is -Inf for a
+            # floor sample and log(Inf) is +Inf for a ceiling one, so this test
+            # rejects a neighbour that is itself ruined. The target channel is
+            # excluded because it is the thing we are trying to estimate.
+            valid_k_mask: np.ndarray = np.isfinite(log_fixed_pixels[pixel_row, pixel_col])
+            valid_k_mask[c_target] = False
+            valid_k_cols: np.ndarray = np.flatnonzero(valid_k_mask)
+
+            if(valid_k_cols.size > 0):
+                # Only the observed values vary between pixels in this case.
+                mu_k, coefficients, std_xs = conditioning[tuple(valid_k_cols)]
+                k: np.ndarray = log_fixed_pixels[pixel_row, pixel_col, valid_k_cols]
+                mu_xs: float = float(mu[c_target] + coefficients @ (k - mu_k))
+            else:
+                # Both neighbours are ruined too, which happens in the middle of
+                # a large blown-out region. With no evidence to condition on,
+                # fall back to the scene-wide prior for this channel.
+                mu_xs = float(mu[c_target])
+                std_xs = prior_std
+
+            # We now have a Gaussian belief about this pixel's log radiance.
+            # The final piece of information is the bound: the sensor told us
+            # the true value lies beyond it. So the answer is the mean of that
+            # Gaussian restricted to the far side of the bound, which is the
+            # standard truncated-normal expectation
+            #
+            #     E[X | X > bound] = mean + std * phi(z) / (1 - Phi(z))
+            #
+            # where z is the bound in standard deviations, phi is the normal
+            # density and Phi its cumulative. The floor case is the mirror
+            # image, subtracting instead of adding.
+            if(np.isinf(radiance_map[pixel_row, pixel_col])):
+                # Ceiling pixel: the truth is brighter than anything we measured.
+                z_score: float = (s_log[c_target] - mu_xs) / std_xs
+
+                # Probability the prior assigns to being above the bound.
+                tail: float = float(1 - ndtr(z_score))
+                if(tail < 1e-15):
+                    # The prior says being this bright is essentially
+                    # impossible, so the ratio below is numerically
+                    # meaningless. Pin the estimate to the bound itself.
+                    expected_val_log: float = float(s_log[c_target])
+                else:
+                    # Normal density at the bound, scaled by the width.
+                    numerator_term: float = (std_xs / sqrt_two_pi) * np.exp(-(z_score ** 2) / 2)
+
+                    # Step upward from the mean into the surviving tail.
+                    expected_val_log = mu_xs + numerator_term / tail
+            else:
+                # Floor pixel: the truth is dimmer than anything we measured.
+                z_score = (f_log[c_target] - mu_xs) / std_xs
+
+                # Probability the prior assigns to being below the bound.
+                tail = float(ndtr(z_score))
+                if(tail < 1e-15):
+                    expected_val_log = float(f_log[c_target])
+                else:
+                    numerator_term = (std_xs / sqrt_two_pi) * np.exp(-(z_score ** 2) / 2)
+
+                    # Step downward from the mean into the surviving tail.
+                    expected_val_log = mu_xs - numerator_term / tail
+
+            # Everything above happened in log space, so undo the log to get
+            # back to the linear sensor units the rest of the pipeline expects.
+            raw_fixed[pixel_row, pixel_col] = np.exp(expected_val_log)
+
+    return raw_fixed
+
+
+def _impute_pixel_values_shared_worker(frame: np.ndarray,
+                                      frame_index: int,
+                                      bayer_pattern: str,
+                                      shared_name: str,
+                                      output_shape: tuple[int, ...]
+                                     ) -> None:
+    """Write one imputed frame into its assigned shared-memory output slice."""
+    shared_memory = SharedMemory(name=shared_name)
+    try:
+        output = np.ndarray(output_shape, dtype=np.float64, buffer=shared_memory.buf)
+        try:
+            _impute_pixel_values_single(frame, bayer_pattern, dst=output[frame_index])
+        finally:
+            del output
+    finally:
+        # The parent owns the allocation and unlinks it after the pool finishes.
+        shared_memory.close()
+
+
+def impute_pixel_values(linearized_image_or_buffer: np.ndarray,
+                        bayer_pattern: str="BGGR",
+                        visualize_results: bool=False,
+                        n_workers: int=12
+                       ) -> np.ndarray | tuple[np.ndarray, object]:
+    """Impute floor and ceiling Bayer samples using Geoff's Bayesian model.
+
+    This is the Python equivalent of MATLAB ``imputePixelValues``, which
+    implements a Bayesian estimate of the linearized sensor value at pixels
+    that sit at the ceiling (``Inf``) or on the floor (zero), following:
+
+        Zhang X, Brainard DH. Estimation of saturated pixel values in digital
+        color imaging. Journal of the Optical Society of America A. 2004 Dec
+        1;21(12):2301-10.
+
+    Modified to add imputation of floor values, and to consider the
+    distribution of pixel values in the log transformed space.
+
+    MATLAB handles one frame. A ``(frames, rows, cols)`` buffer is accepted
+    here and each frame is modeled independently, matching repeated calls to
+    the MATLAB function.
+
+    Args:
+        linearized_image_or_buffer: Linearized frame or frame buffer whose
+            ceiling samples are ``Inf`` and whose floor samples are zero.
+        bayer_pattern: Bayer layout of the sensor.
+        visualize_results: When ``True``, display a before/after figure and
+            return it alongside the result. Supported for one frame only.
+        n_workers: Number of processes for a frame buffer, default 12. Use 1
+            for serial processing. Single frames are processed directly.
+            Input frames are serialized to workers; output slices are shared.
+            Script callers must guard their entry point with
+            ``if __name__ == "__main__":`` for multiprocessing spawn.
+
+    Returns:
+        The imputed frame or buffer, or ``(imputed, figure)`` when
+        visualization is requested.
+    """
+    values: np.ndarray = np.asarray(linearized_image_or_buffer, dtype=np.float64)
+    if(isinstance(n_workers, (bool, np.bool_)) or not isinstance(n_workers, (int, np.integer)) or n_workers < 1):
+        raise ValueError("n_workers must be a positive integer.")
+    n_workers = int(n_workers)
+
+    # Accept one frame or a buffer of frames, and nothing else.
+    if(values.ndim not in (2, 3)):
+        raise ValueError(
+            "Imputation requires shape (rows, cols) or "
+            f"(frames, rows, cols). Got {values.shape}."
+        )
+    if(visualize_results is True and values.ndim != 2):
+        raise AssertionError("Imputation visualization supports a single frame only")
+
+    # Keep a copy of the input for the before/after figure.
+    unmodified: np.ndarray | None = values.copy() if visualize_results else None
+
+    # Impute one frame directly, or every frame of a buffer independently.
+    if(values.ndim == 2):
+        result: np.ndarray = _impute_pixel_values_single(values, bayer_pattern)
+    elif(n_workers == 1 or values.size == 0):
+        # Allocate once and write each imputed frame into its final slice.
+        result = np.empty(values.shape, dtype=np.float64)
+        for frame_index, frame in enumerate(values):
+            _impute_pixel_values_single(frame, bayer_pattern, dst=result[frame_index])
+    else:
+        # Workers receive an input frame and its index, then write directly to
+        # disjoint slices of one shared output allocation. No output frames
+        # are serialized back to the parent or assembled with np.stack.
+        shared_memory = SharedMemory(create=True, size=values.nbytes)
+        try:
+            shared_output = np.ndarray(values.shape, dtype=np.float64, buffer=shared_memory.buf)
+            try:
+                with multiprocessing.get_context("spawn").Pool(processes=n_workers) as pool:
+                    pool.starmap(
+                        _impute_pixel_values_shared_worker,
+                        ((frame, index, bayer_pattern, shared_memory.name, values.shape)
+                         for index, frame in enumerate(values)),
+                        chunksize=1,
+                    )
+                # Return an independently owned NumPy array before releasing
+                # the shared allocation. This final full-buffer copy is needed
+                # to give the caller an ordinary array with normal ownership.
+                result = shared_output.copy()
+            finally:
+                del shared_output
+        finally:
+            try:
+                shared_memory.close()
+            finally:
+                shared_memory.unlink()
+
+    # If visualize results is true, we will print an output of what the image looks like
+    if(visualize_results is True):
+        fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+        fig.suptitle("Floor / Ceiling Imputation (Before / After)", fontweight="bold", fontsize=18)
+
+        axes[0].imshow(unmodified, cmap="gray")
+        axes[0].set_title("Before")
+        axes[0].axis("off")
+
+        axes[1].imshow(result, cmap="gray")
+        axes[1].set_title("After")
+        axes[1].axis("off")
+
+        plt.tight_layout()
+        plt.show()
+
+        return result, fig
+
+    return result
+
+
+def _interpolate_channel(radiance_map: np.ndarray,
+                         channel_idx: np.ndarray,
+                         image_shape: tuple[int, int]
+                        ) -> np.ndarray:
+    """Interpolate one Bayer channel across the frame, preserving Inf.
+
+    This is the ``interpolateChannel`` subfunction of MATLAB
+    ``demosaicRadianceMapRCD``.
+    """
+    rows, cols = image_shape
+    channel_rows: np.ndarray = channel_idx[:, 0]
+    channel_cols: np.ndarray = channel_idx[:, 1]
+
+    # Extract values for this channel from the raw radiance map.
+    sub_val: np.ndarray = radiance_map[channel_rows, channel_cols]
+
+    # Identify which specific sub-pixel locations are Inf in the raw map.
+    inf_mask_sub: np.ndarray = np.isinf(sub_val)
+
+    # Prepare work values by turning Inf and NaN into NaN for the interpolant.
+    work_sub: np.ndarray = sub_val.copy()
+    work_sub[np.isinf(work_sub)] = np.nan
+
+    # Filter out NaN values for fitting.
+    sub_x: np.ndarray = channel_cols.astype(np.float64) + 1
+    sub_y: np.ndarray = channel_rows.astype(np.float64) + 1
+    valid_idx: np.ndarray = ~np.isnan(work_sub)
+
+    # Nothing to fit, so the whole plane is undefined.
+    if(not np.any(valid_idx)):
+        return np.full((rows, cols), np.nan, dtype=np.float64)
+
+    # Perform bilinear interpolation with nearest extrapolation for edge robustness.
+    full_grid: np.ndarray = _scattered_interpolant(
+        sub_x[valid_idx], sub_y[valid_idx], work_sub[valid_idx], (rows, cols)
+    )
+
+    # Restore Inf values at their original sub-grid locations.
+    if(np.any(inf_mask_sub)):
+        full_grid[channel_rows[inf_mask_sub], channel_cols[inf_mask_sub]] = np.inf
+
+    return full_grid
+
+
+def _interpolate_ratio_channel(radiance_map: np.ndarray,
+                               channel_idx: np.ndarray,
+                               full_grid_g: np.ndarray,
+                               image_shape: tuple[int, int]
+                              ) -> np.ndarray:
+    """Interpolate one Bayer channel as a ratio to the green guide.
+
+    This is the ``interpolateRatioChannel`` subfunction of MATLAB
+    ``demosaicRadianceMapRCD``. Colour ratios vary far more smoothly across a
+    scene than raw radiance does, so interpolating the ratio and multiplying
+    back by green keeps the detail green resolves instead of blurring it.
+    """
+    rows, cols = image_shape
+    channel_rows: np.ndarray = channel_idx[:, 0]
+    channel_cols: np.ndarray = channel_idx[:, 1]
+
+    # Extract values for the target colour channel (R or B).
+    sub_val: np.ndarray = radiance_map[channel_rows, channel_cols]
+
+    # Identify which specific sub-pixel locations are Inf in the raw map.
+    inf_mask_sub: np.ndarray = np.isinf(sub_val)
+
+    # Prepare work values by turning Inf into NaN for the interpolant.
+    work_sub: np.ndarray = sub_val.copy()
+    work_sub[np.isinf(work_sub)] = np.nan
+
+    # Extract corresponding Green guide values at these specific locations.
+    guide_val: np.ndarray = full_grid_g[channel_rows, channel_cols]
+
+    # Compute the colour ratio (R/G or B/G) using the NaN-masked working values.
+    # Add a small epsilon to the denominator to prevent division by zero.
+    epsilon: float = 1e-6
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ratio_sub: np.ndarray = work_sub / (guide_val + epsilon)
+
+    # Filter out NaN values for fitting.
+    sub_x: np.ndarray = channel_cols.astype(np.float64) + 1
+    sub_y: np.ndarray = channel_rows.astype(np.float64) + 1
+    valid_idx: np.ndarray = ~np.isnan(ratio_sub)
+
+    # Nothing to fit, so the whole plane is undefined.
+    if(not np.any(valid_idx)):
+        return np.full((rows, cols), np.nan, dtype=np.float64)
+
+    # Perform bilinear interpolation of the colour ratio.
+    full_ratio_grid: np.ndarray = _scattered_interpolant(
+        sub_x[valid_idx], sub_y[valid_idx], ratio_sub[valid_idx], (rows, cols)
+    )
+
+    # Calculate the final grid by multiplying the interpolated ratio by the full Green guide.
+    full_grid: np.ndarray = full_ratio_grid * full_grid_g
+
+    # Restore Inf values at their original sub-grid locations.
+    if(np.any(inf_mask_sub)):
+        full_grid[channel_rows[inf_mask_sub], channel_cols[inf_mask_sub]] = np.inf
+
+    return full_grid
+
+
+# ---------------------------------------------------------------------------
+# How the ratio-corrected demosaicing works, in plain terms
+#
+# The problem. Because of the Bayer filter each pixel measured only one colour.
+# Demosaicing fills in the other two so that every pixel has a full RGB triple.
+#
+# The naive approach interpolates each channel on its own. That blurs edges,
+# because red and blue are sampled at only a quarter of the pixels each and so
+# carry very little spatial detail on their own.
+#
+# The RCD idea. Green is sampled at half of all pixels, twice as densely as red
+# or blue, so green is the sharpest record of where the edges in the scene are.
+# Meanwhile the RATIO of red to green varies slowly and smoothly across a
+# scene, even across an edge, because an edge usually changes brightness rather
+# than hue. So instead of interpolating red directly:
+#
+#   1. Interpolate green across the whole frame. This is the guide.
+#   2. At each red sample, form the ratio red / green.
+#   3. Interpolate that smooth ratio field across the whole frame.
+#   4. Multiply back by the full green guide to recover red everywhere.
+#
+# Red inherits its detail from green, which actually resolved it, while the
+# ratio supplies the colour. Blue is handled identically.
+# ---------------------------------------------------------------------------
+def _demosaic_radiance_map_rcd_single(radiance_map: np.ndarray,
+                                      bayer_pattern: str
+                                     ) -> np.ndarray:
+    """Demosaic one Bayer radiance map with ratio-corrected interpolation."""
+    rows, cols = radiance_map.shape
+
+    pattern = str(bayer_pattern).upper()
+    if(pattern not in ("BGGR", "RGGB", "GRBG", "GBRG")):
+        raise ValueError(f"Unknown Bayer pattern: {bayer_pattern}")
+
+    if((rows, cols) == tuple(WORLD_FRAME_SHAPE) and pattern == "BGGR"):
+        # Reuse row-ordered coordinates directly for sequential image access.
+        # The interpolant handles MATLAB nearest-neighbor ties explicitly.
+        rgb_idx = (WORLD_R_PIXELS, WORLD_G_PIXELS,
+                     WORLD_B_PIXELS)
+    else:
+        # Preserve support for other Bayer patterns and frame dimensions.
+        cell_positions = ((0, 0), (0, 1), (1, 0), (1, 1))
+        rgb_idx = [
+            np.array([(r, c)
+                      for position, (row_parity, col_parity) in enumerate(cell_positions)
+                      if(pattern[position] == channel)
+                      for c in range(col_parity, cols, 2)
+                      for r in range(row_parity, rows, 2)], dtype=np.uint64)
+            for channel in "RGB"
+        ]
+
+    # 1. Interpolate Green channel first to act as the spatial luminance guide.
+    # Green is sampled twice as densely as red or blue, so it carries the most
+    # spatial detail.
+    full_grid_g: np.ndarray = _interpolate_channel(radiance_map, rgb_idx[1], (rows, cols))
+
+    # 2. Interpolate Red and Blue channels using the Ratio-Corrected approach.
+    # This interpolates the R/G and B/G ratios, then multiplies by the full Green channel.
+    full_grid_r: np.ndarray = _interpolate_ratio_channel(
+        radiance_map, rgb_idx[0], full_grid_g, (rows, cols)
+    )
+    full_grid_b: np.ndarray = _interpolate_ratio_channel(
+        radiance_map, rgb_idx[2], full_grid_g, (rows, cols)
+    )
+
+    # Assemble into a rows x cols x 3 matrix (R, G, B).
+    return np.stack((full_grid_r, full_grid_g, full_grid_b), axis=-1)
+
+
+def demosaic_radiance_map_rcd(radiance_map_or_buffer: np.ndarray,
+                              bayer_pattern: str="BGGR",
+                              visualize_results: bool=False
+                             ) -> np.ndarray | tuple[np.ndarray, object]:
+    """Demosaic a Bayer-pattern radiance map into a 3-D RGB image.
+
+    This is the Python equivalent of MATLAB ``demosaicRadianceMapRCD``. It
+    takes a 2-D radiance map with a specified Bayer pattern and returns a
+    ``rows x cols x 3`` array containing the interpolated Red, Green, and Blue
+    channels using a Ratio-Corrected Demosaicing (RCD) algorithm.
+
+    Pixels assigned an ``Inf`` value in the input retain their ``Inf`` value in
+    their respective output channel after demosaicing.
+
+    MATLAB handles one map. A ``(frames, rows, cols)`` buffer is accepted here
+    and each frame is demosaiced independently.
+
+    Args:
+        radiance_map_or_buffer: Bayer radiance map shaped ``(rows, cols)`` or a
+            buffer shaped ``(frames, rows, cols)``.
+        bayer_pattern: Bayer layout of the sensor.
+        visualize_results: When ``True``, display a before/after figure and
+            return it alongside the result. Supported for one frame only.
+
+    Returns:
+        ``(rows, cols, 3)`` for one map or ``(frames, rows, cols, 3)`` for a
+        buffer, or that result paired with a figure when visualization is
+        requested.
+    """
+    values: np.ndarray = np.asarray(radiance_map_or_buffer, dtype=np.float64)
+
+    # Accept one radiance map or a buffer of them, and nothing else.
+    if(values.ndim not in (2, 3)):
+        raise ValueError(
+            "RCD demosaicing requires shape (rows, cols) or "
+            f"(frames, rows, cols). Got {values.shape}."
+        )
+    if(visualize_results is True and values.ndim != 2):
+        raise AssertionError("RCD demosaicing visualization supports a single frame only")
+
+    # Demosaic one map directly, or every frame of a buffer independently.
+    if(values.ndim == 2):
+        result: np.ndarray = _demosaic_radiance_map_rcd_single(values, bayer_pattern)
+    else:
+        result = np.stack(
+            [_demosaic_radiance_map_rcd_single(frame, bayer_pattern) for frame in values],
+            axis=0,
+        )
+
+    # If visualize results is true, we will print an output of what the image looks like
+    if(visualize_results is True):
+        # Radiance is unbounded, so stretch the middle 98% into the display range.
+        finite_values: np.ndarray = result[np.isfinite(result)]
+        display_result: np.ndarray = result.copy()
+        if(finite_values.size):
+            lower, upper = np.percentile(finite_values, (1, 99))
+            if(upper > lower):
+                display_result = np.clip((display_result - lower) / (upper - lower), 0, 1)
+
+        fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+        fig.suptitle("Radiance Demosaicing (Before / After)", fontweight="bold", fontsize=18)
+
+        axes[0].imshow(values, cmap="gray")
+        axes[0].set_title("Bayer radiance")
+        axes[0].axis("off")
+
+        axes[1].imshow(display_result)
+        axes[1].set_title("RCD RGB radiance")
+        axes[1].axis("off")
+
+        plt.tight_layout()
+        plt.show()
+
+        return result, fig
+
+    return result
+
 
 def apply_fielding_function(image_or_video: np.ndarray, 
                             visualize_results: bool=False,
@@ -909,21 +1773,23 @@ def generate_RGB_mask(original_frame: np.ndarray, marker: Literal["str", "num"]=
 
 # Apply the per-color weights to the color pixels of a frame.
 def apply_color_correction(image_or_video: np.ndarray, 
-                           bayer_pixel_locations: list[np.ndarray] | None=None, 
+                           bayer_correction_matrix: np.ndarray | None=None,
                            visualize_results: bool=False,
                            ) -> None | tuple[np.ndarray, object]:
     """Apply calibrated Bayer-site RGB scaling factors in place.
 
     The correction constants in ``WORLD_RGB_SCALARS`` are applied to raw
-    Bayer samples by color class. For a frame buffer, ``bayer_pixel_locations``
-    can be precomputed once with :func:`generate_RGB_mask` and reused.
+    Bayer samples using a cached BGGR weight map for each image size. The
+    same 2-D map broadcasts across every frame of a buffer.
 
     Args:
         image_or_video: A floating-point raw Bayer frame with shape
             ``(rows, cols)`` or frame buffer with shape
             ``(frames, rows, cols)``.
-        bayer_pixel_locations: Optional list of three ``(n, 2)`` coordinate
-            arrays for red, green, and blue Bayer sites, respectively.
+        bayer_correction_matrix: Optional 2-D weight map matching the frame's
+            spatial shape. When omitted, use WORLD_BAYER_CORRECTION_MATRICES,
+            raising ValueError for unsupported spatial shapes.
+            A supplied matrix is not modified or added to the cache.
         visualize_results: When ``True``, display a before/after figure and
             return it with the corrected input array. Visualization supports
             only a single ``(rows, cols)`` frame and asserts otherwise.
@@ -946,22 +1812,22 @@ def apply_color_correction(image_or_video: np.ndarray,
         )
         unmodified_image_or_video = image_or_video.copy() 
     
-    # Generate tbe bayer mask if not already passedi n
-    if(bayer_pixel_locations is None): 
-        bayer_RGB_mask = generate_RGB_mask(image_or_video if image_or_video.ndim == 2 else image_or_video[0])
-        bayer_pixel_locations = [ np.argwhere(bayer_RGB_mask == color) for color in "RGB" ]
+    image_shape = image_or_video.shape[-2:]
+    if(bayer_correction_matrix is None):
+        if(image_shape not in WORLD_BAYER_CORRECTION_MATRICES):
+            raise ValueError(f"Unsupported image shape for Bayer color correction: {image_shape}.")
+        bayer_correction_matrix = WORLD_BAYER_CORRECTION_MATRICES[image_shape]
+    else:
+        bayer_correction_matrix = np.asarray(bayer_correction_matrix)
+        if(bayer_correction_matrix.shape != image_shape):
+            raise ValueError(
+                f"Bayer correction matrix must have shape {image_shape}; "
+                f"got {bayer_correction_matrix.shape}."
+            )
 
-    # Apply the color correction
-    for (pixels, weight) in zip(bayer_pixel_locations, WORLD_RGB_SCALARS):
-        rows: np.ndarray = pixels[:, 0]
-        cols: np.ndarray = pixels[:, 1]
-
-        # Apply the weight to the specified pixels 
-        # on either this single frame or entire video 
-        if(image_or_video.ndim == 3):
-            image_or_video[:, rows, cols] *= weight
-        else:
-            image_or_video[rows, cols] *= weight
+    # Elementwise multiplication writes directly to the input. Broadcasting
+    # avoids creating a separate weight map for each frame in a buffer.
+    image_or_video *= bayer_correction_matrix
 
     # Visualize the results if desired 
     if(visualize_results is True):
@@ -2192,21 +3058,28 @@ def world_counts_to_radiance(image_or_video: np.ndarray,
 
     # The calibration set point must include the mean scale introduced by the
     # flat-field and RGB correction stages.
-    effective_set_point: float = float(WORLD_LINEARIZED_SET_POINT * np.nanmean(WORLD_FIELDING_FUNCTIONS[image_or_video.shape[-2:]]) * np.nanmean(WORLD_RADIOMETRIC_CORRECTION_MAP))
+    effective_set_point: float = WORLD_EFFECTIVE_SET_POINTS[image_or_video.shape[-2:]]
 
-    # Reproduce MATLAB's exposure * Again * Dgain camera score and interpolate
-    # the corresponding mean scene radiance in log10 space.
+    # Reproduce MATLAB's exposure * Again * Dgain camera score. Interpolate
+    # each channel in log space, exponentiate, then use Bayer weights 1:2:1.
     this_camera_score: np.ndarray = np.asarray(np.asarray(exposure) * np.asarray(analog_gain) * np.asarray(digital_gain), dtype=np.float64)
-    log_mean_scene_radiance: np.ndarray = np.asarray(np.interp(np.log10(this_camera_score), np.log10(WORLD_CAMERA_SCORE), np.log10(WORLD_AVG_SCENE_RADIANCE), left=np.nan, right=np.nan), dtype=np.float64)
-    mean_scene_radiance: np.ndarray = np.asarray(10 ** log_mean_scene_radiance, dtype=np.float64)
+    log_camera_score = np.log10(this_camera_score)
+    channel_radiances = [
+        np.power(10.0, np.interp(log_camera_score, WORLD_LOG_CAMERA_SCORE,
+                                 WORLD_LOG_EFFECTIVE_RADIANCE[:, channel],
+                                 left=np.nan, right=np.nan))
+        for channel in range(3)
+    ]
+    mean_effective_radiance = (channel_radiances[0] + 2 * channel_radiances[1]
+                               + channel_radiances[2]) * 0.25
 
     # Give each buffered frame its own broadcastable radiance scale. Scalar
     # settings naturally apply the same scale to every frame.
-    if(image_or_video.ndim == 3 and mean_scene_radiance.ndim > 0):
-        mean_scene_radiance = mean_scene_radiance.reshape(-1, 1, 1)
+    if(image_or_video.ndim == 3 and np.ndim(mean_effective_radiance) > 0):
+        mean_effective_radiance = mean_effective_radiance.reshape(-1, 1, 1)
 
-    # Match MATLAB's (correctedCounts / effectiveSetPoint) * meanSceneRadiance.
-    image_or_video *= mean_scene_radiance / effective_set_point
+    # Match MATLAB's (correctedCounts / effectiveSetPoint) * meanEffectiveRadiance.
+    image_or_video *= mean_effective_radiance / effective_set_point
 
     if(visualize_results is True):
         fig, axes = plt.subplots(1, 2, figsize=(12, 4))
@@ -2225,12 +3098,29 @@ def world_counts_to_radiance(image_or_video: np.ndarray,
 
 
 def world_transformation_pipeline(raw_frame_or_buffer: np.ndarray,
-                                  agc_settings: dict[str, float | np.ndarray]
+                                  agc_settings: dict[str, float | np.ndarray],
+                                  n_workers: int=12
                                  ) -> np.ndarray:
-    # Stage 1: Ensure the raw frame buffer is float so we can operate on it 
-    # Subsequent operations will be either in place to the input array if it is float 
-    # or to the copy 
+    """Run Geoff's six-stage world-camera reconstruction pipeline.
+
+    The returned image remains a Bayer radiance map, matching MATLAB
+    ``reconstructionPipeline``. Use :func:`demosaic_radiance_map_rcd` when an
+    RGB radiance image is required.
+
+    ``n_workers`` controls the imputation process pool for frame buffers;
+    use 1 for serial processing. Single frames do not start a pool.
+    """
+    if(raw_frame_or_buffer.ndim not in (2, 3)):
+        raise ValueError(
+            "World reconstruction requires shape (rows, cols) or "
+            f"(frames, rows, cols). Got {raw_frame_or_buffer.shape}."
+        )
+
+    # Stage 1: convert raw sensor counts to double precision.
     raw_frame_or_buffer = raw_frame_or_buffer.astype(np.float64, copy=False)
+
+    # Stage 2: invert the fitted response and mark unreliable high-count
+    # samples as Inf using the derivative-derived saturation threshold.
     linearized: np.ndarray = linearize_camera_responsivity(raw_frame_or_buffer,
                                                            original_bit_depth=8,
                                                            dark_noise=WORLD_DARK_SIGNAL,
@@ -2238,24 +3128,36 @@ def world_transformation_pipeline(raw_frame_or_buffer: np.ndarray,
                                                            visualize_results=False
                                                         )
 
+    # Stage 3: impute sensor-floor and sensor-ceiling samples independently
+    # for every frame using the cross-channel log-Gaussian model.
+    imputed: np.ndarray = impute_pixel_values(
+        linearized,
+        bayer_pattern="BGGR",
+        visualize_results=False,
+        n_workers=n_workers,
+    )
 
-    # Stage 2: Flat fielding correction
+    # Stage 4: flat-field correction.
     # This operation will happen IN PLACE for maximum speed
-    apply_fielding_function(linearized, visualize_results=False)
+    apply_fielding_function(imputed, visualize_results=False)
     # This is fast because it is just assigning a pointer, not copying the array 
     # We are simply renaming for clarity here, this is not even really necessary 
-    fielding_corrected: np.ndarray = linearized 
+    fielding_corrected: np.ndarray = imputed
 
-    # Stage 3: Radiometric correction RGB
+    # Stage 5: equalize the Bayer RGB channels.
     # We will also perform this in place for speed
-    apply_color_correction(fielding_corrected, 
-                           bayer_pixel_locations=[WORLD_R_PIXELS, WORLD_G_PIXELS, WORLD_B_PIXELS], 
-                           visualize_results=False
-                        )
+    image_shape = fielding_corrected.shape[-2:]
+    if(image_shape not in WORLD_BAYER_CORRECTION_MATRICES):
+        raise ValueError(f"Unsupported image shape for Bayer color correction: {image_shape}.")
+    apply_color_correction(
+        fielding_corrected,
+        bayer_correction_matrix=WORLD_BAYER_CORRECTION_MATRICES[image_shape],
+        visualize_results=False,
+    )
     # Once again, we just use a pointer here for clarity of what stage we are on
     color_corrected: np.ndarray = fielding_corrected 
 
-    # Stage 4: Convert to absolute radiance units
+    # Stage 6: convert to absolute radiance units.
     # We will also perform this in place for speed 
     world_counts_to_radiance(color_corrected,
                               agc_settings=agc_settings,

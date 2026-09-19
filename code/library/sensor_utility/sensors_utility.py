@@ -59,6 +59,7 @@ def _process_raw_world_helper(
     chunk_range: tuple[int | None]=(0, None), 
     overwrite_existing: bool = False,
     verbose: bool = False,
+    n_workers: int = 12,
 ) -> None:
     """Process world-camera chunks and save them as MATLAB files.
 
@@ -67,6 +68,7 @@ def _process_raw_world_helper(
         output_path: Directory in which to save the processed chunks.
         overwrite_existing: Whether to replace existing output files.
         verbose: Whether to display a processing progress bar.
+        n_workers: Number of world-frame imputation workers; 1 runs serially.
 
     Returns:
         None. Processed chunks are written to ``output_path``.
@@ -153,6 +155,7 @@ def _process_raw_world_helper(
             "data": world_util.world_transformation_pipeline(
                 frame_buffer,
                 agc_settings,
+                n_workers=n_workers,
             ),
             "metadata": agc_settings | {"timestamps": metadata_buffer[:, 0]},
         }
@@ -263,7 +266,8 @@ def process_raw_recording(
     output_path: str,
     overwrite_existing: bool = False,
     verbose: bool = False,
-    chunk_ranges: dict[Literal["W", "M"], tuple[int | None]] = {sensor_name: (0, None) for sensor_name in "WM"}
+    chunk_ranges: dict[Literal["W", "M"], tuple[int | None]] = {sensor_name: (0, None) for sensor_name in "WM"},
+    n_workers: int = 12,
 ) -> None:
     """Process all world-camera and minispectrometer chunks in a recording.
 
@@ -272,6 +276,9 @@ def process_raw_recording(
         output_path: Destination directory for the processed sensor folders.
         overwrite_existing: Whether to replace existing processed chunks.
         verbose: Whether to display progress bars during processing.
+        n_workers: Number of world-frame imputation workers, default 12.
+            Use 1 for serial processing. Script callers must guard their entry
+            point with ``if __name__ == "__main__":`` when using processes.
 
     Returns:
         None. World and minispectrometer results are written beneath
@@ -317,6 +324,7 @@ def process_raw_recording(
             chunk_ranges[sensor_name], 
             overwrite_existing,
             verbose,
+            **({"n_workers": n_workers} if sensor_name == "W" else {}),
         )
 
 
