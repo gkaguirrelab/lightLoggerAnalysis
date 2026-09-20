@@ -6,7 +6,7 @@ function [I_raw, radianceMap] = synthesisPipeline(radianceModel, radianceModelS,
 % Declare persistent variables for derived parameters and correction maps
 persistent clippingExponent linearizedSetPoint darkSignal ...
     correctionMap radiometricCorrectionMap ...
-    effectiveRadiance cameraScore ...
+    integratedRadiance cameraScore ...
     meanCorrectionFielding meanCorrectionRGB Smax ...
     azimuthMap elevationMap T channelNames bayerPattern
 
@@ -50,12 +50,12 @@ if isempty(radiometricCorrectionMap)
 end
 
 % Load camera score to effective integrated radiance mapping parameters
-if isempty(effectiveRadiance)
+if isempty(integratedRadiance)
     paramFileName = fullfile(...
         tbLocateProjectSilent('lightLoggerAnalysis'),...
         'derived',...
-        'cameraScoreToEffectiveRadiance.mat');
-    load(paramFileName, 'effectiveRadiance', 'cameraScore');
+        'cameraScoreToIntegratedRadiance.mat');
+    load(paramFileName, 'integratedRadiance', 'cameraScore');
 end
 
 % Load camera intrinsics and compute azimuth/elevation maps
@@ -91,7 +91,7 @@ if isempty(T)
     bayerPattern = "BGGR";
 end
 
-% 0. Compute Spatially-Varying Channel Radiance Map from radianceModel
+% Compute Spatially-Varying Channel Radiance Map from radianceModel
 spectralRadianceMap = radianceModel(azimuthMap, elevationMap);
 numWls = size(spectralRadianceMap, 1);
 spectralRadianceFlat = reshape(spectralRadianceMap, numWls, []);
@@ -126,29 +126,27 @@ effectiveSetPoint = linearizedSetPoint * meanCorrectionFielding * meanCorrection
 
 % Determine mean effective radiance implied by the given AGCSettings
 thisCameraScore = AGCSettings.exposure * AGCSettings.Again * AGCSettings.Dgain;
-logThisEffectiveRadiance = interp1(log10(cameraScore), log10(effectiveRadiance), log10(thisCameraScore), 'linear');
-thisEffectiveRadiance = 10.^logThisEffectiveRadiance;
+logThisIntegratedRadiance = interp1(log10(cameraScore), log10(integratedRadiance), log10(thisCameraScore), 'linear');
+thisIntegratedRadiance = 10.^logThisIntegratedRadiance;
 
 % Calculate the Bayer-weighted mean effective radiance (1 Red, 2 Green, 1 Blue)
-meanEffectiveRadiance = (thisEffectiveRadiance(1) + 2*thisEffectiveRadiance(2) + thisEffectiveRadiance(3)) / 4;
+meanIntegratedRadiance = (thisIntegratedRadiance(1) + 2*thisIntegratedRadiance(2) + thisIntegratedRadiance(3)) / 4;
 
-% 1. Inverse of Radiance Conversion (Stage 6 -> Stage 5)
-I_sensor_corrected = (radianceMap / meanEffectiveRadiance) * effectiveSetPoint;
+% Inverse of Radiance Conversion
+I_sensor_corrected = (radianceMap / meanIntegratedRadiance) * effectiveSetPoint;
 
-% 2. Inverse of RGB Radiometric Correction (Stage 5 -> Stage 4)
+% Inverse of RGB Radiometric Correction
 I_flat = I_sensor_corrected ./ radiometricCorrectionMap;
 
-% 3. Inverse of Flat Fielding Correction (Stage 4 -> Stage 3/2)
+% Inverse of Flat Fielding Correction
 yLinear = I_flat ./ correctionMap;
 
-% 4. Inverse of Sensor Linearization (Stage 2 -> Stage 1 double)
-% Note: The inverse of Stage 3 (imputing ceiling/floor pixels) is skipped 
-% because absolute pixel loss at saturation boundaries cannot be deterministically inverted.
+% Inverse of Sensor Linearization
 n = clippingExponent;
 yPrime = (yLinear * Smax) ./ (Smax.^n + yLinear.^n).^(1./n);
 y = yPrime + darkSignal;
 
-% 5. Clip, round, and convert back to uint8 raw sensor counts (Stage 1 -> uint8)
+% 5. Clip, round, and convert back to uint8 raw sensor counts
 I_raw = uint8(round(max(0, min(255, y))));
 
 end

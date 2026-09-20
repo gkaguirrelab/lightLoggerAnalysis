@@ -239,9 +239,9 @@ measG = reshape(measuredRGBRadiance(:, :, 2), [], 1);
 measB = reshape(measuredRGBRadiance(:, :, 3), [], 1);
 
 % Create an alpha map (0.1 for estimated, 0.5 for measured) and flatten it
-alphaMap = 0.1 * ones(nRows, nColumns);
+alphaMap = 0.75 * ones(nRows, nColumns);
 for i = 1:length(measCols)
-    alphaMap(measRows(i), measCols(i)) = 0.5;
+    alphaMap(measRows(i), measCols(i)) = 0.75;
 end
 alphaFlat = reshape(alphaMap, [], 1);
 
@@ -281,10 +281,12 @@ rSq = mdl.Rsquared.Ordinary;
 axis equal;
 xlim([minVal, maxVal]);
 ylim([minVal, maxVal]);
-xlabel('Predicted RGB Radiance');
-ylabel('Measured RGB Radiance');
+xlabel('Predicted integrated radiance [W/m2/sr]');
+ylabel('Measured integrated radiance [W/m2/sr]');
 title(sprintf('Camera Validation: Predicted vs. Measured RGB Radiance\nOverall R^2 = %.4f', rSq));
 legend('Location', 'northwest');
+a = gca();
+a.XTick = a.YTick;
 grid on;
 box on;
 hold off;

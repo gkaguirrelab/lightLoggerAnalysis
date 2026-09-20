@@ -6,7 +6,7 @@ function [radianceMap, imageStages] = reconstructionPipeline(I, AGCSettings)
 % Declare persistent variables for all derived parameters and maps
 persistent clippingExponent linearizedSetPoint darkSignal ...
     correctionMap radiometricCorrectionMap ...
-    effectiveRadiance cameraScore ...
+    integratedRadiance cameraScore ...
     meanCorrectionFielding meanCorrectionRGB Smax
 
 % Load non-linear clipping exponent and linearized set point
@@ -51,12 +51,12 @@ if isempty(radiometricCorrectionMap)
 end
 
 % Load camera score to effective integrated radiance mapping parameters
-if isempty(effectiveRadiance)
+if isempty(integratedRadiance)
     paramFileName = fullfile(...
         tbLocateProjectSilent('lightLoggerAnalysis'),...
         'derived',...
-        'cameraScoreToEffectiveRadiance.mat');
-    load(paramFileName, 'effectiveRadiance', 'cameraScore');
+        'cameraScoreToIntegratedRadiance.mat');
+    load(paramFileName, 'integratedRadiance', 'cameraScore');
 end
 
 
@@ -107,7 +107,7 @@ effectiveSetPoint = linearizedSetPoint * meanCorrectionFielding * meanCorrection
 thisCameraScore = AGCSettings.exposure * AGCSettings.Again * AGCSettings.Dgain;
 
 % Interpolate the 1x3 effective radiance vector for this camera score
-logThisEffectiveRadiance = interp1(log10(cameraScore), log10(effectiveRadiance), log10(thisCameraScore), 'linear');
+logThisEffectiveRadiance = interp1(log10(cameraScore), log10(integratedRadiance), log10(thisCameraScore), 'linear');
 thisEffectiveRadiance = 10.^logThisEffectiveRadiance;
 
 % Calculate the Bayer-weighted mean effective radiance (1 Red, 2 Green, 1 Blue)
