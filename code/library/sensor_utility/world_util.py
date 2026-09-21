@@ -314,27 +314,27 @@ WORLD_BAYER_CORRECTION_MATRICES: dict[tuple[int, int], np.ndarray] = {
     (480, 640): _build_bayer_correction_matrix((480, 640)),
 }
 
-_effective_radiance_calibration = scipy.io.loadmat(
-    _DERIVED_CALIBRATION_DIR / "cameraScoreToEffectiveRadiance.mat"
+_integrated_radiance_calibration = scipy.io.loadmat(
+    _DERIVED_CALIBRATION_DIR / "cameraScoreToIntegratedRadiance.mat"
 )
 WORLD_CAMERA_SCORE: np.ndarray = np.asarray(
-    _effective_radiance_calibration["cameraScore"], dtype=np.float64
+    _integrated_radiance_calibration["cameraScore"], dtype=np.float64
 ).reshape(-1)
-WORLD_EFFECTIVE_RADIANCE: np.ndarray = np.asarray(
-    _effective_radiance_calibration["effectiveRadiance"], dtype=np.float64
+WORLD_INTEGRATED_RADIANCE: np.ndarray = np.asarray(
+    _integrated_radiance_calibration["integratedRadiance"], dtype=np.float64
 )
-if(WORLD_EFFECTIVE_RADIANCE.shape != (WORLD_CAMERA_SCORE.size, 3)
+if(WORLD_INTEGRATED_RADIANCE.shape != (WORLD_CAMERA_SCORE.size, 3)
    or not np.all(np.isfinite(WORLD_CAMERA_SCORE))
-   or not np.all(np.isfinite(WORLD_EFFECTIVE_RADIANCE))
+   or not np.all(np.isfinite(WORLD_INTEGRATED_RADIANCE))
    or np.any(WORLD_CAMERA_SCORE <= 0)
-   or np.any(WORLD_EFFECTIVE_RADIANCE <= 0)
+   or np.any(WORLD_INTEGRATED_RADIANCE <= 0)
    or np.any(np.diff(WORLD_CAMERA_SCORE) <= 0)):
-    raise ValueError("Invalid camera-score to RGB effective-radiance calibration")
+    raise ValueError("Invalid camera-score to RGB integrated-radiance calibration")
 
 # MATLAB interpolates each RGB channel in log10 space before taking the Bayer
 # weighted mean. Cache both logs and the fixed spatial scale once per import.
 WORLD_LOG_CAMERA_SCORE: np.ndarray = np.log10(WORLD_CAMERA_SCORE)
-WORLD_LOG_EFFECTIVE_RADIANCE: np.ndarray = np.log10(WORLD_EFFECTIVE_RADIANCE)
+WORLD_LOG_INTEGRATED_RADIANCE: np.ndarray = np.log10(WORLD_INTEGRATED_RADIANCE)
 WORLD_EFFECTIVE_SET_POINTS: dict[tuple[int, int], float] = {
     shape: float(WORLD_LINEARIZED_SET_POINT
                  * np.nanmean(fielding)
@@ -3066,20 +3066,20 @@ def world_counts_to_radiance(image_or_video: np.ndarray,
     log_camera_score = np.log10(this_camera_score)
     channel_radiances = [
         np.power(10.0, np.interp(log_camera_score, WORLD_LOG_CAMERA_SCORE,
-                                 WORLD_LOG_EFFECTIVE_RADIANCE[:, channel],
+                                 WORLD_LOG_INTEGRATED_RADIANCE[:, channel],
                                  left=np.nan, right=np.nan))
         for channel in range(3)
     ]
-    mean_effective_radiance = (channel_radiances[0] + 2 * channel_radiances[1]
-                               + channel_radiances[2]) * 0.25
+    mean_integrated_radiance = (channel_radiances[0] + 2 * channel_radiances[1]
+                                + channel_radiances[2]) * 0.25
 
     # Give each buffered frame its own broadcastable radiance scale. Scalar
     # settings naturally apply the same scale to every frame.
-    if(image_or_video.ndim == 3 and np.ndim(mean_effective_radiance) > 0):
-        mean_effective_radiance = mean_effective_radiance.reshape(-1, 1, 1)
+    if(image_or_video.ndim == 3 and np.ndim(mean_integrated_radiance) > 0):
+        mean_integrated_radiance = mean_integrated_radiance.reshape(-1, 1, 1)
 
-    # Match MATLAB's (correctedCounts / effectiveSetPoint) * meanEffectiveRadiance.
-    image_or_video *= mean_effective_radiance / effective_set_point
+    # Scale corrected counts by the Bayer-weighted integrated radiance.
+    image_or_video *= mean_integrated_radiance / effective_set_point
 
     if(visualize_results is True):
         fig, axes = plt.subplots(1, 2, figsize=(12, 4))
@@ -3107,6 +3107,8 @@ def world_transformation_pipeline(raw_frame_or_buffer: np.ndarray,
     ``reconstructionPipeline``. Use :func:`demosaic_radiance_map_rcd` when an
     RGB radiance image is required.
 
+    Digital gain is applied immediately after response linearization and
+    before bad-pixel imputation, matching MATLAB ``reconstructionPipeline``.
     ``n_workers`` controls the imputation process pool for frame buffers;
     use 1 for serial processing. Single frames do not start a pool.
     """
@@ -3127,6 +3129,15 @@ def world_transformation_pipeline(raw_frame_or_buffer: np.ndarray,
                                                            clipping_exponent=WORLD_FULL_WELL_CLIPPING_EXPONENT,
                                                            visualize_results=False
                                                         )
+
+    # Apply digital gain to the linearized Bayer counts before imputation,
+    # exactly where Geoff's MATLAB reconstruction now applies it.
+    digital_gain: float | np.ndarray = (
+        agc_settings["Dgain"]
+        if "Dgain" in agc_settings
+        else agc_settings["AGCDgain"]
+    )
+    apply_digital_gain(linearized, digital_gain, visualize_results=False)
 
     # Stage 3: impute sensor-floor and sensor-ceiling samples independently
     # for every frame using the cross-channel log-Gaussian model.
