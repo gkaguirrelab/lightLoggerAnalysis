@@ -11,6 +11,8 @@ The world-camera and PR-670 results are stored separately under `worldCamera/` a
 
 > **NDF 4 configuration:** A single NDF 4 filter was not available, so NDF 4 was produced by combining the NDF 1 and NDF 3 filters.
 
+> **IR-filter configuration:** The IR filter was not applied during this calibration.
+
 ## Equipment
 
 | Component | Role in the measurement |
@@ -53,6 +55,10 @@ After completing the Light Logger recordings, the same NDF sequence was repeated
 
 For the PR-670 measurements, all unnecessary room lights were turned off to limit ambient-light contamination. The two-layer cloth shroud used for the world-camera recordings was not required for this stage.
 
+![PR-670 aligned with the integrating sphere for the radiometric reference measurements](.READMEAssets/pr670-setup.jpeg)
+
+*Figure 4. PR-670 measurement setup. The spectroradiometer was aligned with the integrating sphere while the computer controlled acquisition.*
+
 ## Data Organization
 
 ```text
@@ -73,21 +79,11 @@ The `worldCamera/NDF0/` through `worldCamera/NDF4/` directories will each contai
 The zero-based global raw-frame indices below count only frames physically present in the raw chunks; synthetic rows inserted for timestamp gaps are excluded. The final frames have not yet been selected, so every index remains set to the placeholder value `0`. Replace these values before generating the calibration inputs.
 
 <!-- populateData:agc-settings-by-ndf-frame-indices:start -->
-| NDF level | Selection number | Zero-based global raw-frame index |
-| ---: | ---: | ---: |
-| 0 | 1 | 0 |
-| 0 | 2 | 0 |
-| 0 | 3 | 0 |
-| 1 | 1 | 0 |
-| 1 | 2 | 0 |
-| 1 | 3 | 0 |
-| 2 | 1 | 0 |
-| 2 | 2 | 0 |
-| 2 | 3 | 0 |
-| 3 | 1 | 0 |
-| 3 | 2 | 0 |
-| 3 | 3 | 0 |
-| 4 | 1 | 0 |
-| 4 | 2 | 0 |
-| 4 | 3 | 0 |
+| NDF level | Frame 1 | Frame 2 | Frame 3 |
+| ---: | ---: | ---: | ---: |
+| 0 | 0 | 0 | 0 |
+| 1 | 0 | 0 | 0 |
+| 2 | 0 | 0 | 0 |
+| 3 | 0 | 0 | 0 |
+| 4 | 0 | 0 | 0 |
 <!-- populateData:agc-settings-by-ndf-frame-indices:end -->
