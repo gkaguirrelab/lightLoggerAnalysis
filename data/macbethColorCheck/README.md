@@ -60,8 +60,8 @@ Five patches were selected for measurement. Patch indices, rows, and columns are
 2. Place the PR-670 in front of the ColorChecker and align it with the target patch.
 3. Run `measureUncontrolledSourceSpectrum.m` to acquire **five measurements** from each selected patch.
 4. Repeat the measurement sequence for all five patches listed above.
-5. Record the indoor-close view with the world camera and MS on the Light Logger.
-6. Extract the selected world-camera frame listed below and pair it with its nearest MS measurement.
+5. Record close views of the chart under both indoor and outdoor lighting with the world camera and MS on the Light Logger.
+6. Extract the selected world-camera frame from each recording and pair it with its nearest MS measurement.
 
 ## Selected Light Logger Frames
 
@@ -70,8 +70,11 @@ The global world-frame indices are zero-based:
 | View | Global world-frame index | Saved file |
 | --- | ---: | --- |
 | Indoor close | 32000 | `lightLogger/indoor_close_AGCandMS_01.mat` |
+| Outdoor close | 0 | `lightLogger/outdoor_close_AGCandMS_01.mat` |
 
-The `worldFrame` image in this MAT file contains the original world-camera pixel values. **Absolutely no image processing was applied**, including no digital-gain application, debayering, linearization, fielding correction, RGB correction, floor/ceiling correction, rescaling, or other transformation.
+The outdoor index of `0` is a placeholder and must be replaced after the outdoor frame is selected.
+
+The `worldFrame` images in these MAT files contain the original world-camera pixel values. **Absolutely no image processing was applied**, including no digital-gain application, debayering, linearization, fielding correction, RGB correction, floor/ceiling correction, rescaling, or other transformation.
 
 ## Objective
 
