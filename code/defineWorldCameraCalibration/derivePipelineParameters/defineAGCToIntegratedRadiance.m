@@ -6,17 +6,21 @@
 % Housekeeping
 clear
 
-% Use the full-precision fixed AGC settings for the 0.25 contrast
-% calibration. These values should remain:
-%   NDF       = [0,          1,          2,          3,          4,          5]
-%   AGain     = [1,          1.80281687, 10.666,     10.666,     10.666,     10.666]
-%   DGain     = [1,          1,          1.58156674, 5.96331605, 7.97561560, 10]
-%   Exposure  = [1466,       8333,       8333,       8333,       8333,       8333]
-%   AGC score = [1466,       15022.87298, 140569.30074, 530018.20667, 708870.94394, 888797.78]
-agcData.ndf = 0:5;
-agcData.AGain = [1, 1.80281687, 10.666, 10.666, 10.666, 10.666];
-agcData.DGain = [1, 1, 1.58156674, 5.96331605, 7.97561560, 10];
-agcData.Exposure = [1466, 8333, 8333, 8333, 8333, 8333];
+% Load the AGC settings for each ND level
+agcData.ndf = 0:4;
+for ii = 1:length(agcData.ndf)
+    dataFileName = fullfile(...
+        tbLocateProjectSilent('lightLoggerAnalysis'),...
+        'data',...
+        'AGCSettingsByNDF',...
+        'worldCamera',...
+        sprintf('NDF%d',agcData.ndf(ii)),...
+        sprintf('NDF%d_AGCandMS_01.mat',agcData.ndf(ii)));
+    load(dataFileName,'AGCSettings');
+    agcData.AGain(ii) = AGCSettings.Again;
+    agcData.DGain(ii) = AGCSettings.Dgain;
+    agcData.Exposure(ii) = AGCSettings.exposure;
+end
 
 % Derive a "camera score" by obtaining the product of the AGC settings
 cameraScore = agcData.DGain .* agcData.AGain .* agcData.Exposure;
@@ -34,31 +38,31 @@ channelCodes = {'r','g','b'};
 % Preallocate an Nx3 array for the sensor-weighted integrated radiance
 integratedRadiance = zeros(length(agcData.ndf), 3);
 
-% Next, load the "maxSpectrum" calibration files and extract for each the
-% radiance of the sphere interior. Account for the settings level of the
-% combiLED during the measurement.
-settings = 0.25;
+% Next, load radiance spectrum associated with each ND level
 for ii = 1:length(agcData.ndf)
-    thisCalFile = sprintf('CombiLED-A_cassette-ND%d_sphere_maxSpectrum.mat',agcData.ndf(ii));
-    load(thisCalFile,'cals');
-    cal = cals{end};
-    S = cal.rawData.S;
+
+    dataFileName = fullfile(...
+        tbLocateProjectSilent('lightLoggerAnalysis'),...
+        'data',...
+        'AGCSettingsByNDF',...
+        'PR670',...
+        sprintf('AGCSettingsMeasure%dNDF.mat',agcData.ndf(ii)));
+    load(dataFileName,'measurement','S');
     wlsSource = SToWls(S);
-    
+
     % This is the average radiance in units of Watts/m2/sr/[S(2)*nm],
-    % adjusted for the settings level of the CombiLED.
-    spdSource = cal.rawData.gammaCurveMeanMeasurements * settings;
-    
+    spdSource = mean(measurement,1);
+
     % Loop over the channels to calculate the sensor-weighted effective radiance.
     for cc = 1:length(channelNames)
         % Spline the sensor sensitivity to match the source SPD
         sensitivitySensor = SplineRaw(wlsSensor,T.(channelNames{cc}),wlsSource);
-        
+
         % Scale sensor sensitivity so maximum value is unity
         sensitivitySensor = sensitivitySensor ./ max(sensitivitySensor);
-        
+
         % Calculate absolute integrated radiance for this channel
-        integratedRadiance(ii,cc) = spdSource' * sensitivitySensor;
+        integratedRadiance(ii,cc) = spdSource * sensitivitySensor;
     end
 end
 
