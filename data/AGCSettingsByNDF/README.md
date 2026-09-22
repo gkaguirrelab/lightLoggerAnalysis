@@ -76,7 +76,7 @@ The `worldCamera/NDF0/` through `worldCamera/NDF4/` directories will each contai
 
 ## Selected World-Camera Frames
 
-The zero-based global raw-frame indices below count only frames physically present in the raw chunks; synthetic rows inserted for timestamp gaps are excluded. Run `selectAGCSettingsByNDFFrames.ipynb` to count the physical frames, select frames at approximately two seconds before the end, one second before the end, and the final frame of each recording, and replace this table automatically. A row containing only `0` values is still a placeholder.
+The zero-based global raw-frame indices below count only frames physically present in the raw chunks; synthetic rows inserted for timestamp gaps are excluded. For each NDF recording, the selected frames are approximately two seconds before the end, one second before the end, and the final captured frame.
 
 <!-- populateData:agc-settings-by-ndf-frame-indices:start -->
 | NDF level | Frame 1 | Frame 2 | Frame 3 |
