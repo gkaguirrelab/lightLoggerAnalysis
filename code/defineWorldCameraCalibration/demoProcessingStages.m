@@ -1,10 +1,9 @@
 % Housekeeping
 clear
-%close all
 
 % Pick a measurement
-measurementName = 'indoor_AGCandMS_04.mat';
-%measurementName = 'planetarium_AGCandMS_01.mat';
+%measurementName = 'indoor_AGCandMS_04.mat';
+measurementName = 'planetarium_AGCandMS_01.mat';
 
 % Load the data
 fileName = fullfile(...
@@ -20,9 +19,13 @@ load(fileName,'worldFrame','AGCSettings','minispectValue')
 % Display the reconstruction
 plotReconstructionStages(imageStages)
 
-% Obtain the demosaiced image and show this
+% Obtain the demosaiced image
 radianceMapDemosaiced = demosaicRadianceMapRCD(imageStages{end});
 
+% Obtain the estimated spectral radiance
+[spectralRadiance,miniSpectS] = estimateRadianceSpectrumFromMinispect(minispectValue.AS);
+
+% Show the final, demosaiced image
 figure
 logImage = log10(radianceMapDemosaiced);
 logImage = logImage-min(logImage(:));

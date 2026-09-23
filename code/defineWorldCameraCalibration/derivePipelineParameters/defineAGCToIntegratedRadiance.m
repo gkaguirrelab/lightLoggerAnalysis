@@ -11,7 +11,7 @@ commonS = [380, 1, 352];
 commonWls = SToWls(commonS);
 
 % Load the AGC settings for each ND level
-agcData.ndf = 0:4;
+agcData.ndf = 0:3;
 for ii = 1:length(agcData.ndf)
     dataFileName = fullfile(...
         tbLocateProjectSilent('lightLoggerAnalysis'),...
@@ -50,6 +50,10 @@ end
 % Preallocate an Nx3 array for the sensor-weighted integrated radiance
 integratedRadiance = zeros(length(agcData.ndf), 3);
 
+% Prepare to plot the chromaticity diagrams for each ND level spectrum
+figure
+tiledlayout
+
 % Next, load radiance spectrum associated with each ND level
 for ii = 1:length(agcData.ndf)
 
@@ -68,6 +72,10 @@ for ii = 1:length(agcData.ndf)
     % power adjustment from 2 nm bands to 1 nm bands automatically.
     spdSource = SplineSpd(SToWls(S), spdSource_raw(ii,:)', commonWls)';
 
+    % Report the spd chromaticity and luminance in a figure
+    nexttile
+    luminance(ii) = plotChromLum(spdSource',WlsToS(commonWls));
+
     % Loop over the channels to calculate the sensor-weighted effective radiance.
     for cc = 1:length(channelNames)
         % Calculate absolute integrated radiance for this channel using the 1 nm dot product
@@ -77,10 +85,19 @@ end
 
 % Plot the measurements
 figure;
+yyaxis left
 for cc = 1:3
     loglog(cameraScore, integratedRadiance(:,cc),['-' channelCodes{cc}],'LineWidth',2,'MarkerSize',10); 
     hold on
 end
+ylabel('Log integrated radiance (W/m^2/sr)');
+
+% Add the luminance values to the right y-axis
+yyaxis right
+loglog(cameraScore, luminance,'.','MarkerSize',1); 
+ylabel('Log luminance (cd/m^2)');
+
+% General plot properties
 a = gca();
 a.XScale = 'log';
 a.YScale = 'log';
@@ -89,9 +106,9 @@ hold on; grid off; box off;
 
 % Clean up, label, legend
 xlabel('Log camera sensitivity score');
-ylabel('Log integrated radiance (W/m^2/sr)');
 title('Integrated Radiance vs. Camera AGC Sensitivity');
 legend('Red Channel', 'Green Channel', 'Blue Channel', 'Location', 'northwest');
+
 
 % Save the values that relate camera score to channel-specific effective radiance
 saveFileName = fullfile(...
