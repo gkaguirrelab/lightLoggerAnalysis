@@ -2,7 +2,7 @@
 
 ## Overview
 
-This measurement was performed in the **Flicker Room** to verify the chromatic response of the Light Logger camera against a Macbeth ColorChecker, using a PR-670 spectroradiometer as the reference instrument.
+These measurements were performed indoors in the **Flicker Room** and outdoors outside **Goddard Hall** to verify the chromatic response of the Light Logger camera against a Macbeth ColorChecker, using a PR-670 spectroradiometer as the reference instrument.
 
 ## Equipment
 
@@ -32,15 +32,35 @@ Identification references: [BabelColor ColorChecker formats and history](https:/
 
 ## Experimental Setup
 
+### Indoor
+
 The Macbeth ColorChecker was positioned upright against a box in the Flicker Room. The PR-670 was placed in front of the chart and aligned with the selected color patches. The Light Logger camera was positioned nearby to capture the same target for comparison.
 
 ![Experimental setup showing the Light Logger camera, Macbeth ColorChecker, and PR-670 spectroradiometer](.READMEAssets/setup.jpeg)
 
-*Figure 1. Experimental setup in the Flicker Room.*
+*Indoor experimental setup in the Flicker Room.*
+
+### Outdoor
+
+The outdoor measurement was performed on a table outside Goddard Hall. An extension cord connected to the wall outlet outside the Goddard breezeway supplied power to the PR-670 and laptop. The Macbeth ColorChecker leaned against a chair placed upside down on the table, with a backpack behind the chair to keep wind from disturbing the setup. The PR-670 was mounted on a tripod in front of the chart and aligned with the selected patches.
+
+![Outdoor setup showing the PR-670, ColorChecker, laptop, and extension cord outside Goddard Hall](.READMEAssets/outdoor_setup.jpeg)
+
+*Outdoor experimental setup and power connection near the Goddard breezeway.*
+
+![Side view of the ColorChecker supported by an upside-down chair and backpack](.READMEAssets/outdoor_setup_side.jpeg)
+
+*Side view of the outdoor chart support and PR-670 alignment.*
+
+![PR-670 display showing the outdoor R1C3 luminance measurement of 81.68 cd/m²](.READMEAssets/outdoor_R1C3_luminance.jpeg)
+
+*Outdoor luminance measurement of R1C3 (Blue Sky, index 3): 81.68 cd/m², as shown on the PR-670 display.*
 
 ## Selected ColorChecker Patches
 
 Five patches were selected for measurement. Patch indices, rows, and columns are all **one-indexed**. Index 1 is the upper-left patch, and numbering proceeds left-to-right across each row, then top-to-bottom.
+
+Reference spectra use the same filenames in `indoor/PR670/` and `outdoor/PR670/`. Paths below are relative to each condition directory.
 
 | Index | Patch name | Row | Column | PR-670 file |
 | ---: | --- | :---: | :---: | --- |
@@ -52,11 +72,11 @@ Five patches were selected for measurement. Patch indices, rows, and columns are
 
 ![Macbeth ColorChecker with the five selected patches marked in red](.READMEAssets/selectedColors.jpeg)
 
-*Figure 2. Selected ColorChecker patches, marked in red.*
+*Selected ColorChecker patches, marked in red.*
 
 ## Procedure
 
-1. Position the Macbeth ColorChecker upright in the Flicker Room, supported by a box.
+1. Position the Macbeth ColorChecker upright using the indoor or outdoor setup described above.
 2. Place the PR-670 in front of the ColorChecker and align it with the target patch.
 3. Run `measureUncontrolledSourceSpectrum.m` to acquire **five measurements** from each selected patch.
 4. Repeat the measurement sequence for all five patches listed above.
@@ -65,14 +85,16 @@ Five patches were selected for measurement. Patch indices, rows, and columns are
 
 ## Selected Light Logger Frames
 
+The notebook uses one Dropbox source root, `MacBethColorCheck`, with recordings in `indoor/MacBethColorCheck_raw/` and `outdoor/MacBethColorCheck_raw/`. It writes the selected frames to the corresponding condition directories under `data/MacBethColorCheck/`.
+
 The global world-frame indices are zero-based:
 
 | View | Global world-frame index | Saved file |
 | --- | ---: | --- |
-| Indoor close | 32000 | `lightLogger/indoor_close_AGCandMS_01.mat` |
-| Outdoor close | 0 | `lightLogger/outdoor_close_AGCandMS_01.mat` |
+| Indoor close | 32000 | `indoor/lightLogger/close_AGCandMS_01.mat` |
+| Outdoor close | 10333 | `outdoor/lightLogger/close_AGCandMS_01.mat` |
 
-The outdoor index of `0` is a placeholder and must be replaced after the outdoor frame is selected.
+`populateData.ipynb` reads the frame selections directly from this table. Each MAT file includes the raw `worldFrame`, `globalWorldFrameIndex`, `worldTimestampSeconds`, `AGCSettings` (analog gain, digital gain, and exposure), and the nearest `minispectTimestampSeconds` and `minispectValue`, along with a descriptive frame label and schema documentation.
 
 The `worldFrame` images in these MAT files contain the original world-camera pixel values. **Absolutely no image processing was applied**, including no digital-gain application, debayering, linearization, fielding correction, RGB correction, floor/ceiling correction, rescaling, or other transformation.
 
