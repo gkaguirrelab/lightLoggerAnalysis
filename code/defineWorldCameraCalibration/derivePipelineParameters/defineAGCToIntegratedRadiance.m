@@ -6,6 +6,10 @@
 % Housekeeping
 clear
 
+% Define the common wavelength domain (380 to 730 nm with 1 nm spacing)
+commonS = [380, 1, 352];
+commonWls = SToWls(commonS);
+
 % Load the AGC settings for each ND level
 agcData.ndf = 0:4;
 for ii = 1:length(agcData.ndf)
@@ -35,6 +39,14 @@ wlsSensor = T.wls;
 channelNames = {'red','green','blue'};
 channelCodes = {'r','g','b'};
 
+% Spline the sensor sensitivities to the common 1 nm wavelength domain
+% and scale so maximum value is unity
+sensorSensitivities = zeros(length(commonWls), 3);
+for cc = 1:length(channelNames)
+    sens = SplineRaw(wlsSensor, T.(channelNames{cc}), commonWls);
+    sensorSensitivities(:, cc) = sens ./ max(sens);
+end
+
 % Preallocate an Nx3 array for the sensor-weighted integrated radiance
 integratedRadiance = zeros(length(agcData.ndf), 3);
 
@@ -48,21 +60,18 @@ for ii = 1:length(agcData.ndf)
         'PR670',...
         sprintf('AGCSettingsMeasure%dNDF.mat',agcData.ndf(ii)));
     load(dataFileName,'measurement','S');
-    wlsSource = SToWls(S);
-
-    % This is the average radiance in units of Watts/m2/sr/[S(2)*nm],
-    spdSource = mean(measurement,1);
+    
+    % This is the average radiance in units of Watts/m2/sr/[S(2)*nm]
+    spdSource_raw(ii,:) = mean(measurement,1);
+    
+    % Resample the source SPD to 1 nm spacing. SplineSpd handles the
+    % power adjustment from 2 nm bands to 1 nm bands automatically.
+    spdSource = SplineSpd(SToWls(S), spdSource_raw(ii,:)', commonWls)';
 
     % Loop over the channels to calculate the sensor-weighted effective radiance.
     for cc = 1:length(channelNames)
-        % Spline the sensor sensitivity to match the source SPD
-        sensitivitySensor = SplineRaw(wlsSensor,T.(channelNames{cc}),wlsSource);
-
-        % Scale sensor sensitivity so maximum value is unity
-        sensitivitySensor = sensitivitySensor ./ max(sensitivitySensor);
-
-        % Calculate absolute integrated radiance for this channel
-        integratedRadiance(ii,cc) = spdSource * sensitivitySensor;
+        % Calculate absolute integrated radiance for this channel using the 1 nm dot product
+        integratedRadiance(ii,cc) = spdSource * sensorSensitivities(:, cc);
     end
 end
 
@@ -89,7 +98,7 @@ saveFileName = fullfile(...
     tbLocateProjectSilent('lightLoggerAnalysis'),...
     'derived',...
     'cameraScoreToIntegratedRadiance.mat');
-readme = ['Created by defineAGCToMeanRadiance.\n'...
+readme = ['Created by defineAGCToIntegratedRadiance.\n'...
     'A linear interpolation between these values (in log10 space) maps AGC values to integrated radiance.\n',...
     'cameraScore -- the product of the AGC settings (analog gain, digital gain, exposure).\n',...
     'effectiveRadiance -- the integrated radiance (W/m2/sr) seen by the R, G, and B channels (Nx3 matrix).\n'];
