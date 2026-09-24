@@ -107,11 +107,11 @@ effectiveSetPoint = linearizedSetPoint * meanCorrectionFielding * meanCorrection
 thisCameraScore = AGCSettings.exposure * AGCSettings.Again * AGCSettings.Dgain;
 
 % Interpolate the 1x3 effective radiance vector for this camera score
-logThisEffectiveRadiance = interp1(log10(cameraScore), log10(integratedRadiance), log10(thisCameraScore), 'linear');
-thisEffectiveRadiance = 10.^logThisEffectiveRadiance;
+logThisIntegratedRadiance = interp1(log10(cameraScore), log10(integratedRadiance), log10(thisCameraScore), 'linear');
+thisIntegratedRadiance = 10.^logThisIntegratedRadiance;
 
 % Calculate the Bayer-weighted mean effective radiance (1 Red, 2 Green, 1 Blue)
-meanEffectiveRadiance = (thisEffectiveRadiance(1) + 2*thisEffectiveRadiance(2) + thisEffectiveRadiance(3)) / 4;
+meanEffectiveRadiance = (thisIntegratedRadiance(1) + 2*thisIntegratedRadiance(2) + thisIntegratedRadiance(3)) / 4;
 
 % Scale the radiometrically balanced image to absolute radiance
 imageStages{6} = (imageStages{5} / effectiveSetPoint) * meanEffectiveRadiance;

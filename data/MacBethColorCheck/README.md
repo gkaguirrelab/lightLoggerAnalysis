@@ -101,3 +101,7 @@ The `worldFrame` images in these MAT files contain the original world-camera pix
 ## Objective
 
 The objective of this procedure was to verify the chromatic properties of the Light Logger camera by comparing its response to the known ColorChecker patches and the corresponding PR-670 spectral measurements.
+
+## `ColorChecker_RGB_and_spectra.xls`
+Spectral reflectance data for the Macbeth color checker chart, downloaded from https://babelcolor.com/colorchecker.htm
+
