@@ -30,6 +30,10 @@
 % Housekeeping. We clear all to make sure we have fresh persistent vals
 clear all
 
+% Indoor or outdoor data set?
+valSetOptions = {'indoor','outdoor'};
+valIdx = 1;
+
 % Define the common wavelength domain (380 to 730 nm with 1 nm spacing) for
 % this analysis
 commonS = [380, 1, 352]; 
@@ -38,11 +42,26 @@ commonS = [380, 1, 352];
 nRows = 4;
 nColumns = 6;
 
+% Using the "extractCheckerPixels" in the GUI mode, I defined the corner
+% locations for the "close" camera image for each validation set.
+cornerSets{1} = [
+    128.6063  103.3571
+    530.4668  109.7359
+    530.4668  364.8854
+    122.2276  376.5797];
+
+cornerSets{2} = [
+   73.3239  108.6728
+  503.8887  103.3571
+  542.1611  376.5797
+   48.8721  419.1047];
+
 % Get the list of spectral radiance measurements of checks
 dirName = fullfile(...
     tbLocateProjectSilent('lightLoggerAnalysis'),...
     'data',...
     'macbethColorCheck',...
+    valSetOptions{valIdx},...
     'PR670',...
     '*.mat');
 fileList = dir(dirName);
@@ -178,6 +197,7 @@ dataFileName = fullfile(...
     tbLocateProjectSilent('lightLoggerAnalysis'),...
     'data',...
     'macbethColorCheck',...
+    valSetOptions{valIdx},...
     'lightLogger',...
     'close_AGCandMS_01.mat');
 load(dataFileName,'worldFrame','AGCSettings');
@@ -189,17 +209,8 @@ radianceMap = reconstructionPipeline(worldFrame, AGCSettings);
 % each pixel
 radianceMap = demosaicRadianceMapRCD(radianceMap);
 
-% Obtain the pixel indices within the world image for each check. Using the
-% "extractCheckerPixels" in the GUI mode, I defined the corner locations
-% for the "close" camera image. We now call this routine again with the
-% defined corners to obtain the locations of pixels within the image
-% corresponding to each of the checks
-corners = [
-    128.6063  103.3571
-    530.4668  109.7359
-    530.4668  364.8854
-    122.2276  376.5797];
-rawPixelIndices = extractCheckerPixels(worldFrame,arducamB0392cameraIntrinsics.results.Intrinsics,corners);
+% Obtain the pixel indices within the world image for each check.
+rawPixelIndices = extractCheckerPixels(worldFrame,arducamB0392cameraIntrinsics.results.Intrinsics,cornerSets{valIdx});
 
 % Now loop through the rows and columns of the checker chart and obtain the
 % measured RGB radiance values
