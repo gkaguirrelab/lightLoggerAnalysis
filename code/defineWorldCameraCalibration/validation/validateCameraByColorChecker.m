@@ -205,7 +205,7 @@ for valIdx = 1:length(valSetOptions)
         valSetOptions{valIdx},...
         'lightLogger',...
         'close_AGCandMS_01.mat');
-    load(dataFileName,'worldFrame','AGCSettings');
+    load(dataFileName,'worldFrame','AGCSettings','minispectValue');
 
     % Convert the raw worldFrame to a radiance map
     radianceMap = reconstructionPipeline(worldFrame, AGCSettings);
@@ -237,14 +237,28 @@ for valIdx = 1:length(valSetOptions)
         end
     end
 
+    % Compare the predicted, mean integrated radiance value in the radiance
+    % map given the spectral radiance estimated from the minispect
+    %{
+    [minispectSPD,minispectS,fVal,fitErrors] = estimateRadianceSpectrumFromMinispect(minispectValue.AS);
+    minispectSPD = SplineSpd(SToWls(minispectS), minispectSPD, SToWls(commonS));
+    minispectPredictedMeanRGBRadiance = minispectSPD' * sensorSensitivities;
+    for cc = 1:3; imx219ObservedMeanRGBRadiance(cc) = mean(mean(radianceMap(:,:,cc))); end
+    figure
+    plot(minispectPredictedMeanRGBRadiance,imx219ObservedMeanRGBRadiance,'*');
+    xlabel('minispect radiance'); ylabel('imx219 radiance');
+    refline(1,0);
+    axis square
+    %}
+
 
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    %% PLOT PREDICTED VS MEASURED INTEGRATED RADIANCE
+    %% PLOT RESULTS
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
     figure('Name', ['Validation: ' valSetOptions{valIdx}], ...
-        'Position', [50+(valIdx-1)*100, 50+(valIdx-1)*100, 1200, 450]);
-    tiledlayout(1,2,"TileSpacing","tight");
+        'Position', [50+(valIdx-1)*100, 50+(valIdx-1)*100, 1200, 400]);
+    tiledlayout(1,3,"TileSpacing","tight");
 
     % Show the illuminant
     nexttile
@@ -252,6 +266,17 @@ for valIdx = 1:length(valSetOptions)
     ylabel('radiance [W/m2/sr/nm]');
     xlabel('wavelength [nm]');
     title('Mean illuminant');
+
+    % Show the camera image
+    nexttile
+    logImage = log10(radianceMap);
+    logImage = logImage-min(logImage(:));
+    logImage = logImage/max(logImage(:));
+    imagesc(logImage)
+    box off
+    axis off
+    axis equal
+    title('log10 radiance');
 
     % Show the integrated radiance
     nexttile; hold on;
@@ -308,10 +333,9 @@ for valIdx = 1:length(valSetOptions)
     axis equal;
     xlim([minVal, maxVal]);
     ylim([minVal, maxVal]);
-    xlabel('Predicted [W/m2/sr]');
-    ylabel('Measured [W/m2/sr]');
+    xlabel('via PR670 [W/m2/sr]');
+    ylabel('via IMX219 [W/m2/sr]');
     title('Integrated radiance');
-    legend('Location', 'northwest');
     a = gca();
     a.XTick = a.YTick;
     grid on;

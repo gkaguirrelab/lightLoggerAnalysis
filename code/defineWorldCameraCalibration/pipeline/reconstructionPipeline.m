@@ -111,10 +111,10 @@ logThisIntegratedRadiance = interp1(log10(cameraScore), log10(integratedRadiance
 thisIntegratedRadiance = 10.^logThisIntegratedRadiance;
 
 % Calculate the Bayer-weighted mean effective radiance (1 Red, 2 Green, 1 Blue)
-meanEffectiveRadiance = (thisIntegratedRadiance(1) + 2*thisIntegratedRadiance(2) + thisIntegratedRadiance(3)) / 4;
+meanIntegratedRadiance = (thisIntegratedRadiance(1) + 2*thisIntegratedRadiance(2) + thisIntegratedRadiance(3)) / 4;
 
 % Scale the radiometrically balanced image to absolute radiance
-imageStages{6} = (imageStages{5} / effectiveSetPoint) * meanEffectiveRadiance;
+imageStages{6} = (imageStages{5} / effectiveSetPoint) * meanIntegratedRadiance;
 
 % Return the final stage as the radiance map
 radianceMap = imageStages{6};

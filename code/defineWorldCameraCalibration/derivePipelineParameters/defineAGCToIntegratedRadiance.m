@@ -87,10 +87,13 @@ end
 figure;
 yyaxis left
 for cc = 1:3
-    loglog(cameraScore, integratedRadiance(:,cc),['-' channelCodes{cc}],'LineWidth',2,'MarkerSize',10); 
+    loglog(cameraScore, integratedRadiance(:,cc),['o-' channelCodes{cc}],'LineWidth',2,'MarkerSize',10); 
     hold on
 end
 ylabel('Log integrated radiance (W/m^2/sr)');
+
+% Show a couple validation measurements
+loglog([1.6808e+05,3.0757e+04],[0.0576,0.4555],'*k');
 
 % Add the luminance values to the right y-axis
 yyaxis right
