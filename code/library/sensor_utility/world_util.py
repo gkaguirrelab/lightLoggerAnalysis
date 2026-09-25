@@ -3007,14 +3007,15 @@ def world_metadata_from_chunks(raw_chunks_path: str,
 def plot_world_camera_settings(
     world_metadata: pd.DataFrame,
 ) -> tuple[plt.Figure, tuple[plt.Axes, plt.Axes]]:
-    """Plot world-camera gain and exposure settings over elapsed time.
+    """Plot world-camera gain and exposure settings over time and frame number.
 
     The modern metadata layout plots the camera and AGC-requested analog
     gains, the camera digital gain, and both camera and AGC-requested
     exposures. The legacy ``Again``, ``Dgain``, and ``exposure`` layout is
     also supported. Gain traces use shades of blue on the left axis, while
     exposure traces use shades of orange on the right axis so the two axis
-    color families never overlap.
+    color families never overlap. The bottom X axis shows elapsed seconds and
+    the top X axis shows the corresponding zero-based DataFrame row numbers.
 
     Args:
         world_metadata: DataFrame returned by ``world_metadata_from_chunks``
@@ -3126,6 +3127,50 @@ def plot_world_camera_settings(
             label=display_names[column_name],
         ))
 
+    # Add zero-based frame numbers along the top without changing the elapsed-
+    # time coordinates used to draw the lines. Interpolation preserves the
+    # timestamp-to-row mapping if the recorded frame intervals vary slightly.
+    finite_timestamp_mask: np.ndarray = np.isfinite(elapsed_seconds)
+    finite_elapsed_seconds: np.ndarray = elapsed_seconds[finite_timestamp_mask]
+    finite_frame_numbers: np.ndarray = np.arange(
+        len(world_metadata), dtype=np.float64
+    )[finite_timestamp_mask]
+    if(np.any(np.diff(finite_elapsed_seconds) < 0)):
+        raise ValueError("world_metadata timestamps must be in ascending order")
+
+    # np.interp requires unique ascending X values. In the unusual event of
+    # duplicate timestamps, associate that time with its first metadata row.
+    unique_elapsed_seconds, unique_time_indices = np.unique(
+        finite_elapsed_seconds, return_index=True
+    )
+    frame_numbers_at_unique_times: np.ndarray = finite_frame_numbers[
+        unique_time_indices
+    ]
+
+    if(unique_elapsed_seconds.size > 1):
+        def elapsed_time_to_frame_number(elapsed_time: np.ndarray) -> np.ndarray:
+            return np.interp(
+                elapsed_time, unique_elapsed_seconds, frame_numbers_at_unique_times
+            )
+
+        def frame_number_to_elapsed_time(frame_number: np.ndarray) -> np.ndarray:
+            return np.interp(
+                frame_number, finite_frame_numbers, finite_elapsed_seconds
+            )
+
+        frame_axis = gain_axis.secondary_xaxis(
+            "top",
+            functions=(elapsed_time_to_frame_number, frame_number_to_elapsed_time),
+        )
+        frame_axis.set_xlabel("Frame number")
+    else:
+        # A one-frame recording has no interval from which to construct an
+        # invertible secondary scale, so label its sole time position directly.
+        frame_axis = gain_axis.secondary_xaxis("top")
+        frame_axis.set_xticks([float(unique_elapsed_seconds[0])])
+        frame_axis.set_xticklabels([str(int(finite_frame_numbers[0]))])
+        frame_axis.set_xlabel("Frame number")
+
     # Match each Y axis's labels, ticks, and visible spine to its line family.
     # This reinforces which scale belongs to which group of traces.
     gain_axis.set_xlabel("Elapsed time (s)")
@@ -3138,6 +3183,7 @@ def plot_world_camera_settings(
     gain_axis.spines["left"].set_color("#08306b")
     exposure_axis.spines["right"].set_color("#d94801")
     gain_axis.grid(True, alpha=0.25)
+    gain_axis.margins(x=0)
     gain_axis.set_title("World camera settings")
 
     # Matplotlib otherwise creates one legend per axis, so explicitly pass all
