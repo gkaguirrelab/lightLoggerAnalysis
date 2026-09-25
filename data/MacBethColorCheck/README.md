@@ -100,7 +100,7 @@ The global world-frame indices are zero-based:
 | Condition | Measurement | Global world-frame index | Saved file |
 | --- | ---: | ---: | --- |
 | Indoor | 1 | 32000 | `indoor/1/lightLogger/close_AGCandMS_01.mat` |
-| Indoor | 2 | 7666 | `indoor/2/lightLogger/close_AGCandMS_01.mat` |
+| Indoor | 2 | 11888 | `indoor/2/lightLogger/close_AGCandMS_01.mat` |
 | Outdoor | 1 | 10333 | `outdoor/1/lightLogger/close_AGCandMS_01.mat` |
 
 `populateData.ipynb` reads the frame selections directly from this table. Each MAT file includes the raw `worldFrame`, `globalWorldFrameIndex`, `worldTimestampSeconds`, `AGCSettings` (analog gain, digital gain, and exposure), and the nearest `minispectTimestampSeconds` and `minispectValue`, along with a descriptive frame label and schema documentation.
