@@ -60,15 +60,15 @@ The outdoor measurement was performed on a table outside Goddard Hall. An extens
 
 Five patches were selected for measurement. Patch indices, rows, and columns are all **one-indexed**. Index 1 is the upper-left patch, and numbering proceeds left-to-right across each row, then top-to-bottom.
 
-Reference spectra use the same filenames in `indoor/PR670/` and `outdoor/PR670/`. Paths below are relative to each condition directory.
+Each lighting condition contains one numerically named directory per measurement. Within each measurement directory, reference spectra are stored in `PR670/` and use the naming pattern `<condition><measurement>_R<row>C<column>.mat`.
 
-| Index | Patch name | Row | Column | PR-670 file |
+| Index | Patch name | Row | Column | PR-670 filename pattern |
 | ---: | --- | :---: | :---: | --- |
-| 3 | Blue Sky | 1 | 3 | `PR670/Index-03_BlueSky_radianceSpectrum.mat` |
-| 6 | Bluish Green | 1 | 6 | `PR670/Index-06_BlueishGreen_radianceSpectrum.mat` |
-| 9 | Moderate Red | 2 | 3 | `PR670/Index-09_ModerateRed_radianceSpectrum.mat` |
-| 12 | Orange Yellow | 2 | 6 | `PR670/Index-12_OrangeYellow_radianceSpectrum.mat` |
-| 22 | Neutral 5 | 4 | 4 | `PR670/Index-22_Neutral5_radianceSpectrum.mat` |
+| 3 | Blue Sky | 1 | 3 | `PR670/<condition><measurement>_R1C3.mat` |
+| 6 | Bluish Green | 1 | 6 | `PR670/<condition><measurement>_R1C6.mat` |
+| 9 | Moderate Red | 2 | 3 | `PR670/<condition><measurement>_R2C3.mat` |
+| 12 | Orange Yellow | 2 | 6 | `PR670/<condition><measurement>_R2C6.mat` |
+| 22 | Neutral 5 | 4 | 4 | `PR670/<condition><measurement>_R4C4.mat` |
 
 ![Macbeth ColorChecker with the five selected patches marked in red](.READMEAssets/selectedColors.jpeg)
 
@@ -85,14 +85,15 @@ Reference spectra use the same filenames in `indoor/PR670/` and `outdoor/PR670/`
 
 ## Selected Light Logger Frames
 
-The notebook uses one Dropbox source root, `MacBethColorCheck`, with recordings in `indoor/MacBethColorCheck_raw/` and `outdoor/MacBethColorCheck_raw/`. It writes the selected frames to the corresponding condition directories under `data/MacBethColorCheck/`.
+The notebook uses one Dropbox source root, `MacBethColorCheck`. Beneath it, each condition contains numerically named measurement directories, and each measurement contains its raw chunks at `<condition>/<measurement>/MacBethColorCheck_raw/`. Selected frames are written to the matching numbered measurement directory under `data/MacBethColorCheck/`.
 
 The global world-frame indices are zero-based:
 
-| View | Global world-frame index | Saved file |
-| --- | ---: | --- |
-| Indoor close | 32000 | `indoor/lightLogger/close_AGCandMS_01.mat` |
-| Outdoor close | 10333 | `outdoor/lightLogger/close_AGCandMS_01.mat` |
+| Condition | Measurement | Global world-frame index | Saved file |
+| --- | ---: | ---: | --- |
+| Indoor | 1 | 32000 | `indoor/1/lightLogger/close_AGCandMS_01.mat` |
+| Indoor | 2 | 7666 | `indoor/2/lightLogger/close_AGCandMS_01.mat` |
+| Outdoor | 1 | 10333 | `outdoor/1/lightLogger/close_AGCandMS_01.mat` |
 
 `populateData.ipynb` reads the frame selections directly from this table. Each MAT file includes the raw `worldFrame`, `globalWorldFrameIndex`, `worldTimestampSeconds`, `AGCSettings` (analog gain, digital gain, and exposure), and the nearest `minispectTimestampSeconds` and `minispectValue`, along with a descriptive frame label and schema documentation.
 

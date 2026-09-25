@@ -33,6 +33,11 @@ clear all
 % Indoor or outdoor data set?
 valSetOptions = {'indoor','outdoor'};
 
+% The existing checker-corner selections below were made for measurement 1
+% of each condition. Additional numbered measurements can be added once their
+% image-specific corner coordinates have been selected.
+valMeasurementOptions = [1 1];
+
 % Define the common wavelength domain (380 to 730 nm with 1 nm spacing) for
 % this analysis
 commonS = [380, 1, 352];
@@ -66,6 +71,7 @@ for valIdx = 1:length(valSetOptions)
         'data',...
         'macbethColorCheck',...
         valSetOptions{valIdx},...
+        num2str(valMeasurementOptions(valIdx)),...
         'PR670',...
         '*.mat');
     fileList = dir(dirName);
@@ -78,8 +84,12 @@ for valIdx = 1:length(valSetOptions)
     for ii = 1:length(fileList)
         fileName = fullfile(fileList(ii).folder,fileList(ii).name);
         load(fileName,'measurement','S')
-        myIndex = int32(sscanf(fileList(ii).name, 'Index-%d'));
-        [c, r] = ind2sub([nColumns nRows], myIndex);
+        patchLocation = regexp(fileList(ii).name, '_R(\d+)C(\d+)\.mat$', 'tokens', 'once');
+        if isempty(patchLocation)
+            error('Could not parse ColorChecker row and column from %s', fileList(ii).name);
+        end
+        r = str2double(patchLocation{1});
+        c = str2double(patchLocation{2});
         mySPD = mean(measurement,1);
         spectralRadiance{c, r} = SplineSpd(SToWls(S), mySPD', SToWls(commonS));
     end
@@ -203,6 +213,7 @@ for valIdx = 1:length(valSetOptions)
         'data',...
         'macbethColorCheck',...
         valSetOptions{valIdx},...
+        num2str(valMeasurementOptions(valIdx)),...
         'lightLogger',...
         'close_AGCandMS_01.mat');
     load(dataFileName,'worldFrame','AGCSettings','minispectValue');
@@ -256,7 +267,8 @@ for valIdx = 1:length(valSetOptions)
     %% PLOT RESULTS
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-    figure('Name', ['Validation: ' valSetOptions{valIdx}], ...
+    figure('Name', sprintf('Validation: %s measurement %d', ...
+        valSetOptions{valIdx}, valMeasurementOptions(valIdx)), ...
         'Position', [50+(valIdx-1)*100, 50+(valIdx-1)*100, 1200, 400]);
     tiledlayout(1,3,"TileSpacing","tight");
 
