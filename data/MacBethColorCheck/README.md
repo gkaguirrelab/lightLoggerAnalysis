@@ -40,6 +40,14 @@ The Macbeth ColorChecker was positioned upright against a box in the Flicker Roo
 
 *Indoor experimental setup in the Flicker Room.*
 
+#### Measurement 2
+
+For indoor measurement 2, the PR-670 reported a luminance of **9.583 cd/m²**.
+
+![PR-670 display showing the indoor measurement 2 luminance of 9.583 cd/m²](.READMEAssets/indoor2_luminance.jpeg)
+
+*Indoor measurement 2 luminance: 9.583 cd/m², as shown on the PR-670 display.*
+
 ### Outdoor
 
 The outdoor measurement was performed on a table outside Goddard Hall. An extension cord connected to the wall outlet outside the Goddard breezeway supplied power to the PR-670 and laptop. The Macbeth ColorChecker leaned against a chair placed upside down on the table, with a backpack behind the chair to keep wind from disturbing the setup. The PR-670 was mounted on a tripod in front of the chart and aligned with the selected patches.
@@ -105,4 +113,3 @@ The objective of this procedure was to verify the chromatic properties of the Li
 
 ## `ColorChecker_RGB_and_spectra.xls`
 Spectral reflectance data for the Macbeth color checker chart, downloaded from https://babelcolor.com/colorchecker.htm
-

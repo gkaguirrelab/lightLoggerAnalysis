@@ -8,16 +8,12 @@ The Light Logger was mounted on a tripod at a height of approximately 100 cm abo
 
 Using the collected calibration data, we computed and exported the camera's intrinsics, enabling lens distortion correction and accurate pixel-to-degree conversions for subsequent analyses.
 
-## Accepted raw-frame indices
+## Archived calibration images
 
-The 47 accepted checkerboard images should be recreated from their zero-based global raw-frame indices rather than copied from another image archive. Set the exact checkerboard raw-chunk directory and run the fisheye discovery section in `code/defineWorldCameraCalibration/populateData.ipynb` to replace this provisional block.
-
-<!-- populateData:fisheye-frame-indices:start -->
-Frame indices pending the exact checkerboard raw-chunk path and raw-recording access.
-<!-- populateData:fisheye-frame-indices:end -->
+The original raw checkerboard recording on Dropbox is incomplete: metadata files exist for several chunks whose corresponding frame arrays were apparently never uploaded. Because the full recording cannot be reconstructed reliably, the accepted raw-frame indices were not rediscovered manually. The 47 accepted checkerboard TIFFs are instead preserved directly in Dropbox under `intrinsics_calibration/intrinsics_calibration_images/` and copied from that archive when rebuilding this data directory.
 
 The images and calibration calculation can be displayed in matlab using the command `cameraCalibrator('intrinsics_calibration_session.mat')`.
 
-To recreate the session from scratch, first regenerate `intrinsics_calibration_images/` from the recorded indices, open that folder in MATLAB Camera Calibrator, repeat the documented interactive image acceptance and fisheye fitting, and save the app session as `intrinsics_calibration_session.mat` in this directory.
+To recreate the session from scratch, first copy the archived accepted TIFFs into `intrinsics_calibration_images/` with `populateData.ipynb`, open that folder in MATLAB Camera Calibrator, repeat the documented interactive image acceptance and fisheye fitting, and save the app session as `intrinsics_calibration_session.mat` in this directory.
 
 The resulting camera intrinsics file is saved in the derived folder as `arducamB0392cameraIntrinsics.mat`.

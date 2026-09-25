@@ -27,6 +27,9 @@ about the optical axis was changed between positions.
 
 The raw chunks are reconstructed as a 180 fps, gap-filled temporary video with per-frame digital gain applied. The following zero-based video indices are then extracted. Because gap filling can insert synthetic frames, these are indices in the reconstructed video rather than indices counting only physically stored raw frames.
 
+<!-- populateData:flat-field-frame-selection:start -->
+Recording frame rate: `180` fps.
+
 | Output TIFF | Time (seconds) | Temporary-video frame index |
 | --- | ---: | ---: |
 | `0.tiff` | 366 | 65880 |
@@ -65,6 +68,7 @@ The raw chunks are reconstructed as a 180 fps, gap-filled temporary video with p
 | `33.tiff` | 878 | 158040 |
 | `34.tiff` | 912 | 164160 |
 | `35.tiff` | 920 | 165600 |
+<!-- populateData:flat-field-frame-selection:end -->
 
 
 Additional Calibration Notes (Geoff):
