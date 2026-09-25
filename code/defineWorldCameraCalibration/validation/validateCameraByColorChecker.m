@@ -31,12 +31,8 @@
 clear all
 
 % Indoor or outdoor data set?
-valSetOptions = {'indoor','outdoor'};
-
-% The existing checker-corner selections below were made for measurement 1
-% of each condition. Additional numbered measurements can be added once their
-% image-specific corner coordinates have been selected.
-valMeasurementOptions = [1 1];
+valSetOptions = {'indoor','indoor','outdoor'};
+valNumOptions = {'1','2','1'};
 
 % Define the common wavelength domain (380 to 730 nm with 1 nm spacing) for
 % this analysis
@@ -55,6 +51,12 @@ cornerSets{1} = [
     122.2276  376.5797];
 
 cornerSets{2} = [
+    149.8688  162.8920
+457.1113  178.8389
+481.5631  386.1478
+103.0914  396.7791];
+
+cornerSets{3} = [
     73.3239  108.6728
     503.8887  103.3571
     542.1611  376.5797
@@ -71,7 +73,7 @@ for valIdx = 1:length(valSetOptions)
         'data',...
         'macbethColorCheck',...
         valSetOptions{valIdx},...
-        num2str(valMeasurementOptions(valIdx)),...
+        valNumOptions{valIdx},...
         'PR670',...
         '*.mat');
     fileList = dir(dirName);
@@ -213,7 +215,7 @@ for valIdx = 1:length(valSetOptions)
         'data',...
         'macbethColorCheck',...
         valSetOptions{valIdx},...
-        num2str(valMeasurementOptions(valIdx)),...
+        valNumOptions{valIdx},...
         'lightLogger',...
         'close_AGCandMS_01.mat');
     load(dataFileName,'worldFrame','AGCSettings','minispectValue');
@@ -226,7 +228,7 @@ for valIdx = 1:length(valSetOptions)
     radianceMap = demosaicRadianceMapRCD(radianceMap);
 
     % Obtain the pixel indices within the world image for each check.
-    rawPixelIndices = extractCheckerPixels(worldFrame,arducamB0392cameraIntrinsics.results.Intrinsics,cornerSets{valIdx});
+    rawPixelIndices = extractCheckerPixels(worldFrame*AGCSettings.Dgain,arducamB0392cameraIntrinsics.results.Intrinsics,cornerSets{valIdx});
 
     % Now loop through the rows and columns of the checker chart and obtain the
     % measured RGB radiance values
@@ -267,8 +269,7 @@ for valIdx = 1:length(valSetOptions)
     %% PLOT RESULTS
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-    figure('Name', sprintf('Validation: %s measurement %d', ...
-        valSetOptions{valIdx}, valMeasurementOptions(valIdx)), ...
+    figure('Name', sprintf('Validation: %s', valSetOptions{valIdx}), ...
         'Position', [50+(valIdx-1)*100, 50+(valIdx-1)*100, 1200, 400]);
     tiledlayout(1,3,"TileSpacing","tight");
 
