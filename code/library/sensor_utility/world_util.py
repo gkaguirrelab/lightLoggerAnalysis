@@ -3004,6 +3004,196 @@ def world_metadata_from_chunks(raw_chunks_path: str,
     return metadata
 
 
+def plot_world_camera_settings(
+    world_metadata: pd.DataFrame,
+) -> tuple[plt.Figure, tuple[plt.Axes, plt.Axes]]:
+    """Plot world-camera gain and exposure settings over time and frame number.
+
+    The modern metadata layout plots the camera and AGC-requested analog
+    gains, the camera digital gain, and both camera and AGC-requested
+    exposures. The legacy ``Again``, ``Dgain``, and ``exposure`` layout is
+    also supported. Gain traces use shades of blue on the left axis, while
+    exposure traces use shades of orange on the right axis so the two axis
+    color families never overlap. The bottom X axis shows elapsed seconds and
+    the top X axis shows the corresponding zero-based DataFrame row numbers.
+
+    Args:
+        world_metadata: DataFrame returned by ``world_metadata_from_chunks``
+            with timestamps converted to seconds (the default behavior).
+
+    Returns:
+        The new figure and a ``(gain_axis, exposure_axis)`` tuple.
+
+    Raises:
+        TypeError: If ``world_metadata`` is not a pandas DataFrame.
+        ValueError: If the DataFrame is empty, has no finite timestamps, or
+            does not contain either a complete modern or legacy metadata
+            layout.
+    """
+    # Fail early with a clear message instead of allowing plotting or column
+    # lookup errors to surface later in the function.
+    if(not isinstance(world_metadata, pd.DataFrame)):
+        raise TypeError("world_metadata must be a pandas DataFrame")
+    if(world_metadata.empty):
+        raise ValueError("world_metadata must contain at least one row")
+    if("timestamp" not in world_metadata.columns):
+        raise ValueError("world_metadata must contain a 'timestamp' column")
+
+    # Recordings can use one of two metadata layouts. Modern recordings store
+    # the settings applied by the camera alongside the settings requested by
+    # the custom AGC. Legacy recordings store only one value per setting.
+    modern_gain_columns: tuple[str, ...] = ("cameraAgain", "AGCAgain", "AGCDgain")
+    modern_exposure_columns: tuple[str, ...] = ("cameraExposure", "AGCExposure")
+    legacy_gain_columns: tuple[str, ...] = ("Again", "Dgain")
+    legacy_exposure_columns: tuple[str, ...] = ("exposure",)
+
+    # Select a complete layout rather than plotting a misleading partial set
+    # of camera settings when one or more expected columns are absent.
+    modern_columns: set[str] = set(modern_gain_columns + modern_exposure_columns)
+    legacy_columns: set[str] = set(legacy_gain_columns + legacy_exposure_columns)
+    available_columns: set[str] = set(world_metadata.columns)
+    if(modern_columns.issubset(available_columns)):
+        gain_columns = modern_gain_columns
+        exposure_columns = modern_exposure_columns
+    elif(legacy_columns.issubset(available_columns)):
+        gain_columns = legacy_gain_columns
+        exposure_columns = legacy_exposure_columns
+    else:
+        raise ValueError(
+            "world_metadata must contain either the modern setting columns "
+            f"{sorted(modern_columns)} or legacy setting columns {sorted(legacy_columns)}"
+        )
+
+    # world_metadata_from_chunks returns timestamps in seconds by default.
+    # Subtract the first valid timestamp so the plot begins at zero while
+    # retaining NaNs in their original positions.
+    timestamps: np.ndarray = world_metadata["timestamp"].to_numpy(dtype=np.float64)
+    finite_timestamps: np.ndarray = timestamps[np.isfinite(timestamps)]
+    if(finite_timestamps.size == 0):
+        raise ValueError("world_metadata must contain at least one finite timestamp")
+    elapsed_seconds: np.ndarray = timestamps - finite_timestamps[0]
+
+    # Keep every gain trace in the blue family and every exposure trace in the
+    # orange family. Shades distinguish related camera and AGC values, while
+    # the separate families make the two Y axes visually unambiguous.
+    gain_colors: dict[str, str] = {
+        "cameraAgain": "#08519c",
+        "AGCAgain": "#6baed6",
+        "AGCDgain": "#08306b",
+        "Again": "#2171b5",
+        "Dgain": "#6baed6",
+    }
+    exposure_colors: dict[str, str] = {
+        "cameraExposure": "#d94801",
+        "AGCExposure": "#fd8d3c",
+        "exposure": "#e6550d",
+    }
+    display_names: dict[str, str] = {
+        "cameraAgain": "Camera AGain",
+        "AGCAgain": "AGC AGain",
+        "AGCDgain": "Camera DGain",
+        "cameraExposure": "Camera exposure",
+        "AGCExposure": "AGC exposure",
+        "Again": "AGain",
+        "Dgain": "DGain",
+        "exposure": "Exposure",
+    }
+
+    # twinx shares the elapsed-time X axis while allowing exposure, whose
+    # numeric range is much larger than gain, to retain its own Y scale.
+    figure, gain_axis = plt.subplots(figsize=(10, 5))
+    exposure_axis: plt.Axes = gain_axis.twinx()
+
+    # Collect lines from both axes so they can appear in one combined legend.
+    lines: list = []
+
+    # Draw gain values against the left-hand scale.
+    for column_name in gain_columns:
+        lines.extend(gain_axis.plot(
+            elapsed_seconds,
+            world_metadata[column_name].to_numpy(dtype=np.float64),
+            color=gain_colors[column_name],
+            linewidth=1.5,
+            label=display_names[column_name],
+        ))
+
+    # Draw exposure values against the independent right-hand scale.
+    for column_name in exposure_columns:
+        lines.extend(exposure_axis.plot(
+            elapsed_seconds,
+            world_metadata[column_name].to_numpy(dtype=np.float64),
+            color=exposure_colors[column_name],
+            linewidth=1.5,
+            label=display_names[column_name],
+        ))
+
+    # Add zero-based frame numbers along the top without changing the elapsed-
+    # time coordinates used to draw the lines. Interpolation preserves the
+    # timestamp-to-row mapping if the recorded frame intervals vary slightly.
+    finite_timestamp_mask: np.ndarray = np.isfinite(elapsed_seconds)
+    finite_elapsed_seconds: np.ndarray = elapsed_seconds[finite_timestamp_mask]
+    finite_frame_numbers: np.ndarray = np.arange(
+        len(world_metadata), dtype=np.float64
+    )[finite_timestamp_mask]
+    if(np.any(np.diff(finite_elapsed_seconds) < 0)):
+        raise ValueError("world_metadata timestamps must be in ascending order")
+
+    # np.interp requires unique ascending X values. In the unusual event of
+    # duplicate timestamps, associate that time with its first metadata row.
+    unique_elapsed_seconds, unique_time_indices = np.unique(
+        finite_elapsed_seconds, return_index=True
+    )
+    frame_numbers_at_unique_times: np.ndarray = finite_frame_numbers[
+        unique_time_indices
+    ]
+
+    if(unique_elapsed_seconds.size > 1):
+        def elapsed_time_to_frame_number(elapsed_time: np.ndarray) -> np.ndarray:
+            return np.interp(
+                elapsed_time, unique_elapsed_seconds, frame_numbers_at_unique_times
+            )
+
+        def frame_number_to_elapsed_time(frame_number: np.ndarray) -> np.ndarray:
+            return np.interp(
+                frame_number, finite_frame_numbers, finite_elapsed_seconds
+            )
+
+        frame_axis = gain_axis.secondary_xaxis(
+            "top",
+            functions=(elapsed_time_to_frame_number, frame_number_to_elapsed_time),
+        )
+        frame_axis.set_xlabel("Frame number")
+    else:
+        # A one-frame recording has no interval from which to construct an
+        # invertible secondary scale, so label its sole time position directly.
+        frame_axis = gain_axis.secondary_xaxis("top")
+        frame_axis.set_xticks([float(unique_elapsed_seconds[0])])
+        frame_axis.set_xticklabels([str(int(finite_frame_numbers[0]))])
+        frame_axis.set_xlabel("Frame number")
+
+    # Match each Y axis's labels, ticks, and visible spine to its line family.
+    # This reinforces which scale belongs to which group of traces.
+    gain_axis.set_xlabel("Elapsed time (s)")
+    gain_axis.set_ylabel("Gain", color="#08306b")
+    exposure_axis.set_ylabel("Exposure", color="#d94801")
+    gain_axis.set_ylim(bottom=1)
+    exposure_axis.set_ylim(bottom=0)
+    gain_axis.tick_params(axis="y", colors="#08306b")
+    exposure_axis.tick_params(axis="y", colors="#d94801")
+    gain_axis.spines["left"].set_color("#08306b")
+    exposure_axis.spines["right"].set_color("#d94801")
+    gain_axis.grid(True, alpha=0.25)
+    gain_axis.margins(x=0)
+    gain_axis.set_title("World camera settings")
+
+    # Matplotlib otherwise creates one legend per axis, so explicitly pass all
+    # lines to the left axis to produce a single complete legend.
+    gain_axis.legend(lines, [line.get_label() for line in lines], loc="best")
+    figure.tight_layout()
+
+    return figure, (gain_axis, exposure_axis)
+
+
 def world_raw_frames_from_chunks(path_to_recording: str, 
                                  use_mean_frame: bool=False,
                                  verbose: bool = False

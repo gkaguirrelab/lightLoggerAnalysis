@@ -38,8 +38,12 @@ The applied camera settings were fixed within each AGC-state recording.
 
 ## Selected raw-frame indices
 
-The generation notebook chooses ten zero-based global raw-frame indices spanning each recording. Because the last selected index depends on the raw frame count, the notebook records the exact generated selection here whenever the dark-signal frames are rebuilt.
+The generation notebook chose ten zero-based global raw-frame indices spanning each recording. The fixed selections used to populate this dataset are recorded below.
 
-<!-- populateData:dark-signal-frame-indices:start -->
-Frame indices pending regeneration from the raw dark-signal recordings.
-<!-- populateData:dark-signal-frame-indices:end -->
+| AGC-state folder | Zero-based global raw-frame indices |
+| --- | --- |
+| `AGCstate1` | 0, 1318, 2637, 3956, 5275, 6594, 7913, 9232, 10551, 11870 |
+| `AGCstate2` | 0, 1176, 2352, 3528, 4704, 5881, 7057, 8233, 9409, 10586 |
+| `AGCstate3` | 0, 1188, 2376, 3564, 4752, 5940, 7128, 8316, 9504, 10692 |
+| `AGCstate4` | 0, 1961, 3922, 5884, 7845, 9807, 11768, 13730, 15691, 17653 |
+| `AGCstate5` | 0, 1294, 2588, 3882, 5176, 6470, 7764, 9058, 10352, 11646 |
