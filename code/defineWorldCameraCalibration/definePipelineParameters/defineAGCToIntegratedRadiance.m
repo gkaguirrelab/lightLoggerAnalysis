@@ -20,10 +20,11 @@ for ii = 1:length(agcData.ndf)
         'worldCamera',...
         sprintf('NDF%d',agcData.ndf(ii)),...
         sprintf('NDF%d_AGCandMS_01.mat',agcData.ndf(ii)));
-    load(dataFileName,'AGCSettings');
+    load(dataFileName,'AGCSettings','worldFrame');
     agcData.AGain(ii) = AGCSettings.Again;
     agcData.DGain(ii) = AGCSettings.Dgain;
     agcData.Exposure(ii) = AGCSettings.exposure;
+    frameSet{ii} = worldFrame;
 end
 
 % Derive a "camera score" by obtaining the product of the AGC settings
@@ -76,10 +77,21 @@ for ii = 1:length(agcData.ndf)
     nexttile
     luminance(ii) = plotChromLum(spdSource',WlsToS(commonWls));
 
+    % The spdSource is the spectral radiance within the sphere. The camera
+    % sees this source through the lens, which has fall-off in the
+    % periphery. Further, the camera image incorporates areas of decreased
+    % radiance coming from the baffle within the sphere and even some areas
+    % outside of the sphere captured by the wide-field camera. Therefore,
+    % the actual radiance that drives the AGC settings of the camera will
+    % be less than the spdSource. We derive a multiplier here to account
+    % for this effect by taking the ratio of the mean of the entire image
+    % to the mean from the image center.
+    imageWeight = mean(frameSet{ii}(:)) / mean(mean(frameSet{ii}(220:260,300:340)));
+
     % Loop over the channels to calculate the sensor-weighted effective radiance.
     for cc = 1:length(channelNames)
         % Calculate absolute integrated radiance for this channel using the 1 nm dot product
-        integratedRadiance(ii,cc) = spdSource * sensorSensitivities(:, cc);
+        integratedRadiance(ii,cc) = spdSource * imageWeight * sensorSensitivities(:, cc);
     end
 end
 
@@ -91,9 +103,6 @@ for cc = 1:3
     hold on
 end
 ylabel('Log integrated radiance (W/m^2/sr)');
-
-% Show a couple validation measurements
-loglog([1.6808e+05,3.0757e+04],[0.0576,0.4555],'*k');
 
 % Add the luminance values to the right y-axis
 yyaxis right
