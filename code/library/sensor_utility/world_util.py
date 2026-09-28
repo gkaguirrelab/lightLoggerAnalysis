@@ -2656,7 +2656,8 @@ def calculate_color_weights_single_measurement(measurement: dict,
 # Given a recording path, return all frame timestamps.
 def world_timestamps_from_chunks(raw_chunks_path: str,
                                  convert_to_seconds: bool=True,
-                                 verbose: bool=False
+                                 verbose: bool=False,
+                                 fill_missing_frames: bool=True
                                 ) -> np.ndarray:
     """Return the concatenated world-camera timestamp vector.
 
@@ -2669,11 +2670,20 @@ def world_timestamps_from_chunks(raw_chunks_path: str,
         convert_to_seconds: Whether to convert the stored nanosecond
             timestamps into seconds.
         verbose: Whether to display chunk-loading progress.
+        fill_missing_frames: Whether to insert timestamps for gaps between
+            chunks. Defaults to True to preserve compatibility with existing
+            callers that relied on gaps always being filled. Set False to
+            return only timestamps of physically stored frames.
 
     Returns:
         One-dimensional NumPy array of world-frame timestamps.
     """
-    return world_metadata_from_chunks(raw_chunks_path, convert_to_seconds, verbose)["timestamp"].to_numpy()
+    return world_metadata_from_chunks(
+        raw_chunks_path,
+        convert_to_seconds=convert_to_seconds,
+        verbose=verbose,
+        fill_missing_frames=fill_missing_frames,
+    )["timestamp"].to_numpy()
 
 
 def generate_real_dummy_frame_distribution(path_to_video: str) -> np.ndarray:
@@ -2884,7 +2894,8 @@ def world_camera_field_of_view_steradians(matlab_engine: object | None=None) -> 
 # Given a recording path, return all frame metadata.
 def world_metadata_from_chunks(raw_chunks_path: str,
                                  convert_to_seconds: bool=True,
-                                 verbose: bool=False
+                                 verbose: bool=False,
+                                 fill_missing_frames: bool=True
                                 ) -> pd.DataFrame:
     # Find the config file 
     # of the recording. This will tell us about the FPS 
@@ -2896,7 +2907,9 @@ def world_metadata_from_chunks(raw_chunks_path: str,
     them into a single table. When a timestamp gap appears between adjacent
     chunks, it estimates how many frames are missing from the nominal frame
     period and inserts synthetic rows whose timestamps span the gap while
-    the AGC-setting columns are filled with ``NaN``.
+    the AGC-setting columns are filled with ``NaN``. Set
+    ``fill_missing_frames=False`` to concatenate only stored rows, preserving
+    physical frame indices even when recorded camera settings contain NaNs.
 
     Args:
         raw_chunks_path: Directory containing ``config.pkl`` and the world
@@ -2904,27 +2917,33 @@ def world_metadata_from_chunks(raw_chunks_path: str,
         convert_to_seconds: Whether to convert timestamps from nanoseconds
             since boot into seconds.
         verbose: Whether to show progress while loading the metadata chunks.
+        fill_missing_frames: Whether to insert timestamped NaN rows for gaps
+            between chunks. Defaults to True to preserve compatibility with
+            existing callers that relied on gaps always being filled.
 
     Returns:
-        ``pandas.DataFrame`` with columns ``["timestamp", "Again",
-        "Dgain", "exposure"]`` in frame order.
+        ``pandas.DataFrame`` in frame order with a zero-based index and a
+        timestamp column followed by legacy ``Again``, ``Dgain``, ``exposure``
+        or the modern ``WORLD_AGC_METADATA_COLS`` camera settings.
     """
     chunks_path: str = os.path.abspath(os.path.expanduser(raw_chunks_path))
     if(not os.path.isdir(chunks_path)):
         raise FileNotFoundError(f"Raw chunks path does not exist: {chunks_path}")
 
-    # Read the configured frame rate, or use the standard 120 FPS fallback when the config file is unavailable.
-    config_filepath: str = os.path.join(chunks_path, "config.pkl")
-    if(os.path.exists(config_filepath)):
-        with open(config_filepath, 'rb') as config_file:
-            config_data: dict = dill.load(config_file)
-        recording_fps: float = config_data['sensors']['W']['sensor_mode']['fps']
-    else:
-        warnings.warn(f"Config filepath does not exist: {config_filepath}. Assuming world-camera FPS is {WORLD_CAM_FPS}.", RuntimeWarning)
-        recording_fps = WORLD_CAM_FPS
+    # Only gap filling needs the configured frame rate.
+    if fill_missing_frames:
+        # Read the configured frame rate, or use the standard 120 FPS fallback when the config file is unavailable.
+        config_filepath: str = os.path.join(chunks_path, "config.pkl")
+        if(os.path.exists(config_filepath)):
+            with open(config_filepath, 'rb') as config_file:
+                config_data: dict = dill.load(config_file)
+            recording_fps: float = config_data['sensors']['W']['sensor_mode']['fps']
+        else:
+            warnings.warn(f"Config filepath does not exist: {config_filepath}. Assuming world-camera FPS is {WORLD_CAM_FPS}.", RuntimeWarning)
+            recording_fps = WORLD_CAM_FPS
 
-    assert recording_fps > 0, f"World camera FPS must be positive. Got: {recording_fps}"
-    frame_period_ns: float = (10 ** 9) / recording_fps
+        assert recording_fps > 0, f"World camera FPS must be positive. Got: {recording_fps}"
+        frame_period_ns: float = (10 ** 9) / recording_fps
 
     # First, let's find the world metadata chunks
     world_metadata_chunks: list[str] = natsorted([os.path.join(chunks_path, filename)
@@ -2963,7 +2982,7 @@ def world_metadata_from_chunks(raw_chunks_path: str,
         # Otherwise, we need to interpolate 
         # the timestamps in between the chunks 
         # that comes BEFORE world_metadata 
-        else:
+        elif fill_missing_frames:
             # Find the missing time in nano seconds
             gap_ns: float = current_chunk_start - previous_chunk_end
 

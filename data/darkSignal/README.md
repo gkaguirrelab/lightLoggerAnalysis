@@ -6,7 +6,7 @@ to estimate the camera dark signal and dark noise separately for each AGC
 state, because the effective camera noise depends on analog gain, digital gain,
 and exposure.
 
-Each `AGCstate*_AGain-*_DGain-*_E-*` folder contains a stack of TIFF dark frames acquired with the
+Each `AGCstate*` folder contains a stack of TIFF dark frames acquired with the
 camera covered with both the lens cap and a black shroud, and the entire room in darkness. The frames are linearly spaced through the recording. These frames should be processed within each AGC state, not
 pooled across AGC states.
 
@@ -15,7 +15,7 @@ pooled across AGC states.
 Dropbox location:
 
 ```text
-FLIC_admin/Equipment/ArduCam B0392 IMX219 Wide Angle M12/darkNoiseCalibrations
+FLIC_admin/Equipment/ArduCam B0392 IMX219 Wide Angle M12/darkSignal
 ```
 
 ## Recorded Camera Settings
@@ -38,12 +38,14 @@ The applied camera settings were fixed within each AGC-state recording.
 
 ## Selected raw-frame indices
 
-The generation notebook chose ten zero-based global raw-frame indices spanning each recording. The fixed selections used to populate this dataset are recorded below.
+The generation notebook reads ten zero-based global raw-frame indices per recording from the table below. These fixed selections span each recording and are the authoritative inputs used to populate the dataset. The raw recording folder column maps each NDF directory to its output AGC state. The notebook derives the state count and frame counts from this table.
 
-| AGC-state folder | Zero-based global raw-frame indices |
-| --- | --- |
-| `AGCstate1` | 0, 1318, 2637, 3956, 5275, 6594, 7913, 9232, 10551, 11870 |
-| `AGCstate2` | 0, 1176, 2352, 3528, 4704, 5881, 7057, 8233, 9409, 10586 |
-| `AGCstate3` | 0, 1188, 2376, 3564, 4752, 5940, 7128, 8316, 9504, 10692 |
-| `AGCstate4` | 0, 1961, 3922, 5884, 7845, 9807, 11768, 13730, 15691, 17653 |
-| `AGCstate5` | 0, 1294, 2588, 3882, 5176, 6470, 7764, 9058, 10352, 11646 |
+<!-- populateData:dark-signal-frame-selection:start -->
+| Raw recording folder | AGC-state folder | Zero-based global raw-frame indices |
+| --- | --- | --- |
+| `0NDF` | `AGCstate1` | 0, 1318, 2637, 3956, 5275, 6594, 7913, 9232, 10551, 11870 |
+| `1NDF` | `AGCstate2` | 0, 1176, 2352, 3528, 4704, 5881, 7057, 8233, 9409, 10586 |
+| `2NDF` | `AGCstate3` | 0, 1188, 2376, 3564, 4752, 5940, 7128, 8316, 9504, 10692 |
+| `3NDF` | `AGCstate4` | 0, 1961, 3922, 5884, 7845, 9807, 11768, 13730, 15691, 17653 |
+| `4NDF` | `AGCstate5` | 0, 1294, 2588, 3882, 5176, 6470, 7764, 9058, 10352, 11646 |
+<!-- populateData:dark-signal-frame-selection:end -->

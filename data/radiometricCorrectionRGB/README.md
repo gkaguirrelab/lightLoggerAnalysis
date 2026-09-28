@@ -4,6 +4,7 @@ This directory contains the paired cloudy-sky camera and PR670 measurements used
 
 The raw world-camera chunks are reconstructed as a gap-filled temporary video with digital gain, response linearization, and color weighting disabled. Ten consecutive raw-Bayer grayscale frames are selected from the lossless temporary video:
 
+<!-- populateData:radiometric-frame-selection:start -->
 | Output TIFF | Zero-based temporary-video frame index |
 | --- | ---: |
 | `rawFrames/0.tiff` | 8000 |
@@ -16,6 +17,7 @@ The raw world-camera chunks are reconstructed as a gap-filled temporary video wi
 | `rawFrames/7.tiff` | 8007 |
 | `rawFrames/8.tiff` | 8008 |
 | `rawFrames/9.tiff` | 8009 |
+<!-- populateData:radiometric-frame-selection:end -->
 
 Because the video reconstruction fills timestamp gaps, these are temporary-video indices, not necessarily indices counting only physical frames in the raw chunks.
 

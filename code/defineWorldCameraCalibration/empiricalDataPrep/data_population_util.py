@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 import chunk_io
 import numpy as np
+import pandas as pd
 import world_util
 
 
@@ -82,13 +83,12 @@ def find_target_frame(
     ):
         raise ValueError("global_frame_index must be a nonnegative integer.")
 
-    # Load the naturally ordered world metadata with timestamps in seconds.
-    world_metadata = world_util.world_metadata_from_chunks(
-        str(raw_chunks), convert_to_seconds=True, verbose=False
+    # Load only stored rows so iloc counts physical frames, including those
+    # with missing camera settings. Timestamps are in seconds for the reader.
+    captured_metadata: pd.DataFrame = world_util.world_metadata_from_chunks(
+        str(raw_chunks), convert_to_seconds=True, verbose=False,
+        fill_missing_frames=False,
     )
-    # Synthetic gap rows contain NaN camera settings. Remove every row that
-    # contains a NaN so iloc indexes only frames physically present on disk.
-    captured_metadata = world_metadata.dropna().reset_index(drop=True)
     if global_frame_index >= len(captured_metadata):
         raise IndexError(
             f"Global frame index {global_frame_index} exceeds "
