@@ -1682,6 +1682,7 @@ def video_to_illuminance(path_to_video: str,
     metadata: pd.DataFrame | np.ndarray = world_util.world_metadata_from_chunks(
         _gka_path_from_recording_path(path_to_raw),
         verbose=verbose,
+        fill_missing_frames=True,  # Keep row positions aligned with the reconstructed video.
     )
 
     # Determine whether this is a tag segment, task segment, or complete recording.
@@ -1732,13 +1733,14 @@ def video_to_illuminance(path_to_video: str,
     else:
         raise ValueError(f"World metadata does not contain a supported analog gain, digital gain, and exposure schema. Columns: {list(metadata.columns)}")
 
-    # Dummy frames are identified directly by NaN values in their AGC metadata columns.
+    # Require finite settings for illuminance conversion. Keep every row in place
+    # for video alignment; invalid settings can occur in captured or dummy frames.
     metadata_settings: np.ndarray = metadata.loc[:, score_columns].to_numpy(dtype=np.float64)
-    real_frame_mask: np.ndarray = np.all(np.isfinite(metadata_settings), axis=1)
+    valid_settings_mask: np.ndarray = np.all(np.isfinite(metadata_settings), axis=1)
 
-    # Calculate camera scores for real frames and leave dummy-frame scores as NaN.
+    # Calculate usable camera scores and leave invalid-setting scores as NaN.
     camera_scores: np.ndarray = np.full(num_frames, np.nan, dtype=np.float64)
-    camera_scores[real_frame_mask] = np.prod(metadata_settings[real_frame_mask], axis=1)
+    camera_scores[valid_settings_mask] = np.prod(metadata_settings[valid_settings_mask], axis=1)
 
     # Load minispect counts and restrict them to the same time interval as the selected camera metadata.
     as_values: np.ndarray | None = None
@@ -1788,7 +1790,7 @@ def video_to_illuminance(path_to_video: str,
         # Map each local decoded frame back to its global video and metadata index.
         for local_frame_idx, frame_idx in enumerate(range(start, end)):
             # Dummy frames have no camera measurement and remain NaN in the output.
-            if(not real_frame_mask[frame_idx]):
+            if(not valid_settings_mask[frame_idx]):
                 continue
 
             # Convert the already-linearized RGB frame to float without applying another response correction.

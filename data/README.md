@@ -58,6 +58,24 @@ python code/defineWorldCameraCalibration/defineMSIlluminanceToAGCLag.py /path/to
 python code/defineWorldCameraCalibration/dataPrep/deriveEmpircalAGCAndIlluminance.py /path/to/recording/GKA [...]
 ```
 
+### Notebook population settings
+
+`populateData.ipynb` reads this table directly to select the cohort and filter
+samples. It uses the first `maximum_subjects` eligible subject directories in
+natural order, excluding `subjects_to_skip` (comma-separated names; empty means
+none), and includes their activity recordings. The saturation limit is inclusive
+and expressed in percent. The initial sample count is discarded separately from
+each recording, before retaining the finite positive matched samples.
+
+<!-- populateData:agc-to-illuminance-settings:start -->
+| Setting | Value |
+| --- | --- |
+| `maximum_subjects` | `4` |
+| `subjects_to_skip` | `FLIC_18` |
+| `maximum_saturation_percent` | `40.0` |
+| `initial_samples_to_exclude` | `100` |
+<!-- populateData:agc-to-illuminance-settings:end -->
+
 After regenerating this point cloud, run
 `code/defineWorldCameraCalibration/defineAGCToMeanLuminance.m` to compare it
 with the integrating-sphere measurements and refresh
