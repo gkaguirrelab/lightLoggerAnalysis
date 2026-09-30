@@ -64,6 +64,15 @@ The outdoor measurement was performed on a table outside Goddard Hall. An extens
 
 *Outdoor luminance measurement of R1C3 (Blue Sky, index 3): 81.68 cd/m², as shown on the PR-670 display.*
 
+#### Measurements 2 and 3
+
+| Outdoor measurement | Filter condition | PR-670 reference files |
+| ---: | --- | --- |
+| 2 | No filter | `outdoor/2/PR670/outdoor2_R<row>C<column>.mat` |
+| 3 | 0.8 neutral-density filter (NDF) | `outdoor/3/PR670/outdoor3_R<row>C<column>.mat` |
+
+Each new measurement contains the same five selected patches listed below.
+
 ## Selected ColorChecker Patches
 
 Five patches were selected for measurement. Patch indices, rows, and columns are all **one-indexed**. Index 1 is the upper-left patch, and numbering proceeds left-to-right across each row, then top-to-bottom.
@@ -102,6 +111,10 @@ The global world-frame indices are zero-based:
 | Indoor | 1 | 32000 | `indoor/1/lightLogger/close_AGCandMS_01.mat` |
 | Indoor | 2 | 7666 | `indoor/2/lightLogger/close_AGCandMS_01.mat` |
 | Outdoor | 1 | 10333 | `outdoor/1/lightLogger/close_AGCandMS_01.mat` |
+| Outdoor | 2 | TBD | `outdoor/2/lightLogger/close_AGCandMS_01.mat` |
+| Outdoor | 3 | TBD | `outdoor/3/lightLogger/close_AGCandMS_01.mat` |
+
+The world-frame selections for outdoor measurement 2 (no filter) and measurement 3 (0.8 NDF) are pending. Replace each `TBD` with its zero-based global world-frame index when selected; the listed files are planned outputs and have not yet been generated. The notebook skips rows with nonnumeric frame indices.
 
 `populateData.ipynb` reads the frame selections directly from this table. Each MAT file includes the raw `worldFrame`, `globalWorldFrameIndex`, `worldTimestampSeconds`, `AGCSettings` (analog gain, digital gain, and exposure), and the nearest `minispectTimestampSeconds` and `minispectValue`, along with a descriptive frame label and schema documentation.
 
