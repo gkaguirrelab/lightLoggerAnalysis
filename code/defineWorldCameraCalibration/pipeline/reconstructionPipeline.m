@@ -4,7 +4,7 @@ function [radianceMap, imageStages] = reconstructionPipeline(I, AGCSettings)
 % derived parameters upfront.
 
 % Declare persistent variables for all derived parameters and maps
-persistent clippingExponent linearizedSetPoint darkSignal ...
+persistent clippingExponent darkSignal ...
     correctionMap radiometricCorrectionMap ...
     integratedRadiance cameraScore ...
     meanCorrectionFielding meanCorrectionRGB Smax
@@ -15,7 +15,7 @@ if isempty(clippingExponent)
         tbLocateProjectSilent('lightLoggerAnalysis'),...
         'derived',...
         'nonLinearClippingExponent.mat');
-    load(paramFileName, 'clippingExponent', 'linearizedSetPoint');
+    load(paramFileName, 'clippingExponent');
 end
 
 % Load dark signal and compute Smax for linearization
@@ -35,8 +35,7 @@ if isempty(correctionMap)
         'derived',...
         'flatFieldingFunction.mat');
     load(paramFileName, 'correctionMap');
-    % Calculate the mean of the lens profile (1 / correctionMap) 
-    % and invert it to obtain the scaling factor
+    % Calculate the mean of the fielding correction map
     meanCorrectionFielding = mean(correctionMap(:), 'omitnan');
 end
 
@@ -62,8 +61,8 @@ end
 
 % Set the saturation threshold based upon the clippingExponent value
 
-% Define the maximum allowable noise amplification (derivative)
-% A value of 3.0 to 5.0 is typically a safe boundary for Bayesian conditioning
+% Define the maximum allowable noise amplification (derivative) A value of
+% 3.0 to 5.0 is typically a safe boundary for Bayesian conditioning
 maxAllowedDerivative = 4.0; 
 
 % Dynamically calculate the saturation threshold based on the derivative
@@ -102,19 +101,29 @@ imageStages{4} = imageStages{3} .* correctionMap;
 % Stage 5: Equalize RGB channels
 imageStages{5} = imageStages{4} .* radiometricCorrectionMap;
 
+% Obtain a linearized set point. This is the sensor value (after
+% linearization) that corresponds to the set point that the AGC attempts to
+% obtain for the mean of the entire image. To do so, we take the initial
+% set point, undo Dgain effects, linearize, and account for the mean
+% fielding and RGB corrections
+setPoint = 127;
+setPoint = (setPoint / AGCSettings.Dgain) - darkSignal;
+linearizedSetPoint = setPoint ./ (1 - (setPoint ./ Smax).^n).^(1./n);
+linearizedSetPoint = linearizedSetPoint * AGCSettings.Dgain * meanCorrectionFielding * meanCorrectionRGB;
+
 % Stage 6: Convert to absolute radiance units
-effectiveSetPoint = linearizedSetPoint * meanCorrectionFielding * meanCorrectionRGB;
 thisCameraScore = AGCSettings.exposure * AGCSettings.Again * AGCSettings.Dgain;
 
 % Interpolate the 1x3 effective radiance vector for this camera score
 logThisIntegratedRadiance = interp1(log10(cameraScore), log10(integratedRadiance), log10(thisCameraScore), 'linear');
 thisIntegratedRadiance = 10.^logThisIntegratedRadiance;
 
-% Calculate the Bayer-weighted mean effective radiance (1 Red, 2 Green, 1 Blue)
+% Calculate the Bayer-weighted mean effective radiance (1 Red, 2 Green, 1
+% Blue)
 meanIntegratedRadiance = (thisIntegratedRadiance(1) + 2*thisIntegratedRadiance(2) + thisIntegratedRadiance(3)) / 4;
 
 % Scale the radiometrically balanced image to absolute radiance
-imageStages{6} = (imageStages{5} / effectiveSetPoint) * meanIntegratedRadiance;
+imageStages{6} = (imageStages{5} / linearizedSetPoint) * meanIntegratedRadiance;
 
 % Return the final stage as the radiance map
 radianceMap = imageStages{6};

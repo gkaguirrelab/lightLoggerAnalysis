@@ -21,4 +21,4 @@ I find that the integrated radiance derived from the PR670 measurements accurate
 
 I have attached the validation plots for the outdoor and indoor conditions, as well as relevant matlab code elements. I have also attached the plot that is produced by "defineAGCToIntegratedRadiance". 
 
-Review these elements and offer some hypotheses regarding why the validation is systematically off for the indoor measurement.
+Review these elements and offer some hypotheses regarding why the validation is systematically off for the indoor measurement. Pay particular attention to the manner in which the "linearizedSetPoint" is calculated within the reconstructionPipeline routine, and the way in which the linearized set point is considered within the defineFullWellCapacityEffect routine.
