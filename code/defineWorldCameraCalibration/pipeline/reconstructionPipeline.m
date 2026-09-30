@@ -55,7 +55,7 @@ if isempty(integratedRadiance)
         tbLocateProjectSilent('lightLoggerAnalysis'),...
         'derived',...
         'cameraScoreToIntegratedRadiance.mat');
-    load(paramFileName, 'integratedRadiance', 'cameraScore');
+    load(paramFileName,'agcToRadianceP');
 end
 
 
@@ -109,18 +109,13 @@ imageStages{5} = imageStages{4} .* radiometricCorrectionMap;
 setPoint = 127;
 setPoint = (setPoint / AGCSettings.Dgain) - darkSignal;
 linearizedSetPoint = setPoint ./ (1 - (setPoint ./ Smax).^n).^(1./n);
-linearizedSetPoint = linearizedSetPoint * AGCSettings.Dgain * meanCorrectionFielding * meanCorrectionRGB;
+linearizedSetPoint = linearizedSetPoint * meanCorrectionFielding * meanCorrectionRGB;
 
 % Stage 6: Convert to absolute radiance units
 thisCameraScore = AGCSettings.exposure * AGCSettings.Again * AGCSettings.Dgain;
 
-% Interpolate the 1x3 effective radiance vector for this camera score
-logThisIntegratedRadiance = interp1(log10(cameraScore), log10(integratedRadiance), log10(thisCameraScore), 'linear');
-thisIntegratedRadiance = 10.^logThisIntegratedRadiance;
-
-% Calculate the Bayer-weighted mean effective radiance (1 Red, 2 Green, 1
-% Blue)
-meanIntegratedRadiance = (thisIntegratedRadiance(1) + 2*thisIntegratedRadiance(2) + thisIntegratedRadiance(3)) / 4;
+% Obtain the mean integrated radiance implied by this camera score
+meanIntegratedRadiance = 10.^polyval(agcToRadianceP,log10(thisCameraScore))
 
 % Scale the radiometrically balanced image to absolute radiance
 imageStages{6} = (imageStages{5} / linearizedSetPoint) * meanIntegratedRadiance;
