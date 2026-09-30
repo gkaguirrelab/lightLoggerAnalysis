@@ -6,7 +6,7 @@ function [radianceMap, imageStages] = reconstructionPipeline(I, AGCSettings)
 % Declare persistent variables for all derived parameters and maps
 persistent clippingExponent darkSignal ...
     correctionMap radiometricCorrectionMap ...
-    integratedRadiance cameraScore ...
+    agcToRadianceP ...
     meanCorrectionFielding meanCorrectionRGB Smax
 
 % Load non-linear clipping exponent and linearized set point
@@ -50,7 +50,7 @@ if isempty(radiometricCorrectionMap)
 end
 
 % Load camera score to effective integrated radiance mapping parameters
-if isempty(integratedRadiance)
+if isempty(agcToRadianceP)
     paramFileName = fullfile(...
         tbLocateProjectSilent('lightLoggerAnalysis'),...
         'derived',...
@@ -90,7 +90,7 @@ linearized(y >= saturationThreshold) = Inf;
 imageStages{2} = linearized;
 
 % Apply digital gain
-imageStages{2} = imageStages{2} * AGCSettings.Dgain;
+imageStages{2} = imageStages{2};% * AGCSettings.Dgain;
 
 % Stage 3: Impute values for ceiling and floor pixels
 imageStages{3} = imputePixelValues(imageStages{2});
@@ -115,7 +115,7 @@ linearizedSetPoint = linearizedSetPoint * meanCorrectionFielding * meanCorrectio
 thisCameraScore = AGCSettings.exposure * AGCSettings.Again * AGCSettings.Dgain;
 
 % Obtain the mean integrated radiance implied by this camera score
-meanIntegratedRadiance = 10.^polyval(agcToRadianceP,log10(thisCameraScore))
+meanIntegratedRadiance = 10.^polyval(agcToRadianceP,log10(thisCameraScore));
 
 % Scale the radiometrically balanced image to absolute radiance
 imageStages{6} = (imageStages{5} / linearizedSetPoint) * meanIntegratedRadiance;

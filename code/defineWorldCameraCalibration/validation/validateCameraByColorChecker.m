@@ -29,6 +29,7 @@
 
 % Housekeeping. We clear all to make sure we have fresh persistent vals
 clear all
+close all
 
 % Indoor or outdoor data set?
 valSetOptions = {'indoor','indoor','outdoor','outdoor','outdoor'};
@@ -74,9 +75,14 @@ cornerSets{5} = [
     485.8156  288.3405
     182.8256  351.0648];
 
+% Plot the measurements in order of decreasing irradiance
+plotOrder = [3,1,4,2,5];
+
 %% Loop over the validation sets
 
-for valIdx = 1:length(valSetOptions)
+for vv = 1:length(valSetOptions)
+
+    valIdx = plotOrder(vv);
 
     % Get the list of spectral radiance measurements of checks
     dirName = fullfile(...
@@ -238,7 +244,9 @@ for valIdx = 1:length(valSetOptions)
     % each pixel
     radianceMap = demosaicRadianceMapRCD(radianceMap);
 
-    % Obtain the pixel indices within the world image for each check.
+    % Obtain the pixel indices within the world image for each check. We
+    % scale the image by the Dgain so that it is visible if we wish to
+    % display it.
     rawPixelIndices = extractCheckerPixels(worldFrame*AGCSettings.Dgain,arducamB0392cameraIntrinsics.results.Intrinsics,cornerSets{valIdx});
 
     % Now loop through the rows and columns of the checker chart and obtain the
@@ -280,8 +288,8 @@ for valIdx = 1:length(valSetOptions)
     %% PLOT RESULTS
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-    figure('Name', sprintf('Validation: %s', valSetOptions{valIdx}), ...
-        'Position', [50+(valIdx-1)*100, 50+(valIdx-1)*100, 1200, 400]);
+    figure('Name', sprintf('Validation: %s', vv), ...
+        'Position', [50+(vv-1)*100, 50+(vv-1)*100, 1200, 400]);
     tiledlayout(1,3,"TileSpacing","tight");
 
     % Show the illuminant

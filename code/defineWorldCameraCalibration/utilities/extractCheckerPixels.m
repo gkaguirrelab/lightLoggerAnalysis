@@ -49,7 +49,6 @@ end
 [imageRows, imageCols, ~] = size(I);
 
 % --- 2. Undistort the Image and Get Virtual Intrinsics ---
-disp('Undistorting image...');
 [J, newIntrinsics] = undistortFisheyeImage(I, camIntrinsics);
 K = newIntrinsics.IntrinsicMatrix;
 
@@ -123,7 +122,6 @@ movingPoints = corners;
 tform = fitgeotrans(fixedPoints, movingPoints, 'projective');
 
 % --- 6. Project, Re-distort, and Mask ---
-disp('Calculating boundaries and mapping back to raw space...');
 rawPixelIndices = cell(rows, cols);
 
 safe_margin = 0.02;
@@ -197,9 +195,6 @@ end
 if showPlot
     hold(ax1, 'off');
     hold(ax2, 'off');
-    disp('Extraction complete. Figure left open for inspection.');
-else
-    disp('Extraction complete.');
 end
 end
 

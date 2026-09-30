@@ -111,7 +111,8 @@ end
 loglog(cameraScore, mean(integratedRadiance,2),'*','MarkerSize',10); 
 loglog(xFit, yFit,'-k','LineWidth',2); 
 
-
+% Add some empirical values
+%loglog([3.0757e+04,1.6808e+05,1.7469e+05,2.2210e+05,4.8693e+05],[0.2967,0.0456,0.0437,0.0336,.0141],'^r')
 
 ylabel('Log integrated radiance (W/m^2/sr)');
 
