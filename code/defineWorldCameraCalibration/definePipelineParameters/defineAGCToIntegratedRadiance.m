@@ -95,13 +95,25 @@ for ii = 1:length(agcData.ndf)
     end
 end
 
+% Get the linear fit to the mean integrated radiance as a function of
+% camera score
+agcToRadianceP = polyfit(log10(cameraScore), mean(log10(integratedRadiance),2), 1); 
+xFit = 10.^linspace(2,6,100);
+yFit = 10.^polyval(agcToRadianceP,log10(xFit));
+
 % Plot the measurements
 figure;
 yyaxis left
 for cc = 1:3
-    loglog(cameraScore, integratedRadiance(:,cc),['o-' channelCodes{cc}],'LineWidth',2,'MarkerSize',10); 
+    loglog(cameraScore, integratedRadiance(:,cc),['o-' channelCodes{cc}],'LineWidth',1,'MarkerSize',5); 
     hold on
 end
+loglog(cameraScore, mean(integratedRadiance,2),'*','MarkerSize',10); 
+loglog(xFit, yFit,'-k','LineWidth',2); 
+
+% Add some empirical values
+%loglog([3.0757e+04,1.6808e+05,1.7469e+05,2.2210e+05,4.8693e+05],[0.2967,0.0456,0.0437,0.0336,.0141],'^r')
+
 ylabel('Log integrated radiance (W/m^2/sr)');
 
 % Add the luminance values to the right y-axis
@@ -128,7 +140,6 @@ saveFileName = fullfile(...
     'derived',...
     'cameraScoreToIntegratedRadiance.mat');
 readme = ['Created by defineAGCToIntegratedRadiance.\n'...
-    'A linear interpolation between these values (in log10 space) maps AGC values to integrated radiance.\n',...
-    'cameraScore -- the product of the AGC settings (analog gain, digital gain, exposure).\n',...
-    'effectiveRadiance -- the integrated radiance (W/m2/sr) seen by the R, G, and B channels (Nx3 matrix).\n'];
-save(saveFileName,'readme','cameraScore','integratedRadiance');
+    'A linear function (in log10 space) maps AGC values to integrated radiance.\n',...
+    'agcToRadianceP -- the slope and intercept.\n'];
+save(saveFileName,'readme','agcToRadianceP');

@@ -29,10 +29,11 @@
 
 % Housekeeping. We clear all to make sure we have fresh persistent vals
 clear all
+close all
 
 % Indoor or outdoor data set?
-valSetOptions = {'indoor','indoor','outdoor'};
-valNumOptions = {'1','2','1'};
+valSetOptions = {'indoor','indoor','outdoor','outdoor','outdoor'};
+valNumOptions = {'1','2','1','2','3'};
 
 % Define the common wavelength domain (380 to 730 nm with 1 nm spacing) for
 % this analysis
@@ -52,9 +53,9 @@ cornerSets{1} = [
 
 cornerSets{2} = [
     149.8688  162.8920
-457.1113  178.8389
-481.5631  386.1478
-103.0914  396.7791];
+    457.1113  178.8389
+    481.5631  386.1478
+    103.0914  396.7791];
 
 cornerSets{3} = [
     73.3239  108.6728
@@ -62,10 +63,26 @@ cornerSets{3} = [
     542.1611  376.5797
     48.8721  419.1047];
 
+cornerSets{4} = [
+    194.5199  173.5233
+    469.8688  148.0083
+    485.8156  323.4236
+    208.3405  355.3173];
+
+cornerSets{5} = [
+    137.1113  127.8090
+    468.8056   84.2209
+    485.8156  288.3405
+    182.8256  351.0648];
+
+% Plot the measurements in order of decreasing irradiance
+plotOrder = [3,1,4,2,5];
 
 %% Loop over the validation sets
 
-for valIdx = 1:length(valSetOptions)
+for vv = 1:length(valSetOptions)
+
+    valIdx = plotOrder(vv);
 
     % Get the list of spectral radiance measurements of checks
     dirName = fullfile(...
@@ -227,7 +244,9 @@ for valIdx = 1:length(valSetOptions)
     % each pixel
     radianceMap = demosaicRadianceMapRCD(radianceMap);
 
-    % Obtain the pixel indices within the world image for each check.
+    % Obtain the pixel indices within the world image for each check. We
+    % scale the image by the Dgain so that it is visible if we wish to
+    % display it.
     rawPixelIndices = extractCheckerPixels(worldFrame*AGCSettings.Dgain,arducamB0392cameraIntrinsics.results.Intrinsics,cornerSets{valIdx});
 
     % Now loop through the rows and columns of the checker chart and obtain the
@@ -269,8 +288,8 @@ for valIdx = 1:length(valSetOptions)
     %% PLOT RESULTS
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-    figure('Name', sprintf('Validation: %s', valSetOptions{valIdx}), ...
-        'Position', [50+(valIdx-1)*100, 50+(valIdx-1)*100, 1200, 400]);
+    figure('Name', sprintf('Validation: %s', vv), ...
+        'Position', [50+(vv-1)*100, 50+(vv-1)*100, 1200, 400]);
     tiledlayout(1,3,"TileSpacing","tight");
 
     % Show the illuminant

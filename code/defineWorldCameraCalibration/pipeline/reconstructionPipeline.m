@@ -6,7 +6,7 @@ function [radianceMap, imageStages] = reconstructionPipeline(I, AGCSettings)
 % Declare persistent variables for all derived parameters and maps
 persistent clippingExponent darkSignal ...
     correctionMap radiometricCorrectionMap ...
-    integratedRadiance cameraScore ...
+    agcToRadianceP ...
     meanCorrectionFielding meanCorrectionRGB Smax
 
 % Load non-linear clipping exponent and linearized set point
@@ -50,12 +50,12 @@ if isempty(radiometricCorrectionMap)
 end
 
 % Load camera score to effective integrated radiance mapping parameters
-if isempty(integratedRadiance)
+if isempty(agcToRadianceP)
     paramFileName = fullfile(...
         tbLocateProjectSilent('lightLoggerAnalysis'),...
         'derived',...
         'cameraScoreToIntegratedRadiance.mat');
-    load(paramFileName, 'integratedRadiance', 'cameraScore');
+    load(paramFileName,'agcToRadianceP');
 end
 
 
@@ -90,7 +90,7 @@ linearized(y >= saturationThreshold) = Inf;
 imageStages{2} = linearized;
 
 % Apply digital gain
-imageStages{2} = imageStages{2} * AGCSettings.Dgain;
+imageStages{2} = imageStages{2};% * AGCSettings.Dgain;
 
 % Stage 3: Impute values for ceiling and floor pixels
 imageStages{3} = imputePixelValues(imageStages{2});
@@ -109,18 +109,13 @@ imageStages{5} = imageStages{4} .* radiometricCorrectionMap;
 setPoint = 127;
 setPoint = (setPoint / AGCSettings.Dgain) - darkSignal;
 linearizedSetPoint = setPoint ./ (1 - (setPoint ./ Smax).^n).^(1./n);
-linearizedSetPoint = linearizedSetPoint * AGCSettings.Dgain * meanCorrectionFielding * meanCorrectionRGB;
+linearizedSetPoint = linearizedSetPoint * meanCorrectionFielding * meanCorrectionRGB;
 
 % Stage 6: Convert to absolute radiance units
 thisCameraScore = AGCSettings.exposure * AGCSettings.Again * AGCSettings.Dgain;
 
-% Interpolate the 1x3 effective radiance vector for this camera score
-logThisIntegratedRadiance = interp1(log10(cameraScore), log10(integratedRadiance), log10(thisCameraScore), 'linear');
-thisIntegratedRadiance = 10.^logThisIntegratedRadiance;
-
-% Calculate the Bayer-weighted mean effective radiance (1 Red, 2 Green, 1
-% Blue)
-meanIntegratedRadiance = (thisIntegratedRadiance(1) + 2*thisIntegratedRadiance(2) + thisIntegratedRadiance(3)) / 4;
+% Obtain the mean integrated radiance implied by this camera score
+meanIntegratedRadiance = 10.^polyval(agcToRadianceP,log10(thisCameraScore));
 
 % Scale the radiometrically balanced image to absolute radiance
 imageStages{6} = (imageStages{5} / linearizedSetPoint) * meanIntegratedRadiance;
