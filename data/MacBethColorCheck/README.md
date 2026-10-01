@@ -116,13 +116,13 @@ The global world-frame indices are zero-based:
 
 | Condition | Measurement | Global world-frame index | Saved file |
 | --- | ---: | ---: | --- |
-| Indoor | 1 | 32000 | `indoor/1/lightLogger/close_AGCandMS_01.mat` |
+| Indoor | 1 | 35000 | `indoor/1/lightLogger/close_AGCandMS_01.mat` |
 | Indoor | 2 | 7666 | `indoor/2/lightLogger/close_AGCandMS_01.mat` |
-| Outdoor | 1 | 10333 | `outdoor/1/lightLogger/close_AGCandMS_01.mat` |
-| Outdoor | 2 | 11111 | `outdoor/2/lightLogger/close_AGCandMS_01.mat` |
+| Outdoor | 1 | 10750 | `outdoor/1/lightLogger/close_AGCandMS_01.mat` |
+| Outdoor | 2 | 11055 | `outdoor/2/lightLogger/close_AGCandMS_01.mat` |
 | Outdoor | 3 | 11000 | `outdoor/3/lightLogger/close_AGCandMS_01.mat` |
 
-Outdoor measurement 2 (no filter) uses zero-based global world-frame index **11111**, and measurement 3 (0.8 NDF) uses **11000**. The selected frames have been generated in the files listed above.
+Outdoor measurement 2 (no filter) uses zero-based global world-frame index **11055**, and measurement 3 (0.8 NDF) uses **11000**. The files listed above are the output destinations. After changing a selection, rerun the Macbeth generation cell with overwrite enabled to update its MAT file and settings plot.
 
 `populateData.ipynb` reads the frame selections directly from this table. Each MAT file includes the raw `worldFrame`, `globalWorldFrameIndex`, `worldTimestampSeconds`, `AGCSettings` (analog gain, digital gain, and exposure), and the nearest `minispectTimestampSeconds` and `minispectValue`, along with a descriptive frame label and schema documentation.
 

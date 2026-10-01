@@ -317,24 +317,14 @@ WORLD_BAYER_CORRECTION_MATRICES: dict[tuple[int, int], np.ndarray] = {
 _integrated_radiance_calibration = scipy.io.loadmat(
     _DERIVED_CALIBRATION_DIR / "cameraScoreToIntegratedRadiance.mat"
 )
-WORLD_CAMERA_SCORE: np.ndarray = np.asarray(
-    _integrated_radiance_calibration["cameraScore"], dtype=np.float64
+WORLD_AGC_TO_RADIANCE_P: np.ndarray = np.asarray(
+    _integrated_radiance_calibration["agcToRadianceP"], dtype=np.float64
 ).reshape(-1)
-WORLD_INTEGRATED_RADIANCE: np.ndarray = np.asarray(
-    _integrated_radiance_calibration["integratedRadiance"], dtype=np.float64
-)
-if(WORLD_INTEGRATED_RADIANCE.shape != (WORLD_CAMERA_SCORE.size, 3)
-   or not np.all(np.isfinite(WORLD_CAMERA_SCORE))
-   or not np.all(np.isfinite(WORLD_INTEGRATED_RADIANCE))
-   or np.any(WORLD_CAMERA_SCORE <= 0)
-   or np.any(WORLD_INTEGRATED_RADIANCE <= 0)
-   or np.any(np.diff(WORLD_CAMERA_SCORE) <= 0)):
-    raise ValueError("Invalid camera-score to RGB integrated-radiance calibration")
+if(WORLD_AGC_TO_RADIANCE_P.shape != (2,)
+   or not np.all(np.isfinite(WORLD_AGC_TO_RADIANCE_P))):
+    raise ValueError("agcToRadianceP must contain a finite slope and intercept")
 
-# MATLAB interpolates each RGB channel in log10 space before taking the Bayer
-# weighted mean. Cache both logs and the fixed spatial scale once per import.
-WORLD_LOG_CAMERA_SCORE: np.ndarray = np.log10(WORLD_CAMERA_SCORE)
-WORLD_LOG_INTEGRATED_RADIANCE: np.ndarray = np.log10(WORLD_INTEGRATED_RADIANCE)
+# Cache the fixed spatial scale introduced by fielding and RGB corrections.
 WORLD_EFFECTIVE_SET_POINTS: dict[tuple[int, int], float] = {
     shape: float(WORLD_LINEARIZED_SET_POINT
                  * np.nanmean(fielding)
@@ -3025,6 +3015,8 @@ def world_metadata_from_chunks(raw_chunks_path: str,
 
 def plot_world_camera_settings(
     world_metadata: pd.DataFrame,
+    events: Iterable[dict] | None = None,
+    ax: plt.Axes | None = None,
 ) -> tuple[plt.Figure, tuple[plt.Axes, plt.Axes]]:
     """Plot world-camera gain and exposure settings over time and frame number.
 
@@ -3034,14 +3026,21 @@ def plot_world_camera_settings(
     also supported. Gain traces use shades of blue on the left axis, while
     exposure traces use shades of orange on the right axis so the two axis
     color families never overlap. The bottom X axis shows elapsed seconds and
-    the top X axis shows the corresponding zero-based DataFrame row numbers.
+    the top X axis spans zero to the last metadata row on a linear frame scale.
 
     Args:
         world_metadata: DataFrame returned by ``world_metadata_from_chunks``
             with timestamps converted to seconds (the default behavior).
+        events: Iterable of dictionaries with either ``timestamp`` (absolute
+            seconds, on the metadata clock) or ``frame_num`` (zero-based row).
+            If both are supplied, timestamp takes precedence. Optional ``label``
+            overrides the default one-based "event i" annotation. Markers use
+            green/purple/red colors and are excluded from the settings legend.
+        ax: Optional gain axis to draw on; otherwise create a larger figure.
+            The caller controls layout when supplying an axis.
 
     Returns:
-        The new figure and a ``(gain_axis, exposure_axis)`` tuple.
+        The figure and a ``(gain_axis, exposure_axis)`` tuple.
 
     Raises:
         TypeError: If ``world_metadata`` is not a pandas DataFrame.
@@ -3120,7 +3119,11 @@ def plot_world_camera_settings(
 
     # twinx shares the elapsed-time X axis while allowing exposure, whose
     # numeric range is much larger than gain, to retain its own Y scale.
-    figure, gain_axis = plt.subplots(figsize=(10, 5))
+    if ax is None:
+        figure, gain_axis = plt.subplots(figsize=(16, 7))
+    else:
+        gain_axis = ax
+        figure = ax.figure
     exposure_axis: plt.Axes = gain_axis.twinx()
 
     # Collect lines from both axes so they can appear in one combined legend.
@@ -3146,49 +3149,40 @@ def plot_world_camera_settings(
             label=display_names[column_name],
         ))
 
-    # Add zero-based frame numbers along the top without changing the elapsed-
-    # time coordinates used to draw the lines. Interpolation preserves the
-    # timestamp-to-row mapping if the recorded frame intervals vary slightly.
-    finite_timestamp_mask: np.ndarray = np.isfinite(elapsed_seconds)
-    finite_elapsed_seconds: np.ndarray = elapsed_seconds[finite_timestamp_mask]
-    finite_frame_numbers: np.ndarray = np.arange(
-        len(world_metadata), dtype=np.float64
-    )[finite_timestamp_mask]
-    if(np.any(np.diff(finite_elapsed_seconds) < 0)):
-        raise ValueError("world_metadata timestamps must be in ascending order")
+    # Use a simple, evenly spaced frame scale across the recording.
+    frame_axis = gain_axis.twiny()
+    frame_axis.set_xlim(0, max(len(world_metadata) - 1, 1))
+    frame_axis.xaxis.set_major_locator(plt.MaxNLocator(nbins=6, integer=True))
+    if len(world_metadata) == 1:
+        frame_axis.set_xticks([0])
+    frame_axis.set_xlabel("Frame number")
 
-    # np.interp requires unique ascending X values. In the unusual event of
-    # duplicate timestamps, associate that time with its first metadata row.
-    unique_elapsed_seconds, unique_time_indices = np.unique(
-        finite_elapsed_seconds, return_index=True
-    )
-    frame_numbers_at_unique_times: np.ndarray = finite_frame_numbers[
-        unique_time_indices
-    ]
-
-    if(unique_elapsed_seconds.size > 1):
-        def elapsed_time_to_frame_number(elapsed_time: np.ndarray) -> np.ndarray:
-            return np.interp(
-                elapsed_time, unique_elapsed_seconds, frame_numbers_at_unique_times
-            )
-
-        def frame_number_to_elapsed_time(frame_number: np.ndarray) -> np.ndarray:
-            return np.interp(
-                frame_number, finite_frame_numbers, finite_elapsed_seconds
-            )
-
-        frame_axis = gain_axis.secondary_xaxis(
-            "top",
-            functions=(elapsed_time_to_frame_number, frame_number_to_elapsed_time),
+    # Resolve events against the same metadata clock/physical-row coordinates.
+    event_colors = ("#238b45", "#7a0177", "#cb181d", "#525252")
+    for event_number, event in enumerate(events if events is not None else (), 1):
+        if not isinstance(event, dict):
+            raise TypeError(f"Event {event_number} must be a dict")
+        if "timestamp" in event:
+            event_x = float(event["timestamp"]) - finite_timestamps[0]
+        elif "frame_num" in event:
+            frame_num = float(event["frame_num"])
+            if not np.isfinite(frame_num) or not frame_num.is_integer() or not 0 <= frame_num < len(timestamps):
+                raise ValueError(f"Event {event_number} frame_num must be an in-range integer")
+            event_x = elapsed_seconds[int(frame_num)]
+        else:
+            raise ValueError(f"Event {event_number} requires timestamp or frame_num")
+        if not np.isfinite(event_x):
+            raise ValueError(f"Event {event_number} must have a finite timestamp")
+        color = event_colors[(event_number - 1) % len(event_colors)]
+        gain_axis.axvline(event_x, color=color, linestyle="--", linewidth=1,
+                         label="_nolegend_")
+        gain_axis.annotate(
+            str(event.get("label", f"event {event_number}")),
+            xy=(event_x, 0.98 - 0.08 * ((event_number - 1) % 3)),
+            xycoords=gain_axis.get_xaxis_transform(), xytext=(3, 0),
+            textcoords="offset points", rotation=90, fontsize=8,
+            color=color, va="top", ha="left",
         )
-        frame_axis.set_xlabel("Frame number")
-    else:
-        # A one-frame recording has no interval from which to construct an
-        # invertible secondary scale, so label its sole time position directly.
-        frame_axis = gain_axis.secondary_xaxis("top")
-        frame_axis.set_xticks([float(unique_elapsed_seconds[0])])
-        frame_axis.set_xticklabels([str(int(finite_frame_numbers[0]))])
-        frame_axis.set_xlabel("Frame number")
 
     # Match each Y axis's labels, ticks, and visible spine to its line family.
     # This reinforces which scale belongs to which group of traces.
@@ -3207,8 +3201,10 @@ def plot_world_camera_settings(
 
     # Matplotlib otherwise creates one legend per axis, so explicitly pass all
     # lines to the left axis to produce a single complete legend.
-    gain_axis.legend(lines, [line.get_label() for line in lines], loc="best")
-    figure.tight_layout()
+    gain_axis.legend(lines, [line.get_label() for line in lines],
+                     loc="upper left", bbox_to_anchor=(1.14, 1.0), borderaxespad=0)
+    if ax is None:
+        figure.tight_layout()
 
     return figure, (gain_axis, exposure_axis)
 
@@ -3269,25 +3265,19 @@ def world_counts_to_radiance(image_or_video: np.ndarray,
     # flat-field and RGB correction stages.
     effective_set_point: float = WORLD_EFFECTIVE_SET_POINTS[image_or_video.shape[-2:]]
 
-    # Reproduce MATLAB's exposure * Again * Dgain camera score. Interpolate
-    # each channel in log space, exponentiate, then use Bayer weights 1:2:1.
+    # Match MATLAB: 10.^polyval(agcToRadianceP, log10(cameraScore)).
+    # The fitted coefficients directly predict mean integrated radiance.
     this_camera_score: np.ndarray = np.asarray(np.asarray(exposure) * np.asarray(analog_gain) * np.asarray(digital_gain), dtype=np.float64)
-    log_camera_score = np.log10(this_camera_score)
-    channel_radiances = [
-        np.power(10.0, np.interp(log_camera_score, WORLD_LOG_CAMERA_SCORE,
-                                 WORLD_LOG_INTEGRATED_RADIANCE[:, channel],
-                                 left=np.nan, right=np.nan))
-        for channel in range(3)
-    ]
-    mean_integrated_radiance = (channel_radiances[0] + 2 * channel_radiances[1]
-                                + channel_radiances[2]) * 0.25
+    mean_integrated_radiance = np.power(
+        10.0, np.polyval(WORLD_AGC_TO_RADIANCE_P, np.log10(this_camera_score))
+    )
 
     # Give each buffered frame its own broadcastable radiance scale. Scalar
     # settings naturally apply the same scale to every frame.
     if(image_or_video.ndim == 3 and np.ndim(mean_integrated_radiance) > 0):
         mean_integrated_radiance = mean_integrated_radiance.reshape(-1, 1, 1)
 
-    # Scale corrected counts by the Bayer-weighted integrated radiance.
+    # Scale corrected counts by the fitted mean integrated radiance.
     image_or_video *= mean_integrated_radiance / effective_set_point
 
     if(visualize_results is True):
