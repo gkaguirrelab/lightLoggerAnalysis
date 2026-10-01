@@ -46,39 +46,39 @@ nColumns = 6;
 % Using the "extractCheckerPixels" in the GUI mode, I defined the corner
 % locations for the "close" camera image for each validation set.
 cornerSets{3} = [
-  198.7724  194.7857
-  418.8389  191.5963
-  430.5332  339.3704
-  186.0150  344.6860
-];
+    198.7724  194.7857
+    418.8389  191.5963
+    430.5332  339.3704
+    186.0150  344.6860
+    ];
 
 cornerSets{1} = [
-  200.8987  153.3239
-  406.0814  154.3870
-  405.0183  284.0880
-  197.7093  287.2774
-];
+    200.8987  153.3239
+    406.0814  154.3870
+    405.0183  284.0880
+    197.7093  287.2774
+    ];
 
 cornerSets{4} = [
-  233.8555  234.1213
-  430.5332  211.7957
-  447.5432  342.5598
-  242.3605  370.2010
-];
+    233.8555  234.1213
+    430.5332  211.7957
+    447.5432  342.5598
+    242.3605  370.2010
+    ];
 
 cornerSets{2} = [
-  150.9319  166.0814
-  457.1113  176.7126
-  484.7525  386.1478
-   99.9020  398.9053
-];
+    150.9319  166.0814
+    457.1113  176.7126
+    484.7525  386.1478
+    99.9020  398.9053
+    ];
 
 cornerSets{5} = [
-  134.9850  128.8721
-  468.8056   83.1578
-  485.8156  287.2774
-  184.9518  351.0648
-];
+    134.9850  128.8721
+    468.8056   83.1578
+    485.8156  287.2774
+    184.9518  351.0648
+    ];
 
 % Plot the measurements in order of decreasing irradiance
 plotOrder = [3,1,4,2,5];
@@ -274,19 +274,9 @@ for vv = 1:length(valSetOptions)
         end
     end
 
-    % Compare the predicted, mean integrated radiance value in the radiance
-    % map given the spectral radiance estimated from the minispect
-    %{
+    % Obtain the spectral radiance estimated from the minispect
     [minispectSPD,minispectS,fVal,fitErrors] = estimateRadianceSpectrumFromMinispect(minispectValue.AS);
     minispectSPD = SplineSpd(SToWls(minispectS), minispectSPD, SToWls(commonS));
-    minispectPredictedMeanRGBRadiance = minispectSPD' * sensorSensitivities;
-    for cc = 1:3; imx219ObservedMeanRGBRadiance(cc) = mean(mean(radianceMap(:,:,cc))); end
-    figure
-    plot(minispectPredictedMeanRGBRadiance,imx219ObservedMeanRGBRadiance,'*');
-    xlabel('minispect radiance'); ylabel('imx219 radiance');
-    refline(1,0);
-    axis square
-    %}
 
 
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -294,15 +284,8 @@ for vv = 1:length(valSetOptions)
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
     figure('Name', sprintf('Validation: %s', vv), ...
-        'Position', [50+(vv-1)*100, 50+(vv-1)*100, 1200, 400]);
-    tiledlayout(1,3,"TileSpacing","tight");
-
-    % Show the illuminant
-    nexttile
-    plot(SToWls(commonS),mean(predictedMeasIlluminants),'-k','LineWidth',2);
-    ylabel('radiance [W/m2/sr/nm]');
-    xlabel('wavelength [nm]');
-    title('Mean illuminant');
+        'Position', [50+(vv-1)*100, 50+(vv-1)*100, 1600, 400]);
+    tiledlayout(1,4,"TileSpacing","compact","Padding","tight");
 
     % Show the camera image
     nexttile
@@ -313,70 +296,90 @@ for vv = 1:length(valSetOptions)
     box off
     axis off
     axis equal
-    title('log10 radiance');
+ 
+    % Show the illuminant
+    nexttile
+    plot(SToWls(commonS),mean(predictedMeasIlluminants),'-k','LineWidth',2);
+    ylabel('radiance [W/m2/sr/nm]');
+    xlabel('wavelength [nm]');
+    title('Illuminant');
+    axis square
 
-    % Show the integrated radiance
+    % Show the mean integrated radiance with true-color patches
     nexttile; hold on;
 
-    % Flatten the 4x6 matrices into 24x1 vectors for each channel
-    predR = reshape(predictedRGBRadiance(:, :, 1), [], 1);
-    predG = reshape(predictedRGBRadiance(:, :, 2), [], 1);
-    predB = reshape(predictedRGBRadiance(:, :, 3), [], 1);
+    predMean = mean(predictedRGBRadiance, 3);
+    measMean = mean(measuredRGBRadiance, 3);
 
-    measR = reshape(measuredRGBRadiance(:, :, 1), [], 1);
-    measG = reshape(measuredRGBRadiance(:, :, 2), [], 1);
-    measB = reshape(measuredRGBRadiance(:, :, 3), [], 1);
+    % Define standard sRGB reference colors for the 24 Macbeth patches (4x6 layout)
+    macbethRGB = zeros(nRows, nColumns, 3);
+    macbethRGB(1,:,:) = [115,82,68; 194,150,130; 98,122,157; 87,108,67; 133,128,177; 103,189,170]; % Row 1
+    macbethRGB(2,:,:) = [214,126,44; 80,91,166; 193,90,99; 94,60,108; 157,188,64; 224,163,46];    % Row 2
+    macbethRGB(3,:,:) = [56,61,150; 70,148,73; 175,54,60; 231,199,31; 187,86,149; 8,133,161];     % Row 3
+    macbethRGB(4,:,:) = [243,243,242; 200,200,200; 160,160,160; 122,122,121; 85,85,85; 52,52,52]; % Row 4 (Neutrals)
+    macbethRGB = macbethRGB / 255; % Normalize to [0, 1] for MATLAB plots
 
-    % Create an alpha map (0.1 for estimated, 0.5 for measured) and flatten it
-    alphaMap = 0.75 * ones(nRows, nColumns);
-    for i = 1:length(measCols)
-        alphaMap(measRows(i), measCols(i)) = 0.75;
+    for r = 1:nRows
+        for c = 1:nColumns
+            patchColor = squeeze(macbethRGB(r, c, :))';
+            scatter(predMean(r, c), measMean(r, c), 85, patchColor, 'filled', ...
+                'MarkerEdgeColor', 'k', 'LineWidth', 0.5);
+        end
     end
-    alphaFlat = reshape(alphaMap, [], 1);
 
-    % Plot each channel with a distinct color and literal transparency values
-    sR = scatter(predR, measR, 75, 'r', 'filled', 'MarkerEdgeColor', 'none', 'DisplayName', 'Red Channel');
-    sR.AlphaData = alphaFlat;
-    sR.MarkerFaceAlpha = 'flat';
-    sR.AlphaDataMapping = 'none';
+    % Determine axis limits
+    maxValMean = max([predMean(:); measMean(:)]) * 1.05;
+    minValMean = min([predMean(:); measMean(:); 0]);
+    plot([minValMean, maxValMean], [minValMean, maxValMean], 'k--', 'LineWidth', 1.5, 'HandleVisibility', 'off');
 
-    sG = scatter(predG, measG, 75, 'g', 'filled', 'MarkerEdgeColor', 'none', 'DisplayName', 'Green Channel');
-    sG.AlphaData = alphaFlat;
-    sG.MarkerFaceAlpha = 'flat';
-    sG.AlphaDataMapping = 'none';
-
-    sB = scatter(predB, measB, 75, 'b', 'filled', 'MarkerEdgeColor', 'none', 'DisplayName', 'Blue Channel');
-    sB.AlphaData = alphaFlat;
-    sB.MarkerFaceAlpha = 'flat';
-    sB.AlphaDataMapping = 'none';
-
-    % Determine the axis limits based on the data to create a proportional plot
-    maxVal = max([predR; predG; predB; measR; measG; measB]) * 1.05;
-    minVal = min([predR; predG; predB; measR; measG; measB; 0]);
-
-    % Plot the 1:1 identity line
-    plot([minVal, maxVal], [minVal, maxVal], 'k--', 'LineWidth', 1.5, 'DisplayName', '1:1 Agreement');
-
-    % Calculate overall R-squared for all channels combined
-    allPred = [predR; predG; predB];
-    allMeas = [measR; measG; measB];
-
-    % Remove any potential NaN values (e.g., if a patch mask entirely failed) before fitting
-    validIdx = ~isnan(allPred) & ~isnan(allMeas);
-    mdl = fitlm(allPred(validIdx), allMeas(validIdx));
-    rSq = mdl.Rsquared.Ordinary;
-
-    % Formatting
-    axis equal;
-    xlim([minVal, maxVal]);
-    ylim([minVal, maxVal]);
+    axis square;
+    xlim([minValMean, maxValMean]);
+    ylim([minValMean, maxValMean]);
     xlabel('via PR670 [W/m2/sr]');
     ylabel('via IMX219 [W/m2/sr]');
-    title('Integrated radiance');
+    title('Integrated Radiance');
     a = gca();
     a.XTick = a.YTick;
     grid on;
     box on;
     hold off;
+
+    % Show the R:G:B ratio agreement via channel fractions
+    nexttile; hold on;
+
+    % Calculate total radiance per patch to extract fractional channel ratios
+    predSum = sum(predictedRGBRadiance, 3);
+    measSum = sum(measuredRGBRadiance, 3);
+
+    predFracR = reshape(predictedRGBRadiance(:,:,1) ./ predSum, [], 1);
+    predFracG = reshape(predictedRGBRadiance(:,:,2) ./ predSum, [], 1);
+    predFracB = reshape(predictedRGBRadiance(:,:,3) ./ predSum, [], 1);
+
+    measFracR = reshape(measuredRGBRadiance(:,:,1) ./ measSum, [], 1);
+    measFracG = reshape(measuredRGBRadiance(:,:,2) ./ measSum, [], 1);
+    measFracB = reshape(measuredRGBRadiance(:,:,3) ./ measSum, [], 1);
+
+    % Plot each fractional channel color contribution
+    scatter(predFracR, measFracR, 85, 'r', 'filled', 'MarkerEdgeColor', 'none', 'MarkerFaceAlpha', 0.5);
+    scatter(predFracG, measFracG, 85, 'g', 'filled', 'MarkerEdgeColor', 'none', 'MarkerFaceAlpha', 0.5);
+    scatter(predFracB, measFracB, 85, 'b', 'filled', 'MarkerEdgeColor', 'none', 'MarkerFaceAlpha', 0.5);
+
+    % 1:1 identity line
+    plot([0, 0.75], [0, 0.75], 'k--', 'LineWidth', 1.5);
+
+    a = gca();
+    a.XTick = [0 0.25 0.5 0.75];
+    a.YTick = [0 0.25 0.5 0.75];
+
+    axis square;
+    xlim([0, 0.75]);
+    ylim([0, 0.75]);
+    xlabel('Predicted Channel Fraction');
+    ylabel('Measured Channel Fraction');
+    title('R:G:B Ratio');
+    grid on;
+    box on;
+    hold off;
+
 
 end % loop over valSetOptions
