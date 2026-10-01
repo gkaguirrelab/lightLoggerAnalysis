@@ -1,7 +1,16 @@
-function [radianceMap, imageStages] = reconstructionPipeline(I, AGCSettings)
-% Performs the complete forward reconstruction pipeline in a single
-% integrated function, using persistent variables to load all necessary
-% derived parameters upfront.
+function [integratedRadianceMap, imageStages] = reconstructionPipeline(I, AGCSettings)
+% Convert raw camera sensor values to integrated radiance
+%
+% The IMX219 camera chip records 8 bit RAW images (obtained by a strict
+% bit-shift of the raw signal). The sensitivity of the IMX219 sensor is
+% adjusted using a custom automatic gain control (AGC) routine, which
+% modulates exposure time, analog gain, and digital gain in an attempt to
+% maintain the mean of the chip sensor values at 127. This routine takes as
+% input a raw camera image (I) and the AGC settings. The raw image has not
+% had digital gain applied.
+%
+% The output of the routine is the map expressed as integrated radiance
+% (W/m2/sr) for each pixel.
 
 % Declare persistent variables for all derived parameters and maps
 persistent clippingExponent darkSignal ...
@@ -59,8 +68,6 @@ if isempty(agcToRadianceP)
 end
 
 
-% Set the saturation threshold based upon the clippingExponent value
-
 % Define the maximum allowable noise amplification (derivative) A value of
 % 3.0 to 5.0 is typically a safe boundary for Bayesian conditioning
 maxAllowedDerivative = 4.0; 
@@ -90,7 +97,7 @@ linearized(y >= saturationThreshold) = Inf;
 imageStages{2} = linearized;
 
 % Apply digital gain
-imageStages{2} = imageStages{2};% * AGCSettings.Dgain;
+imageStages{2} = imageStages{2} * AGCSettings.Dgain;
 
 % Stage 3: Impute values for ceiling and floor pixels
 imageStages{3} = imputePixelValues(imageStages{2});
@@ -121,6 +128,6 @@ meanIntegratedRadiance = 10.^polyval(agcToRadianceP,log10(thisCameraScore));
 imageStages{6} = (imageStages{5} / linearizedSetPoint) * meanIntegratedRadiance;
 
 % Return the final stage as the radiance map
-radianceMap = imageStages{6};
+integratedRadianceMap = imageStages{6};
 
 end

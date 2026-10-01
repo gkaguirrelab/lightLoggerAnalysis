@@ -97,7 +97,8 @@ end
 
 % Get the linear fit to the mean integrated radiance as a function of
 % camera score
-agcToRadianceP = polyfit(log10(cameraScore), mean(log10(integratedRadiance),2), 1); 
+bayerWeightedRadiance = (integratedRadiance(:,1) + 2*integratedRadiance(:,2) + integratedRadiance(:,3)) / 4;
+agcToRadianceP = polyfit(log10(cameraScore), log10(bayerWeightedRadiance), 1);
 xFit = 10.^linspace(2,6,100);
 yFit = 10.^polyval(agcToRadianceP,log10(xFit));
 
