@@ -32,8 +32,8 @@ clear all
 close all
 
 % Indoor or outdoor data set?
-valSetOptions = {'indoor','indoor','outdoor','outdoor','outdoor'};
-valNumOptions = {'1','2','1','2','3'};
+valSetOptions = {'indoor','indoor','indoor','outdoor','outdoor','outdoor'};
+valNumOptions = {'1','2','4','1','2','3'};
 
 % Define the common wavelength domain (380 to 730 nm with 1 nm spacing) for
 % this analysis
@@ -45,25 +45,11 @@ nColumns = 6;
 
 % Using the "extractCheckerPixels" in the GUI mode, I defined the corner
 % locations for the "close" camera image for each validation set.
-cornerSets{3} = [
-    198.7724  194.7857
-    418.8389  191.5963
-    430.5332  339.3704
-    186.0150  344.6860
-    ];
-
 cornerSets{1} = [
     200.8987  153.3239
     406.0814  154.3870
     405.0183  284.0880
     197.7093  287.2774
-    ];
-
-cornerSets{4} = [
-    233.8555  234.1213
-    430.5332  211.7957
-    447.5432  342.5598
-    242.3605  370.2010
     ];
 
 cornerSets{2} = [
@@ -73,7 +59,28 @@ cornerSets{2} = [
     99.9020  398.9053
     ];
 
+cornerSets{3} = [
+    217.9086  160.7658
+    449.6694  179.9020
+    440.1013  335.1179
+    197.7093  315.9817
+    ];
+
+cornerSets{4} = [
+    198.7724  194.7857
+    418.8389  191.5963
+    430.5332  339.3704
+    186.0150  344.6860
+    ];
+
 cornerSets{5} = [
+    233.8555  234.1213
+    430.5332  211.7957
+    447.5432  342.5598
+    242.3605  370.2010
+    ];
+
+cornerSets{6} = [
     134.9850  128.8721
     468.8056   83.1578
     485.8156  287.2774
@@ -81,7 +88,7 @@ cornerSets{5} = [
     ];
 
 % Plot the measurements in order of decreasing irradiance
-plotOrder = [3,1,4,2,5];
+plotOrder = [4,1,5,2,6,3];
 
 %% Loop over the validation sets
 
@@ -247,7 +254,7 @@ for vv = 1:length(valSetOptions)
 
     % Demosaic the image so that we have an RGB triplet of radiance values for
     % each pixel
-    radianceMap = demosaicRadianceMapRCD(radianceMap);
+    radianceMap = demosaicRadianceMap(radianceMap);
 
     % Obtain the pixel indices within the world image for each check. We
     % scale the image by the Dgain so that it is visible if we wish to
@@ -296,7 +303,7 @@ for vv = 1:length(valSetOptions)
     box off
     axis off
     axis equal
- 
+
     % Show the illuminant
     nexttile
     plot(SToWls(commonS),mean(predictedMeasIlluminants),'-k','LineWidth',2);
