@@ -197,7 +197,7 @@ for valIdx = 1:length(valSetOptions)
     radianceMap = reconstructionPipeline(worldFrame, AGCSettings);
 
     % Demosaic the image
-    radianceMap = demosaicRadianceMapRCD(radianceMap);
+    radianceMap = demosaicRadianceMap(radianceMap);
 
     % Obtain the pixel indices within the world image for each check.
     rawPixelIndices = extractCheckerPixels(worldFrame*AGCSettings.Dgain,arducamB0392cameraIntrinsics.results.Intrinsics,cornerSets{valIdx});

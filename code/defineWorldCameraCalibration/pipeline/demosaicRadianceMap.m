@@ -1,4 +1,4 @@
-function rgbMap = demosaicRadianceMapRCD(radianceMap, bayerPattern)
+function rgbMap = demosaicRadianceMap(radianceMap, bayerPattern)
 % demosaicRadianceMapRCD Demosaics a Bayer-pattern radiance map into a 3D RGB image.
 %   rgbMap = demosaicRadianceMapRCD(radianceMap, bayerPattern) takes a 2D radiance map 
 %   with a specified Bayer pattern and returns an H x W x 3 double matrix containing 

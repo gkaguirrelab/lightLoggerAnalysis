@@ -2,9 +2,9 @@
 clear
 
 % Pick a measurement
-%measurementName = 'indoor_AGCandMS_04.mat';
+measurementName = 'indoor_AGCandMS_01.mat';
 %measurementName = 'planetarium_AGCandMS_01.mat';
-measurementName = 'macbeth_AGCandMS_01.mat';
+%measurementName = 'macbeth_AGCandMS_01.mat';
 
 % Load the data
 fileName = fullfile(...
@@ -21,7 +21,15 @@ load(fileName,'worldFrame','AGCSettings','minispectValue')
 plotReconstructionStages(imageStages)
 
 % Obtain the demosaiced image
-radianceMapDemosaiced = demosaicRadianceMapRCD(imageStages{end});
+radianceMapDemosaiced = demosaicRadianceMap(imageStages{end});
+
+% Generate the sensor -> cone mapping for this observer
+fprintf('Generating the sensor -> cone mapping...');
+coneMapVar = generateSensorToConeMapping('age',22);
+fprintf('done.\n')
+
+% Obtain the cone isomerization map
+isomerizationMap = computeConeIsomerizationMap(radianceMapDemosaiced, coneMapVar);
 
 % Obtain the estimated spectral radiance
 [spectralRadiance,miniSpectS] = estimateRadianceSpectrumFromMinispect(minispectValue.AS);
