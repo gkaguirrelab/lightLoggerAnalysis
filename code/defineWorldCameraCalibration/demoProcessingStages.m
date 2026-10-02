@@ -2,8 +2,8 @@
 clear
 
 % Pick a measurement
-measurementName = 'indoor_AGCandMS_01.mat';
-%measurementName = 'planetarium_AGCandMS_01.mat';
+%measurementName = 'indoor_AGCandMS_01.mat';
+measurementName = 'planetarium_AGCandMS_01.mat';
 %measurementName = 'macbeth_AGCandMS_01.mat';
 
 % Load the data
@@ -31,11 +31,10 @@ fprintf('done.\n')
 % Obtain the cone isomerization map
 isomerizationMap = computeConeIsomerizationMap(radianceMapDemosaiced, coneMapVar);
 
-% Obtain the estimated spectral radiance
-[spectralRadiance,miniSpectS] = estimateRadianceSpectrumFromMinispect(minispectValue.AS);
-
 % Show the final, demosaiced image
 figure
+tiledlayout(1,2,'Padding','tight','TileSpacing','compact')
+nexttile
 logImage = log10(radianceMapDemosaiced);
 logImage = logImage-min(logImage(:));
 logImage = logImage/max(logImage(:));
@@ -44,3 +43,13 @@ box off
 axis off
 axis equal
 title('log10 radiance');
+
+nexttile
+logImage = log10(isomerizationMap);
+logImage = logImage-min(logImage(:));
+logImage = logImage/max(logImage(:));
+imagesc(logImage)
+box off
+axis off
+axis equal
+title('log10 isomerization rate');

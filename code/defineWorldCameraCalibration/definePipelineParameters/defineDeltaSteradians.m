@@ -107,6 +107,12 @@ imagesc(deltaSteradians);
 colorbar
 title('Steradians per pixel')
 
+% Report the coordinates of the optical center
+opticalCenter = fisheyeIntrinsics.DistortionCenter;
+xCenter = opticalCenter(1); % Column
+yCenter = opticalCenter(2); % Row
+fprintf('Optical Center (Eccentricity = 0) is at pixel [X: %.2f, Y: %.2f]\n', xCenter, yCenter);
+
 % Show the eccentricity map
 figure
 imagesc(eccentricityMap);
@@ -131,6 +137,8 @@ readme = sprintf([ ...
 save(saveFileName,'readme','deltaSteradians','eccentricityMap','unitDirections');
 
 fprintf('Summed pixel solid angle: %2.2f sr\n', summedPixelSteradians);
+
+
 
 % LOCAL FUNCTIONS
 
