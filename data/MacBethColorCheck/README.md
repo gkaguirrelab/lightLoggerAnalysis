@@ -48,6 +48,10 @@ For indoor measurement 2, the PR-670 reported a luminance of **9.583 cd/m²**.
 
 *Indoor measurement 2 luminance: 9.583 cd/m², as shown on the PR-670 display.*
 
+#### Measurement 3
+
+Indoor measurement 3 contains the five selected PR-670 patch measurements in `indoor/3/PR670/`, named `indoor3_R<row>C<column>.mat`. Its selected zero-based global world-frame index is **5752**.
+
 ### Outdoor
 
 The outdoor measurement was performed on a table outside Goddard Hall. An extension cord connected to the wall outlet outside the Goddard breezeway supplied power to the PR-670 and laptop. The Macbeth ColorChecker leaned against a chair placed upside down on the table, with a backpack behind the chair to keep wind from disturbing the setup. The PR-670 was mounted on a tripod in front of the chart and aligned with the selected patches.
@@ -118,6 +122,7 @@ The global world-frame indices are zero-based:
 | --- | ---: | ---: | --- |
 | Indoor | 1 | 35000 | `indoor/1/lightLogger/close_AGCandMS_01.mat` |
 | Indoor | 2 | 7666 | `indoor/2/lightLogger/close_AGCandMS_01.mat` |
+| Indoor | 3 | 5752 | `indoor/3/lightLogger/close_AGCandMS_01.mat` |
 | Outdoor | 1 | 10750 | `outdoor/1/lightLogger/close_AGCandMS_01.mat` |
 | Outdoor | 2 | 11055 | `outdoor/2/lightLogger/close_AGCandMS_01.mat` |
 | Outdoor | 3 | 11000 | `outdoor/3/lightLogger/close_AGCandMS_01.mat` |
