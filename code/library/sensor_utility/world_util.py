@@ -284,7 +284,6 @@ BEGIN PROCESSING PIPELINE CONSTANTS
 """
 
 WORLD_FULL_WELL_CLIPPING_EXPONENT: float = float(scipy.io.loadmat(_DERIVED_CALIBRATION_DIR / "nonLinearClippingExponent.mat")["clippingExponent"].item())
-WORLD_LINEARIZED_SET_POINT: float = float(scipy.io.loadmat(_DERIVED_CALIBRATION_DIR / "nonLinearClippingExponent.mat")["linearizedSetPoint"].item())
 
 WORLD_DARK_SIGNAL: float = float(scipy.io.loadmat(_DERIVED_CALIBRATION_DIR / "darkSignal.mat")["darkSignal"].item())
 
@@ -325,9 +324,8 @@ if(WORLD_AGC_TO_RADIANCE_P.shape != (2,)
     raise ValueError("agcToRadianceP must contain a finite slope and intercept")
 
 # Cache the fixed spatial scale introduced by fielding and RGB corrections.
-WORLD_EFFECTIVE_SET_POINTS: dict[tuple[int, int], float] = {
-    shape: float(WORLD_LINEARIZED_SET_POINT
-                 * np.nanmean(fielding)
+WORLD_MEAN_SPATIAL_CORRECTIONS: dict[tuple[int, int], float] = {
+    shape: float(np.nanmean(fielding)
                  * np.nanmean(WORLD_RADIOMETRIC_CORRECTION_MAP))
     for shape, fielding in WORLD_FIELDING_FUNCTIONS.items()
 }
@@ -3261,9 +3259,16 @@ def world_counts_to_radiance(image_or_video: np.ndarray,
     analog_gain: float | np.ndarray = agc_settings["Again"] if "Again" in agc_settings else agc_settings["cameraAgain"]
     digital_gain: float | np.ndarray = agc_settings["Dgain"] if "Dgain" in agc_settings else agc_settings["AGCDgain"]
 
-    # The calibration set point must include the mean scale introduced by the
-    # flat-field and RGB correction stages.
-    effective_set_point: float = WORLD_EFFECTIVE_SET_POINTS[image_or_video.shape[-2:]]
+    # Match reconstructionPipeline.m: undo digital gain at the AGC target,
+    # subtract dark signal, then invert the sensor response for each frame.
+    set_point = 127.0 / np.asarray(digital_gain, dtype=np.float64) - WORLD_DARK_SIGNAL
+    smax = 255.0 - WORLD_DARK_SIGNAL
+    exponent = WORLD_FULL_WELL_CLIPPING_EXPONENT
+    linearized_set_point = set_point / (1 - (set_point / smax) ** exponent) ** (1 / exponent)
+    effective_set_point = (
+        linearized_set_point
+        * WORLD_MEAN_SPATIAL_CORRECTIONS[image_or_video.shape[-2:]]
+    )
 
     # Match MATLAB: 10.^polyval(agcToRadianceP, log10(cameraScore)).
     # The fitted coefficients directly predict mean integrated radiance.
@@ -3274,11 +3279,12 @@ def world_counts_to_radiance(image_or_video: np.ndarray,
 
     # Give each buffered frame its own broadcastable radiance scale. Scalar
     # settings naturally apply the same scale to every frame.
-    if(image_or_video.ndim == 3 and np.ndim(mean_integrated_radiance) > 0):
-        mean_integrated_radiance = mean_integrated_radiance.reshape(-1, 1, 1)
+    radiance_scale = mean_integrated_radiance / effective_set_point
+    if(image_or_video.ndim == 3 and np.ndim(radiance_scale) > 0):
+        radiance_scale = radiance_scale.reshape(-1, 1, 1)
 
     # Scale corrected counts by the fitted mean integrated radiance.
-    image_or_video *= mean_integrated_radiance / effective_set_point
+    image_or_video *= radiance_scale
 
     if(visualize_results is True):
         fig, axes = plt.subplots(1, 2, figsize=(12, 4))
