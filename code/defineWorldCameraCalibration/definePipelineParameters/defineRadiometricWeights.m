@@ -32,40 +32,40 @@ nColumns = 6;
 
 % Using the "extractCheckerPixels" in the GUI mode, I defined the corner
 % locations for the "close" camera image for each validation set.
-cornerSets{3} = [
-  198.7724  194.7857
-  418.8389  191.5963
-  430.5332  339.3704
-  186.0150  344.6860
-];
-
 cornerSets{1} = [
-  200.8987  153.3239
-  406.0814  154.3870
-  405.0183  284.0880
-  197.7093  287.2774
-];
-
-cornerSets{4} = [
-  233.8555  234.1213
-  430.5332  211.7957
-  447.5432  342.5598
-  242.3605  370.2010
-];
+    200.8987  153.3239
+    406.0814  154.3870
+    405.0183  284.0880
+    197.7093  287.2774
+    ];
 
 cornerSets{2} = [
-  150.9319  166.0814
-  457.1113  176.7126
-  484.7525  386.1478
-   99.9020  398.9053
-];
+    150.9319  166.0814
+    457.1113  176.7126
+    484.7525  386.1478
+    99.9020  398.9053
+    ];
+
+cornerSets{3} = [
+    198.7724  194.7857
+    418.8389  191.5963
+    430.5332  339.3704
+    186.0150  344.6860
+    ];
+
+cornerSets{4} = [
+    233.8555  234.1213
+    430.5332  211.7957
+    447.5432  342.5598
+    242.3605  370.2010
+    ];
 
 cornerSets{5} = [
-  134.9850  128.8721
-  468.8056   83.1578
-  485.8156  287.2774
-  184.9518  351.0648
-];
+    134.9850  128.8721
+    468.8056   83.1578
+    485.8156  287.2774
+    184.9518  351.0648
+    ];
 
 % Initialize an array to hold the adjustments for each validation set
 allAdjustments = zeros(length(valSetOptions), 3);
@@ -200,7 +200,7 @@ for valIdx = 1:length(valSetOptions)
     radianceMap = demosaicRadianceMap(radianceMap);
 
     % Obtain the pixel indices within the world image for each check.
-    rawPixelIndices = extractCheckerPixels(worldFrame*AGCSettings.Dgain,arducamB0392cameraIntrinsics.results.Intrinsics,cornerSets{valIdx});
+    rawPixelIndices = extractCheckerPixels(worldFrame*AGCSettings.Dgain,arducamB0392cameraIntrinsics.results.Intrinsics,cornerSets{valIdx},true);
 
     % Obtain the measured RGB radiance values
     for r = 1:nRows

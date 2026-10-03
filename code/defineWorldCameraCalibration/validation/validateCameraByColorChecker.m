@@ -31,6 +31,13 @@
 clear all
 close all
 
+% Define the save directory on the Desktop and ensure it exists
+desktopPath = fullfile(getenv('HOME'), 'Desktop');
+saveDir = fullfile(desktopPath, 'Macbeth_Validation_Figures');
+if ~exist(saveDir, 'dir')
+    mkdir(saveDir);
+end
+
 % Indoor or outdoor data set?
 valSetOptions = {'indoor','indoor','indoor','outdoor','outdoor','outdoor'};
 valNumOptions = {'1','2','4','1','2','3'};
@@ -337,6 +344,7 @@ for vv = 1:length(plotOrder)
 
     % Store the slope and intercept of a robust fit
     predMeasFit(vv,:) = robustfit(predMean(:),measMean(:));
+    AgainStore(vv) = AGCSettings.Again;
     DgainStore(vv) = AGCSettings.Dgain;
 
     % Determine axis limits
@@ -393,5 +401,18 @@ for vv = 1:length(plotOrder)
     box on;
     hold off;
 
+    % Draw the figure to ensure it is fully rendered before saving
+    drawnow;
+
+    % Construct a descriptive filename based on the environment and set number
+    envStr = valSetOptions{valIdx};
+    numStr = valNumOptions{valIdx};
+    fileName = sprintf('Validation_%s_set%s_NDF_Dgain_%1.2f.pdf', envStr, numStr, AGCSettings.Dgain);
+    fullSavePath = fullfile(saveDir, fileName);
+
+    % Export the figure as a vector PDF
+    exportgraphics(gcf, fullSavePath, 'ContentType', 'vector');
+
+    fprintf('Saved figure to: %s\n', fullSavePath);
 
 end % loop over valSetOptions

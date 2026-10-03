@@ -1,16 +1,16 @@
 function [integratedRadianceMap, imageStages] = reconstructionPipeline(I, AGCSettings)
-% Convert raw camera sensor values to integrated radiance
+% Convert raw camera sensor values to integrated radiance[cite: 18]
 %
 % The IMX219 camera chip records 8 bit RAW images (obtained by a strict
 % bit-shift of the raw signal). The sensitivity of the IMX219 sensor is
 % adjusted using a custom automatic gain control (AGC) routine, which
 % modulates exposure time, analog gain, and digital gain in an attempt to
 % maintain the mean of the chip sensor values at 127. This routine takes as
-% input a raw camera image (I) and the AGC settings. The raw image has not
-% had digital gain applied.
+% input a raw camera image (I) and the AGC settings[cite: 18]. The raw
+% image has not had digital gain applied[cite: 18].
 %
 % The output of the routine is the map expressed as integrated radiance
-% (W/m2/sr) for each pixel.
+% (W/m2/sr) for each pixel[cite: 18].
 
 % Declare persistent variables for all derived parameters and maps
 persistent clippingExponent darkSignal ...
@@ -109,8 +109,9 @@ imageStages{5} = imageStages{4} .* radiometricCorrectionMap;
 % linearization) that corresponds to the set point that the AGC attempts to
 % obtain for the mean of the entire image. To do so, we take the initial
 % set point, undo Dgain effects, linearize, and account for the mean
-% fielding and RGB corrections
+% fielding and RGB corrections[cite: 18]
 setPoint = 127;
+
 setPoint = (setPoint / AGCSettings.Dgain) - darkSignal;
 linearizedSetPoint = setPoint ./ (1 - (setPoint ./ Smax).^n).^(1./n);
 linearizedSetPoint = linearizedSetPoint * meanCorrectionFielding * meanCorrectionRGB;
@@ -124,7 +125,7 @@ meanIntegratedRadiance = 10.^polyval(agcToRadianceP,log10(thisCameraScore));
 % Scale the radiometrically balanced image to absolute radiance
 imageStages{6} = (imageStages{5} / linearizedSetPoint) * meanIntegratedRadiance;
 
-% Return the final stage as the radiance map
+% Return the final stage as the radiance map[cite: 18]
 integratedRadianceMap = imageStages{6};
 
 end
