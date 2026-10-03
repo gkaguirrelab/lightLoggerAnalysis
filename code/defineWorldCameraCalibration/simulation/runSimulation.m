@@ -54,7 +54,7 @@ nexttile
 surf(cameraRadianceMap-cameraRadianceMapEstimated, 'EdgeColor', 'none'); colorbar; title('Source-Recon'); zlim([-15 15]);
 
 % Obtain the demosaiced image and show this
-radianceMapDemosaiced = demosaicRadianceMapRCD(imageStages{end});
+radianceMapDemosaiced = demosaicRadianceMap(imageStages{end});
 
 figure
 logImage = log10(radianceMapDemosaiced);

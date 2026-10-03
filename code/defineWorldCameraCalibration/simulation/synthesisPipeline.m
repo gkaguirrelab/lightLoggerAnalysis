@@ -4,19 +4,19 @@ function [I_raw, radianceMap] = synthesisPipeline(radianceModel, radianceModelS,
 % this function returns the original raw sensor image as a uint8 array.
 
 % Declare persistent variables for derived parameters and correction maps
-persistent clippingExponent linearizedSetPoint darkSignal ...
+persistent clippingExponent darkSignal ...
     correctionMap radiometricCorrectionMap ...
-    integratedRadiance cameraScore ...
+    agcToRadianceP ...
     meanCorrectionFielding meanCorrectionRGB Smax ...
     azimuthMap elevationMap T channelNames bayerPattern
 
-% Load non-linear clipping exponent and linearized set point
+% Load non-linear clipping exponent
 if isempty(clippingExponent)
     paramFileName = fullfile(...
         tbLocateProjectSilent('lightLoggerAnalysis'),...
         'derived',...
         'nonLinearClippingExponent.mat');
-    load(paramFileName, 'clippingExponent', 'linearizedSetPoint');
+    load(paramFileName, 'clippingExponent');
 end
 
 % Load dark signal and compute Smax
@@ -29,33 +29,34 @@ if isempty(darkSignal)
     Smax = 2^8 - 1 - darkSignal;
 end
 
-% Load flat fielding correction map and compute its mean
+% Load flat fielding correction map and compute its mean scaling factor
 if isempty(correctionMap)
     paramFileName = fullfile(...
         tbLocateProjectSilent('lightLoggerAnalysis'),...
         'derived',...
         'flatFieldingFunction.mat');
     load(paramFileName, 'correctionMap');
-    meanCorrectionFielding = mean(correctionMap(:), 'omitnan');
+    % Calculate the mean using the harmonic-like formulation
+    meanCorrectionFielding = 1 / mean(1 ./ correctionMap(:), 'omitnan');
 end
 
-% Load RGB radiometric correction map and compute its mean
+% Load RGB radiometric correction map and compute its mean scaling factor
 if isempty(radiometricCorrectionMap)
     paramFileName = fullfile(...
         tbLocateProjectSilent('lightLoggerAnalysis'),...
         'derived',...
         'radiometricCorrectionRGB.mat');
     load(paramFileName, 'radiometricCorrectionMap');
-    meanCorrectionRGB = mean(radiometricCorrectionMap(:), 'omitnan');
+    meanCorrectionRGB = 1 / mean(1 ./ radiometricCorrectionMap(:), 'omitnan');
 end
 
 % Load camera score to effective integrated radiance mapping parameters
-if isempty(integratedRadiance)
+if isempty(agcToRadianceP)
     paramFileName = fullfile(...
         tbLocateProjectSilent('lightLoggerAnalysis'),...
         'derived',...
         'cameraScoreToIntegratedRadiance.mat');
-    load(paramFileName, 'integratedRadiance', 'cameraScore');
+    load(paramFileName, 'agcToRadianceP');
 end
 
 % Load camera intrinsics and compute azimuth/elevation maps
@@ -121,19 +122,19 @@ for cc = 1:3
     radianceMap = radianceMap + tempMap;
 end
 
-% Calculate the effective set point accounting for spatial scaling
-effectiveSetPoint = linearizedSetPoint * meanCorrectionFielding * meanCorrectionRGB;
+% Calculate the linearized set point for the current AGC settings
+n = clippingExponent;
+setPoint = 127;
+setPoint = (setPoint / AGCSettings.Dgain) - darkSignal;
+linearizedSetPoint = setPoint ./ (1 - (setPoint ./ Smax).^n).^(1./n);
+linearizedSetPoint = linearizedSetPoint * meanCorrectionFielding * meanCorrectionRGB;
 
-% Determine mean effective radiance implied by the given AGCSettings
-thisCameraScore = AGCSettings.exposure * AGCSettings.Again * AGCSettings.Dgain;
-logThisIntegratedRadiance = interp1(log10(cameraScore), log10(integratedRadiance), log10(thisCameraScore), 'linear');
-thisIntegratedRadiance = 10.^logThisIntegratedRadiance;
-
-% Calculate the Bayer-weighted mean effective radiance (1 Red, 2 Green, 1 Blue)
-meanIntegratedRadiance = (thisIntegratedRadiance(1) + 2*thisIntegratedRadiance(2) + thisIntegratedRadiance(3)) / 4;
+% Determine mean integrated radiance implied by the given AGCSettings
+thisCameraScore = (AGCSettings.exposure * AGCSettings.Again) / linearizedSetPoint;
+meanIntegratedRadiance = 10.^polyval(agcToRadianceP, log10(thisCameraScore));
 
 % Inverse of Radiance Conversion
-I_sensor_corrected = (radianceMap / meanIntegratedRadiance) * effectiveSetPoint;
+I_sensor_corrected = (radianceMap / meanIntegratedRadiance) * linearizedSetPoint;
 
 % Inverse of RGB Radiometric Correction
 I_flat = I_sensor_corrected ./ radiometricCorrectionMap;
@@ -141,12 +142,21 @@ I_flat = I_sensor_corrected ./ radiometricCorrectionMap;
 % Inverse of Flat Fielding Correction
 yLinear = I_flat ./ correctionMap;
 
-% Inverse of Sensor Linearization
-n = clippingExponent;
-yPrime = (yLinear * Smax) ./ (Smax.^n + yLinear.^n).^(1./n);
+% Inverse of Sensor Linearization (handling the max(0, ...) logic from the forward pipeline)
+yPrime = zeros(size(yLinear));
+posIdx = yLinear >= 0;
+negIdx = yLinear < 0;
+
+% For positive values, apply the algebraic inverse of the asymptotic gain
+yPrime(posIdx) = (yLinear(posIdx) .* Smax) ./ (Smax.^n + yLinear(posIdx).^n).^(1./n);
+
+% For negative values, the forward pipeline applied an asymptotic gain of 1
+yPrime(negIdx) = yLinear(negIdx);
+
+% Restore dark signal
 y = yPrime + darkSignal;
 
-% 5. Clip, round, and convert back to uint8 raw sensor counts
+% Clip, round, and convert back to uint8 raw sensor counts
 I_raw = uint8(round(max(0, min(255, y))));
 
 end
