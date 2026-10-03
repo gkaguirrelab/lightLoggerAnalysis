@@ -407,11 +407,17 @@ for vv = 1:length(plotOrder)
     % Construct a descriptive filename based on the environment and set number
     envStr = valSetOptions{valIdx};
     numStr = valNumOptions{valIdx};
+
     fileName = sprintf('Validation_%s_set%s_NDF_Dgain_%1.2f.pdf', envStr, numStr, AGCSettings.Dgain);
     fullSavePath = fullfile(saveDir, fileName);
-
-    % Export the figure as a vector PDF
     exportgraphics(gcf, fullSavePath, 'ContentType', 'vector');
+
+    % Export the figure as a PNG
+    %{
+    fileName = sprintf('Validation_%s_set%s_NDF_Dgain_%1.2f.png', envStr, numStr, AGCSettings.Dgain);
+    fullSavePath = fullfile(saveDir, fileName);
+    exportgraphics(gcf, fullSavePath);
+    %}
 
     fprintf('Saved figure to: %s\n', fullSavePath);
 

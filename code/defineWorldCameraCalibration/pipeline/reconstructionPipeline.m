@@ -1,16 +1,16 @@
 function [integratedRadianceMap, imageStages] = reconstructionPipeline(I, AGCSettings)
-% Convert raw camera sensor values to integrated radiance[cite: 18]
+% Convert raw camera sensor values to integrated radiance
 %
 % The IMX219 camera chip records 8 bit RAW images (obtained by a strict
 % bit-shift of the raw signal). The sensitivity of the IMX219 sensor is
 % adjusted using a custom automatic gain control (AGC) routine, which
 % modulates exposure time, analog gain, and digital gain in an attempt to
 % maintain the mean of the chip sensor values at 127. This routine takes as
-% input a raw camera image (I) and the AGC settings[cite: 18]. The raw
-% image has not had digital gain applied[cite: 18].
+% input a raw camera image (I) and the AGC settings. The raw
+% image has not had digital gain applied.
 %
 % The output of the routine is the map expressed as integrated radiance
-% (W/m2/sr) for each pixel[cite: 18].
+% (W/m2/sr) for each pixel.
 
 % Declare persistent variables for all derived parameters and maps
 persistent clippingExponent darkSignal ...
@@ -85,14 +85,21 @@ saturationThreshold = floor(yPrimeThresh + darkSignal);
 % Stage 1: Convert from uint8 to double float
 imageStages{1} = double(I);
 
-% Stage 2: Linearize sensor counts; set to Inf any values above the
-% saturation threshold in the raw image
+% Stage 2: Linearize sensor counts without hard-clamping noise distribution
 y = imageStages{1};
-y(y < darkSignal) = darkSignal;
 yPrime = y - darkSignal;
 n = clippingExponent;
-asymptoticGain = 1 ./ (1 - (yPrime ./ Smax).^n).^(1./n);
+
+% Use a non-negative version strictly for the asymptotic gain nonlinearity 
+% to avoid complex numbers from fractional powers of negative numbers, 
+% while allowing yPrime to retain its true signed values.
+yPrimeNonlinear = max(0, yPrime);
+asymptoticGain = 1 ./ (1 - (yPrimeNonlinear ./ Smax).^n).^(1./n);
+
+% Apply asymptotic gain to the signed linear signal
 linearized = yPrime .* asymptoticGain;
+
+% Set to Inf any values above the saturation threshold in the raw image
 linearized(y >= saturationThreshold) = Inf;
 imageStages{2} = linearized;
 
@@ -109,9 +116,8 @@ imageStages{5} = imageStages{4} .* radiometricCorrectionMap;
 % linearization) that corresponds to the set point that the AGC attempts to
 % obtain for the mean of the entire image. To do so, we take the initial
 % set point, undo Dgain effects, linearize, and account for the mean
-% fielding and RGB corrections[cite: 18]
+% fielding and RGB corrections
 setPoint = 127;
-
 setPoint = (setPoint / AGCSettings.Dgain) - darkSignal;
 linearizedSetPoint = setPoint ./ (1 - (setPoint ./ Smax).^n).^(1./n);
 linearizedSetPoint = linearizedSetPoint * meanCorrectionFielding * meanCorrectionRGB;
@@ -125,7 +131,7 @@ meanIntegratedRadiance = 10.^polyval(agcToRadianceP,log10(thisCameraScore));
 % Scale the radiometrically balanced image to absolute radiance
 imageStages{6} = (imageStages{5} / linearizedSetPoint) * meanIntegratedRadiance;
 
-% Return the final stage as the radiance map[cite: 18]
+% Return the final stage as the radiance map
 integratedRadianceMap = imageStages{6};
 
 end

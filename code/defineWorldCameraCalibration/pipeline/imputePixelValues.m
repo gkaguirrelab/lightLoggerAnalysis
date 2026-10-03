@@ -1,14 +1,13 @@
 function rawFixed = imputePixelValues(radianceMap, bayerPattern)
 % Implements a Bayesian estimation of linearized sensor values for pixels
-% at ceiling (Inf) or floor (zero). Based upon Zhang & Brainard approach:
+% at ceiling (Inf) or floor (zero). Accounts for quantization bin intervals
+% and is robust to negative sensor values. Based in part upon Zhang &
+% Brainard approach:
 %
 % Zhang X, Brainard DH. Estimation of saturated pixel values in digital
 % color imaging. Journal of the Optical Society of America A. 2004 Dec
 % 1;21(12):2301-10.
-%
-% Modified to add imputation of floor values, and to consider the
-% distribution of pixel values in the log transformed space.
-%
+% 
 
 if nargin < 2 || isempty(bayerPattern)
     bayerPattern = "BGGR";
@@ -23,12 +22,13 @@ rgbMap = zeros(H, W, 3);
 for c = 1:3
     subVal = radianceMap(bayerIdx{c});
     infMask = isinf(subVal);
-    floorMask = (subVal == 0);
+    % Robustly identify floor or negative/quantized low values
+    floorMask = (subVal <= 0);
 
     workSub = subVal;
     workSub(infMask | floorMask) = NaN;
 
-    validIdx = ~isnan(workSub);
+    validIdx = ~isnan(workSub) & (workSub > 0);
     subX = X(bayerIdx{c}); subY = Y(bayerIdx{c});
 
     if any(validIdx(:))
@@ -36,38 +36,51 @@ for c = 1:3
         rgbMap(:,:,c) = F(X, Y);
     end
 
-    % Restore Inf and 0 at sub-grid locations so the imputation step can find them
+    % Restore Inf and floor/negative markers at sub-grid locations
     channelGrid = rgbMap(:,:,c);
     channelGrid(bayerIdx{c}(infMask)) = Inf;
-    channelGrid(bayerIdx{c}(floorMask)) = 0;
+    channelGrid(bayerIdx{c}(floorMask)) = 0; 
     rgbMap(:,:,c) = channelGrid;
 end
 
-% Extract Prior Statistics
+% Extract Prior Statistics using strictly positive valid pixels
 pixels = reshape(rgbMap, [], 3);
-validPixels = pixels(~any(isinf(pixels) | pixels == 0, 2), :);
+validPixelsMask = all(isfinite(pixels) & pixels > 0, 2);
+if ~any(validPixelsMask)
+    validPixelsMask = all(isfinite(pixels), 2);
+    pixels(pixels <= 0) = 1e-6;
+end
+validPixels = pixels(validPixelsMask, :);
+
 logValid = log(validPixels);
 mu = mean(logValid, 1)';
 S = cov(logValid);
 
 s_log = zeros(3, 1); f_log = zeros(3, 1);
 for c = 1:3
-    validC = pixels(pixels(:, c) > 0 & ~isinf(pixels(:, c)), c);
+    validC = pixels(pixels(:, c) > 0 & isfinite(pixels(:, c)), c);
     if isempty(validC)
         s_log(c) = log(1.0);
         f_log(c) = log(1e-4);
     else
         s_log(c) = log(max(validC));
-        f_log(c) = log(min(validC));
+        f_log(c) = log(max(min(validC), 1e-6));
     end
 end
 
-% Targeted Imputation and Direct Remosaicing
+% Targeted Imputation and Direct Remosaicing accounting for quantization
+% intervals
 rawFixed = radianceMap;
-logFixedPixels = log(pixels);
+logFixedPixels = zeros(size(pixels));
+for c = 1:3
+    colVals = pixels(:, c);
+    posIdx = colVals > 0 & isfinite(colVals);
+    logFixedPixels(posIdx, c) = log(colVals(posIdx));
+    logFixedPixels(~posIdx, c) = NaN;
+end
 
 for cTarget = 1:3
-    targetMask = (isinf(radianceMap) | radianceMap == 0);
+    targetMask = (isinf(radianceMap) | radianceMap <= 0);
     bayerTargetMask = false(H, W);
     bayerTargetMask(bayerIdx{cTarget}) = true;
 
@@ -95,8 +108,13 @@ for cTarget = 1:3
         Sxs = max(Sxs, 1e-8);
         stdXs = sqrt(Sxs);
 
-        if isinf(radianceMap(pIdx))
+        valAtPixel = radianceMap(pIdx);
+
+        if isinf(valAtPixel)
+            % Ceiling / Saturation imputation
             zScore = (s_log(cTarget) - muXs) / stdXs;
+            zScore = real(zScore);
+            if isnan(zScore), zScore = 0; end
             Z = 1 - normcdf(zScore);
 
             if Z < 1e-15
@@ -106,11 +124,24 @@ for cTarget = 1:3
                 expectedVal_log = muXs + numeratorTerm / Z;
             end
         else
-            zScore = (f_log(cTarget) - muXs) / stdXs;
+            % Floor / Negative / Quantized low value imputation. Treats the
+            % observed non-positive or floor value as an interval
+            % constraint bounded by the measurement or lower quantization
+            % threshold.
+            boundVal = max(valAtPixel, 0);
+            if boundVal == 0
+                upperBoundLog = f_log(cTarget);
+            else
+                upperBoundLog = log(boundVal + eps);
+            end
+
+            zScore = (upperBoundLog - muXs) / stdXs;
+            zScore = real(zScore);
+            if isnan(zScore), zScore = 0; end
             Z = normcdf(zScore);
 
             if Z < 1e-15
-                expectedVal_log = f_log(cTarget);
+                expectedVal_log = upperBoundLog;
             else
                 numeratorTerm = (stdXs / sqrt(2 * pi)) * exp(-(zScore^2) / 2);
                 expectedVal_log = muXs - numeratorTerm / Z;
