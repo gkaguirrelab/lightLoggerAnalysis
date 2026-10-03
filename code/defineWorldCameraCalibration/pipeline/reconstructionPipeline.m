@@ -1,13 +1,13 @@
 function [integratedRadianceMap, imageStages] = reconstructionPipeline(I, AGCSettings)
 % Convert raw camera sensor values to integrated radiance
 %
-% The IMX219 camera chip records 8 bit RAW images (obtained by a strict
-% bit-shift of the raw signal). The sensitivity of the IMX219 sensor is
-% adjusted using a custom automatic gain control (AGC) routine, which
-% modulates exposure time, analog gain, and digital gain in an attempt to
-% maintain the mean of the chip sensor values at 127. This routine takes as
-% input a raw camera image (I) and the AGC settings. The raw
-% image has not had digital gain applied.
+% The IMX219 camera chip records 8 bit RAW images (obtained by a bit-shift
+% of the raw signal). The sensitivity of the IMX219 sensor is adjusted
+% using a custom automatic gain control (AGC) routine, which modulates
+% exposure time, analog gain, and digital gain in an attempt to maintain
+% the mean of the chip sensor values at 127. This routine takes as input a
+% raw camera image (I) and the AGC settings. The raw image has not had
+% digital gain applied.
 %
 % The output of the routine is the map expressed as integrated radiance
 % (W/m2/sr) for each pixel.
@@ -81,8 +81,12 @@ saturationThreshold = floor(yPrimeThresh + darkSignal);
 
 % --- Processing Pipeline Stages ---
 
-% Stage 1: Convert from uint8 to double float
-imageStages{1} = double(I);
+% Stage 1: Convert to double and correct 8-bit quantization bias. The
+% IMX219's 2-bit right-shift acts as a floor function, systematically
+% truncating an average of 1.5 counts from the 10-bit signal. Adding 0.375
+% (the 8-bit equivalent) restores this discarded statistical mean,
+% preventing severe radiance under-estimation near the dark signal floor.
+imageStages{1} = double(I) + 0.375;
 
 % Stage 2: Linearize sensor counts; we allow negative sensor values
 y = imageStages{1};

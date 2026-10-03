@@ -1,6 +1,7 @@
 function coneMapVar = generateSensorToConeMapping(options)
 % GENERATESENSORTOCONEMAPPING Creates a 1D mapping LUT for converting
 % camera RGB radiance to LMS isomerization rates based on eccentricity.
+% Relies upon ISETbio tools for this.
 %
 % Name-Value Arguments:
 %   age                 - Observer age in years (default: 56)

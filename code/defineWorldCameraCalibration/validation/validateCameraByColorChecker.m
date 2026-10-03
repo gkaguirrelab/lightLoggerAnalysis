@@ -40,7 +40,7 @@ end
 
 % Indoor or outdoor data set?
 valSetOptions = {'indoor','indoor','indoor','outdoor','outdoor','outdoor'};
-valNumOptions = {'1','2','4','1','2','3'};
+valNumOptions = {'1','2','3','1','2','3'};
 
 % Plot the measurements in order of decreasing irradiance
 plotOrder = [4,5,1,2,6,3];
