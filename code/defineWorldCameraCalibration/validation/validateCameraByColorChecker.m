@@ -35,6 +35,9 @@ close all
 valSetOptions = {'indoor','indoor','indoor','outdoor','outdoor','outdoor'};
 valNumOptions = {'1','2','4','1','2','3'};
 
+% Plot the measurements in order of decreasing irradiance
+plotOrder = [4,5,1,2,6,3];
+
 % Define the common wavelength domain (380 to 730 nm with 1 nm spacing) for
 % this analysis
 commonS = [380, 1, 352];
@@ -87,12 +90,9 @@ cornerSets{6} = [
     184.9518  351.0648
     ];
 
-% Plot the measurements in order of decreasing irradiance
-plotOrder = [4,1,5,2,6,3];
-
 %% Loop over the validation sets
 
-for vv = 1:length(valSetOptions)
+for vv = 1:length(plotOrder)
 
     valIdx = plotOrder(vv);
 
@@ -250,7 +250,7 @@ for vv = 1:length(valSetOptions)
     load(dataFileName,'worldFrame','AGCSettings','minispectValue');
 
     % Convert the raw worldFrame to a radiance map
-    radianceMap = reconstructionPipeline(worldFrame, AGCSettings);
+    [radianceMap, imageStages] = reconstructionPipeline(worldFrame, AGCSettings);
 
     % Demosaic the image so that we have an RGB triplet of radiance values for
     % each pixel
@@ -291,6 +291,7 @@ for vv = 1:length(valSetOptions)
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
     figure('Name', sprintf('Validation: %s', vv), ...
+        'WindowStyle', 'Docked',...
         'Position', [50+(vv-1)*100, 50+(vv-1)*100, 1600, 400]);
     tiledlayout(1,4,"TileSpacing","compact","Padding","tight");
 
@@ -333,6 +334,10 @@ for vv = 1:length(valSetOptions)
                 'MarkerEdgeColor', 'k', 'LineWidth', 0.5);
         end
     end
+
+    % Store the slope and intercept of a robust fit
+    predMeasFit(vv,:) = robustfit(predMean(:),measMean(:));
+    DgainStore(vv) = AGCSettings.Dgain;
 
     % Determine axis limits
     maxValMean = max([predMean(:); measMean(:)]) * 1.05;

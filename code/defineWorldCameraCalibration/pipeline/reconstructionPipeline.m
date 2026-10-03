@@ -45,7 +45,7 @@ if isempty(correctionMap)
         'flatFieldingFunction.mat');
     load(paramFileName, 'correctionMap');
     % Calculate the mean of the fielding correction map
-    meanCorrectionFielding = mean(correctionMap(:), 'omitnan');
+    meanCorrectionFielding = 1 / mean(1 ./ correctionMap(:), 'omitnan');
 end
 
 % Load RGB radiometric correction map and compute its mean scaling factor
@@ -55,7 +55,7 @@ if isempty(radiometricCorrectionMap)
         'derived',...
         'radiometricCorrectionRGB.mat');
     load(paramFileName, 'radiometricCorrectionMap');
-    meanCorrectionRGB = mean(radiometricCorrectionMap(:), 'omitnan');
+    meanCorrectionRGB = 1 / mean(1 ./ radiometricCorrectionMap(:), 'omitnan');
 end
 
 % Load camera score to effective integrated radiance mapping parameters
@@ -96,9 +96,6 @@ linearized = yPrime .* asymptoticGain;
 linearized(y >= saturationThreshold) = Inf;
 imageStages{2} = linearized;
 
-% Apply digital gain
-imageStages{2} = imageStages{2} * AGCSettings.Dgain;
-
 % Stage 3: Impute values for ceiling and floor pixels
 imageStages{3} = imputePixelValues(imageStages{2});
 
@@ -119,7 +116,7 @@ linearizedSetPoint = setPoint ./ (1 - (setPoint ./ Smax).^n).^(1./n);
 linearizedSetPoint = linearizedSetPoint * meanCorrectionFielding * meanCorrectionRGB;
 
 % Stage 6: Convert to absolute radiance units
-thisCameraScore = AGCSettings.exposure * AGCSettings.Again * AGCSettings.Dgain;
+thisCameraScore = (AGCSettings.exposure * AGCSettings.Again) / linearizedSetPoint;
 
 % Obtain the mean integrated radiance implied by this camera score
 meanIntegratedRadiance = 10.^polyval(agcToRadianceP,log10(thisCameraScore));

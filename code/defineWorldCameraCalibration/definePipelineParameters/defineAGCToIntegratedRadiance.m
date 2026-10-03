@@ -27,8 +27,28 @@ for ii = 1:length(agcData.ndf)
     frameSet{ii} = worldFrame;
 end
 
-% Derive a "camera score" by obtaining the product of the AGC settings
-cameraScore = agcData.DGain .* agcData.AGain .* agcData.Exposure;
+% Load parameters required for set point calculation
+load(fullfile(tbLocateProjectSilent('lightLoggerAnalysis'), 'derived', 'darkSignal.mat'), 'darkSignal');
+load(fullfile(tbLocateProjectSilent('lightLoggerAnalysis'), 'derived', 'nonLinearClippingExponent.mat'), 'clippingExponent');
+load(fullfile(tbLocateProjectSilent('lightLoggerAnalysis'), 'derived', 'flatFieldingFunction.mat'), 'correctionMap');
+load(fullfile(tbLocateProjectSilent('lightLoggerAnalysis'), 'derived', 'radiometricCorrectionRGB.mat'), 'radiometricCorrectionMap');
+
+Smax = 2^8 - 1 - darkSignal;
+n = clippingExponent;
+meanCorrectionFielding = 1 / mean(1 ./ correctionMap(:), 'omitnan');
+meanCorrectionRGB = 1 / mean(1 ./ radiometricCorrectionMap(:), 'omitnan');
+
+% Derive an "effective camera score" that accounts for dark signal
+cameraScore = zeros(1, length(agcData.ndf));
+for ii = 1:length(agcData.ndf)
+    setPoint = 127;
+    setPoint = (setPoint / agcData.DGain(ii)) - darkSignal;
+    linSetPoint = setPoint / (1 - (setPoint / Smax)^n)^(1/n);
+    linSetPoint = linSetPoint * meanCorrectionFielding * meanCorrectionRGB;
+
+    % The effective sensitivity score is the hardware gain divided by the targeted linear signal
+    cameraScore(ii) = (agcData.AGain(ii) * agcData.Exposure(ii)) / linSetPoint;
+end
 
 % Load the IMX219 sensitivity functions.
 dataFileName = fullfile(...
@@ -77,29 +97,27 @@ for ii = 1:length(agcData.ndf)
     nexttile
     luminance(ii) = plotChromLum(spdSource',WlsToS(commonWls));
 
-    % The spdSource is the spectral radiance within the sphere. The camera
-    % sees this source through the lens, which has fall-off in the
-    % periphery. Further, the camera image incorporates areas of decreased
-    % radiance coming from the baffle within the sphere and even some areas
-    % outside of the sphere captured by the wide-field camera. Therefore,
-    % the actual radiance that drives the AGC settings of the camera will
-    % be less than the spdSource. We derive a multiplier here to account
-    % for this effect by taking the ratio of the mean of the entire image
-    % to the mean from the image center.
-    imageWeight = mean(frameSet{ii}(:)) / mean(mean(frameSet{ii}(220:260,300:340)));
-
     % Loop over the channels to calculate the sensor-weighted effective radiance.
     for cc = 1:length(channelNames)
-        % Calculate absolute integrated radiance for this channel using the 1 nm dot product
-        integratedRadiance(ii,cc) = spdSource * imageWeight * sensorSensitivities(:, cc);
+        % Calculate absolute integrated radiance using the 1 nm dot product WITHOUT imageWeight penalty
+        integratedRadiance(ii,cc) = spdSource * sensorSensitivities(:, cc);
     end
 end
 
 % Get the linear fit to the mean integrated radiance as a function of
 % camera score
 bayerWeightedRadiance = (integratedRadiance(:,1) + 2*integratedRadiance(:,2) + integratedRadiance(:,3)) / 4;
-agcToRadianceP = polyfit(log10(cameraScore), log10(bayerWeightedRadiance), 1);
-xFit = 10.^linspace(2,6,100);
+
+% Force the theoretical physical slope of -1
+fixedSlope = -1.0;
+
+% Analytically calculate the intercept (calibration constant)
+intercept = mean(log10(bayerWeightedRadiance(:)) - (fixedSlope * log10(cameraScore(:))));
+
+% Define the polynomial with the fixed slope and empirical intercept
+agcToRadianceP = [fixedSlope, intercept];
+
+xFit = 10.^linspace(0,4,100);
 yFit = 10.^polyval(agcToRadianceP,log10(xFit));
 
 % Plot the measurements
@@ -111,9 +129,6 @@ for cc = 1:3
 end
 loglog(cameraScore, mean(integratedRadiance,2),'*','MarkerSize',10); 
 loglog(xFit, yFit,'-k','LineWidth',2); 
-
-% Add some empirical values
-%loglog([3.0757e+04,1.6808e+05,1.7469e+05,2.2210e+05,4.8693e+05],[0.2967,0.0456,0.0437,0.0336,.0141],'^r')
 
 ylabel('Log integrated radiance (W/m^2/sr)');
 
@@ -130,7 +145,7 @@ a.TickDir = 'out';
 hold on; grid off; box off;
 
 % Clean up, label, legend
-xlabel('Log camera sensitivity score');
+xlabel('Log effective camera sensitivity score');
 title('Integrated Radiance vs. Camera AGC Sensitivity');
 legend('Red Channel', 'Green Channel', 'Blue Channel', 'Location', 'northwest');
 

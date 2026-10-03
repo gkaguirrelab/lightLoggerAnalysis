@@ -13,6 +13,12 @@ A few key properties of this approach:
 
 The routine "reconstructionPipeline" takes a raw IMX219 camera image and the AGC settings for that frame and returns the reconstructed map of integrated radiance for each color channel.
 
+A key property of this analysis approach is that the AGC settings of the camera are used to interpret the sensor values in terms of absolute integrated radiance. In a series of validation measurements I have compared the integrated radiance derived from this analysis to that predicted from direct measurements of the spectral radiance. The match between observed and predicted integrated radiance is acceptable in the regime of higher light levels. At low light levels the values calculated from the camera are systematically larger (e.g., 6x) than those predicted from the direct measurements. I believe that the error lies in the handling of the digital gain component of the AGC settings. In particular, digital gain is applied on top of the dark signal returned by the camera. I account for this property in the reconstructionPipeline.m code. I think this correction is needed as well in the function "defineAGCToIntegratedRadiance". Could my hypothesis be correct, and if so how should I alter the code to correct for this error?
+
+
+
+**********************************
+
 Examine the routine "reconstructionPipeline". In particular, consider the code that produces a "linearized set point". I am struggling with how to handle the digital gain of the camera in this calculation. I find that it is necessary to divide the set point by the digital gain to produce an accurate radiance map. First, why is this division necessary to obtain an accurate measure of integrated radiance? Second, I am uncertain if the division by digital gain should take place prior to adjustment for the non-linear full well capacity effect, or after. Advise on this.
 
 
