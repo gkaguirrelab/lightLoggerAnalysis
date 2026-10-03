@@ -43,7 +43,7 @@ for c = 1:3
     rgbMap(:,:,c) = channelGrid;
 end
 
-% Extract Prior Statistics using strictly positive valid pixels
+% Extract Prior Statistics using positive valid pixels
 pixels = reshape(rgbMap, [], 3);
 validPixelsMask = all(isfinite(pixels) & pixels > 0, 2);
 if ~any(validPixelsMask)

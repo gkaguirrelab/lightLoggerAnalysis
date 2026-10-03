@@ -2,7 +2,7 @@
 clear
 
 % Pick a measurement
-measurementName = 'indoor_AGCandMS_02.mat';
+measurementName = 'outdoor_AGCandMS_01.mat';
 %measurementName = 'planetarium_AGCandMS_01.mat';
 %measurementName = 'macbeth_AGCandMS_01.mat';
 

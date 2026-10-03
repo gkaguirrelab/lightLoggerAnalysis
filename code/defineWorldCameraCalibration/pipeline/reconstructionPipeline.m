@@ -67,7 +67,6 @@ if isempty(agcToRadianceP)
     load(paramFileName,'agcToRadianceP');
 end
 
-
 % Define the maximum allowable noise amplification (derivative) A value of
 % 3.0 to 5.0 is typically a safe boundary for Bayesian conditioning
 maxAllowedDerivative = 4.0; 
@@ -85,14 +84,14 @@ saturationThreshold = floor(yPrimeThresh + darkSignal);
 % Stage 1: Convert from uint8 to double float
 imageStages{1} = double(I);
 
-% Stage 2: Linearize sensor counts without hard-clamping noise distribution
+% Stage 2: Linearize sensor counts; we allow negative sensor values
 y = imageStages{1};
 yPrime = y - darkSignal;
 n = clippingExponent;
 
 % Use a non-negative version strictly for the asymptotic gain nonlinearity 
 % to avoid complex numbers from fractional powers of negative numbers, 
-% while allowing yPrime to retain its true signed values.
+% while allowing yPrime to retain signed values.
 yPrimeNonlinear = max(0, yPrime);
 asymptoticGain = 1 ./ (1 - (yPrimeNonlinear ./ Smax).^n).^(1./n);
 
