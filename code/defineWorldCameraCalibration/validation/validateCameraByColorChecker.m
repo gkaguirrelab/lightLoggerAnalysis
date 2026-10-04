@@ -327,7 +327,7 @@ for vv = 1:length(plotOrder)
     % Show the illuminant
     nexttile
     plot(SToWls(commonS),mean(predictedMeasIlluminants),'-k','LineWidth',2);
-    ylabel('radiance [W/m2/sr/nm]');
+    ylabel('radiance [W/m^2/sr/nm]');
     xlabel('wavelength [nm]');
     title('Illuminant');
     axis square
@@ -363,8 +363,8 @@ for vv = 1:length(plotOrder)
     axis square;
     xlim([minValMean, maxValMean]);
     ylim([minValMean, maxValMean]);
-    xlabel('via PR670 [W/m2/sr]');
-    ylabel('via IMX219 [W/m2/sr]');
+    xlabel('via PR670 [W/m^2/sr]');
+    ylabel('via IMX219 [W/m^2/sr]');
     title('Integrated Radiance');
     a = gca();
     a.XTick = a.YTick;
@@ -470,8 +470,8 @@ end
 axis square;
 xlim([-4 0]);
 ylim([-4 0]);
-xlabel('via PR670 [log10 W/m2/sr]');
-ylabel('via IMX219 [log10 W/m2/sr]');
+xlabel('via PR670 [log_1_0 W/m^2/sr]');
+ylabel('via IMX219 [log_1_0 W/m^2/sr]');
 title('Integrated radiance');
 a = gca();
 a.XTick = a.YTick;
