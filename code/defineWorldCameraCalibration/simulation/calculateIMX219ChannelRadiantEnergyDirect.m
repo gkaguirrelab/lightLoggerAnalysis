@@ -14,10 +14,10 @@ if isempty(bayerIdx)
     
     % Load precomputed pixel solid angles from the derived file
     projectRoot = tbLocateProjectSilent('lightLoggerAnalysis');
-    deltaPath = fullfile(projectRoot, 'derived', 'deltaSteradians.mat');
+    deltaPath = fullfile(projectRoot, 'derived', 'cameraToVisualAngles.mat');
     assert(isfile(deltaPath), ...
         'calculateChannelRadiantEnergy:MissingDeltaSteradians', ...
-        'Could not find derived deltaSteradians.mat file. Please run defineDeltaSteradians first.');
+        'Could not find derived cameraToVisualAngles.mat file.');
     
     load(deltaPath, 'deltaSteradians');
     pixelSolidAngles = deltaSteradians;

@@ -19,7 +19,7 @@ if isempty(T)
     [bayerIdx{1}, bayerIdx{2}, bayerIdx{3}] = returnBayerIndices(zeros(rows, columns), bayerPattern);
     
     % 2. Load precomputed per-pixel solid angles
-    deltaPath = fullfile(projectRoot, 'derived', 'deltaSteradians.mat');
+    deltaPath = fullfile(projectRoot, 'derived', 'cameraToVisualAngles.mat');
     load(deltaPath, 'deltaSteradians');
 end
 
