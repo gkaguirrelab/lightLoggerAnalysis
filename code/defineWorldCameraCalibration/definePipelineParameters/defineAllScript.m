@@ -12,6 +12,10 @@ defineRadiometricWeights
 % defineFisheyeCameraIntrinsics -- This is run in an interactive GUI
 defineCameraToVisualAngles
 defineAGCToIntegratedRadianceViaMacbeth
+defineSensorToConeMapping
+
+% Not strictly part of the IMX219 camera calibration pathway, but
+% nonetheless lives here.
 defineMinispectRadianceWeights
 
 % We can define the AGC -> integrated radiance conversion using either:

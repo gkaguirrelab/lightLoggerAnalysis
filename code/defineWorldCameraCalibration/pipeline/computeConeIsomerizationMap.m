@@ -1,11 +1,10 @@
-function isomerizationMap = computeConeIsomerizationMap(integratedRadianceMap, coneMapVar, options)
+function isomerizationMap = computeConeIsomerizationMap(integratedRadianceMap, options)
 % COMPUTECONEISOMERIZATIONMAP Converts an RGB integrated radiance map into
 % an LMS cone isomerization rate map, allowing dynamic fixation and pupil
 % adjustments.
 %
 % Inputs:
 %   integratedRadianceMap - H x W x 3 RGB matrix in W/m^2/sr
-%   coneMapVar            - Struct containing the 1D LUT transform table
 %
 % Name-Value Arguments:
 %   fixationAzimuth   - Azimuth offset of fixation in degrees (default: 0)
@@ -14,13 +13,12 @@ function isomerizationMap = computeConeIsomerizationMap(integratedRadianceMap, c
 
 arguments
     integratedRadianceMap (:,:,3) double
-    coneMapVar (1,1) struct
     options.fixationAzimuth (1,1) double = 0
     options.fixationElevation (1,1) double = 0
     options.pupilDiameterMm (1,1) double = 3.0
 end
 
-persistent unitDirections
+persistent unitDirections coneMapVar
 
 % Load the unit vectors defining the camera geometry
 if isempty(unitDirections)
@@ -29,6 +27,14 @@ if isempty(unitDirections)
         'derived',...
         'cameraToVisualAngles.mat');
     load(mapFileName, 'unitDirections');
+end
+
+if isempty(coneMapVar)
+    mapFileName = fullfile(...
+        tbLocateProjectSilent('lightLoggerAnalysis'),...
+        'derived',...
+        'radianceToConeRateSupport.mat');
+    load(mapFileName, 'coneMapVar');
 end
 
 [H, W, ~] = size(integratedRadianceMap);

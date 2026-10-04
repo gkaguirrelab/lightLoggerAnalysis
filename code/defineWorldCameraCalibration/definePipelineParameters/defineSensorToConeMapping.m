@@ -1,32 +1,30 @@
-function coneMapVar = generateSensorToConeMapping(options)
-% GENERATESENSORTOCONEMAPPING Creates a 1D mapping LUT for converting
-% camera RGB radiance to LMS isomerization rates based on eccentricity.
-% Relies upon ISETbio tools for this.
+% This script uses ISETbio to define a variable that supports the
+% conversion of integrated radiance values from the camera sensors to cone
+% isomerization rates for an observer. The current implementation assumes
+% the lens density typical for a 25 year-old observer. We would need to
+% create different versions of this derived file for observes of different
+% ages if we wished to explicitly model age effects in our data.
 %
-% Name-Value Arguments:
-%   age                 - Observer age in years (default: 56)
-%   basePupilDiameterMm - Canonical pupil diameter in mm (default: 3.0)
+% The routine assumes a particular baseline pupil diameter for the
+% calculations. In subsequent routines we are able to adjust the computed
+% cone isomerization rate by noting the difference between the current
+% pupil size and this baseline value.
 
-arguments
-    options.age (1,1) double = 56
-    options.basePupilDiameterMm (1,1) double = 3.0
-end
-
-persistent T wlsSensor channelNames camSens
+% Hard code some options
+options.age  = 25;
+options.basePupilDiameterMm = 3.0;
 
 % Load the IMX219 sensitivity functions on the first pass
-if isempty(camSens)
-    dataFileName = fullfile(...
-        tbLocateProjectSilent('lightLoggerAnalysis'),...
-        'data',...
-        'IMX219_spectralSensitivity.mat');
-    load(dataFileName,'T');
-    wlsSensor = T.wls;
-    channelNames = {'red','green','blue'};
+dataFileName = fullfile(...
+    tbLocateProjectSilent('lightLoggerAnalysis'),...
+    'data',...
+    'IMX219_spectralSensitivity.mat');
+load(dataFileName,'T');
+wlsSensor = T.wls;
+channelNames = {'red','green','blue'};
 
-    % Extract the sensitivity vectors into an N-wave x 3 array
-    camSens = [T.(channelNames{1}), T.(channelNames{2}), T.(channelNames{3})];
-end
+% Extract the sensitivity vectors into an N-wave x 3 array
+camSens = [T.(channelNames{1}), T.(channelNames{2}), T.(channelNames{3})];
 
 % Instantiate ISETbio optical and receptor components directly
 lens = Lens('wave', wlsSensor);
@@ -40,7 +38,7 @@ else
     ageScalar = 1.56 + 0.0667 * (options.age - 60);
 end
 
-% In ISETbio, the Lens density property is a scalar multiplier 
+% In ISETbio, the Lens density property is a scalar multiplier
 % that scales the internal unitDensity spectrum.
 lens.density = ageScalar;
 pigment = photoPigment('wave', wlsSensor);
@@ -98,4 +96,11 @@ coneMapVar.transformTable = transformTable;
 coneMapVar.basePupilDiameterMm = options.basePupilDiameterMm;
 coneMapVar.observerAge = options.age;
 
-end
+% Save the coneMapVar in the "derived" directory
+saveFileName = fullfile(...
+    tbLocateProjectSilent('lightLoggerAnalysis'),...
+    'derived',...
+    'radianceToConeRateSupport.mat');
+readme = ['Created by defineSensorToConeMapping.\n'...
+    'coneMapVar -- a structure with values needed for conversion of radiance to cone isomerization rate.\n'];
+save(saveFileName,'readme','coneMapVar');

@@ -2,9 +2,9 @@
 clear
 
 % Pick a measurement
-%measurementName = 'indoor_AGCandMS_03.mat';
-measurementName = 'planetarium_AGCandMS_01.mat';
-%measurementName = 'macbeth_AGCandMS_02.mat';
+measurementName = 'outdoor_AGCandMS_03.mat';
+%measurementName = 'planetarium_AGCandMS_01.mat';
+%measurementName = 'macbeth_AGCandMS_03.mat';
 
 % Load the data
 fileName = fullfile(...
@@ -20,11 +20,16 @@ load(fileName,'worldFrame','AGCSettings','minispectValue')
 % Obtain the demosaiced image
 radianceMapDemosaiced = demosaicRadianceMap(imageStages{end});
 
-% Generate the sensor -> cone mapping for a 22 year old observer
-coneMapVar = generateSensorToConeMapping('age',22);
+% Obtain the cone isomerization map. We pass the current fixation location
+% and pupil size to be used in this calculation
+fixationAzimuth  = 0;
+fixationElevation = 0;
+pupilDiameterMm = 3.0;
 
-% Obtain the cone isomerization map
-isomerizationMap = computeConeIsomerizationMap(radianceMapDemosaiced, coneMapVar);
+isomerizationMap = computeConeIsomerizationMap(radianceMapDemosaiced, ...
+    'fixationAzimuth', fixationAzimuth, ...
+    'fixationElevation', fixationElevation, ...
+    'pupilDiameterMm', pupilDiameterMm);
 
 % Obtain the Linear Opponent post receptoral map
 postRecepMap = computePostRecepExcitation(isomerizationMap);
