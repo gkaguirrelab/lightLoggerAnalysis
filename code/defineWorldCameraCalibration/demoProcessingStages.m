@@ -2,8 +2,8 @@
 clear
 
 % Pick a measurement
-%measurementName = 'outdoor_AGCandMS_01.mat';
-measurementName = 'planetarium_AGCandMS_01.mat';
+measurementName = 'outdoor_AGCandMS_01.mat';
+%measurementName = 'planetarium_AGCandMS_01.mat';
 %measurementName = 'macbeth_AGCandMS_01.mat';
 
 % Load the data
@@ -20,10 +20,8 @@ load(fileName,'worldFrame','AGCSettings','minispectValue')
 % Obtain the demosaiced image
 radianceMapDemosaiced = demosaicRadianceMap(imageStages{end});
 
-% Generate the sensor -> cone mapping for this observer
-fprintf('Generating the sensor -> cone mapping...');
+% Generate the sensor -> cone mapping for a 22 year old observer
 coneMapVar = generateSensorToConeMapping('age',22);
-fprintf('done.\n')
 
 % Obtain the cone isomerization map
 isomerizationMap = computeConeIsomerizationMap(radianceMapDemosaiced, coneMapVar);

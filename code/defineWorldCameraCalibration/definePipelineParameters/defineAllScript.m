@@ -10,6 +10,6 @@ defineFullWellCapacityEffect
 defineFlatFieldingFunction
 defineRadiometricWeights
 % defineFisheyeCameraIntrinsics -- This is run in an interactive GUI
-defineDeltaSteradians
+defineCameraToVisualAngles
 defineAGCToIntegratedRadiance
 defineMinispectRadianceWeights

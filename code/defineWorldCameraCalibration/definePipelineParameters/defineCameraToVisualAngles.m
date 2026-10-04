@@ -110,7 +110,6 @@ title('Steradians per pixel')
 
 % Report the coordinates of the optical center
 opticalCenter = fisheyeIntrinsics.DistortionCenter;
-fprintf('Optical Center (Eccentricity = 0) is at pixel [X: %.2f, Y: %.2f]\n', opticalCenter);
 
 % Show the eccentricity map
 figure
