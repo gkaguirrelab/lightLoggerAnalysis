@@ -1,0 +1,16 @@
+I have a scientific instrument based on an IMX219 camera chip. The goal of the scientific instrument is to estimate the cone inputs to the post-receptoral retinal channels.
+
+The instrument includes a high-speed IMX219 camera chip (with a wide-field, fish-eye lens) positioned between and slightly above the eyes of an observer, mounted on spectacles. The spectacles also integrate paired IR "pupil" cameras that monitor the eyes of the observer. From these pupil cameras we derive a continuous measure of gaze angle and pupil diameter. We are able to map the gaze angle recordings to assign a point of fixation for each frame within the IMX219 camera image.
+
+The IMX219 camera image is processed to recover the absolute integrated radiance (in W/m2/sr) for each sensor channel (RGB) at each pixel. We have characterized the optical intrinsics of the IMX219 camera. 
+
+The routine "defineSensorToConeMapping" uses ISETbio routines to define a set of transformation variables to support the conversion of integrated sensor radiance into cone isomerization rates across the retina. We express the "pooled" isomerization rate in units of R*/visual degree^2/second.
+
+We wish to ultimately produce a "virtually foveated" version of the measurement. Given the camera intrinsics, project the IMX219-derived image to an evenly sampled grid of visual angle positions. Given the fixation location of the observer within the image, we consider the effect of retinal variation in isomerization properties with the fovea centered on a particular location in the image in the evenly sampled visual angle space.
+
+It is important that we keep separate visual angle eccentricity in the sense of the mapping of the camera image to visual angle coordinates, and the separate sense of mapping of that visual angle image to the eccentricity locations of the retina. Note that the optical intrinsics of the camera have the property of having a center of the optical distortion located in pixel coordinates ("fisheyeIntrinsics.DistortionCenter"). While the distortion produced by the lens must be accounted for in projecting the image to the evenly sampled visual angle space, the center of optical distortion should not be used as a reference location for gaze angle. Instead, wherever the observer is fixated in the image (given as a GazeX, GazeY position in pixel units) should correspond to the fovea (retinal eccentricity = 0) in constructing the map of isomerization rates.
+
+Examine these routines to determine if there is any error in the proper handling of conversion to degrees of visual angle and mapping of gaze coordinates to retinal locations.
+
+
+When I pass a uniform field of integrated radiance, I find appropriate spatial structure in the resulting isomerization map corresponding to the fovea / foveola. However, when the GazeX, GazeY is given as the center of the image [320, 240], this foveola spatial structure is centered on the visual angle location [-4, -2] degrees. I suspect that the routines contain an error in how gaze position and eccentricity are related to the optical center of the camera. Please identify and fix the error.

@@ -19,7 +19,7 @@
 projectRoot = tbLocateProjectSilent('lightLoggerAnalysis');
 
 % Load the calibrated fisheye model using the canonical, correctly spelled
-% filename and variable name[cite: 4].
+% filename and variable name.
 intrinsicsPath = fullfile( ...
     projectRoot, 'derived', 'arducamB0392cameraIntrinsics.mat');
 assert(isfile(intrinsicsPath), ...
@@ -34,7 +34,7 @@ assert(isfield(intrinsicsData, 'arducamB0392cameraIntrinsics'), ...
 fisheyeIntrinsics = ...
     intrinsicsData.arducamB0392cameraIntrinsics.results.Intrinsics;
 
-% The calibration and raw recordings both use 480 rows by 640 columns[cite: 4].
+% The calibration and raw recordings both use 480 rows by 640 columns.
 imageSize = double(fisheyeIntrinsics.ImageSize(:).');
 assert(isequal(imageSize, [480 640]), ...
     'defineDeltaSteradians:UnexpectedImageSize', ...
@@ -45,14 +45,14 @@ columns = imageSize(2);
 
 % anglesFromIntrinsics expects MATLAB one-based [x, y] pixel-center
 % coordinates. Flatten in MATLAB column-major order and reshape the returned
-% angles in the same order so each result remains aligned to its source pixel[cite: 4].
+% angles in the same order so each result remains aligned to its source pixel.
 [xCoordinates, yCoordinates] = meshgrid(1:columns, 1:rows);
 sensorPoints = [xCoordinates(:), yCoordinates(:)];
 visualAngles = anglesFromIntrinsics(sensorPoints, fisheyeIntrinsics);
 visualAngles = reshape(visualAngles, rows, columns, 2);
 
 % Match world_frame_visual_angle_to_steradians in world_util.py exactly.
-% The final visual-angle dimension is [azimuth, elevation], in degrees[cite: 4].
+% The final visual-angle dimension is [azimuth, elevation], in degrees.
 azimuth = deg2rad(visualAngles(:, :, 1));
 elevation = deg2rad(visualAngles(:, :, 2));
 cosElevation = cos(elevation);
@@ -63,17 +63,17 @@ unitDirections = cat(3, ...
 
 % Calculate eccentricity (in degrees) from the forward optical axis. 
 % The forward axis is [0, 0, 1], so the dot product with unit directions
-% is exactly the Z-component[cite: 4].
+% is exactly the Z-component.
 eccentricityMap = rad2deg(acos(unitDirections(:, :, 3)));
 
 % NumPy's gradient(..., edge_order=2) uses centered differences internally
 % and second-order one-sided differences at both image boundaries. The local
-% helper below reproduces those formulas explicitly for MATLAB arrays[cite: 4].
+% helper below reproduces those formulas explicitly for MATLAB arrays.
 directionChangePerRow = secondOrderFiniteDifference(unitDirections, 1);
 directionChangePerColumn = secondOrderFiniteDifference(unitDirections, 2);
 
 % The cross-product magnitude is the area of the local parallelogram on the
-% unit sphere, which is the solid angle represented by the pixel[cite: 4].
+% unit sphere, which is the solid angle represented by the pixel.
 areaVectors = cross( ...
     directionChangePerColumn, directionChangePerRow, 3);
 deltaSteradians = sqrt(sum(areaVectors.^2, 3));
@@ -89,7 +89,7 @@ assert(all(isfinite(deltaSteradians), 'all') && ...
 % Compare the summed per-pixel approximation with an independent integration
 % over the calibrated rectangular sensor boundary. The finite-difference map
 % samples area at pixel centers, so close agreement rather than exact equality
-% is expected at the outer half-pixel boundary[cite: 4].
+% is expected at the outer half-pixel boundary.
 summedPixelSteradians = sum(deltaSteradians, 'all');
 integratedFieldOfViewSteradians = ...
     calculateFisheyeSolidAngle(fisheyeIntrinsics);
@@ -109,7 +109,7 @@ axis equal
 title('Steradians per pixel')
 
 % Report the coordinates of the optical center
-opticalCenter = fisheyeIntrinsics.DistortionCenter;
+opticalCenter = fisheyeIntrinsics.PrincipalPoint;
 
 % Show the eccentricity map
 figure
@@ -118,7 +118,7 @@ axis equal
 colorbar
 title('Eccentricity (degrees)')
 
-% Save the reusable maps plus human-readable provenance[cite: 4].
+% Save the reusable maps plus human-readable provenance.
 saveFileName = fullfile(projectRoot, 'derived', 'cameraToVisualAngles.mat');
 readme = sprintf([ ...
     'Created by defineCameraToVisualAngles.\n' ...
@@ -141,7 +141,7 @@ save(saveFileName,'readme','deltaSteradians','eccentricityMap','unitDirections',
 % LOCAL FUNCTIONS
 
 function derivative = secondOrderFiniteDifference(values, dimension)
-% Reproduce numpy.gradient(..., edge_order=2) at unit sample spacing[cite: 4].
+% Reproduce numpy.gradient(..., edge_order=2) at unit sample spacing.
 
 dimensionLength = size(values, dimension);
 assert(dimensionLength >= 3, ...
@@ -151,7 +151,7 @@ assert(dimensionLength >= 3, ...
 derivative = zeros(size(values), 'like', values);
 allIndices = repmat({':'}, 1, ndims(values));
 
-% Interior samples use the centered difference (next - previous) / 2[cite: 4].
+% Interior samples use the centered difference (next - previous) / 2.
 target = allIndices;
 previous = allIndices;
 next = allIndices;
@@ -161,7 +161,7 @@ next{dimension} = 3:dimensionLength;
 derivative(target{:}) = ...
     (values(next{:}) - values(previous{:})) ./ 2;
 
-% Boundary samples use NumPy's second-order one-sided coefficients[cite: 4].
+% Boundary samples use NumPy's second-order one-sided coefficients.
 first = allIndices;
 second = allIndices;
 third = allIndices;
