@@ -4,9 +4,9 @@
 % dome. A full description of the manner of data collection is described in
 % the readme.md within this directory. Raw frames were selected from each of
 % four camera-rotation periods. This routine loads and linearizes the raw
-% frames, averages them, separates out the R, G, and B channels, fits a
-% flattened 2D Gaussian function, and then uses this fit to generate and
-% save a derived correction function that imposes a flat intensity field.
+% frames, averages them, separates out the R, G, and B channels, fits an
+% unconstrained thin-plate smoothing spline, and then uses this fit to 
+% generate and save a derived correction function that imposes a flat intensity field.
 
 % Housekeeping
 clear
@@ -66,10 +66,10 @@ channelOrder = {'r','g','b'};
 avgImageByChannel = makeBayerChannelAverages(...
     rawFrameFileNames,bayerPattern,clippingExponent);
 
-% Loop over the channels and fit a flattened Gaussian
+% Loop over the channels and fit an unconstrained thin-plate surface
 results = struct();
 for ii = 1:numel(avgImageByChannel)
-    [pFit, modelFit, residual, X, Y] = fitFlattenedGaussian(avgImageByChannel{ii});
+    [pFit, modelFit, residual, X, Y] = fitThinPlateSurface(avgImageByChannel{ii});
     results(ii).source = avgImageByChannel{ii};
     results(ii).pFit = pFit;
     results(ii).modelFit = modelFit;
@@ -125,7 +125,7 @@ for ii=1:length(results)
     yVals = results(ii).modelFit(round(size(results(ii).source,1)/2),:)/maxVal;
     plot(yVals,['-',channelOrder{ii}],'LineWidth',2);
 end
-title('Normalized image intensity along horiontal center')
+title('Normalized image intensity along horizontal center')
 ylabel('image intensity relative to max')
 xlabel('horizontal pixel position')
 
@@ -184,44 +184,36 @@ avgImageByChannel = {avg_R,avg_G,avg_B};
 end
 
 
-% A flattened Gaussian that fits our spatial intensity variation well
-function [pFit, hotspot_fit, residual, X, Y] = fitFlattenedGaussian(I)
+% Fits an unconstrained thin-plate smoothing spline to the spatial envelope
+function [pFit, hotspot_fit, residual, X, Y] = fitThinPlateSurface(I)
 
 [H, W] = size(I);
 [X, Y] = meshgrid(1:W, 1:H);
 
-baseline0 = min(I(:));
-amp0 = max(I(:)) - min(I(:));
+% First, apply a mild Gaussian blur to the raw intensity data. 
+% This suppresses high-frequency, pixel-to-pixel shot noise so that 
+% the subsequent spline fits the true macroscopic spatial envelope.
+% 'replicate' padding prevents the edges from incorrectly curving downward.
+I_smooth = imgaussfilt(I, 4, 'Padding', 'replicate');
 
-[~, maxIdx] = max(I(:));
-[y0_guess, x0_guess] = ind2sub(size(I), maxIdx);
+% Extract control points (knots) uniformly across the image. 
+% A skip of 8 leaves ~4800 knots. This dense grid provides massive geometric 
+% flexibility to capture annular ripples and localized edge drop-offs, 
+% utilizing the allowance for increased matrix computation time.
+skip = 8;
+X_knot = X(1:skip:end, 1:skip:end);
+Y_knot = Y(1:skip:end, 1:skip:end);
+I_knot = I_smooth(1:skip:end, 1:skip:end);
 
-sigma0 = min(H,W) / 3;
-k0 = 1;
+% Fit a Thin-Plate Spline interpolant through the control knots.
+% This behaves as an unconstrained physical bending sheet, naturally 
+% minimizing bending energy without imposing global parametric equations.
+fitType = 'thinplateinterp';
+[pFit, ~] = fit([X_knot(:), Y_knot(:)], I_knot(:), fitType, 'Normalize', 'on');
 
-flatGauss2D = @(p, x, y) ...
-    p(1) + p(2) .* tanh( ...
-    p(7) .* exp( ...
-    -((x - p(3)).^2 ./ (2*p(5)^2) + ...
-    (y - p(4)).^2 ./ (2*p(6)^2)) ) );
+% Evaluate the thin-plate surface over the full, original high-resolution pixel grid
+hotspot_fit = pFit(X, Y);
 
-modelFun = @(p, xy) flatGauss2D(p, xy(:,1), xy(:,2));
-
-xy = [X(:), Y(:)];
-z = I(:);
-
-p0 = [baseline0, amp0, x0_guess, y0_guess, sigma0, sigma0, k0];
-
-lb = [0, 0, 1, 1, 10, 10, 0.01];
-ub = [Inf, Inf, W, H, W, H, 100];
-
-opts = optimoptions('lsqcurvefit', ...
-    'Display','off', ...
-    'MaxFunctionEvaluations', 5000);
-
-pFit = lsqcurvefit(modelFun, p0, xy, z, lb, ub, opts);
-
-hotspot_fit = reshape(modelFun(pFit, xy), H, W);
 residual = I - hotspot_fit;
 
 end

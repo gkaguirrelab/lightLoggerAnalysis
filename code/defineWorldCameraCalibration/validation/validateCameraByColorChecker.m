@@ -97,6 +97,18 @@ cornerSets{6} = [
     184.9518  351.0648
     ];
 
+% Define standard sRGB reference colors for the 24 Macbeth patches (4x6 layout)
+macbethRGB = zeros(nRows, nColumns, 3);
+macbethRGB(1,:,:) = [115,82,68; 194,150,130; 98,122,157; 87,108,67; 133,128,177; 103,189,170]; % Row 1
+macbethRGB(2,:,:) = [214,126,44; 80,91,166; 193,90,99; 94,60,108; 157,188,64; 224,163,46];    % Row 2
+macbethRGB(3,:,:) = [56,61,150; 70,148,73; 175,54,60; 231,199,31; 187,86,149; 8,133,161];     % Row 3
+macbethRGB(4,:,:) = [243,243,242; 200,200,200; 160,160,160; 122,122,121; 85,85,85; 52,52,52]; % Row 4 (Neutrals)
+macbethRGB = macbethRGB / 255; % Normalize to [0, 1] for MATLAB plots
+
+% Initialize storage arrays for the aggregate plot across all validation sets
+allPredMean = cell(length(plotOrder), 1);
+allMeasMean = cell(length(plotOrder), 1);
+
 %% Loop over the validation sets
 
 for vv = 1:length(plotOrder)
@@ -325,14 +337,10 @@ for vv = 1:length(plotOrder)
 
     predMean = mean(predictedRGBRadiance, 3);
     measMean = mean(measuredRGBRadiance, 3);
-
-    % Define standard sRGB reference colors for the 24 Macbeth patches (4x6 layout)
-    macbethRGB = zeros(nRows, nColumns, 3);
-    macbethRGB(1,:,:) = [115,82,68; 194,150,130; 98,122,157; 87,108,67; 133,128,177; 103,189,170]; % Row 1
-    macbethRGB(2,:,:) = [214,126,44; 80,91,166; 193,90,99; 94,60,108; 157,188,64; 224,163,46];    % Row 2
-    macbethRGB(3,:,:) = [56,61,150; 70,148,73; 175,54,60; 231,199,31; 187,86,149; 8,133,161];     % Row 3
-    macbethRGB(4,:,:) = [243,243,242; 200,200,200; 160,160,160; 122,122,121; 85,85,85; 52,52,52]; % Row 4 (Neutrals)
-    macbethRGB = macbethRGB / 255; % Normalize to [0, 1] for MATLAB plots
+    
+    % Store the current predictions and measurements for the final aggregate plot
+    allPredMean{vv} = predMean;
+    allMeasMean{vv} = measMean;
 
     for r = 1:nRows
         for c = 1:nColumns
@@ -422,3 +430,73 @@ for vv = 1:length(plotOrder)
     fprintf('Saved figure to: %s\n', fullSavePath);
 
 end % loop over valSetOptions
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% AGGREGATE PLOT: ALL VALIDATION SETS
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+figure('Name', 'All Validation Sets - Integrated Radiance', ...
+    'WindowStyle', 'Docked', ...
+    'Position', [50, 50, 600, 600]);
+hold on;
+
+% Define distinct marker symbols for the different validation sets
+markers = {'o', 's', '^', 'd', 'v', 'p'};
+maxValMeanAgg = 0;
+minValMeanAgg = inf;
+
+for vv = 1:length(plotOrder)
+    pMean = allPredMean{vv};
+    mMean = allMeasMean{vv};
+    
+    % Update absolute max and min for the axis limits
+    maxValMeanAgg = max([maxValMeanAgg; pMean(:); mMean(:)]);
+    minValMeanAgg = min([minValMeanAgg; pMean(:); mMean(:); 0]);
+
+    for r = 1:nRows
+        for c = 1:nColumns
+            patchColor = squeeze(macbethRGB(r, c, :))';
+            scatter(pMean(r, c), mMean(r, c), 85, patchColor, 'filled', ...
+                'Marker', markers{vv}, 'MarkerEdgeColor', 'k', 'LineWidth', 0.5);
+        end
+    end
+end
+
+% Expand the max limit slightly for visual padding
+maxValMeanAgg = maxValMeanAgg * 1.05;
+
+% 1:1 identity line
+plot([minValMeanAgg, maxValMeanAgg], [minValMeanAgg, maxValMeanAgg], 'k--', 'LineWidth', 1.5, 'HandleVisibility', 'off');
+
+axis square;
+xlim([minValMeanAgg, maxValMeanAgg]);
+ylim([minValMeanAgg, maxValMeanAgg]);
+xlabel('via PR670 [W/m2/sr]');
+ylabel('via IMX219 [W/m2/sr]');
+title('Integrated Radiance (All Validation Sets)');
+a = gca();
+a.XTick = a.YTick;
+grid on;
+box on;
+
+% Create custom handles to generate a legend for the marker types
+dummyPlots = gobjects(length(plotOrder), 1);
+legendLabels = cell(length(plotOrder), 1);
+for vv = 1:length(plotOrder)
+    valIdx = plotOrder(vv);
+    % Plot invisible points mapped to the marker types
+    dummyPlots(vv) = scatter(NaN, NaN, 85, [0.5 0.5 0.5], 'filled', ...
+        'Marker', markers{vv}, 'MarkerEdgeColor', 'k');
+    legendLabels{vv} = sprintf('%s %s', valSetOptions{valIdx}, valNumOptions{valIdx});
+end
+legend(dummyPlots, legendLabels, 'Location', 'best');
+
+hold off;
+drawnow;
+
+% Save aggregate figure
+fileNameAgg = 'Validation_All_Sets_Integrated_Radiance.pdf';
+fullSavePathAgg = fullfile(saveDir, fileNameAgg);
+exportgraphics(gcf, fullSavePathAgg, 'ContentType', 'vector');
+fprintf('Saved aggregate figure to: %s\n', fullSavePathAgg);

@@ -2,8 +2,8 @@
 clear
 
 % Pick a measurement
-measurementName = 'outdoor_AGCandMS_01.mat';
-%measurementName = 'planetarium_AGCandMS_01.mat';
+%measurementName = 'indoor_AGCandMS_02.mat';
+measurementName = 'planetarium_AGCandMS_01.mat';
 %measurementName = 'macbeth_AGCandMS_01.mat';
 
 % Load the data
@@ -31,7 +31,10 @@ fprintf('done.\n')
 % Obtain the cone isomerization map
 isomerizationMap = computeConeIsomerizationMap(radianceMapDemosaiced, coneMapVar);
 
-% Show the final, demosaiced image
+% Obtain the Linear Opponent post receptoral map
+postRecepMap = computePostRecepExcitation(isomerizationMap);
+
+% Show the final, demosaiced images
 figure
 tiledlayout(1,2,'Padding','tight','TileSpacing','compact')
 nexttile
@@ -45,11 +48,11 @@ axis equal
 title('log10 radiance');
 
 nexttile
-logImage = log10(isomerizationMap);
-logImage = logImage-min(logImage(:));
-logImage = logImage/max(logImage(:));
-imagesc(logImage)
+surf(postRecepMap(:,:,1),'FaceColor','k','FaceAlpha',0.5,'EdgeColor','none');
+hold on
+surf(postRecepMap(:,:,2),'FaceColor','r','FaceAlpha',0.5,'EdgeColor','none');
+surf(postRecepMap(:,:,3),'FaceColor','b','FaceAlpha',0.5,'EdgeColor','none');
 box off
-axis off
-axis equal
-title('log10 isomerization rate');
+view([-160,20])
+zlabel('Pooled isomerization rate [R^*/c/s]');
+title('Post-receptoral channels');
