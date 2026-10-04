@@ -2,9 +2,9 @@
 clear
 
 % Pick a measurement
-measurementName = 'outdoor_AGCandMS_01.mat';
-%measurementName = 'planetarium_AGCandMS_01.mat';
-%measurementName = 'macbeth_AGCandMS_01.mat';
+%measurementName = 'indoor_AGCandMS_03.mat';
+measurementName = 'planetarium_AGCandMS_01.mat';
+%measurementName = 'macbeth_AGCandMS_02.mat';
 
 % Load the data
 fileName = fullfile(...

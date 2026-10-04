@@ -54,11 +54,11 @@ for ss = 1:nStages
         G = normI;
         B = normI;
 
-        isZeros = (I == 0);
+        isFloor = (I <= 0);
 
         % Color inf points red [1, 0, 0] and zeros blue [0, 0, 1]
         R(isinfI) = 1;   G(isinfI) = 0;   B(isinfI) = 0;
-        R(isZeros) = 0;  G(isZeros) = 0;  B(isZeros) = 1;
+        R(isFloor) = 0;  G(isFloor) = 0;  B(isFloor) = 1;
 
         RGB = cat(3, R, G, B);
 
@@ -146,7 +146,7 @@ for ss = 1:nStages
     % Add min and max text to the upper left corner
     textStr = {sprintf('min = [%d, %d, %d]', minVals(1), minVals(2), minVals(3)), ...
         sprintf('max = [%d, %d, %d]', maxVals(1), maxVals(2), maxVals(3)),...
-        sprintf('ceil, floor = [%d, %d]', nInf, sum(I(:) == 0))};
+        sprintf('ceil, floor = [%d, %d]', nInf, sum(I(:) <= 0))};
     text(0.25, 0.95, textStr, 'Units', 'normalized', 'VerticalAlignment', 'top', 'FontSize', 8);
 
     if ss == 1

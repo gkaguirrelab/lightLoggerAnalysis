@@ -441,6 +441,9 @@ figure('Name', 'All Validation Sets - Integrated Radiance', ...
     'Position', [50, 50, 600, 600]);
 hold on;
 
+% 1:1 identity line
+plot([-4 0],[-4 0], 'k--', 'LineWidth', 1.5);
+
 % Define distinct marker symbols for the different validation sets
 markers = {'o', 's', '^', 'd', 'v', 'p'};
 maxValMeanAgg = 0;
@@ -457,26 +460,22 @@ for vv = 1:length(plotOrder)
     for r = 1:nRows
         for c = 1:nColumns
             patchColor = squeeze(macbethRGB(r, c, :))';
-            scatter(pMean(r, c), mMean(r, c), 85, patchColor, 'filled', ...
+            scatter(log10(pMean(r, c)), log10(mMean(r, c)), 85, patchColor, 'filled', ...
                 'Marker', markers{vv}, 'MarkerEdgeColor', 'k', 'LineWidth', 0.5);
         end
     end
 end
 
-% Expand the max limit slightly for visual padding
-maxValMeanAgg = maxValMeanAgg * 1.05;
-
-% 1:1 identity line
-plot([minValMeanAgg, maxValMeanAgg], [minValMeanAgg, maxValMeanAgg], 'k--', 'LineWidth', 1.5, 'HandleVisibility', 'off');
 
 axis square;
-xlim([minValMeanAgg, maxValMeanAgg]);
-ylim([minValMeanAgg, maxValMeanAgg]);
-xlabel('via PR670 [W/m2/sr]');
-ylabel('via IMX219 [W/m2/sr]');
-title('Integrated Radiance (All Validation Sets)');
+xlim([-4 0]);
+ylim([-4 0]);
+xlabel('via PR670 [log10 W/m2/sr]');
+ylabel('via IMX219 [log10 W/m2/sr]');
+title('Integrated radiance');
 a = gca();
 a.XTick = a.YTick;
+a.TickDir = 'out';
 grid on;
 box on;
 
@@ -488,9 +487,20 @@ for vv = 1:length(plotOrder)
     % Plot invisible points mapped to the marker types
     dummyPlots(vv) = scatter(NaN, NaN, 85, [0.5 0.5 0.5], 'filled', ...
         'Marker', markers{vv}, 'MarkerEdgeColor', 'k');
-    legendLabels{vv} = sprintf('%s %s', valSetOptions{valIdx}, valNumOptions{valIdx});
+
+    switch valSetOptions{valIdx}
+        case 'indoor'
+            setting = 'in';
+        case 'outdoor'
+            setting = 'out';
+    end
+
+    % Update legend label to include environment and gains, excluding the index number
+    legendLabels{vv} = sprintf('%s, A: %2.2f, D: %2.2f', ...
+        setting, AgainStore(vv), DgainStore(vv));
 end
-legend(dummyPlots, legendLabels, 'Location', 'best');
+legend(dummyPlots, legendLabels, 'Location','southeast');
+
 
 hold off;
 drawnow;
