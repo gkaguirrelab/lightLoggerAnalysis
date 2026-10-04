@@ -28,8 +28,6 @@ if isempty(unitDirections)
         tbLocateProjectSilent('lightLoggerAnalysis'),...
         'derived',...
         'deltaSteradians.mat');
-
-    % Note: ensure defineDeltaSteradians saves 'unitDirections'
     load(mapFileName, 'unitDirections');
 end
 
@@ -46,14 +44,14 @@ el = deg2rad(options.fixationElevation);
 fixationVector = [cos(el)*sin(az), -sin(el), cos(el)*cos(az)];
 fixationVector = reshape(fixationVector, 1, 1, 3);
 
-% The dot product of the unit directions and the fixation vector yields the cosine
-% of the angular distance (eccentricity) from the fovea
+% The dot product of the unit directions and the fixation vector yields the
+% cosine of the angular distance (eccentricity) from the fovea
 dotProducts = sum(unitDirections .* fixationVector, 3);
 dotProducts = min(max(dotProducts, -1), 1); % Clamp to prevent acos precision errors
 dynamicEccMap = rad2deg(acos(dotProducts));
 
-% 3. Interpolate the 3x3 matrices from the 1D LUT
-% This maps the HxW dynamic eccentricities into an (H*W) x 9 matrix
+% Interpolate the 3x3 matrices from the 1D LUT. This maps the HxW dynamic
+% eccentricities into an (H*W) x 9 matrix
 T_flat = interp1(coneMapVar.eccGrid, coneMapVar.transformTable, dynamicEccMap(:), 'linear', 'extrap');
 
 % Reshape back into the H x W x 3 x 3 spatial matrix format

@@ -5,10 +5,11 @@ nStages = length(imageStages);
 
 % Stage labels (we may or may not have the source, depending upon whether
 % we are working with actual data or a simulation)
-stages = {'raw','linear','impute','flat','equalRGB','radiance','source'};
+stages = {'raw','linear','impute','flat','equalRGB','radiance','receptoral'};
 
 % Plot colors for the histograms
 channelColor = {'r','g','b'};
+recepColor = {'k','r','b'};
 
 fig = figure;
 
@@ -137,7 +138,7 @@ for ss = 1:nStages
             N = histcounts(vec, edges);
             N = N ./ numel(I(:,:,cc));
 
-            plot(edges(1:end-1)*100, N*100, ['.-' channelColor{cc}]);
+            plot(edges(1:end-1)*100, N*100, ['.-' recepColor{cc}]);
             hold on
         end
     end

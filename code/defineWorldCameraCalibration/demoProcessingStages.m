@@ -2,7 +2,7 @@
 clear
 
 % Pick a measurement
-%measurementName = 'indoor_AGCandMS_02.mat';
+%measurementName = 'outdoor_AGCandMS_01.mat';
 measurementName = 'planetarium_AGCandMS_01.mat';
 %measurementName = 'macbeth_AGCandMS_01.mat';
 
@@ -17,9 +17,6 @@ load(fileName,'worldFrame','AGCSettings','minispectValue')
 % Reconstruct the radiance image
 [radianceMap,imageStages] = reconstructionPipeline(worldFrame,AGCSettings);
 
-% Display the reconstruction
-plotReconstructionStages(imageStages)
-
 % Obtain the demosaiced image
 radianceMapDemosaiced = demosaicRadianceMap(imageStages{end});
 
@@ -33,6 +30,10 @@ isomerizationMap = computeConeIsomerizationMap(radianceMapDemosaiced, coneMapVar
 
 % Obtain the Linear Opponent post receptoral map
 postRecepMap = computePostRecepExcitation(isomerizationMap);
+
+% Display the reconstruction
+imageStages{end+1}=postRecepMap;
+plotReconstructionStages(imageStages)
 
 % Show the final, demosaiced images
 figure
@@ -53,6 +54,8 @@ hold on
 surf(postRecepMap(:,:,2),'FaceColor','r','FaceAlpha',0.5,'EdgeColor','none');
 surf(postRecepMap(:,:,3),'FaceColor','b','FaceAlpha',0.5,'EdgeColor','none');
 box off
+a = gca();
+a.XDir ="reverse";
 view([-160,20])
-zlabel('Pooled isomerization rate [R^*/c/s]');
+zlabel('log pooled isomerization rate [R^*/c/s]');
 title('Post-receptoral channels');
