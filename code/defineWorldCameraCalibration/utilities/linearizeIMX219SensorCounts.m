@@ -16,21 +16,23 @@ if isempty(darkSignal)
         'darkSignal.mat');
     load(paramFileName,'darkSignal');
 end
-Smin = darkSignal;
 
-% Define the fixed asymptotic value
+% Definitions
+Smin = darkSignal;
 Smax = 2^8-1 - Smin;
 
-% Force all image pixels to above the min value
-y(y<Smin) = Smin;
+% First steps
+y = double(y) + 0.375;
+yPrime = y - darkSignal;
 
-% Subtract the baseline offset
-yPrime = y - Smin;
+% Use a non-negative version strictly for the asymptotic gain nonlinearity 
+% to avoid complex numbers from fractional powers of negative numbers, 
+% while allowing yPrime to retain signed values.
+yPrimeNonlinear = max(0, yPrime);
+asymptoticGain = 1 ./ (1 - (yPrimeNonlinear ./ Smax).^n).^(1./n);
 
-% Calculate and return the unclipped, unbounded linear portion (a * x)
-% Note: Input values corresponding precisely to maximum full-well capacity 
-% will natively evaluate to Inf, preserving physical magnitude assumptions 
-% for saturated pixels.
-yLinear = yPrime ./ (1 - (yPrime ./ Smax).^n).^(1./n);
+% Apply asymptotic gain to the signed linear signal
+yLinear = yPrime .* asymptoticGain;
+
 
 end
