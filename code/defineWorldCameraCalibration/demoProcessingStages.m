@@ -4,7 +4,7 @@ clear
 % Pick a measurement
 measurementName = 'outdoor_AGCandMS_01.mat';
 %measurementName = 'planetarium_AGCandMS_01.mat';
-%measurementName = 'macbeth_AGCandMS_03.mat';
+%measurementName = 'macbeth_AGCandMS_01.mat';
 
 % Load the data
 fileName = fullfile(...
@@ -20,10 +20,6 @@ load(fileName,'worldFrame','AGCSettings','minispectValue')
 % Obtain the demosaiced image
 radianceMapDemosaiced = demosaicRadianceMap(imageStages{end});
 
-% radianceMapDemosaiced(:,:,1) = 1.1;
-% radianceMapDemosaiced(:,:,2) = 1.2;
-% radianceMapDemosaiced(:,:,3) = 1.3;
-
 % Obtain the cone isomerization map, which is in units of R*/deg^2/s. We
 % pass the current fixation location (in terms of image pixel) and pupil
 % size to be used in this calculation
@@ -35,8 +31,8 @@ pupilDiameterMm = 3.0;
     'gazeY', gazeY, ...
     'pupilDiameterMm', pupilDiameterMm);
 
-% Obtain the Linear Opponent post receptoral map
-[postRecepMap,weights] = computePostRecepExcitation(isomerizationMap,'balanceNeutral',true);
+% Obtain the Linear Opponent post-receptoral map
+[postRecepMap,weights] = computePostRecepExcitation(isomerizationMap,'balanceNeutral',false);
 
 % Display the reconstruction
 plotReconstructionStages(imageStages)
@@ -44,15 +40,12 @@ plotReconstructionStages(imageStages)
 % Show postRecepMap channels
 faceColors = {'k','r','b'};
 figure
-tiledlayout(1,3,'Padding','tight','TileSpacing','compact')
 for cc = 1:3
-    nexttile
-    imagesc(isomerizationMap(:,:,cc));
-    surf(AzGrid,ElGrid,postRecepMap(:,:,cc),'FaceColor',faceColors{cc});
-    % colorbar   
-    % box off
-    % axis off
-    % axis equal
-%zlabel('pooled opponent isomerization rate [R^*/deg^2/s]');
+    surf(AzGrid,ElGrid,postRecepMap(:,:,cc),'FaceColor',faceColors{cc},'FaceAlpha',0.5);
+    hold on
+    zlabel('pooled opponent isomerization rate [R^*/deg^2/s]');
 end
+xlim([-100 100]);
+ylim([-50 50]);
+pbaspect([2 1 1])
 title('Post-receptoral channels');

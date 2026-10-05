@@ -20,8 +20,8 @@ arguments
     isomerizationMap (:,:,3) double
     options.balanceNeutral (1,1) logical = false
     options.wL_eff (1,1) double = 1
-    options.wM_eff (1,1) double = 1.33
-    options.wS_eff (1,1) double = 15
+    options.wM_eff (1,1) double = 3
+    options.wS_eff (1,1) double = 90
 end
 
 % Extract the individual cone class maps

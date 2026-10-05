@@ -51,10 +51,13 @@ sensorPoints = [xCoordinates(:), yCoordinates(:)];
 visualAngles = anglesFromIntrinsics(sensorPoints, fisheyeIntrinsics);
 visualAngles = reshape(visualAngles, rows, columns, 2);
 
+% Extract native azimuth and elevation maps directly in degrees
+nativeAzimuthMap = visualAngles(:, :, 1);
+nativeElevationMap = visualAngles(:, :, 2);
+
 % Match world_frame_visual_angle_to_steradians in world_util.py exactly.
-% The final visual-angle dimension is [azimuth, elevation], in degrees.
-azimuth = deg2rad(visualAngles(:, :, 1));
-elevation = deg2rad(visualAngles(:, :, 2));
+azimuth = deg2rad(nativeAzimuthMap);
+elevation = deg2rad(nativeElevationMap);
 cosElevation = cos(elevation);
 unitDirections = cat(3, ...
     cosElevation .* sin(azimuth), ...
@@ -108,9 +111,6 @@ colorbar
 axis equal
 title('Steradians per pixel')
 
-% Report the coordinates of the optical center
-opticalCenter = fisheyeIntrinsics.PrincipalPoint;
-
 % Show the eccentricity map
 figure
 imagesc(eccentricityMap);
@@ -127,14 +127,15 @@ readme = sprintf([ ...
     'eccentricityMap -- 480-by-640 visual field eccentricity from optical center, ' ...
     'in degrees.\n' ...
     'unitDirections  -- 480-by-640-by-3 unit viewing vectors.\n' ...
-    'opticalCenter -- the x and y pixel coordinates of the optical center of the image.\n' ...
+    'nativeAzimuthMap -- 480-by-640 azimuth angles, in degrees.\n' ...
+    'nativeElevationMap -- 480-by-640 elevation angles, in degrees.\n' ...
     'The arrays are aligned with raw world-camera [row, column] coordinates.\n' ...
     'Summed pixel solid angle: %.12g sr.\n' ...
     'Independently integrated field of view: %.12g sr.\n'], ...
     summedPixelSteradians, integratedFieldOfViewSteradians);
 
-% Added unitDirections to the saved variables
-save(saveFileName,'readme','deltaSteradians','eccentricityMap','unitDirections','opticalCenter');
+% Added nativeAzimuthMap and nativeElevationMap to the saved variables
+save(saveFileName,'readme','deltaSteradians','eccentricityMap','unitDirections','nativeAzimuthMap', 'nativeElevationMap');
 
 
 

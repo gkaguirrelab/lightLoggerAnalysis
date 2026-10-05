@@ -32,6 +32,18 @@ else
 end
 lens.density = ageScalar;
 
+% --- NEW ADDITION: Instantiate continuous Macular and PhotoPigment objects ---
+% Bypassing discrete cMosaic spatial generation eliminates lattice noise 
+% and drastically improves execution speed.
+suppressedText = evalc('dummyCm = cMosaic(''sizeDegs'', [0.1 0.1], ''wave'', wlsSensor);');
+macularObj = dummyCm.macular;
+pigmentObj = dummyCm.pigment;
+
+% Cache the baseline foveal densities to scale inside the loop
+baseMacularDensity = macularObj.density;
+basePigmentOpticalDensity = pigmentObj.opticalDensity;
+% -----------------------------------------------------------------------------
+
 % Pre-calculate constants for photon conversion
 h = 6.626e-34; % Planck's constant (J*s)
 c = 2.998e8;   % Speed of light (m/s)
@@ -47,20 +59,12 @@ pinvCamSens = pinv(camSens');
 % Create a 1D grid of eccentricities out to the edges of the visual field
 eccGrid = 0:0.25:120;
 transformTable = zeros(length(eccGrid), 9);
-densityTable = zeros(length(eccGrid), 3); % NEW: Store L, M, S cone densities
+densityTable = zeros(length(eccGrid), 3); % Store L, M, S cone densities
 
 % Loop over scalar eccentricities to build the LUT
 for ii = 1:length(eccGrid)
     ecc = eccGrid(ii);
-
-    % Clamp eccentricity safely within the 29-degree radius of the 58-deg FOV lattice
-    safeEcc = min(ecc, 28);
-
-    % Instantiate minimal cMosaic to retrieve macular pigment and outer segment properties
-    % Evaluate on the VERTICAL meridian [0 safeEcc] instead of horizontal 
-    % to bypass the optic disk (blind spot) located at 12-18 degrees horizontally.
-    suppressedText = evalc('cm = cMosaic(''eccentricityDegs'', [0 safeEcc], ''sizeDegs'', [0.2 0.2], ''wave'', wlsSensor);');
-
+    
     % Clamp eccentricity for the anatomical query to 60 degrees (approx 18mm) 
     % to stay safely within the bounds of the empirical dataset.
     safeEccAperture = min(ecc, 60);
@@ -90,15 +94,25 @@ for ii = 1:length(eccGrid)
     densityTable(ii, 2) = coneDensitySqDeg * mFraction; % M-cone
     densityTable(ii, 3) = coneDensitySqDeg * sFraction; % S-cone
 
+    % --- MODIFIED: Analytically scale optical properties ---
+    % Scale macular pigment density using standard exponential decay against true ecc
+    macularObj.density = baseMacularDensity .* exp(-ecc / 2.0);
+    
+    % Photopigment optical density remains at its baseline foveal value.
+    % Because cone aperture and density are inversely related, holding this 
+    % constant yields the expected flat isomerization rate across the retina.
+    pigmentObj.opticalDensity = basePigmentOpticalDensity;
+    % -----------------------------------------------------------
+
     % Recalculate radiometric scalar for this eccentricity
     radiometricScalar = (pupilAreaM2 / focalLengthM^2) * coneApertureM2;
 
-    % Base LMS absorptance (inherently includes eccentricity-scaled optical density)
-    baseLMS = diag(lens.transmittance) * cm.pigment.absorptance;
+    % Base LMS absorptance (inherently includes constant optical density)
+    baseLMS = diag(lens.transmittance) * pigmentObj.absorptance;
     baseLMS = diag(energyToQuanta) * baseLMS .* radiometricScalar;
 
     % Effective LMS sensitivities at this eccentricity 
-    effectiveLMS = diag(cm.macular.transmittance) * baseLMS;
+    effectiveLMS = diag(macularObj.transmittance) * baseLMS;
 
     % Calculate 3x3 transformation matrix from Camera RGB to LMS rates
     T_mat = effectiveLMS' * pinvCamSens;
