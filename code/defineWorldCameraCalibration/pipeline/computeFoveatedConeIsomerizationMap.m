@@ -12,10 +12,11 @@ arguments
     integratedRadianceMap (:,:,3) double
     options.gazeX (1,1) double = NaN
     options.gazeY (1,1) double = NaN
+    options.observerAge (1,1) double = 25
     options.pupilDiameterMm (1,1) double = 3.0
     options.azimuthGrid (1,:) double = -90:0.5:90
     options.elevationGrid (1,:) double = -90:0.5:90
-    options.fovealTritanopiaFlag (1,1) logical = false;
+    options.fovealTritanopiaFlag (1,1) logical = false
 end
 
 persistent nativeAzimuthMap nativeElevationMap coneMapVar F_interp
@@ -42,6 +43,12 @@ if isempty(coneMapVar)
     load(mapFileName, 'coneMapVar');
 end
 
+% Get the age-specific coneMapVar
+thisConeMapVar = coneMapVar(options.observerAge);
+if isempty(thisConeMapVar.observerAge)
+    error('computeFoveatedConeIsomerizationMap: Subject age not defined for the coneMapVar');
+end
+
 % Get the image dimensions
 [H_native, W_native, ~] = size(integratedRadianceMap);
 
@@ -54,7 +61,7 @@ if isnan(options.gazeY)
 end
 
 % Establish the pupil area scalar relative to the canonical mapping base
-pupilScalar = (options.pupilDiameterMm / coneMapVar.basePupilDiameterMm)^2;
+pupilScalar = (options.pupilDiameterMm / thisConeMapVar.basePupilDiameterMm)^2;
 
 % Constrain the gaze coordinates within the image bounds
 gx = max(1, min(W_native, options.gazeX));
@@ -89,8 +96,7 @@ validCoverageMask = ~isnan(resampledRadiance(:,:,1));
 % Temporarily set NaNs to 0 to prevent propagation errors during matrix math
 resampledRadiance(isnan(resampledRadiance)) = 0;
 
-% Convert the ABSOLUTE query angles into 3D unit vectors to reflect camera
-% geometry
+% Convert the query angles into 3D unit vectors to reflect camera geometry
 gridUnitDirs_1 = cosd(QueryEl) .* sind(QueryAz);
 gridUnitDirs_2 = -sind(QueryEl);
 gridUnitDirs_3 = cosd(QueryEl) .* cosd(QueryAz);
@@ -107,7 +113,7 @@ dynamicEccMap = rad2deg(acos(dotProducts));
 
 % Interpolate the 3x3 matrices from the 1D LUT. This maps the dynamic
 % eccentricities into an (outH*outW) x 9 matrix
-T_flat = interp1(coneMapVar.eccGrid, coneMapVar.transformTable, dynamicEccMap(:), 'linear', 'extrap');
+T_flat = interp1(thisConeMapVar.eccGrid, thisConeMapVar.transformTable, dynamicEccMap(:), 'linear', 'extrap');
 
 % Reshape back into the spatial matrix format matching the new grid
 T_map = reshape(T_flat, outH, outW, 3, 3);
@@ -137,7 +143,7 @@ isomerizationMap(:,:,3) = isomerizationMap(:,:,3) .* sConeMask;
 end
 
 % Interpolate the spatial cone density map (cones/degree^2)
-densityFlat = interp1(coneMapVar.eccGrid, coneMapVar.densityTable, dynamicEccMap(:), 'linear', 'extrap');
+densityFlat = interp1(thisConeMapVar.eccGrid, thisConeMapVar.densityTable, dynamicEccMap(:), 'linear', 'extrap');
 densityMap = reshape(densityFlat, outH, outW, 3);
 
 % Multiply: (R*/cone/sec) * (cones/deg^2) = (R*/deg^2/sec)
