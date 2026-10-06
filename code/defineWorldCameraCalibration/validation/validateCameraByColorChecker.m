@@ -39,11 +39,11 @@ if ~exist(saveDir, 'dir')
 end
 
 % Indoor or outdoor data set?
-valSetOptions = {'indoor','indoor','indoor','outdoor','outdoor','outdoor'};
-valNumOptions = {'1','2','3','1','2','3'};
+valSetOptions = {'indoor','indoor','indoor','outdoor','outdoor','outdoor','outdoor'};
+valNumOptions = {'1','2','3','1','2','3','4'};
 
 % Plot the measurements in order of decreasing irradiance
-plotOrder = [4,5,1,2,6,3];
+plotOrder = [7,4,5,1,2,6,3];
 
 % Define the common wavelength domain (380 to 730 nm with 1 nm spacing) for
 % this analysis
@@ -97,6 +97,13 @@ cornerSets{6} = [
     184.9518  351.0648
     ];
 
+cornerSets{7} = [
+    170.4089	237.5856
+    388.9882	218.3506
+    400.6457	353.5783
+    176.8206	389.7168
+    ];
+
 % Define standard sRGB reference colors for the 24 Macbeth patches (4x6 layout)
 macbethRGB = zeros(nRows, nColumns, 3);
 macbethRGB(1,:,:) = [115,82,68; 194,150,130; 98,122,157; 87,108,67; 133,128,177; 103,189,170]; % Row 1
@@ -111,7 +118,7 @@ allMeasMean = cell(length(plotOrder), 1);
 
 %% Loop over the validation sets
 
-for vv = 1:length(plotOrder)
+for vv = 1:1 %length(plotOrder)
 
     valIdx = plotOrder(vv);
 
