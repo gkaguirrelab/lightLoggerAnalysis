@@ -771,7 +771,7 @@ def find_nearest_neighbor(
 
     Raises:
         ValueError: If the requested timestamp or sensor selection is invalid,
-            or if paired metadata and value chunks have inconsistent lengths.
+            or if the selected metadata/value pair is unreadable or has inconsistent lengths.
         FileNotFoundError: If the recording or requested sensor chunks do not
             exist.
     """
@@ -820,17 +820,6 @@ def find_nearest_neighbor(
             # loading the complete image/minispect chunk into RAM.
             metadata = np.load(metadata_path, mmap_mode="r")
             timestamps = _timestamps_in_seconds(metadata, sensor)
-            values = np.load(value_path, mmap_mode="r")
-
-            # Metadata row i must describe value i. Continuing with mismatched
-            # files could silently return the wrong frame or minispect packet.
-            if(len(timestamps) != len(values)):
-                raise ValueError(
-                    f"Metadata/value length mismatch for {sensor}: "
-                    f"{metadata_path} has {len(timestamps)} rows while "
-                    f"{value_path} has {len(values)} values."
-                )
-
             # A recording can have an empty terminal chunk, but every stored
             # timestamp row is expected to contain a valid finite timestamp.
             if(timestamps.size == 0):
@@ -864,7 +853,22 @@ def find_nearest_neighbor(
 
         # Now that the winning row is known, copy just that value out of its
         # memory map so it can be returned or parsed independently.
-        selected_values = np.load(best_value_path, mmap_mode="r")
+        try:
+            selected_values = np.load(best_value_path, mmap_mode="r")
+        except ValueError as exc:
+            raise ValueError(
+                f"Cannot read selected {sensor} sample at {best_timestamp} seconds "
+                f"from {best_value_path}: {exc}. No alternative sample was substituted."
+            ) from exc
+        selected_metadata = np.load(best_metadata_path, mmap_mode="r")
+        # Validate the selected pair only. Unrelated incomplete image chunks
+        # must not prevent retrieval of an intact selected frame.
+        if len(selected_metadata) != len(selected_values):
+            raise ValueError(
+                f"Metadata/value length mismatch for {sensor}: "
+                f"{best_metadata_path} has {len(selected_metadata)} rows while "
+                f"{best_value_path} has {len(selected_values)} values."
+            )
         selected_value = np.asarray(selected_values[best_local_index]).copy()
         sensor_result: dict[str, object] = {
             "timestamp": best_timestamp,
