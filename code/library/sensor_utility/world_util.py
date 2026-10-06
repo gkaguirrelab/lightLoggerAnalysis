@@ -1,12 +1,15 @@
 """Utility functions and constants for the world camera sensor."""
 
+from contextlib import contextmanager
+from copy import deepcopy
 from importlib import metadata
+from functools import partial, lru_cache
 import multiprocessing
+from multiprocessing.pool import Pool
 from multiprocessing.shared_memory import SharedMemory
 
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.patches import Rectangle
 import cv2
 import os 
 import sys
@@ -26,13 +29,14 @@ import scipy.io
 from scipy.interpolate import LinearNDInterpolator
 from scipy.spatial import Delaunay, QhullError, cKDTree
 from scipy.special import ndtr
+from scipy.sparse import csr_matrix
 
 # Define constants for the project root and the derived calibration dir that we will consult later
 _PROJECT_ROOT: pathlib.Path = pathlib.Path(__file__).resolve().parents[3]
 _DERIVED_CALIBRATION_DIR: pathlib.Path = _PROJECT_ROOT / "derived"
 
  
-def _load_pyagc():
+def _load_pyagc() -> object | None:
     """Locate and import the optional ``PyAGC`` dependency.
 
     The world-camera utilities can run without ``PyAGC``, but when it is
@@ -40,6 +44,9 @@ def _load_pyagc():
     ranges. This helper searches a small set of project-relative library
     locations, appends each candidate directory to ``sys.path`` if needed,
     and returns the first import that succeeds.
+
+    Args:
+        None.
 
     Returns:
         The imported ``PyAGC`` module, or ``None`` when the library is not
@@ -64,8 +71,15 @@ def _load_pyagc():
 PyAGC = _load_pyagc()
 
 
-def _load_agc_lib():
-    """Import the optional compiled AGC library through ``PyAGC``."""
+def _load_agc_lib() -> object | None:
+    """Load the optional compiled AGC library through PyAGC.
+
+    Args:
+        None.
+
+    Returns:
+        The loaded library, or None if PyAGC is absent or loading fails.
+    """
     if PyAGC is None:
         return None
 
@@ -78,8 +92,16 @@ def _load_agc_lib():
 AGC_LIB = _load_agc_lib()
 
 # Function to load in the fielding functions per dimension. Measured and saved in MATLAB.
-def _import_fielding_functions() -> dict[tuple[int], np.ndarray]:
-    fielding_functions: dict[tuple[int], np.ndarray] = {}
+def _import_fielding_functions() -> dict[tuple[int, int], np.ndarray]:
+    """Load the measured spatial correction map from the derived calibration file.
+
+    Args:
+        None.
+
+    Returns:
+        A dictionary mapping (rows, cols) to the float64 fielding map.
+    """
+    fielding_functions: dict[tuple[int, int], np.ndarray] = {}
     fielding_function = scipy.io.loadmat(
         _DERIVED_CALIBRATION_DIR / "flatFieldingFunction.mat"
     )["correctionMap"].astype(np.float64, copy=False)
@@ -87,6 +109,63 @@ def _import_fielding_functions() -> dict[tuple[int], np.ndarray]:
     fielding_functions[fielding_function.shape] = fielding_function
 
     return fielding_functions
+
+
+def generate_RGB_mask(original_frame: np.ndarray, marker: Literal["str", "num"]="str", visualize_results: bool=False) -> tuple[np.ndarray, object] | np.ndarray:
+    """Build a Bayer-pattern lookup mask for the frame geometry.
+
+    The world camera is modeled here as blue on even/even coordinates, red
+    on odd/odd coordinates, and green on the mixed-parity sites. This
+    helper converts that parity rule into a reusable 2-D mask so later code
+    can select raw Bayer samples by color without recomputing the coordinate
+    sets.
+
+    Args:
+        original_frame: Example frame whose first two dimensions define the
+            mask shape.
+        marker: Output encoding for each pixel site. ``"str"`` stores the
+            literal channel labels ``"R"``, ``"G"``, and ``"B"``; ``"num"``
+            stores the RGB channel indices ``0``, ``1``, and ``2``.
+        visualize_results: When ``True``, render a colorized depiction of
+            the Bayer layout and return it alongside the mask.
+
+    Returns:
+        A 2-D mask array, or ``(mask, figure)`` when visualization is
+        requested.
+    """
+    # Only the frame shape is needed. A BGGR tile repeats every two rows
+    # and columns, so slices fill the entire mask without coordinate lists.
+    image_shape: tuple[int, int] = original_frame.shape[:2]
+    mask: np.ndarray = np.empty(
+        image_shape, dtype="<U1" if marker == "str" else np.float64
+    )
+    red_marker: str | int = "R" if marker == "str" else 0
+    green_marker: str | int = "G" if marker == "str" else 1
+    blue_marker: str | int = "B" if marker == "str" else 2
+    mask[1::2, 1::2] = red_marker
+    mask[0::2, 1::2] = green_marker
+    mask[1::2, 0::2] = green_marker
+    mask[0::2, 0::2] = blue_marker
+
+    if(visualize_results is True):
+        # Give each Bayer site its display color using the same mask.
+        colored_image: np.ndarray = np.zeros((*image_shape, 3), dtype=np.uint8)
+        for channel_index, channel_marker in enumerate((red_marker, green_marker, blue_marker)):
+            colored_image[..., channel_index][mask == channel_marker] = 255
+
+        # Show the Bayer layout on a single axis.
+        fig, ax = plt.subplots(1, 1)
+
+        ax.imshow(colored_image)
+        ax.set_title(f"{original_frame.shape} Bayer RGB Pattern")
+        ax.axis("off")
+
+        # Show the plot
+        plt.show()
+
+        return mask, fig
+
+    return mask
 
 
 # World temporal offset relative to other sensors. The world is the target, 
@@ -279,77 +358,109 @@ for idx, pixel_indices in enumerate((WORLD_R_PIXELS, WORLD_G_PIXELS, WORLD_B_PIX
     WORLD_RGB_MASK[pixel_indices[:, 0], pixel_indices[:, 1]] = idx
 
 
-"""
-BEGIN PROCESSING PIPELINE CONSTANTS
-"""
+# Processing calibration: see code/defineWorldCameraCalibration/README.md#python-calibration-constants.
 
-WORLD_FULL_WELL_CLIPPING_EXPONENT: float = float(scipy.io.loadmat(_DERIVED_CALIBRATION_DIR / "nonLinearClippingExponent.mat")["clippingExponent"].item())
+# Sensor offset and response curve (stages 1–2).
+# Full-well response exponent; see README.md#python-calibration-constants in code/defineWorldCameraCalibration.
+WORLD_FULL_WELL_CLIPPING_EXPONENT: float = float(
+    scipy.io.loadmat(_DERIVED_CALIBRATION_DIR / "nonLinearClippingExponent.mat")["clippingExponent"].item()
+)
 
-WORLD_DARK_SIGNAL: float = float(scipy.io.loadmat(_DERIVED_CALIBRATION_DIR / "darkSignal.mat")["darkSignal"].item())
+# Dark offset in 8-bit counts; see README.md#python-calibration-constants in code/defineWorldCameraCalibration.
+WORLD_DARK_SIGNAL: float = float(
+    scipy.io.loadmat(_DERIVED_CALIBRATION_DIR / "darkSignal.mat")["darkSignal"].item()
+)
 
-WORLD_FIELDING_FUNCTIONS: dict[tuple[int], np.ndarray] = _import_fielding_functions()
+# Maximum trusted inverse-response slope; see README.md#python-calibration-constants in code/defineWorldCameraCalibration.
+WORLD_MAX_ALLOWED_LINEARIZATION_DERIVATIVE: float = 4.0
 
-WORLD_RGB_SCALARS: np.ndarray = scipy.io.loadmat(_DERIVED_CALIBRATION_DIR / "radiometricCorrectionRGB.mat")["radiometricCorrectionRGB"].astype(np.float64, copy=False).reshape(-1)
-WORLD_RADIOMETRIC_CORRECTION_MAP: np.ndarray = scipy.io.loadmat(_DERIVED_CALIBRATION_DIR / "radiometricCorrectionRGB.mat")["radiometricCorrectionMap"].astype(np.float64, copy=False)
+# Spatial and Bayer-channel corrections (stages 4–5).
+# Fielding maps indexed by frame shape; see README.md#python-calibration-constants in code/defineWorldCameraCalibration.
+WORLD_FIELDING_FUNCTIONS: dict[tuple[int, int], np.ndarray] = _import_fielding_functions()
+
+# Shared RGB calibration data loaded once; see README.md#python-calibration-constants in code/defineWorldCameraCalibration.
+WORLD_RADIOMETRIC_CALIBRATION: dict[str, object] = scipy.io.loadmat(
+    _DERIVED_CALIBRATION_DIR / "radiometricCorrectionRGB.mat"
+)
+
+# Channel weights in R, G, B order; see README.md#python-calibration-constants in code/defineWorldCameraCalibration.
+WORLD_RGB_SCALARS: np.ndarray = WORLD_RADIOMETRIC_CALIBRATION["radiometricCorrectionRGB"].astype(
+    np.float64, copy=False
+).reshape(-1)
+
+# MATLAB's full Bayer correction map; see README.md#python-calibration-constants in code/defineWorldCameraCalibration.
+WORLD_RADIOMETRIC_CORRECTION_MAP: np.ndarray = WORLD_RADIOMETRIC_CALIBRATION["radiometricCorrectionMap"].astype(
+    np.float64, copy=False
+)
 
 
-def _build_bayer_correction_matrix(image_shape: tuple[int, int]) -> np.ndarray:
-    """Build a labeled BGGR image, then fill its RGB sites with their weights."""
-    rows, cols = image_shape
-    bayer_cell = np.array([["B", "G"], ["G", "R"]])
-    bayer_image = np.tile(bayer_cell, ((rows + 1) // 2, (cols + 1) // 2))[:rows, :cols]
+def generate_bayer_correction_matrix(image_shape: tuple[int, int]) -> np.ndarray:
+    """Assign the calibrated RGB weight to each site in the existing Bayer mask.
 
-    # Locate each color in the Bayer image before assigning calibrated weights.
-    rgb_pixel_locations = [np.where(bayer_image == color) for color in "RGB"]
-    correction = np.empty(image_shape, dtype=np.float64)
-    for pixel_locations, weight in zip(rgb_pixel_locations, WORLD_RGB_SCALARS):
-        correction[pixel_locations] = weight
+    Args:
+        image_shape: Frame dimensions as ``(rows, cols)``.
+
+    Returns:
+        A read-only float64 correction map with the requested shape. Its BGGR
+        layout comes from ``generate_RGB_mask``, keeping one definition of
+        which sensor sites measure red, green, and blue.
+    """
+    # We first create an empty image that is the shape we desire 
+    frame_shape_template: np.ndarray = np.empty(image_shape, dtype=np.uint8)
+    
+    # Mark where the RGB pixels are in str format 
+    rgb_mask: np.ndarray = generate_RGB_mask(frame_shape_template, marker="str")
+
+    # Allocate a correction matrix that will store the associated weight 
+    # for each of the pixels 
+    correction: np.ndarray = np.empty(image_shape, dtype=np.float64)
+
+    # Fill in the weights into the correction image
+    for color, weight in zip("RGB", WORLD_RGB_SCALARS):
+        correction[rgb_mask == color] = weight
+
+    # Set this array to READ only so it cannot be further modified
     correction.setflags(write=False)
     return correction
 
-
-# Supported image sizes; buffers broadcast the same spatial map over frames.
+# Cached BGGR weights for supported frames; see README.md#python-calibration-constants in code/defineWorldCameraCalibration.
 WORLD_BAYER_CORRECTION_MATRICES: dict[tuple[int, int], np.ndarray] = {
-    (480, 640): _build_bayer_correction_matrix((480, 640)),
+    (480, 640): generate_bayer_correction_matrix((480, 640)),
 }
 
-_integrated_radiance_calibration = scipy.io.loadmat(
+# Absolute radiance calibration (stage 6).
+# Loaded camera-score fit and metadata; see README.md#python-calibration-constants in code/defineWorldCameraCalibration.
+WORLD_INTEGRATED_RADIANCE_CALIBRATION: dict[str, object] = scipy.io.loadmat(
     _DERIVED_CALIBRATION_DIR / "cameraScoreToIntegratedRadiance.mat"
 )
+
+# Log-space radiance slope and intercept; see README.md#python-calibration-constants in code/defineWorldCameraCalibration.
 WORLD_AGC_TO_RADIANCE_P: np.ndarray = np.asarray(
-    _integrated_radiance_calibration["agcToRadianceP"], dtype=np.float64
+    WORLD_INTEGRATED_RADIANCE_CALIBRATION["agcToRadianceP"], dtype=np.float64
 ).reshape(-1)
 if(WORLD_AGC_TO_RADIANCE_P.shape != (2,)
    or not np.all(np.isfinite(WORLD_AGC_TO_RADIANCE_P))):
     raise ValueError("agcToRadianceP must contain a finite slope and intercept")
 
-# Cache the fixed spatial scale introduced by fielding and RGB corrections.
+# Product of harmonic spatial means; see README.md#python-calibration-constants in code/defineWorldCameraCalibration.
 WORLD_MEAN_SPATIAL_CORRECTIONS: dict[tuple[int, int], float] = {
-    shape: float(np.nanmean(fielding)
-                 * np.nanmean(WORLD_RADIOMETRIC_CORRECTION_MAP))
+    shape: float(1 / np.nanmean(1 / fielding)
+                 / np.nanmean(1 / WORLD_RADIOMETRIC_CORRECTION_MAP))
     for shape, fielding in WORLD_FIELDING_FUNCTIONS.items()
 }
 
-# Geoff's MATLAB reconstruction treats response-curve inversion as unreliable
-# once its derivative exceeds this value. The fitted response parameters turn
-# this into a raw 8-bit saturation threshold of 239 for the current camera.
-WORLD_MAX_ALLOWED_LINEARIZATION_DERIVATIVE: float = 4.0
+# Six imputation workers are the measured baseline for 120-frame buffers.
+# See tmp/benchmark_imputation_workers.json for the worker-count comparison.
+WORLD_IMPUTATION_WORKERS: int = 6
 
-# Every four neighbouring samples of a Bayer channel sit on a common circle, so
-# a Delaunay triangulation of them is mathematically non-unique and SciPy and
-# MATLAB split each cell along a different diagonal. Shearing the coordinates by
-# (x, y) -> (x, y + shear * x) breaks the tie the same way MATLAB breaks it. The
-# shear is affine, so barycentric weights are unchanged and only the choice of
-# diagonal is affected. Any positive value works; the diagonal MATLAB picks is
-# already selected at 1e-9 and stays selected at 1e-2.
-# This matches the intact Bayer lattice, not every triangulation around missing
-# samples. Irregular holes can still produce different valid Delaunay triangles
-# in MATLAB and SciPy, changing interpolated values and the fitted prior.
+# Best measured demosaicing count for sequential 3,600-frame buffers.
+# See tmp/benchmark_demosaic_large_buffers.json for startup and warmed timings.
+WORLD_DEMOSAIC_WORKERS: int = 16
+
+# Interpolation used for imputation and demosaicing.
+# Coordinate shear to resolve Bayer-grid ties; see README.md#python-calibration-constants in code/defineWorldCameraCalibration.
 WORLD_TRIANGULATION_SHEAR: float = 1e-4
 
-"""
-END PROCESSING PIPELINE CONSTANTS
-"""
 
 
 def get_world_contrast_level_ndf_settings(
@@ -399,6 +510,9 @@ def restore_settings_dict_types(sensor_mode: dict) -> None:
         sensor_mode: A dictionary describing a camera sensor mode whose
             values may have been coerced to generic types during
             deserialization.
+
+    Returns:
+        None. The supplied sensor-mode dictionary is updated in place.
     """
     sensor_mode['format'] = str(sensor_mode['format'])
     sensor_mode['unpacked'] = str(sensor_mode['unpacked'])
@@ -716,6 +830,15 @@ def calculate_world_saturation_threshold(
     The threshold is the raw sensor value at which the derivative of the
     inverse full-well response reaches ``max_allowed_derivative``. Values at
     or above it are represented as ``Inf`` and subsequently imputed.
+
+    Args:
+        original_bit_depth: Bit depth used to determine the largest raw count.
+        dark_noise: Dark offset in the same count units as the raw input.
+        clipping_exponent: Positive exponent of the fitted full-well response.
+        max_allowed_derivative: Largest trusted inverse-response slope; must be greater than one.
+
+    Returns:
+        Integer raw-count threshold at which samples are marked as saturated.
     """
     if(original_bit_depth <= 0):
         raise ValueError("original_bit_depth must be positive")
@@ -740,39 +863,46 @@ def calculate_world_saturation_threshold(
 
 
 def linearize_camera_responsivity(image_or_video: np.ndarray,
-                                  dst: np.ndarray | None=None,
                                   original_bit_depth: int = 8,
                                   dark_noise: float = WORLD_DARK_SIGNAL,
                                   clipping_exponent: float = WORLD_FULL_WELL_CLIPPING_EXPONENT,
                                   max_allowed_derivative: float = WORLD_MAX_ALLOWED_LINEARIZATION_DERIVATIVE,
                                   visualize_results: bool=False
-                                  ) -> np.ndarray | tuple[np.ndarray, object]:
+                                  ) -> None:
     """Linearize world-camera values using the fitted full-well model.
 
     This uses the same equation as Stage 2 of ``reconstructionPipeline.m``.
-    Values below ``dark_noise`` are raised to the dark-signal floor before
-    that signal is subtracted and the full-well nonlinearity is inverted.
+    Negative dark-subtracted values retain their sign. Only the nonlinear
+    gain uses a non-negative signal. Quantization correction belongs to Stage 1.
 
     Args:
-        image_or_video: Raw camera frame or frame buffer to linearize.
-        dst: Optional floating-point destination array with the same shape as
-            ``image_or_video``. This array is also used as the working buffer.
-            When omitted, ``image_or_video`` itself is modified in place and
-            must therefore have a floating-point dtype.
+        image_or_video: Writable floating-point array of camera counts. The
+            values are modified in place. Pass a copy if the original counts
+            need to be retained, and convert integer arrays to float first.
         original_bit_depth: Bit depth of the input image values.
         dark_noise: The measured dark offset to remove before inversion.
         clipping_exponent: The fitted soft-clipping exponent from the
             full-well calibration.
         max_allowed_derivative: Maximum inverse-response derivative. Raw
             values at or above the resulting threshold are marked ``Inf``.
-        visualize_results: When ``True``, display a before/after figure and
-            return it with the linearized result. Visualization supports only
+        visualize_results: When ``True``, display a before/after figure. Visualization supports only
             a single ``(rows, cols)`` frame and asserts otherwise.
 
     Returns:
-        The unscaled linearized counts, or ``(linearized, figure)`` when
-        visualization is requested.
+        None. The supplied array is modified in place. When visualization is
+        enabled, the before/after figure is displayed without returning it.
+    Raises:
+        TypeError: If the input does not have a floating-point dtype.
     """
+
+    # Linearization always writes into the supplied array. Check its dtype
+    # before changing any values; integer arrays cannot hold the result.
+    if not np.issubdtype(image_or_video.dtype, np.floating):
+        raise TypeError(
+            f"In-place linearization requires a floating-point array; got {image_or_video.dtype}."
+        )
+
+    # Keep the original values only when a before/after figure is requested.
     unmodified_image_or_video: np.ndarray | None = None
     if(visualize_results is True):
         assert image_or_video.ndim == 2, (
@@ -780,21 +910,16 @@ def linearize_camera_responsivity(image_or_video: np.ndarray,
             f"a single frame with shape (rows, cols). Got shape "
             f"{image_or_video.shape}."
         )
-        unmodified_image_or_video = image_or_video.copy() 
+        unmodified_image_or_video = image_or_video.copy()
 
-    # If a destination was not provided, use the input itself as the working
-    # buffer so the complete linearization happens in place without allocation.
-    if(dst is None):
-        assert np.issubdtype(image_or_video.dtype, np.floating), (
-            "image_or_video must have a floating-point dtype when dst is not "
-            f"supplied. Got {image_or_video.dtype}."
-        )
-        dst = image_or_video
-
+    # First, let's find the max sensor value based on the bit depth
+    # and also correct this for the dark noise observed in the signal
     max_sensor_value: float = float(2 ** original_bit_depth - 1)
     dark_signal: float = float(dark_noise)
     smax: float = max_sensor_value - dark_signal
 
+    # If the dark noise is somehow so great it's larger than the signal
+    # something has really gone wrong
     if(smax <= 0):
         raise ValueError(
             f"dark_noise={dark_noise} leaves no usable range for "
@@ -809,29 +934,21 @@ def linearize_camera_responsivity(image_or_video: np.ndarray,
     )
     saturation_mask: np.ndarray = image_or_video >= saturation_threshold
 
-    assert dst.shape == image_or_video.shape, "dst must have the same shape as image_or_video"
-    assert np.issubdtype(dst.dtype, np.floating), "dst must have a floating-point dtype"
-
-    # Copy and convert the input only when the caller supplied a separate
-    # destination. The no-dst path already uses the input as its working buffer.
-    if(dst is not image_or_video):
-        np.copyto(dst, image_or_video, casting="unsafe")
-
-    # Match MATLAB's y(y < darkSignal) = darkSignal, followed by
-    # yPrime = y - darkSignal.
-    dst[dst < dark_signal] = dark_signal
-    dst -= dark_signal
+    # Preserve signed dark-subtracted values, as in MATLAB.
+    image_or_video -= dark_signal
 
     # Match MATLAB's yPrime ./ (1 - (yPrime ./ Smax).^n).^(1./n).
     with np.errstate(divide="ignore", invalid="ignore"):
-        dst[:] = dst / (1 - (dst / smax) ** clipping_exponent) ** (1 / clipping_exponent)
+        image_or_video[:] = image_or_video / (
+            1 - (np.maximum(image_or_video, 0) / smax) ** clipping_exponent
+        ) ** (1 / clipping_exponent)
 
     # Match reconstructionPipeline.m: values in the unstable upper part of
     # the inverse response are treated as ceiling samples even if they have
     # not reached the integer sensor maximum.
-    dst[saturation_mask] = np.inf
+    image_or_video[saturation_mask] = np.inf
 
-    # If visualize results is true, we will print an output of what the image looks like 
+    # If visualize results is true, we will print an output of what the image looks like
     if(visualize_results is True):
         fig, axes = plt.subplots(1, 2, figsize=(12, 4))
         fig.suptitle("Full Well Correction (Before / After)", fontweight='bold', fontsize=18)
@@ -840,16 +957,16 @@ def linearize_camera_responsivity(image_or_video: np.ndarray,
         axes[0].set_title("Before")
         axes[0].axis("off")
 
-        axes[1].imshow(dst, cmap="gray")
+        axes[1].imshow(image_or_video, cmap="gray")
         axes[1].set_title("After")
         axes[1].axis("off")
 
         plt.tight_layout()
         plt.show()
 
-        return dst, fig
+        return None
 
-    return dst
+    return None
 
 
 def _scattered_interpolant(sample_x: np.ndarray,
@@ -988,7 +1105,22 @@ def _impute_pixel_values_single(radiance_map: np.ndarray,
                                 bayer_pattern: str,
                                 dst: np.ndarray | None=None
                                ) -> np.ndarray:
-    """Impute one frame, optionally writing into an independent float64 dst."""
+    """Replace floor and ceiling samples in one Bayer frame.
+
+    The estimate uses the positive RGB samples in this frame to fit a
+    log-space color distribution, then conditions that distribution on the
+    usable neighboring colors. Pixels with valid measurements pass through.
+
+    Args:
+        radiance_map: Two-dimensional linearized Bayer frame; non-positive and infinite values are
+            imputation targets.
+        bayer_pattern: Bayer layout: BGGR, RGGB, GRBG, or GBRG.
+        dst: Optional float64 output with the same shape. It must not share memory with the input.
+
+    Returns:
+        An independent float64 frame, or the supplied dst filled with the result.
+        The input frame is not modified.
+    """
     rows, cols = radiance_map.shape
 
     pattern = str(bayer_pattern).upper()
@@ -1038,9 +1170,9 @@ def _impute_pixel_values_single(radiance_map: np.ndarray,
         # Read this channel's own samples out of the raw map.
         sub_val: np.ndarray = radiance_map[channel_rows, channel_cols]
 
-        # A ceiling sample is Inf and a floor sample is exactly zero.
+        # A ceiling sample is Inf and a floor sample is non-positive.
         inf_mask: np.ndarray = np.isinf(sub_val)
-        floor_mask: np.ndarray = (sub_val == 0)
+        floor_mask: np.ndarray = (sub_val <= 0)
 
         # Neither carries usable information, so blank both out for the fit.
         work_sub: np.ndarray = sub_val.copy()
@@ -1067,17 +1199,22 @@ def _impute_pixel_values_single(radiance_map: np.ndarray,
     # Extract prior statistics. Only pixels whose three channels are all
     # present and positive describe the scene's colour distribution.
     pixels: np.ndarray = rgb_map.reshape(-1, 3)
-    valid_pixels: np.ndarray = pixels[~np.any(np.isinf(pixels) | (pixels == 0), axis=1)]
-    if(valid_pixels.shape[0] < 2):
-        raise ValueError(
-            "At least two complete, positive RGB samples are required for "
-            "Bayesian floor/ceiling imputation."
-        )
+    valid_mask: np.ndarray = np.all(np.isfinite(pixels) & (pixels > 0), axis=1)
+    # A completely dark frame has no positive RGB triples. Match Geoff's
+    # fallback by fitting finite triples after lifting non-positive values
+    # to a small positive floor, so their logarithms remain defined.
+    if not np.any(valid_mask):
+        valid_mask = np.all(np.isfinite(pixels), axis=1)
+        pixels[pixels <= 0] = 1e-6
+    valid_pixels: np.ndarray = pixels[valid_mask]
+    if not valid_pixels.size:
+        raise ValueError("No finite RGB samples available for Bayesian imputation.")
 
     # The model is Gaussian in log space, so the prior is fit to log radiance.
     log_valid: np.ndarray = np.log(valid_pixels)
     mu: np.ndarray = np.mean(log_valid, axis=0)
-    covariance: np.ndarray = np.cov(log_valid, rowvar=False, ddof=1)
+    covariance: np.ndarray = (np.cov(log_valid, rowvar=False, ddof=1)
+                              if len(log_valid) > 1 else np.zeros((3, 3)))
 
     # Record how bright a ceiling sample must be, and how dim a floor sample
     # must be, from each channel's observed range.
@@ -1092,7 +1229,7 @@ def _impute_pixel_values_single(radiance_map: np.ndarray,
             f_log[channel] = np.log(1e-4)
         else:
             s_log[channel] = np.log(np.max(valid_c))
-            f_log[channel] = np.log(np.min(valid_c))
+            f_log[channel] = np.log(max(np.min(valid_c), 1e-6))
 
     # The destination already contains the original samples; only ceiling
     # and floor samples are replaced below.
@@ -1101,14 +1238,14 @@ def _impute_pixel_values_single(radiance_map: np.ndarray,
     # Pre-compute the log of every interpolated pixel once. log(0) is -Inf and
     # log(Inf) is Inf, so the finiteness test below rejects both.
     with np.errstate(divide="ignore", invalid="ignore"):
-        log_fixed_pixels: np.ndarray = np.log(rgb_map)
+        log_fixed_pixels: np.ndarray = np.log(pixels.reshape(rows, cols, 3))
 
     # Constant factor of the Gaussian density, hoisted out of the pixel loop.
     sqrt_two_pi: float = np.sqrt(2 * np.pi)
 
+    # Identify the replacement targets once and reuse them for all channels.
+    target_mask: np.ndarray = np.isinf(radiance_map) | (radiance_map <= 0)
     for c_target in range(3):
-        # Every ceiling or floor pixel in the frame.
-        target_mask: np.ndarray = np.isinf(radiance_map) | (radiance_map == 0)
 
         # Restricted to the Bayer positions belonging to this channel.
         bayer_target_mask: np.ndarray = np.zeros((rows, cols), dtype=bool)
@@ -1125,110 +1262,101 @@ def _impute_pixel_values_single(radiance_map: np.ndarray,
         # which other channels are known. Precompute the three nonempty cases
         # once per target, rather than repeating matrix inversions per pixel.
         # This requires at most nine inversions for the entire frame.
-        other_channels = [channel for channel in range(3) if channel != c_target]
-        known_channel_cases = (
+        other_channels: list[int] = [channel for channel in range(3) if channel != c_target]
+        known_channel_cases: tuple[tuple[int, ...], ...] = (
             (other_channels[0],),
             (other_channels[1],),
             tuple(other_channels),
         )
-        conditioning = {}
+        conditioning: dict[tuple[int, ...], tuple[np.ndarray, np.ndarray, float]] = {}
         for known_channels in known_channel_cases:
-            known_cols = np.array(known_channels, dtype=np.intp)
-            mu_k = mu[known_cols]
-            s_k = covariance[np.ix_(known_cols, known_cols)]
-            s_sk = covariance[c_target, known_cols]
+            known_cols: np.ndarray = np.array(known_channels, dtype=np.intp)
+            mu_k: np.ndarray = mu[known_cols]
+            s_k: np.ndarray = covariance[np.ix_(known_cols, known_cols)]
+            s_sk: np.ndarray = covariance[c_target, known_cols]
             # Preserve the existing ridge regularization and operation order.
-            s_k_inv = np.linalg.inv(s_k + 1e-6 * np.eye(known_cols.size))
-            coefficients = s_sk @ s_k_inv
-            conditional_variance = float(covariance[c_target, c_target] - coefficients @ s_sk.T)
-            conditional_std = np.sqrt(max(conditional_variance, 1e-8))
+            s_k_inv: np.ndarray = np.linalg.inv(s_k + 1e-6 * np.eye(known_cols.size))
+            coefficients: np.ndarray = s_sk @ s_k_inv
+            conditional_variance: float = float(covariance[c_target, c_target] - coefficients @ s_sk.T)
+            conditional_std: float = np.sqrt(max(conditional_variance, 1e-8))
             conditioning[known_channels] = (mu_k, coefficients, conditional_std)
-        prior_std = np.sqrt(max(float(covariance[c_target, c_target]), 1e-8))
+        prior_std: float = np.sqrt(max(float(covariance[c_target, c_target]), 1e-8))
 
-        for pixel_row, pixel_col in active_impute_indices:
-            # Work out which of the other two channels survived at this pixel,
-            # because those are the evidence we get to condition on. A channel
-            # counts as known only if its log is finite: log(0) is -Inf for a
-            # floor sample and log(Inf) is +Inf for a ceiling one, so this test
-            # rejects a neighbour that is itself ruined. The target channel is
-            # excluded because it is the thing we are trying to estimate.
-            valid_k_mask: np.ndarray = np.isfinite(log_fixed_pixels[pixel_row, pixel_col])
-            valid_k_mask[c_target] = False
-            valid_k_cols: np.ndarray = np.flatnonzero(valid_k_mask)
-
-            if(valid_k_cols.size > 0):
-                # Only the observed values vary between pixels in this case.
-                mu_k, coefficients, std_xs = conditioning[tuple(valid_k_cols)]
-                k: np.ndarray = log_fixed_pixels[pixel_row, pixel_col, valid_k_cols]
-                mu_xs: float = float(mu[c_target] + coefficients @ (k - mu_k))
+        # Group target pixels by which of the other two channels survived.
+        # Cases 0, 1, 2, and 3 mean neither, first, second, or both channels.
+        # Every pixel in a group shares the same conditional covariance, so
+        # NumPy can calculate all conditional means in one operation.
+        target_rows: np.ndarray = active_impute_indices[:, 0]
+        target_cols: np.ndarray = active_impute_indices[:, 1]
+        evidence: np.ndarray = log_fixed_pixels[target_rows, target_cols]
+        cases: np.ndarray = (
+            np.isfinite(evidence[:, other_channels[0]]).astype(np.uint8)
+            + 2 * np.isfinite(evidence[:, other_channels[1]])
+        )
+        for case in range(4):
+            selected: np.ndarray = cases == case
+            if not np.any(selected):
+                continue
+            pixel_rows: np.ndarray = target_rows[selected]
+            pixel_cols: np.ndarray = target_cols[selected]
+            conditional_mean: np.ndarray
+            conditional_std: float
+            if case:
+                known: tuple[int, ...] = tuple(
+                    other_channels[i] for i in range(2) if case & (1 << i)
+                )
+                mu_k, coefficients, conditional_std = conditioning[known]
+                conditional_mean = mu[c_target] + (evidence[selected][:, known] - mu_k) @ coefficients
             else:
-                # Both neighbours are ruined too, which happens in the middle of
-                # a large blown-out region. With no evidence to condition on,
-                # fall back to the scene-wide prior for this channel.
-                mu_xs = float(mu[c_target])
-                std_xs = prior_std
+                # With no usable neighboring color, use the scene-wide prior.
+                conditional_std = prior_std
+                conditional_mean = np.full(pixel_rows.size, mu[c_target])
 
-            # We now have a Gaussian belief about this pixel's log radiance.
-            # The final piece of information is the bound: the sensor told us
-            # the true value lies beyond it. So the answer is the mean of that
-            # Gaussian restricted to the far side of the bound, which is the
-            # standard truncated-normal expectation
-            #
-            #     E[X | X > bound] = mean + std * phi(z) / (1 - Phi(z))
-            #
-            # where z is the bound in standard deviations, phi is the normal
-            # density and Phi its cumulative. The floor case is the mirror
-            # image, subtracting instead of adding.
-            if(np.isinf(radiance_map[pixel_row, pixel_col])):
-                # Ceiling pixel: the truth is brighter than anything we measured.
-                z_score: float = (s_log[c_target] - mu_xs) / std_xs
+            # A ceiling sample constrains the answer above the observed range;
+            # a floor sample constrains it below. Apply the corresponding
+            # truncated-normal expectation in log space to the whole group.
+            ceiling: np.ndarray = np.isinf(radiance_map[pixel_rows, pixel_cols])
+            bound: np.ndarray = np.where(ceiling, s_log[c_target], f_log[c_target])
+            z_score: np.ndarray = (bound - conditional_mean) / conditional_std
+            z_score = np.where(np.isnan(z_score), 0, z_score)
+            tail: np.ndarray = np.where(ceiling, 1 - ndtr(z_score), ndtr(z_score))
+            numerator: np.ndarray = (conditional_std / sqrt_two_pi) * np.exp(-z_score * z_score / 2)
 
-                # Probability the prior assigns to being above the bound.
-                tail: float = float(1 - ndtr(z_score))
-                if(tail < 1e-15):
-                    # The prior says being this bright is essentially
-                    # impossible, so the ratio below is numerically
-                    # meaningless. Pin the estimate to the bound itself.
-                    expected_val_log: float = float(s_log[c_target])
-                else:
-                    # Normal density at the bound, scaled by the width.
-                    numerator_term: float = (std_xs / sqrt_two_pi) * np.exp(-(z_score ** 2) / 2)
-
-                    # Step upward from the mean into the surviving tail.
-                    expected_val_log = mu_xs + numerator_term / tail
-            else:
-                # Floor pixel: the truth is dimmer than anything we measured.
-                z_score = (f_log[c_target] - mu_xs) / std_xs
-
-                # Probability the prior assigns to being below the bound.
-                tail = float(ndtr(z_score))
-                if(tail < 1e-15):
-                    expected_val_log = float(f_log[c_target])
-                else:
-                    numerator_term = (std_xs / sqrt_two_pi) * np.exp(-(z_score ** 2) / 2)
-
-                    # Step downward from the mean into the surviving tail.
-                    expected_val_log = mu_xs - numerator_term / tail
-
-            # Everything above happened in log space, so undo the log to get
-            # back to the linear sensor units the rest of the pipeline expects.
-            raw_fixed[pixel_row, pixel_col] = np.exp(expected_val_log)
+            # Extremely unlikely tails make the division unstable. Geoff pins
+            # those estimates to the bound; compute the ratio only elsewhere.
+            adjustment: np.ndarray = np.zeros_like(tail)
+            np.divide(numerator, tail, out=adjustment, where=tail >= 1e-15)
+            expected_log: np.ndarray = np.where(
+                tail < 1e-15, bound,
+                conditional_mean + np.where(ceiling, adjustment, -adjustment),
+            )
+            raw_fixed[pixel_rows, pixel_cols] = np.exp(expected_log)
 
     return raw_fixed
 
 
-def _impute_pixel_values_shared_worker(frame: np.ndarray,
-                                      frame_index: int,
+def _impute_pixel_values_shared_worker(frame_index: int,
                                       bayer_pattern: str,
                                       shared_name: str,
                                       output_shape: tuple[int, ...]
                                      ) -> None:
-    """Write one imputed frame into its assigned shared-memory output slice."""
+    """Impute one frame in the shared buffer owned by the parent process.
+
+    Args:
+        frame_index: Index of the frame assigned to this worker.
+        bayer_pattern: Bayer layout used to interpret the frame.
+        shared_name: Name of the existing shared-memory allocation.
+        output_shape: Shape of the shared (frames, rows, cols) float64 buffer.
+
+    Returns:
+        None. The worker replaces its frame slice in place and closes its handle;
+        the parent remains responsible for releasing the shared allocation.
+    """
     shared_memory = SharedMemory(name=shared_name)
     try:
         output = np.ndarray(output_shape, dtype=np.float64, buffer=shared_memory.buf)
         try:
-            _impute_pixel_values_single(frame, bayer_pattern, dst=output[frame_index])
+            output[frame_index] = _impute_pixel_values_single(output[frame_index], bayer_pattern)
         finally:
             del output
     finally:
@@ -1239,13 +1367,13 @@ def _impute_pixel_values_shared_worker(frame: np.ndarray,
 def impute_pixel_values(linearized_image_or_buffer: np.ndarray,
                         bayer_pattern: str="BGGR",
                         visualize_results: bool=False,
-                        n_workers: int=12
+                        n_workers: int=WORLD_IMPUTATION_WORKERS
                        ) -> np.ndarray | tuple[np.ndarray, object]:
     """Impute floor and ceiling Bayer samples using Geoff's Bayesian model.
 
     This is the Python equivalent of MATLAB ``imputePixelValues``, which
     implements a Bayesian estimate of the linearized sensor value at pixels
-    that sit at the ceiling (``Inf``) or on the floor (zero), following:
+    that sit at the ceiling (``Inf``) or on the floor (non-positive), following:
 
         Zhang X, Brainard DH. Estimation of saturated pixel values in digital
         color imaging. Journal of the Optical Society of America A. 2004 Dec
@@ -1259,71 +1387,139 @@ def impute_pixel_values(linearized_image_or_buffer: np.ndarray,
     the MATLAB function.
 
     Args:
-        linearized_image_or_buffer: Linearized frame or frame buffer whose
-            ceiling samples are ``Inf`` and whose floor samples are zero.
+        linearized_image_or_buffer: Nonempty float64 NumPy frame or frame buffer whose
+            ceiling samples are ``Inf`` and whose floor samples are non-positive.
+            Callers supply this dtype; the function does not convert the input.
         bayer_pattern: Bayer layout of the sensor.
         visualize_results: When ``True``, display a before/after figure and
             return it alongside the result. Supported for one frame only.
-        n_workers: Number of processes for a frame buffer, default 12. Use 1
+        n_workers: Positive integer number of processes for a frame buffer,
+            default WORLD_IMPUTATION_WORKERS (6). Callers supply a valid value. Use 1
             for serial processing. Single frames are processed directly.
-            Input frames are serialized to workers; output slices are shared.
+            Input and output use shared memory; only frame indices are sent.
             Script callers must guard their entry point with
             ``if __name__ == "__main__":`` for multiprocessing spawn.
 
     Returns:
         The imputed frame or buffer, or ``(imputed, figure)`` when
         visualization is requested.
+
+    Notes:
+        Benchmarked on 2026-10-05 on a Mac Studio (Mac15,14), Apple M3 Ultra,
+        28-core CPU (20 performance + 8 efficiency), 256 GB unified memory,
+        macOS 15.3 (arm64).
+        Timed complete calls on 120 real 480 x 640 indoor frames after
+        quantization correction and linearization; all frames needed imputation
+        (0.068% floor pixels, no ceiling pixels). Compared 1/2/4/6/8/12 workers,
+        including spawned-process startup, shared-memory copies, and cleanup.
+        Six took 48.2 s, eight 47.3 s, and twelve 59.7 s in the initial screen.
+        Six was selected as the baseline despite eight being slightly faster.
+        Every tested result matched serial exactly. This imputation benchmark
+        used 120-frame buffers, not the 3,600-frame demosaicing workload.
+        Measurements: tmp/benchmark_imputation_workers.json.
     """
-    values: np.ndarray = np.asarray(linearized_image_or_buffer, dtype=np.float64)
-    if(isinstance(n_workers, (bool, np.bool_)) or not isinstance(n_workers, (int, np.integer)) or n_workers < 1):
-        raise ValueError("n_workers must be a positive integer.")
-    n_workers = int(n_workers)
+    # Input must either be a single image or a buffer of images.
+    assert linearized_image_or_buffer.ndim in (2, 3), (
+        "Imputation requires a single frame with shape (rows, cols) "
+        "or a frame buffer with shape (frames, rows, cols). Got shape "
+        f"{linearized_image_or_buffer.shape}."
+    )
 
-    # Accept one frame or a buffer of frames, and nothing else.
-    if(values.ndim not in (2, 3)):
-        raise ValueError(
-            "Imputation requires shape (rows, cols) or "
-            f"(frames, rows, cols). Got {values.shape}."
+    # Visualization supports one frame. Keep its original values for the
+    # before/after figure only when visualization is requested.
+    unmodified_image_or_buffer: np.ndarray | None = None
+    if(visualize_results is True):
+        assert linearized_image_or_buffer.ndim == 2, (
+            "Imputation visualization only supports a single frame "
+            f"with shape (rows, cols). Got shape {linearized_image_or_buffer.shape}."
         )
-    if(visualize_results is True and values.ndim != 2):
-        raise AssertionError("Imputation visualization supports a single frame only")
+        unmodified_image_or_buffer = linearized_image_or_buffer.copy()
 
-    # Keep a copy of the input for the before/after figure.
-    unmodified: np.ndarray | None = values.copy() if visualize_results else None
+    # Case 1: a single (rows, cols) frame. Process it directly in this
+    # process, regardless of n_workers, and return a separate output array.
+    if(linearized_image_or_buffer.ndim == 2):
+        result: np.ndarray = _impute_pixel_values_single(linearized_image_or_buffer, bayer_pattern)
 
-    # Impute one frame directly, or every frame of a buffer independently.
-    if(values.ndim == 2):
-        result: np.ndarray = _impute_pixel_values_single(values, bayer_pattern)
-    elif(n_workers == 1 or values.size == 0):
-        # Allocate once and write each imputed frame into its final slice.
-        result = np.empty(values.shape, dtype=np.float64)
-        for frame_index, frame in enumerate(values):
+    # Case 2: a (frames, rows, cols) buffer with one worker.
+    # Allocate the output once and process frames one at a time.
+    elif(n_workers == 1):
+        result = np.empty(linearized_image_or_buffer.shape, dtype=np.float64)
+        for frame_index, frame in enumerate(linearized_image_or_buffer):
+            # Write directly into this frame's output slice instead of making
+            # a separate result for every frame and stacking them afterward.
             _impute_pixel_values_single(frame, bayer_pattern, dst=result[frame_index])
+
+    # Case 3: a frame buffer with multiple workers requested.
     else:
-        # Workers receive an input frame and its index, then write directly to
-        # disjoint slices of one shared output allocation. No output frames
-        # are serialized back to the parent or assembled with np.stack.
-        shared_memory = SharedMemory(create=True, size=values.nbytes)
+        # Step 1: find which frames need imputation.
+        # The comparison produces one True/False value per pixel. np.any over
+        # rows and columns reduces that to one flag per frame. np.flatnonzero
+        # then returns the indices of the flagged frames, such as [0, 3, 7].
+        frames_to_impute: np.ndarray = np.flatnonzero(
+            np.any(~np.isfinite(linearized_image_or_buffer) | (linearized_image_or_buffer <= 0), axis=(1, 2))
+        )
+        if not frames_to_impute.size:
+            # There are frames in the buffer, but none need any values replaced.
+            # Return a copy to keep the output independent of the caller's input.
+            # No worker processes or shared memory are needed in this case.
+            return linearized_image_or_buffer.copy()
+
+        # Step 2: reserve a block of memory that all worker processes can access.
+        # Ordinary NumPy arrays are not automatically shared between spawned
+        # processes. SharedMemory provides the shared bytes; it does not yet
+        # contain an image or know the shape of our frame buffer.
+        # Both input and output are float64, so the input's byte count fits.
+        shared_memory: SharedMemory = SharedMemory(create=True, size=linearized_image_or_buffer.nbytes)
         try:
-            shared_output = np.ndarray(values.shape, dtype=np.float64, buffer=shared_memory.buf)
+            # Give those shared bytes a NumPy shape and dtype. This creates a
+            # view of the shared memory, not another allocation of image data.
+            shared_output: np.ndarray = np.ndarray(
+                linearized_image_or_buffer.shape, dtype=np.float64, buffer=shared_memory.buf
+            )
             try:
-                with multiprocessing.get_context("spawn").Pool(processes=n_workers) as pool:
+                # Step 3: initialize the shared buffer with every input frame.
+                # Workers will replace only the frames that need imputation.
+                # All other frames are already correct and stay as copied here.
+                # The caller's original array is separate and remains unchanged.
+                np.copyto(shared_output, linearized_image_or_buffer)
+
+                # Step 4: start the workers and assign one task per flagged frame.
+                # For example, three flagged frames need at most three workers,
+                # even if the caller requested twelve.
+                worker_count: int = min(n_workers, len(frames_to_impute))
+                with multiprocessing.get_context("spawn").Pool(processes=worker_count) as pool:
+                    # Each tuple below supplies the arguments for one worker call.
+                    # The worker uses the shared-memory name to open this buffer,
+                    # reads its assigned frame, and writes the imputed frame back
+                    # into that same slice. Workers use different frame indices,
+                    # so they never write over one another's results.
+                    # Only these small arguments are sent through the pool;
+                    # the image data stay in shared memory. chunksize=1 assigns
+                    # one frame per task, and starmap waits for all tasks to finish.
                     pool.starmap(
                         _impute_pixel_values_shared_worker,
-                        ((frame, index, bayer_pattern, shared_memory.name, values.shape)
-                         for index, frame in enumerate(values)),
+                        ((index, bayer_pattern, shared_memory.name, linearized_image_or_buffer.shape)
+                         for index in frames_to_impute),
                         chunksize=1,
                     )
-                # Return an independently owned NumPy array before releasing
-                # the shared allocation. This final full-buffer copy is needed
-                # to give the caller an ordinary array with normal ownership.
+
+                # Step 5: all frames are now ready. Copy the shared result into
+                # an ordinary NumPy array that owns its memory. The caller can
+                # keep this result after we release the temporary shared buffer.
                 result = shared_output.copy()
             finally:
+                # Step 6a: discard our NumPy view before closing the shared bytes
+                # it refers to. The independent result copy is not affected.
                 del shared_output
         finally:
+            # Step 6b: release the temporary shared memory. These finally blocks
+            # also run if a worker fails, so an error does not skip cleanup.
+            # close() releases this process's handle; unlink() requests removal
+            # of the shared allocation. Workers close their own handles.
             try:
                 shared_memory.close()
             finally:
+                # Attempt removal even if closing our handle raises an error.
                 shared_memory.unlink()
 
     # If visualize results is true, we will print an output of what the image looks like
@@ -1331,7 +1527,7 @@ def impute_pixel_values(linearized_image_or_buffer: np.ndarray,
         fig, axes = plt.subplots(1, 2, figsize=(12, 4))
         fig.suptitle("Floor / Ceiling Imputation (Before / After)", fontweight="bold", fontsize=18)
 
-        axes[0].imshow(unmodified, cmap="gray")
+        axes[0].imshow(unmodified_image_or_buffer, cmap="gray")
         axes[0].set_title("Before")
         axes[0].axis("off")
 
@@ -1347,14 +1543,109 @@ def impute_pixel_values(linearized_image_or_buffer: np.ndarray,
     return result
 
 
+@lru_cache(maxsize=12)
+def _demosaic_interpolation_weights(image_shape: tuple[int, int],
+                                     coordinate_bytes: bytes
+                                    ) -> csr_matrix:
+    """Cache linear interpolation and nearest-edge weights for an intact channel.
+
+    Args:
+        image_shape: Output dimensions as (rows, cols).
+        coordinate_bytes: Contiguous int64 (row, col) Bayer coordinates encoded
+            as bytes, so channel geometry forms an immutable cache key.
+
+    Returns:
+        A sparse matrix mapping measured channel samples to all image pixels.
+        At most twelve channel geometries are retained across calls.
+    """
+    rows, cols = image_shape
+    coordinates: np.ndarray = np.frombuffer(coordinate_bytes, dtype=np.int64).reshape(-1, 2)
+    sample_points: np.ndarray = coordinates[:, ::-1].astype(np.float64) + 1
+    query_y, query_x = np.indices(image_shape, dtype=np.float64)
+    query_points: np.ndarray = np.column_stack((query_x.ravel() + 1, query_y.ravel() + 1))
+
+    # Use the same tie-breaking shear as the scattered interpolation fallback.
+    sheared_samples: np.ndarray = sample_points.copy()
+    sheared_queries: np.ndarray = query_points.copy()
+    sheared_samples[:, 1] += WORLD_TRIANGULATION_SHEAR * sheared_samples[:, 0]
+    sheared_queries[:, 1] += WORLD_TRIANGULATION_SHEAR * sheared_queries[:, 0]
+    triangulation: Delaunay = Delaunay(sheared_samples)
+    simplex: np.ndarray = triangulation.find_simplex(sheared_queries)
+    inside: np.ndarray = np.flatnonzero(simplex >= 0)
+
+    # Store three barycentric weights per interior pixel; reuse them every frame.
+    transforms: np.ndarray = triangulation.transform[simplex[inside]]
+    weights: np.ndarray = np.einsum(
+        "nij,nj->ni", transforms[:, :2], sheared_queries[inside] - transforms[:, 2]
+    )
+    weights = np.column_stack((weights, 1 - weights.sum(axis=1)))
+    vertices: np.ndarray = triangulation.simplices[simplex[inside]]
+
+    # Edge pixels copy the nearest sample, using the existing MATLAB tie rule.
+    outside: np.ndarray = np.flatnonzero(simplex < 0)
+    tree: cKDTree = cKDTree(sample_points)
+    distances, _ = tree.query(query_points[outside])
+    ties: list[list[int]] = tree.query_ball_point(
+        query_points[outside], distances * (1 + 1e-9) + 1e-12
+    )
+    sample_rows, sample_cols = coordinates.T
+    rank: np.ndarray = ((sample_rows % 2) * 2 + sample_cols % 2) * rows * cols + sample_cols * rows + sample_rows
+    nearest: np.ndarray = np.array([indices[np.argmax(rank[indices])] for indices in ties], dtype=np.int64)
+    return csr_matrix(
+        (np.concatenate((weights.ravel(), np.ones(outside.size))),
+         (np.concatenate((np.repeat(inside, 3), outside)),
+          np.concatenate((vertices.ravel(), nearest)))),
+        shape=(rows * cols, len(coordinates)),
+    )
+
+
+def _interpolate_demosaic_samples(channel_idx: np.ndarray,
+                                  sample_values: np.ndarray,
+                                  image_shape: tuple[int, int]
+                                 ) -> np.ndarray:
+    """Apply cached Bayer weights, falling back for missing or degenerate samples.
+
+    Args:
+        channel_idx: Measured channel coordinates as (row, col) pairs.
+        sample_values: Channel values or color-to-green ratios at those sites.
+        image_shape: Output dimensions as (rows, cols).
+
+    Returns:
+        A float64 interpolated channel plane with nearest extrapolation.
+    """
+    # Normal reconstructed frames are finite: triangulate only on the first call.
+    if(np.all(np.isfinite(sample_values))):
+        coordinate_bytes: bytes = np.asarray(channel_idx, dtype=np.int64).tobytes()
+        try:
+            weights: csr_matrix = _demosaic_interpolation_weights(image_shape, coordinate_bytes)
+            return (weights @ sample_values).reshape(image_shape)
+        except QhullError:
+            pass
+
+    # Missing samples change the triangulation, so retain Geoff's scattered fit.
+    valid: np.ndarray = ~np.isnan(sample_values)
+    return _scattered_interpolant(
+        channel_idx[valid, 1] + 1, channel_idx[valid, 0] + 1,
+        sample_values[valid], image_shape,
+    )
+
+
 def _interpolate_channel(radiance_map: np.ndarray,
                          channel_idx: np.ndarray,
                          image_shape: tuple[int, int]
                         ) -> np.ndarray:
-    """Interpolate one Bayer channel across the frame, preserving Inf.
+    """Fill a channel plane from its Bayer samples using linear interpolation.
 
-    This is the ``interpolateChannel`` subfunction of MATLAB
-    ``demosaicRadianceMapRCD``.
+    Outside the sample region, use the nearest sample. Restore infinite
+    values at their original sensor sites after interpolation.
+
+    Args:
+        radiance_map: Two-dimensional Bayer radiance frame.
+        channel_idx: Array of (row, col) positions belonging to this color channel.
+        image_shape: Output dimensions as (rows, cols).
+
+    Returns:
+        A float64 channel plane. With no usable samples, the plane contains NaN.
     """
     rows, cols = image_shape
     channel_rows: np.ndarray = channel_idx[:, 0]
@@ -1371,18 +1662,14 @@ def _interpolate_channel(radiance_map: np.ndarray,
     work_sub[np.isinf(work_sub)] = np.nan
 
     # Filter out NaN values for fitting.
-    sub_x: np.ndarray = channel_cols.astype(np.float64) + 1
-    sub_y: np.ndarray = channel_rows.astype(np.float64) + 1
     valid_idx: np.ndarray = ~np.isnan(work_sub)
 
     # Nothing to fit, so the whole plane is undefined.
     if(not np.any(valid_idx)):
         return np.full((rows, cols), np.nan, dtype=np.float64)
 
-    # Perform bilinear interpolation with nearest extrapolation for edge robustness.
-    full_grid: np.ndarray = _scattered_interpolant(
-        sub_x[valid_idx], sub_y[valid_idx], work_sub[valid_idx], (rows, cols)
-    )
+    # Perform piecewise-linear interpolation with nearest extrapolation for edge robustness.
+    full_grid: np.ndarray = _interpolate_demosaic_samples(channel_idx, work_sub, (rows, cols))
 
     # Restore Inf values at their original sub-grid locations.
     if(np.any(inf_mask_sub)):
@@ -1396,12 +1683,21 @@ def _interpolate_ratio_channel(radiance_map: np.ndarray,
                                full_grid_g: np.ndarray,
                                image_shape: tuple[int, int]
                               ) -> np.ndarray:
-    """Interpolate one Bayer channel as a ratio to the green guide.
+    """Interpolate a red or blue channel using green as a guide.
 
-    This is the ``interpolateRatioChannel`` subfunction of MATLAB
-    ``demosaicRadianceMapRCD``. Colour ratios vary far more smoothly across a
-    scene than raw radiance does, so interpolating the ratio and multiplying
-    back by green keeps the detail green resolves instead of blurring it.
+    Interpolate the measured color-to-green ratios, then multiply by the
+    full green plane. This lets the color channel follow detail resolved
+    by green while preserving its measured color ratios.
+
+    Args:
+        radiance_map: Two-dimensional Bayer radiance frame.
+        channel_idx: Array of (row, col) positions for the red or blue channel.
+        full_grid_g: Interpolated green plane, with the same spatial shape.
+        image_shape: Output dimensions as (rows, cols).
+
+    Returns:
+        The reconstructed color plane, with original infinite sites restored.
+        If no ratios are usable, the plane contains NaN.
     """
     rows, cols = image_shape
     channel_rows: np.ndarray = channel_idx[:, 0]
@@ -1427,18 +1723,14 @@ def _interpolate_ratio_channel(radiance_map: np.ndarray,
         ratio_sub: np.ndarray = work_sub / (guide_val + epsilon)
 
     # Filter out NaN values for fitting.
-    sub_x: np.ndarray = channel_cols.astype(np.float64) + 1
-    sub_y: np.ndarray = channel_rows.astype(np.float64) + 1
     valid_idx: np.ndarray = ~np.isnan(ratio_sub)
 
     # Nothing to fit, so the whole plane is undefined.
     if(not np.any(valid_idx)):
         return np.full((rows, cols), np.nan, dtype=np.float64)
 
-    # Perform bilinear interpolation of the colour ratio.
-    full_ratio_grid: np.ndarray = _scattered_interpolant(
-        sub_x[valid_idx], sub_y[valid_idx], ratio_sub[valid_idx], (rows, cols)
-    )
+    # Perform piecewise-linear interpolation of the colour ratio.
+    full_ratio_grid: np.ndarray = _interpolate_demosaic_samples(channel_idx, ratio_sub, (rows, cols))
 
     # Calculate the final grid by multiplying the interpolated ratio by the full Green guide.
     full_grid: np.ndarray = full_ratio_grid * full_grid_g
@@ -1477,7 +1769,15 @@ def _interpolate_ratio_channel(radiance_map: np.ndarray,
 def _demosaic_radiance_map_rcd_single(radiance_map: np.ndarray,
                                       bayer_pattern: str
                                      ) -> np.ndarray:
-    """Demosaic one Bayer radiance map with ratio-corrected interpolation."""
+    """Reconstruct RGB radiance from one Bayer frame using green-guided ratios.
+
+    Args:
+        radiance_map: Two-dimensional Bayer radiance frame.
+        bayer_pattern: Bayer layout: BGGR, RGGB, GRBG, or GBRG.
+
+    Returns:
+        A float64 array shaped (rows, cols, 3), in red, green, blue order.
+    """
     rows, cols = radiance_map.shape
 
     pattern = str(bayer_pattern).upper()
@@ -1519,19 +1819,145 @@ def _demosaic_radiance_map_rcd_single(radiance_map: np.ndarray,
     return np.stack((full_grid_r, full_grid_g, full_grid_b), axis=-1)
 
 
+@contextmanager
+def demosaic_worker_pool(n_workers: int=WORLD_DEMOSAIC_WORKERS) -> Iterator[Pool | None]:
+    """Reuse demosaicing workers and their interpolation caches across buffers.
+
+    Args:
+        n_workers: Positive process count, default WORLD_DEMOSAIC_WORKERS (16).
+            Selected from sequential 3,600-frame benchmarks including startup
+            amortized over ten buffers. One yields None for serial processing.
+
+    Yields:
+        A spawned pool to pass as worker_pool to demosaic_radiance_map_rcd or
+        as demosaic_pool to world_transformation_pipeline. The pool is closed
+        on context exit, including when processing fails. Guard script entry
+        points with ``if __name__ == "__main__":`` for multiprocessing spawn.
+        Use one context around the entire chunk loop to amortize startup.
+
+    Notes:
+        Benchmarked on 2026-10-05 on a Mac Studio (Mac15,14), Apple M3 Ultra,
+        28-core CPU (20 performance + 8 efficiency), 256 GB unified memory,
+        macOS 15.3 (arm64).
+        Timed one 3,600 x 480 x 640 float64 Bayer buffer at a time, using a
+        120-frame seeded positive-radiance sequence repeated 30 times. Compared
+        8/12/16/24/28 spawned workers with a persistent pool per configuration.
+        Timed startup separately, then three warmed calls including shared-memory
+        allocation, input/output copies, and cleanup. Sixteen was fastest tested:
+        22.77 s for the first call and 10.39 s warmed median, versus 11.09 s
+        warmed with twelve. Every configuration matched the serial reference
+        exactly. One first call plus nine warmed medians estimates 116.3 s
+        for ten buffers; this is not an end-to-end recording measurement and
+        excludes file I/O and other stages. Direct calls without a pool stay
+        serial to avoid repeatedly paying startup and cache-construction costs.
+        Measurements: tmp/benchmark_demosaic_large_buffers.json.
+    """
+    if(not isinstance(n_workers, int) or isinstance(n_workers, bool) or n_workers < 1):
+        raise ValueError("n_workers must be a positive integer.")
+    if(n_workers == 1):
+        yield None
+    else:
+        with multiprocessing.get_context("spawn").Pool(processes=n_workers) as pool:
+            yield pool
+
+
+def _demosaic_shared_worker(frame_index: int,
+                             bayer_pattern: str,
+                             input_name: str,
+                             output_name: str,
+                             input_shape: tuple[int, ...]
+                            ) -> None:
+    """Demosaic one frame into its exclusive shared RGB output slice.
+
+    Args:
+        frame_index: Frame assigned to this worker.
+        bayer_pattern: Bayer layout used to interpret the input.
+        input_name: Parent-owned shared float64 Bayer allocation.
+        output_name: Parent-owned shared float64 RGB allocation.
+        input_shape: Shape of the input (frames, rows, cols) buffer.
+
+    Returns:
+        None. Only this frame's output slice is modified. The parent unlinks
+        both allocations after all tasks finish; workers retain cached weights.
+    """
+    input_memory: SharedMemory = SharedMemory(name=input_name)
+    try:
+        output_memory: SharedMemory = SharedMemory(name=output_name)
+        try:
+            source: np.ndarray = np.ndarray(input_shape, dtype=np.float64, buffer=input_memory.buf)
+            output: np.ndarray = np.ndarray((*input_shape, 3), dtype=np.float64, buffer=output_memory.buf)
+            try:
+                output[frame_index] = _demosaic_radiance_map_rcd_single(source[frame_index], bayer_pattern)
+            finally:
+                del source, output
+        finally:
+            output_memory.close()
+    finally:
+        input_memory.close()
+
+
+def _demosaic_shared_buffer(values: np.ndarray,
+                             bayer_pattern: str,
+                             worker_pool: Pool
+                            ) -> np.ndarray:
+    """Process a buffer with existing workers, transferring only task descriptors.
+
+    Args:
+        values: Nonempty float64 Bayer buffer shaped (frames, rows, cols).
+        bayer_pattern: Bayer layout used to interpret each frame.
+        worker_pool: Persistent spawned pool owned by the caller.
+
+    Returns:
+        An independent float64 RGB buffer. Shared allocations are released on
+        success or failure, and no shared-memory handles escape to the caller.
+    """
+    input_memory: SharedMemory = SharedMemory(create=True, size=values.nbytes)
+    try:
+        output_memory: SharedMemory = SharedMemory(create=True, size=values.nbytes * 3)
+        try:
+            shared_input: np.ndarray = np.ndarray(values.shape, dtype=np.float64, buffer=input_memory.buf)
+            shared_output: np.ndarray = np.ndarray((*values.shape, 3), dtype=np.float64, buffer=output_memory.buf)
+            try:
+                # Copy input once. Each worker writes a disjoint RGB frame.
+                np.copyto(shared_input, values)
+                worker_pool.starmap(
+                    _demosaic_shared_worker,
+                    ((index, bayer_pattern, input_memory.name, output_memory.name, values.shape)
+                     for index in range(len(values))),
+                    chunksize=1,
+                )
+                # Return ordinary NumPy storage before releasing shared memory.
+                return shared_output.copy()
+            finally:
+                del shared_input, shared_output
+        finally:
+            output_memory.close()
+            output_memory.unlink()
+    finally:
+        input_memory.close()
+        input_memory.unlink()
+
+
 def demosaic_radiance_map_rcd(radiance_map_or_buffer: np.ndarray,
                               bayer_pattern: str="BGGR",
-                              visualize_results: bool=False
+                              visualize_results: bool=False,
+                              worker_pool: Pool | None = None
                              ) -> np.ndarray | tuple[np.ndarray, object]:
     """Demosaic a Bayer-pattern radiance map into a 3-D RGB image.
 
-    This is the Python equivalent of MATLAB ``demosaicRadianceMapRCD``. It
+    This is the Python equivalent of MATLAB ``demosaicRadianceMap``. It
     takes a 2-D radiance map with a specified Bayer pattern and returns a
     ``rows x cols x 3`` array containing the interpolated Red, Green, and Blue
     channels using a Ratio-Corrected Demosaicing (RCD) algorithm.
 
     Pixels assigned an ``Inf`` value in the input retain their ``Inf`` value in
-    their respective output channel after demosaicing.
+    their respective output channel after demosaicing when usable samples exist.
+    A channel with no usable samples is NaN, matching MATLAB's early return.
+    Input values are preserved and output uses float64 in the same radiance units.
+    Green is interpolated first; red and blue use color / (green + 1e-6).
+    Intact channel geometry is cached to avoid triangulating every video frame.
+    Missing samples use the scattered fallback, where SciPy and MATLAB may
+    choose different valid triangles.
 
     MATLAB handles one map. A ``(frames, rows, cols)`` buffer is accepted here
     and each frame is demosaiced independently.
@@ -1542,11 +1968,33 @@ def demosaic_radiance_map_rcd(radiance_map_or_buffer: np.ndarray,
         bayer_pattern: Bayer layout of the sensor.
         visualize_results: When ``True``, display a before/after figure and
             return it alongside the result. Supported for one frame only.
+        worker_pool: Optional persistent pool from demosaic_worker_pool(n_workers).
+            Buffers use shared memory when supplied; None runs serially. Single
+            frames run serially. Reuse the pool across chunks to amortize startup
+            and interpolation-cache construction. Input and output are copied
+            once across the shared-memory boundary.
 
     Returns:
         ``(rows, cols, 3)`` for one map or ``(frames, rows, cols, 3)`` for a
         buffer, or that result paired with a figure when visualization is
         requested.
+
+    Notes:
+        Benchmarked on 2026-10-05 on a Mac Studio (Mac15,14), Apple M3 Ultra,
+        28-core CPU (20 performance + 8 efficiency), 256 GB unified memory,
+        macOS 15.3 (arm64).
+        Timed one 3,600 x 480 x 640 float64 Bayer buffer at a time, using a
+        120-frame seeded positive-radiance sequence repeated 30 times. Compared
+        8/12/16/24/28 spawned workers with a persistent pool per configuration.
+        Timed startup separately, then three warmed calls including shared-memory
+        allocation, input/output copies, and cleanup. Sixteen was fastest tested:
+        22.77 s for the first call and 10.39 s warmed median, versus 11.09 s
+        warmed with twelve. Every configuration matched the serial reference
+        exactly. One first call plus nine warmed medians estimates 116.3 s
+        for ten buffers; this is not an end-to-end recording measurement and
+        excludes file I/O and other stages. Direct calls without a pool stay
+        serial to avoid repeatedly paying startup and cache-construction costs.
+        Measurements: tmp/benchmark_demosaic_large_buffers.json.
     """
     values: np.ndarray = np.asarray(radiance_map_or_buffer, dtype=np.float64)
 
@@ -1562,11 +2010,13 @@ def demosaic_radiance_map_rcd(radiance_map_or_buffer: np.ndarray,
     # Demosaic one map directly, or every frame of a buffer independently.
     if(values.ndim == 2):
         result: np.ndarray = _demosaic_radiance_map_rcd_single(values, bayer_pattern)
+    elif(worker_pool is not None and len(values) > 1):
+        result = _demosaic_shared_buffer(values, bayer_pattern, worker_pool)
     else:
-        result = np.stack(
-            [_demosaic_radiance_map_rcd_single(frame, bayer_pattern) for frame in values],
-            axis=0,
-        )
+        # Allocate the buffer once instead of retaining frames and stacking a copy.
+        result = np.empty((*values.shape, 3), dtype=np.float64)
+        for frame_index, frame in enumerate(values):
+            result[frame_index] = _demosaic_radiance_map_rcd_single(frame, bayer_pattern)
 
     # If visualize results is true, we will print an output of what the image looks like
     if(visualize_results is True):
@@ -1600,7 +2050,7 @@ def demosaic_radiance_map_rcd(radiance_map_or_buffer: np.ndarray,
 def apply_fielding_function(image_or_video: np.ndarray, 
                             visualize_results: bool=False,
                             fielding_function: np.ndarray | None = None
-                           ) -> None | tuple[np.ndarray, object]:
+                           ) -> None:
     """Apply the registered fielding correction in place.
 
     Args:
@@ -1608,20 +2058,25 @@ def apply_fielding_function(image_or_video: np.ndarray,
             ``(rows, cols)`` or frame buffer with shape
             ``(frames, rows, cols)``. The spatial frame size must exist in
             ``WORLD_FIELDING_FUNCTIONS``.
-        visualize_results: When ``True``, display a before/after figure and
-            return it with the corrected input array. Visualization supports
+        visualize_results: When ``True``, display a before/after figure. Visualization supports
             only a single ``(rows, cols)`` frame and asserts otherwise.
+        fielding_function: Optional two-dimensional correction map. If omitted, use the calibrated
+            map for the frame shape.
 
     Returns:
-        ``None`` after in-place correction, or ``(image_or_video, figure)``
-        when visualization is requested.
+        None. The supplied array is modified in place. When visualization is
+        enabled, the before/after figure is displayed without returning it.
     """
+
+    # Input must either be a single image or a buffer of images 
     assert image_or_video.ndim in (2, 3), (
         f"Fielding function requires a single frame with shape (rows, cols) "
         f"or a frame buffer with shape (frames, rows, cols). Got shape "
         f"{image_or_video.shape}."
     )
-    
+
+    # If we want to visualize we need to copy an unmodified version of the input
+    # as this is an in-place operation
     unmodified_image_or_video: np.ndarray | None = None
     if(visualize_results is True):
         assert image_or_video.ndim == 2, (
@@ -1632,15 +2087,11 @@ def apply_fielding_function(image_or_video: np.ndarray,
 
     # If the fielding function was not passed in,
     # load it manually.
-    image_shape: np.ndarary = image_or_video.shape if image_or_video.ndim == 2 else image_or_video.shape[1:]
+    image_shape: tuple[int, int] = image_or_video.shape[-2:]
     if(fielding_function is None):
         fielding_function: np.ndarray = WORLD_FIELDING_FUNCTIONS[image_shape]
 
-    # Assert the fielding function is the same size and apply the fielding function.
-    two_d_case: bool = image_or_video.ndim == 2 and fielding_function.ndim == 2 and image_shape == fielding_function.shape
-    three_d_case: bool = image_or_video.ndim == 3 and fielding_function.ndim == 2 and image_shape == fielding_function.shape
-    assert two_d_case or three_d_case, f"ERROR: Unsupported shape"
-
+    # Element wise multiply the two matrices together in place
     image_or_video *= fielding_function
 
     # Visualize the results if desired 
@@ -1659,111 +2110,14 @@ def apply_fielding_function(image_or_video: np.ndarray,
         plt.tight_layout()
         plt.show()
 
-        return image_or_video, fig
+        return None
 
     return None
 
-def generate_RGB_mask(original_frame: np.ndarray, marker: Literal["str", "num"]="str", visualize_results: bool=False) -> tuple[np.ndarray, object] | np.ndarray:
-    """Build a Bayer-pattern lookup mask for the frame geometry.
-
-    The world camera is modeled here as blue on even/even coordinates, red
-    on odd/odd coordinates, and green on the mixed-parity sites. This
-    helper converts that parity rule into a reusable 2-D mask so later code
-    can select raw Bayer samples by color without recomputing the coordinate
-    sets.
-
-    Args:
-        original_frame: Example frame whose first two dimensions define the
-            mask shape.
-        marker: Output encoding for each pixel site. ``"str"`` stores the
-            literal channel labels ``"R"``, ``"G"``, and ``"B"``; ``"num"``
-            stores the RGB channel indices ``0``, ``1``, and ``2``.
-        visualize_results: When ``True``, render a colorized depiction of
-            the Bayer layout and return it alongside the mask.
-
-    Returns:
-        A 2-D mask array, or ``(mask, figure)`` when visualization is
-        requested.
-    """
-    # Initialize a variable for the figure handle that
-    # will be used to visualize (if desired)
-    fig: object | None = None
-
-    # Initialize an array of characters. RGB will represent 
-    # the indices where there are the respective colors in 
-    # bayer pattern 
-    mask: np.ndarray = np.full(original_frame.shape[:2], 'x', dtype='<U1') if marker == "str" else np.full(original_frame.shape[:2], -1, dtype=np.float64)
-    
-    # Extract the dimensions of the frame 
-    height, width = original_frame.shape[:2]
-
-    # Create a list for only the red pixels in a frame
-    world_r_pixels: np.ndarray = np.array( [ (r, c) 
-                                            for r in range(height) 
-                                            for c in range(width)
-                                            if(r % 2 != 0 and c % 2 != 0)
-                                        ], 
-                                        dtype=np.uint64
-                                        )
-
-    # Create a list for only the green pixels in a frame 
-    world_g_pixels: np.ndarray = np.array( [ (r, c) 
-                                            for r in range(height)
-                                            for c in range(width)
-                                            if(r % 2 == 0 and c % 2 != 0)
-                                            or(r % 2 != 0 and c % 2 == 0) 
-                                        ],  
-                                        dtype=np.uint64
-                                        )
-
-    # Create a list for only the blue pixels in a frame
-    world_b_pixels: np.ndarray = np.array([ (r, c)
-                                            for r in range(height)
-                                            for c in range(width)
-                                            if(r % 2 == 0 and c % 2 == 0)
-                                          ], 
-                                          dtype=np.uint64
-                                        )
-    
-    # Set the values in the mask 
-    for idx, (color, pixel_coords) in enumerate(zip("RGB", (world_r_pixels, world_g_pixels, world_b_pixels))):
-        rows: np.ndarray = pixel_coords[:, 0]
-        cols: np.ndarray = pixel_coords[:, 1]
-
-        mask[rows, cols] = color if marker == "str" else idx
-
-    # Visualize the results if desired
-    if(visualize_results is True):
-        # Convert the mask to have color 
-        colored_image: np.ndarray = np.empty(tuple(list(original_frame.shape[:2]) + [3]), dtype=np.uint8)
-        for idx, (color, pixel_coords) in enumerate(zip("RGB", (world_r_pixels, world_g_pixels, world_b_pixels))):
-            rows: np.ndarray = pixel_coords[:, 0]
-            cols: np.ndarray = pixel_coords[:, 1]
-            color_vector: np.ndarray = np.zeros((3,), dtype=np.uint8)
-            color_vector[idx] = 255
-            colored_image[rows, cols] = color_vector
-
-        # Initialize a figure with a single axis 
-        fig, ax = plt.subplots(1, 1)
-
-        # Middle axis will be the after but without 
-        # color correction 
-        ax.imshow(colored_image)
-        ax.set_title(f"{original_frame.shape} Bayer RGB Pattern")
-        ax.axis("off")
-
-        # Show the plot 
-        plt.show() 
-
-        return mask, fig
-    
-    return mask
-
 # Apply the per-color weights to the color pixels of a frame.
 def apply_color_correction(image_or_video: np.ndarray, 
-                           bayer_correction_matrix: np.ndarray | None=None,
                            visualize_results: bool=False,
-                           ) -> None | tuple[np.ndarray, object]:
+                           ) -> None:
     """Apply calibrated Bayer-site RGB scaling factors in place.
 
     The correction constants in ``WORLD_RGB_SCALARS`` are applied to raw
@@ -1774,24 +2128,24 @@ def apply_color_correction(image_or_video: np.ndarray,
         image_or_video: A floating-point raw Bayer frame with shape
             ``(rows, cols)`` or frame buffer with shape
             ``(frames, rows, cols)``.
-        bayer_correction_matrix: Optional 2-D weight map matching the frame's
-            spatial shape. When omitted, use WORLD_BAYER_CORRECTION_MATRICES,
-            raising ValueError for unsupported spatial shapes.
-            A supplied matrix is not modified or added to the cache.
-        visualize_results: When ``True``, display a before/after figure and
-            return it with the corrected input array. Visualization supports
+        visualize_results: When ``True``, display a before/after figure. Visualization supports
             only a single ``(rows, cols)`` frame and asserts otherwise.
 
     Returns:
-        ``None`` after in-place correction, or ``(image_or_video, figure)``
-        when visualization is requested.
+        None. The supplied array is modified in place. When visualization is
+        enabled, the before/after figure is displayed without returning it.
+    Raises:
+        ValueError: If no cached correction map exists for the frame shape.
     """
+
+    # Input must either be a single image or a buffer of images 
     assert image_or_video.ndim in (2, 3), (
         f"Color correction requires a single raw Bayer frame with shape "
         f"(rows, cols) or a raw Bayer frame buffer with shape "
         f"(frames, rows, cols). Got shape {image_or_video.shape}."
     )
 
+    # If we want to do visualization we need do make a copy of the original image 
     unmodified_image_or_video: np.ndarray | None = None
     if(visualize_results is True):
         assert image_or_video.ndim == 2, (
@@ -1799,19 +2153,14 @@ def apply_color_correction(image_or_video: np.ndarray,
             f"with shape (rows, cols). Got shape {image_or_video.shape}."
         )
         unmodified_image_or_video = image_or_video.copy() 
-    
-    image_shape = image_or_video.shape[-2:]
-    if(bayer_correction_matrix is None):
-        if(image_shape not in WORLD_BAYER_CORRECTION_MATRICES):
-            raise ValueError(f"Unsupported image shape for Bayer color correction: {image_shape}.")
-        bayer_correction_matrix = WORLD_BAYER_CORRECTION_MATRICES[image_shape]
-    else:
-        bayer_correction_matrix = np.asarray(bayer_correction_matrix)
-        if(bayer_correction_matrix.shape != image_shape):
-            raise ValueError(
-                f"Bayer correction matrix must have shape {image_shape}; "
-                f"got {bayer_correction_matrix.shape}."
-            )
+
+    # Use the spatial shape for either a single image or a frame buffer.
+    image_shape: tuple[int, int] = image_or_video.shape[-2:]
+
+    # Each supported shape has a correction map cached when the module loads.
+    if(image_shape not in WORLD_BAYER_CORRECTION_MATRICES):
+        raise ValueError(f"Unsupported image shape for Bayer color correction: {image_shape}.")
+    bayer_correction_matrix: np.ndarray = WORLD_BAYER_CORRECTION_MATRICES[image_shape]
 
     # Elementwise multiplication writes directly to the input. Broadcasting
     # avoids creating a separate weight map for each frame in a buffer.
@@ -1833,7 +2182,7 @@ def apply_color_correction(image_or_video: np.ndarray,
         plt.tight_layout()
         plt.show()
 
-        return image_or_video, fig
+        return None
 
     # Return the modified frame
     return None
@@ -1841,7 +2190,7 @@ def apply_color_correction(image_or_video: np.ndarray,
 
 def apply_color_weights(original_frame: np.ndarray,
                         visualize_results: bool=False,
-                        ) -> None | tuple[np.ndarray, object]:
+                        ) -> None:
     """Backward-compatible alias for :func:`apply_color_correction`.
 
     Older code in this project referred to the radiometric RGB correction
@@ -1852,13 +2201,13 @@ def apply_color_weights(original_frame: np.ndarray,
     Args:
         original_frame: Raw Bayer frame to correct.
         visualize_results: Whether to request the optional before/after
-            figure from ``apply_color_correction``.
+            display from ``apply_color_correction``.
 
     Returns:
-        ``None`` after in-place correction, or ``(original_frame, figure)``
-        when visualization is enabled.
+        None. The supplied array is modified in place. When visualization is
+        enabled, the before/after figure is displayed without returning it.
     """
-    return apply_color_correction(original_frame, visualize_results=visualize_results)
+    apply_color_correction(original_frame, visualize_results=visualize_results)
 
 def apply_digital_gain(image_or_video: np.ndarray, 
                        dgain: int | float | np.ndarray, 
@@ -1943,7 +2292,25 @@ def _apply_floor_ceiling_compiled(debayered_frame_buffer: np.ndarray,
                                   clip_floor: int | float,
                                   clip_ceiling: int | float,
                                   ) -> None:
-    """Compiled floor/ceiling propagation over normalized frame buffers."""
+    """Propagate raw floor and ceiling samples into RGB frames in place.
+
+    Each output pixel is checked against its raw contributors. A floor
+    contributor takes precedence when a pixel has both floor and ceiling
+    contributors. Numba processes independent output rows in parallel.
+
+    Args:
+        debayered_frame_buffer: RGB output buffer shaped (frames, rows, cols, 3), modified in place.
+        raw_frame_buffer: Corresponding raw Bayer buffer shaped (frames, rows, cols).
+        debayered_provenance_map: Raw (row, col) contributors for each output pixel.
+        floor: Raw values at or below this level count as floor samples.
+        ceiling: Raw values at or above this level count as ceiling samples.
+        clip_floor: Value assigned to all RGB channels when a floor contributor is found.
+        clip_ceiling: Value assigned when a ceiling contributor is found without a floor
+            contributor.
+
+    Returns:
+        None. The supplied RGB buffer holds the corrected values.
+    """
     debayered_height: int = debayered_provenance_map.shape[0]
     debayered_width: int = debayered_provenance_map.shape[1]
 
@@ -2183,8 +2550,6 @@ def embed_timestamp(original_frame: np.ndarray, timestamp: np.float64, visualize
         axes[0].imshow(original_frame, cmap="gray")
         axes[0].set_title('Before')
 
-        # Middle axis will be the after but without 
-        # color correction 
         axes[1].imshow(embedded_frame.reshape(original_frame.shape))
         axes[1].set_title("After")
 
@@ -2677,13 +3042,17 @@ def world_timestamps_from_chunks(raw_chunks_path: str,
 def generate_real_dummy_frame_distribution(path_to_video: str) -> np.ndarray:
     """Identify the real and missing frames in a chunked world recording.
 
-    The returned array describes the frame sequence that a constant-frame-rate video needs in order to preserve the timing of the captured world frames. Every captured frame is represented by ``True``. Timestamp gaps large enough to imply dropped frames insert one or more ``False`` entries before the next captured frame.
+    The returned array describes the frame sequence that a constant-frame-rate video needs in order
+    to preserve the timing of the captured world frames. Every captured frame is represented by
+    ``True``. Timestamp gaps large enough to imply dropped frames insert one or more ``False``
+    entries before the next captured frame.
 
     Args:
         path_to_video: Recording directory containing ``config.pkl`` and the world metadata chunks.
 
     Returns:
-        One-dimensional Boolean array where ``True`` denotes a captured frame and ``False`` denotes a dummy frame needed to fill a timestamp gap.
+        One-dimensional Boolean array where ``True`` denotes a captured frame and ``False`` denotes
+        a dummy frame needed to fill a timestamp gap.
     """
     # Accept either the GKA recording directory itself or its parent activity directory.
     gka_path: str = os.path.join(path_to_video, "GKA")
@@ -2756,6 +3125,8 @@ def world_frame_to_visual_angle(world_frame: np.ndarray, matlab_engine: object |
     Args:
         world_frame: Raw Bayer ``(rows, columns)`` or spatially equivalent
             ``(rows, columns, channels)`` world-camera frame.
+        matlab_engine: Optional running MATLAB Engine session. If omitted, the function starts its
+            own session.
 
     Returns:
         A float64 array with shape ``(rows, columns, 2)`` containing the
@@ -3211,6 +3582,17 @@ def world_raw_frames_from_chunks(path_to_recording: str,
                                  use_mean_frame: bool=False,
                                  verbose: bool = False
                                 ) -> np.ndarray:
+    """Load raw world-camera frames in natural chunk order.
+
+    Args:
+        path_to_recording: Directory containing world frame .npy chunks and their metadata.
+        use_mean_frame: If True, return the spatial mean of each frame instead of the full frame.
+        verbose: Whether to show a progress bar while reading chunks.
+
+    Returns:
+        An array shaped (frames, rows, cols), or a one-dimensional array of
+        per-frame means when use_mean_frame is True.
+    """
     frame_chunk_paths: list[str] = [os.path.join(path_to_recording, folder_name) for folder_name in natsorted(os.listdir(path_to_recording)) if folder_name.startswith("world") and not folder_name.endswith("metadata.npy")]
     assert len(frame_chunk_paths) > 0, f"No frame chunks found in {path_to_recording}"
     
@@ -3230,7 +3612,7 @@ def world_raw_frames_from_chunks(path_to_recording: str,
 def world_counts_to_radiance(image_or_video: np.ndarray,
                              agc_settings: dict[str, float | np.ndarray],
                              visualize_results: bool=False
-                            ) -> np.ndarray | tuple[np.ndarray, object]:
+                            ) -> None:
     """Convert corrected world-camera counts to absolute radiance units.
 
     Args:
@@ -3246,8 +3628,8 @@ def world_counts_to_radiance(image_or_video: np.ndarray,
             conversion. Visualization supports a single frame only.
 
     Returns:
-        The input array after in-place conversion to radiance, or a tuple of
-        the converted array and its figure when visualization is requested.
+        None. The supplied array is modified in place. When visualization is
+        enabled, the before/after figure is displayed without returning it.
     """
     unmodified_image_or_video: np.ndarray | None = None
     if(visualize_results is True):
@@ -3261,27 +3643,27 @@ def world_counts_to_radiance(image_or_video: np.ndarray,
 
     # Match reconstructionPipeline.m: undo digital gain at the AGC target,
     # subtract dark signal, then invert the sensor response for each frame.
-    set_point = 127.0 / np.asarray(digital_gain, dtype=np.float64) - WORLD_DARK_SIGNAL
-    smax = 255.0 - WORLD_DARK_SIGNAL
-    exponent = WORLD_FULL_WELL_CLIPPING_EXPONENT
-    linearized_set_point = set_point / (1 - (set_point / smax) ** exponent) ** (1 / exponent)
-    effective_set_point = (
+    set_point: np.ndarray = 127.0 / np.asarray(digital_gain, dtype=np.float64) - WORLD_DARK_SIGNAL
+    smax: float = 255.0 - WORLD_DARK_SIGNAL
+    exponent: float = WORLD_FULL_WELL_CLIPPING_EXPONENT
+    linearized_set_point: np.ndarray = set_point / (1 - (set_point / smax) ** exponent) ** (1 / exponent)
+    effective_set_point: np.ndarray = (
         linearized_set_point
         * WORLD_MEAN_SPATIAL_CORRECTIONS[image_or_video.shape[-2:]]
     )
 
     # Match MATLAB: 10.^polyval(agcToRadianceP, log10(cameraScore)).
     # The fitted coefficients directly predict mean integrated radiance.
-    this_camera_score: np.ndarray = np.asarray(np.asarray(exposure) * np.asarray(analog_gain) * np.asarray(digital_gain), dtype=np.float64)
-    mean_integrated_radiance = np.power(
+    this_camera_score: np.ndarray = np.asarray(np.asarray(exposure) * np.asarray(analog_gain) / effective_set_point, dtype=np.float64)
+    mean_integrated_radiance: np.ndarray = np.power(
         10.0, np.polyval(WORLD_AGC_TO_RADIANCE_P, np.log10(this_camera_score))
     )
 
     # Give each buffered frame its own broadcastable radiance scale. Scalar
     # settings naturally apply the same scale to every frame.
-    radiance_scale = mean_integrated_radiance / effective_set_point
+    radiance_scale: np.ndarray = mean_integrated_radiance / effective_set_point
     if(image_or_video.ndim == 3 and np.ndim(radiance_scale) > 0):
-        radiance_scale = radiance_scale.reshape(-1, 1, 1)
+        radiance_scale: np.ndarray = radiance_scale.reshape(-1, 1, 1)
 
     # Scale corrected counts by the fitted mean integrated radiance.
     image_or_video *= radiance_scale
@@ -3297,933 +3679,439 @@ def world_counts_to_radiance(image_or_video: np.ndarray,
         axes[1].axis("off")
         plt.tight_layout()
         plt.show()
-        return image_or_video, fig
+        return None
 
-    return image_or_video
+    return None
 
 
 def world_transformation_pipeline(raw_frame_or_buffer: np.ndarray,
                                   agc_settings: dict[str, float | np.ndarray],
-                                  n_workers: int=12
-                                 ) -> np.ndarray:
-    """Run Geoff's six-stage world-camera reconstruction pipeline.
+                                  gaze_angles_xy: np.ndarray | None = None,
+                                  age: int | None = None,
+                                  n_workers: int=WORLD_IMPUTATION_WORKERS,
+                                  stagewise_output: list[np.ndarray] | None = None,
+                                  demosaic_pool: Pool | None = None
+                                 ) -> dict[str, np.ndarray | dict[str, object]]:
+    """Reconstruct and demosaic world-camera radiance using Geoff's seven stages.
 
-    The returned image remains a Bayer radiance map, matching MATLAB
-    ``reconstructionPipeline``. Use :func:`demosaic_radiance_map_rcd` when an
-    RGB radiance image is required.
+    The result is RGB radiance, matching MATLAB ``reconstructionPipeline``
+    followed by ``demosaicRadianceMap``. Each processing stage calls its standalone
+    helper, whose ``visualize_results`` option can be used independently.
 
-    Digital gain is applied immediately after response linearization and
-    before bad-pixel imputation, matching MATLAB ``reconstructionPipeline``.
-    ``n_workers`` controls the imputation process pool for frame buffers;
-    use 1 for serial processing. Single frames do not start a pool.
+    Raw input is preserved. After imputation, the fielding, color, and radiance
+    corrections reuse one output array to avoid copying an entire buffer at
+    every stage. ``n_workers`` controls frame-wise imputation; use 1 for serial
+    processing. Digital gain enters only through the radiance AGC set point.
+
+    Args:
+        raw_frame_or_buffer: Raw 8-bit counts shaped (rows, cols) or (frames, rows, cols). The input
+            is preserved.
+        agc_settings: Exposure, analog gain, and digital gain as scalars or one value per frame.
+            Accepts legacy or modern metadata keys.
+        gaze_angles_xy: Reserved for later processing; unused here.
+        age: Reserved for later processing; unused here.
+        n_workers: Maximum number of processes used for frame-wise imputation. Use 1 for serial
+            execution.
+        stagewise_output: Optional empty list that receives eight independent
+            float64 snapshots: raw counts, quantization correction, linearization,
+            imputation, fielding, RGB correction, Bayer radiance, and demosaiced
+            RGB radiance. The final snapshot adds a trailing RGB dimension. Omit this argument to avoid the snapshot copies.
+
+        demosaic_pool: Optional persistent pool from demosaic_worker_pool(n_workers).
+            Reuse it across recording chunks for shared-memory demosaicing.
+            None keeps demosaicing serial, avoiding startup for one-off calls.
+
+    Returns:
+        Dictionary with "data", the float64 RGB radiance in W/m²/sr shaped
+        (rows, cols, 3) or (frames, rows, cols, 3), and "metadata", a dictionary
+        containing the processing calibration constants under their module names,
+        source calibration records, input AGC settings, and processing settings.
+        Shape-indexed constants contain the selected frame's value. Metadata is
+        copied once per call so editing it cannot change shared calibrations.
+
+    Notes:
+        Benchmarked on 2026-10-05 on a Mac Studio (Mac15,14), Apple M3 Ultra,
+        28-core CPU (20 performance + 8 efficiency), 256 GB unified memory,
+        macOS 15.3 (arm64).
+        Imputation compared 1/2/4/6/8/12 workers on 120 real 480 x 640 frames,
+        including process startup and shared-memory transfers. Six was chosen
+        as the baseline (48.2 s; eight was slightly faster at 47.3 s).
+        Demosaicing compared 8/12/16/24/28 workers on sequential 3,600-frame
+        float64 buffers using repeated seeded radiance data and persistent pools.
+        Three warmed calls included allocation, copies, and cleanup; sixteen
+        was fastest tested at 10.39 s/buffer, with a 22.77 s first call.
+        Estimated demosaicing time for ten buffers is 116.3 s, excluding file I/O
+        and other stages. All configurations matched their serial references.
+        See tmp/benchmark_imputation_workers.json and
+        tmp/benchmark_demosaic_large_buffers.json for the measurements.
     """
+
+    # First, we need to ensure that the transformation pipeline
+    # can accept either a single raw frame or a buffer of frames,
+    # that's it
     if(raw_frame_or_buffer.ndim not in (2, 3)):
         raise ValueError(
             "World reconstruction requires shape (rows, cols) or "
             f"(frames, rows, cols). Got {raw_frame_or_buffer.shape}."
         )
 
-    # Stage 1: convert raw sensor counts to double precision.
-    raw_frame_or_buffer = raw_frame_or_buffer.astype(np.float64, copy=False)
+    # Get the image shape (r, c). We can get this from .shape[-2]
+    # because if it's a buffer [f, r, c] we would extract r, c
+    # and if it's a single frame [r, c] then it's just the entire thing
+    image_shape: tuple[int, int] = raw_frame_or_buffer.shape[-2:]
 
-    # Stage 2: invert the fitted response and mark unreliable high-count
-    # samples as Inf using the derivative-derived saturation threshold.
-    linearized: np.ndarray = linearize_camera_responsivity(raw_frame_or_buffer,
-                                                           original_bit_depth=8,
-                                                           dark_noise=WORLD_DARK_SIGNAL,
-                                                           clipping_exponent=WORLD_FULL_WELL_CLIPPING_EXPONENT,
-                                                           visualize_results=False
-                                                        )
+    # We need to ensure we support this size of image
+    # for the fielding functions and the bayer correction matrices.
+    # These calibrations were made for specific image shapes
+    if(image_shape not in WORLD_FIELDING_FUNCTIONS
+       or image_shape not in WORLD_BAYER_CORRECTION_MATRICES):
+        raise ValueError(f"Unsupported calibrated image shape: {image_shape}.")
 
-    # Apply digital gain to the linearized Bayer counts before imputation,
-    # exactly where Geoff's MATLAB reconstruction now applies it.
-    digital_gain: float | np.ndarray = (
-        agc_settings["Dgain"]
-        if "Dgain" in agc_settings
-        else agc_settings["AGCDgain"]
+    # Save a boolean of whether we want to store stagewise output or not
+    store_stagewise_output: bool = stagewise_output is not None
+    if(store_stagewise_output is True):
+        if not isinstance(stagewise_output, list):
+            raise TypeError("stagewise_output must be an empty list or None.")
+        if stagewise_output:
+            raise ValueError("stagewise_output must be empty before reconstruction.")
+
+        # Stage 0 of this would be to supply the raw image / buffer
+        stagewise_output.append(raw_frame_or_buffer.astype(np.float64, copy=True))
+
+    # Stage 1: convert raw sensor counts to double precision and correct the
+    # quantization bias. The camera's 10-to-8-bit shift discards an average of
+    # 0.375 counts in 8-bit units.
+    # We make a single copy at the start to not edit the input array
+    quantization_corrected: np.ndarray = raw_frame_or_buffer.astype(np.float64, copy=True)
+    quantization_corrected += 0.375
+
+    # Store this stage in the stagewise output if desired
+    if(store_stagewise_output is True):
+        stagewise_output.append(quantization_corrected.copy())
+
+    # Stage 2: invert the fitted sensor response in place. Negative counts
+    # remain signed after dark subtraction; only the nonlinear gain is clamped
+    # to a non-negative input. Unreliable high-count samples become Inf.
+    linearize_camera_responsivity(
+        quantization_corrected,
+        original_bit_depth=8,
+        dark_noise=WORLD_DARK_SIGNAL,
+        clipping_exponent=WORLD_FULL_WELL_CLIPPING_EXPONENT,
+        visualize_results=False,
     )
-    apply_digital_gain(linearized, digital_gain, visualize_results=False)
+    # Rename the same array after the in-place operation; no data are copied.
+    linearized: np.ndarray = quantization_corrected
+    if(store_stagewise_output is True):
+        stagewise_output.append(linearized.copy())
 
-    # Stage 3: impute sensor-floor and sensor-ceiling samples independently
-    # for every frame using the cross-channel log-Gaussian model.
+    # Stage 3: replace non-positive floor samples and infinite ceiling samples
+    # using each frame's cross-channel Bayesian model. Geoff's current pipeline
+    # does not multiply pixel values by digital gain before this step.
     imputed: np.ndarray = impute_pixel_values(
         linearized,
         bayer_pattern="BGGR",
         visualize_results=False,
         n_workers=n_workers,
     )
+    # Imputation allocates its output, so this stage uses the returned array.
+    if(store_stagewise_output is True):
+        stagewise_output.append(imputed.copy())
 
-    # Stage 4: flat-field correction.
-    # This operation will happen IN PLACE for maximum speed
+    # Stage 4: correct spatial sensitivity with the calibrated fielding map.
+    # The helper modifies the array in place. The new name below refers to the
+    # same array, making the next stage clear without allocating another copy.
     apply_fielding_function(imputed, visualize_results=False)
-    # This is fast because it is just assigning a pointer, not copying the array 
-    # We are simply renaming for clarity here, this is not even really necessary 
+    # Rename the same array after fielding; this alias does not copy data.
     fielding_corrected: np.ndarray = imputed
+    if(store_stagewise_output is True):
+        stagewise_output.append(fielding_corrected.copy())
 
-    # Stage 5: equalize the Bayer RGB channels.
-    # We will also perform this in place for speed
-    image_shape = fielding_corrected.shape[-2:]
-    if(image_shape not in WORLD_BAYER_CORRECTION_MATRICES):
-        raise ValueError(f"Unsupported image shape for Bayer color correction: {image_shape}.")
+    # Stage 5: equalize the Bayer RGB channels with their calibrated weights.
+    # This helper also operates in place and uses the cached correction map.
     apply_color_correction(
         fielding_corrected,
-        bayer_correction_matrix=WORLD_BAYER_CORRECTION_MATRICES[image_shape],
         visualize_results=False,
     )
-    # Once again, we just use a pointer here for clarity of what stage we are on
-    color_corrected: np.ndarray = fielding_corrected 
+    # Rename the same array after RGB correction; this alias does not copy data.
+    color_corrected: np.ndarray = fielding_corrected
+    if(store_stagewise_output is True):
+        stagewise_output.append(color_corrected.copy())
 
-    # Stage 6: convert to absolute radiance units.
-    # We will also perform this in place for speed 
-    world_counts_to_radiance(color_corrected,
-                              agc_settings=agc_settings,
-                              visualize_results=False
-                            )
-    # Once again, we just use a pointer here for clarity of what stage we are on
+    # Stage 6: convert corrected counts to absolute integrated radiance.
+    # The helper accounts for digital gain in the AGC set point, uses harmonic
+    # spatial means, and applies Geoff's updated camera-score calibration.
+    world_counts_to_radiance(
+        color_corrected,
+        agc_settings=agc_settings,
+        visualize_results=False,
+    )
+    # Rename the same array after radiance scaling; this alias does not copy data.
     radiance_map: np.ndarray = color_corrected
+    if(store_stagewise_output is True):
+        stagewise_output.append(radiance_map.copy())
 
-    return radiance_map
+    # Stage 7: use green-guided color ratios to reconstruct full RGB radiance.
+    # The standalone helper reuses interpolation weights across buffered frames.
+    demosaiced: np.ndarray = demosaic_radiance_map_rcd(
+        radiance_map, bayer_pattern="BGGR", worker_pool=demosaic_pool,
+    )
+    if(store_stagewise_output is True):
+        stagewise_output.append(demosaiced.copy())
+
+    # Record every processing calibration, including the source fit metadata.
+    # Store only the applied geometry's maps, once per buffer rather than per frame.
+    calibration_metadata: dict[str, object] = deepcopy({
+        "WORLD_FULL_WELL_CLIPPING_EXPONENT": WORLD_FULL_WELL_CLIPPING_EXPONENT,
+        "WORLD_DARK_SIGNAL": WORLD_DARK_SIGNAL,
+        "WORLD_MAX_ALLOWED_LINEARIZATION_DERIVATIVE": WORLD_MAX_ALLOWED_LINEARIZATION_DERIVATIVE,
+        "WORLD_FIELDING_FUNCTIONS": WORLD_FIELDING_FUNCTIONS[image_shape],
+        "WORLD_RADIOMETRIC_CALIBRATION": WORLD_RADIOMETRIC_CALIBRATION,
+        "WORLD_RGB_SCALARS": WORLD_RGB_SCALARS,
+        "WORLD_RADIOMETRIC_CORRECTION_MAP": WORLD_RADIOMETRIC_CORRECTION_MAP,
+        "WORLD_BAYER_CORRECTION_MATRICES": WORLD_BAYER_CORRECTION_MATRICES[image_shape],
+        "WORLD_INTEGRATED_RADIANCE_CALIBRATION": WORLD_INTEGRATED_RADIANCE_CALIBRATION,
+        "WORLD_AGC_TO_RADIANCE_P": WORLD_AGC_TO_RADIANCE_P,
+        "WORLD_MEAN_SPATIAL_CORRECTIONS": WORLD_MEAN_SPATIAL_CORRECTIONS[image_shape],
+        "WORLD_TRIANGULATION_SHEAR": WORLD_TRIANGULATION_SHEAR,
+        "agc_settings": agc_settings,
+        "image_shape": image_shape,
+        "bayer_pattern": "BGGR",
+        "original_bit_depth": 8,
+        "quantization_bias": 0.375,
+        "radiance_agc_target": 127.0,
+        "demosaic_ratio_epsilon": 1e-6,
+        "units": "W/m²/sr",
+    })
+    return {"data": demosaiced, "metadata": calibration_metadata}
 
 
 
-def visualize_pipeline(recording_path: str,
-                        chunk_range: tuple[int | None, int | None] = (0, None)
-                       ) -> list[tuple[plt.Figure, np.ndarray]]:
-    """Run the full world-camera pipeline on sampled chunk frames and visualize every stage.
+def plot_reconstruction_stages(
+    stagewise_output: list[np.ndarray],
+    title: str = "World-camera reconstruction",
+) -> tuple[plt.Figure, np.ndarray]:
+    """Display the saved Bayer and RGB stages using Geoff's MATLAB figure layout.
 
-    This is the reusable, well-documented form of the exploratory notebook
-    workflow. For each world chunk file in ``recording_path`` it loads the raw
-    Bayer frame buffer, selects one representative frame, pushes that frame
-    through the complete six-stage world-camera pipeline, and draws a 6-row
-    figure comparing the frame before and after each stage alongside
-    intensity-distribution histograms and zoomed saturation / fringe insets.
-
-    Pipeline stages visualized (one figure row each):
-        1. Linearize camera responsivity (raw Bayer -> float; Inf marks
-           sensor-saturated samples, which are re-marked after the operation).
-        2. Fielding-function correction (spatial nonuniformity).
-        3. Per-Bayer-site radiometric color weights.
-        4. Per-frame digital gain (the AGCDgain entry of the frame's AGC settings).
-        5. De-Bayer to RGB. The float Bayer is scaled up by 100 so fractional
-           precision survives the uint16 OpenCV round-trip, Inf is mapped to the
-           uint16 ceiling sentinel, and outputs a saturated contributor pulled up
-           are returned to Inf before scaling back down.
-        6. Floor/ceiling propagation: raw Bayer floor (0) / ceiling (Inf)
-           contributors force the debayered RGB pixel to 0 / 255 via the
-           provenance map.
-
-    Figure layout (per chunk): a 6x4 grid. Column 0 is the "before" image with
-    per-image statistics printed to its left; column 1 is a "Frame AGC Settings"
-    bar chart of this frame's AGC values (exposure columns on a log10 scale);
-    column 2 is the log-scaled intensity histogram comparing before vs. after
-    for the R/G/B channels; and column 3 is the "after" image. Every image panel
-    carries two zoomed insets -- a red "Saturation" crop and a blue "Fringe" crop
-    -- each with an optional Bayer-tinted micro-zoom that annotates individual
-    pixel values.
-
-    Chunk discovery mirrors the notebook: files in ``recording_path`` whose name
-    contains ``"world"`` and not ``"metadata"``, natural-sorted. Each is
-    ``np.load``-ed as an ``(n_frames, rows, cols)`` raw Bayer buffer.
+    Each column shows one stage above its RGB-channel histogram. Images use
+    their finite 85th percentile as a display scale, with ceiling samples in
+    red and non-positive floor samples in blue. Histograms show the percentage
+    of channel samples versus the percentage of that stage's finite maximum.
+    Hover coordinates report the original values rather than display-scaled ones.
 
     Args:
-        recording_path: Directory containing world-camera chunk frame-buffer
-            ``.npy`` files (name contains ``"world"``, excludes ``"metadata"``),
-            each paired with a sibling ``"_metadata"`` file.
-        chunk_range: ``(start, end)`` half-open range of chunk indices to
-            visualize within the natural-sorted chunk list. ``end`` may be
-            ``None`` to run through the last chunk. Defaults to ``(0, None)``
-            (every chunk). The middle frame of each selected chunk is used, and
-            that frame's AGC settings (per ``WORLD_AGC_METADATA_COLS``) are read
-            from the chunk metadata and drive both the digital gain and the
-            "Frame AGC Settings" bar chart.
+        stagewise_output: Eight snapshots (seven Bayer planes and one RGB image) collected by
+            world_transformation_pipeline for a single frame. For a buffer,
+            select the same frame index from each snapshot before plotting.
+        title: Title for the complete figure.
 
     Returns:
-        A list of ``(figure, axes)`` tuples, one per visualized chunk in chunk
-        order. ``axes`` is the ``(6, 3)`` array of Matplotlib axes for that figure.
+        The displayed figure and its (2, 8) axes array. Saved stages are not
+        modified; display scaling operates on separate arrays.
 
     Raises:
-        AssertionError: If no world chunk (or metadata) files are found in
-            ``recording_path``, if the chunk and metadata counts differ, or if a
-            loaded chunk is not 3-dimensional. Pipeline-stage assertions also
-            propagate.
+        ValueError: If the seven Bayer planes and final RGB image have incompatible shapes.
     """
+    stage_names: tuple[str, ...] = (
+        "Raw", "Quantization", "Linearization", "Imputation",
+        "Flat field", "RGB correction", "Radiance", "Demosaiced",
+    )
+    if len(stagewise_output) != len(stage_names):
+        raise ValueError("Provide all eight snapshots from world_transformation_pipeline.")
+    image_shape: tuple[int, ...] = stagewise_output[0].shape
+    if (len(image_shape) != 2
+        or any(stage.shape != image_shape for stage in stagewise_output[:-1])
+        or stagewise_output[-1].shape != (*image_shape, 3)):
+        raise ValueError("Provide seven same-shaped Bayer planes followed by their RGB image.")
 
-    def render_pipeline_figure(sample_frame: np.ndarray, title: str, agc_settings: np.ndarray) -> tuple[plt.Figure, np.ndarray]:
-        """Run the pipeline on one raw Bayer frame and render its diagnostic figure.
-
-        Executes stages 0-6 on ``sample_frame`` using ``agc_settings`` (its
-        AGCDgain entry drives stage 4's digital gain, and the full vector is
-        drawn as the "Frame AGC Settings" bar chart) and draws the 6x4
-        before/after grid described there.
+    def original_pixel_coordinates(x: float, y: float, stage: np.ndarray) -> str:
+        """Format the unscaled stage value under the mouse pointer.
 
         Args:
-            sample_frame: A single raw Bayer frame of shape ``(rows, cols)``.
-            title: Figure suptitle for this frame.
-            agc_settings: 1-D array of this frame's AGC values, ordered to match
-                ``WORLD_AGC_METADATA_COLS``.
+            x: Horizontal image coordinate in pixels.
+            y: Vertical image coordinate in pixels.
+            stage: Original Bayer values for the selected axes.
 
         Returns:
-            ``(figure, axes)`` for the rendered figure.
+            A coordinate/value label, or an empty string outside the image.
         """
-        def get_image_array(image_data: np.ndarray) -> np.ndarray:
-            if(np.ma.isMaskedArray(image_data)):
-                return np.asarray(image_data.filled(np.nan))
-            return np.asarray(image_data)
-
-        def get_dtype_max_value(image_data: np.ndarray) -> tuple[int | float | None, str]:
-            image_values = get_image_array(image_data)
-            if(np.issubdtype(image_values.dtype, np.integer)):
-                dtype_max_value = np.iinfo(image_values.dtype).max
-                return dtype_max_value, str(dtype_max_value)
-            if(np.issubdtype(image_values.dtype, np.floating)):
-                dtype_max_value = np.finfo(image_values.dtype).max
-                return dtype_max_value, f"{dtype_max_value:.3g}"
-            return None, "n/a"
-
-        def pixel_mask_from_value_mask(value_mask: np.ndarray) -> np.ndarray:
-            if(value_mask.ndim == 3):
-                return np.any(value_mask[..., :3], axis=-1)
-            return value_mask
-
-        def get_zero_pixel_mask(image_data: np.ndarray) -> np.ndarray:
-            image_values = get_image_array(image_data)
-            return pixel_mask_from_value_mask(image_values == 0)
-
-        def get_inf_pixel_mask(image_data: np.ndarray) -> np.ndarray:
-            image_values = get_image_array(image_data)
-            return pixel_mask_from_value_mask(np.isinf(image_values))
-
-        def get_dtype_max_pixel_mask(image_data: np.ndarray) -> np.ndarray:
-            image_values = get_image_array(image_data)
-            dtype_max_value, _ = get_dtype_max_value(image_values)
-            if(dtype_max_value is None):
-                return np.zeros(image_values.shape[:2], dtype=bool)
-            return pixel_mask_from_value_mask(image_values == dtype_max_value)
-
-        def get_saturated_pixel_mask(image_data: np.ndarray) -> np.ndarray:
-            return (
-                get_inf_pixel_mask(image_data)
-                | get_dtype_max_pixel_mask(image_data)
-            )
-
-        def get_changed_pixel_mask(before_image: np.ndarray, after_image: np.ndarray) -> np.ndarray:
-            before_values = get_image_array(before_image)
-            after_values = get_image_array(after_image)
-            matching_values = (before_values == after_values) | (np.isnan(before_values) & np.isnan(after_values))
-            return pixel_mask_from_value_mask(~matching_values)
-
-        def get_added_saturation_pixel_mask(before_image: np.ndarray, after_image: np.ndarray) -> np.ndarray:
-            return get_saturated_pixel_mask(after_image) & ~get_saturated_pixel_mask(before_image)
-
-        def get_zoom_bounds(pixel_mask: np.ndarray, image_shape: tuple[int, ...], crop_size: int=32) -> tuple[int, int, int, int] | None:
-            rows, cols = np.where(pixel_mask)
-            if(rows.size == 0):
-                return None
-
-            height, width = image_shape[:2]
-            half_crop = crop_size // 2
-            median_row = np.median(rows)
-            median_col = np.median(cols)
-            center_pixel_idx = int(np.argmin((rows - median_row) ** 2 + (cols - median_col) ** 2))
-            center_row = int(rows[center_pixel_idx])
-            center_col = int(cols[center_pixel_idx])
-            row_start = max(0, min(center_row - half_crop, height - crop_size))
-            col_start = max(0, min(center_col - half_crop, width - crop_size))
-            row_end = min(height, row_start + crop_size)
-            col_end = min(width, col_start + crop_size)
-            return row_start, row_end, col_start, col_end
-
-        def get_pixel_crop_bounds(center_pixel: tuple[int, int] | None, image_shape: tuple[int, ...], crop_size: int=3) -> tuple[int, int, int, int] | None:
-            if(center_pixel is None):
-                return None
-
-            height, width = image_shape[:2]
-            crop_size = min(crop_size, height, width)
-            if(crop_size > 1 and crop_size % 2 == 0):
-                crop_size -= 1
-            half_crop = crop_size // 2
-            center_row, center_col = center_pixel
-            row_start = max(0, min(center_row - half_crop, height - crop_size))
-            col_start = max(0, min(center_col - half_crop, width - crop_size))
-            return row_start, row_start + crop_size, col_start, col_start + crop_size
-
-        def get_green_pixel_center(image_data: np.ndarray, zoom_bounds: tuple[int, int, int, int] | None) -> tuple[int, int] | None:
-            if(zoom_bounds is None):
-                return None
-
-            row_start, row_end, col_start, col_end = zoom_bounds
-            display_crop = image_for_display(image_data)[row_start:row_end, col_start:col_end, :3]
-            if(display_crop.size == 0):
-                return None
-
-            green_score = display_crop[..., 1] - np.maximum(display_crop[..., 0], display_crop[..., 2])
-            brightness = np.max(display_crop, axis=-1)
-            candidate_mask = (green_score > 0.05) & (brightness > 0.05)
-            if(candidate_mask.shape[0] >= 3 and candidate_mask.shape[1] >= 3):
-                interior_candidate_mask = candidate_mask.copy()
-                interior_candidate_mask[[0, -1], :] = False
-                interior_candidate_mask[:, [0, -1]] = False
-                if(np.any(interior_candidate_mask)):
-                    candidate_mask = interior_candidate_mask
-
-            if(not np.any(candidate_mask)):
-                max_green_score = np.max(green_score)
-                if(max_green_score <= 0):
-                    return None
-                candidate_mask = green_score == max_green_score
-
-            candidate_scores = green_score + 0.05 * brightness
-            candidate_scores[~candidate_mask] = -np.inf
-            crop_row, crop_col = np.unravel_index(int(np.argmax(candidate_scores)), candidate_scores.shape)
-            return row_start + int(crop_row), col_start + int(crop_col)
-
-        def get_green_fringe_pixel_center(before_image: np.ndarray, after_image: np.ndarray) -> tuple[int, int] | None:
-            after_display_image = image_for_display(after_image)[..., :3]
-            before_display_image = image_for_display(before_image)[..., :3]
-            after_green_score = after_display_image[..., 1] - np.maximum(after_display_image[..., 0], after_display_image[..., 2])
-            before_green_score = before_display_image[..., 1] - np.maximum(before_display_image[..., 0], before_display_image[..., 2])
-            brightness = np.max(after_display_image, axis=-1)
-            finite_after_mask = ~get_saturated_pixel_mask(after_image)
-            candidate_mask = finite_after_mask & (after_green_score > 0.05) & (brightness > 0.05)
-
-            if(not np.any(candidate_mask)):
-                candidate_mask = finite_after_mask & (before_green_score > 0.05)
-
-            if(not np.any(candidate_mask)):
-                candidate_scores = np.where(finite_after_mask, np.maximum(after_green_score, before_green_score), -np.inf)
-                if(not np.any(np.isfinite(candidate_scores)) or np.max(candidate_scores) <= 0):
-                    return None
-            else:
-                candidate_scores = after_green_score + 0.25 * before_green_score + 0.05 * brightness
-                candidate_scores[~candidate_mask] = -np.inf
-
-            center_row, center_col = np.unravel_index(int(np.argmax(candidate_scores)), candidate_scores.shape)
-            return int(center_row), int(center_col)
-
-        def get_zoom_bounds_around_pixel(center_pixel: tuple[int, int] | None, image_shape: tuple[int, ...], crop_size: int=32) -> tuple[int, int, int, int] | None:
-            if(center_pixel is None):
-                return None
-            pixel_mask = np.zeros(image_shape[:2], dtype=bool)
-            pixel_mask[center_pixel[0], center_pixel[1]] = True
-            return get_zoom_bounds(pixel_mask, image_shape, crop_size=crop_size)
-
-        def get_saturated_contributor_pixel_mask(raw_image: np.ndarray, debayered_image: np.ndarray) -> np.ndarray:
-            raw_saturated_pixel_mask = get_saturated_pixel_mask(raw_image)
-            provenance_map = generate_debayered_provenance_map(debayered_image)
-            contributor_rows = provenance_map[..., :, 0]
-            contributor_cols = provenance_map[..., :, 1]
-            return np.any(raw_saturated_pixel_mask[contributor_rows, contributor_cols], axis=-1)
-
-        def flatten_image_values(image_data: np.ndarray, exclude_saturated: bool=False) -> np.ndarray:
-            image_values = get_image_array(image_data)
-            if(np.ma.isMaskedArray(image_values)):
-                image_values = image_values.compressed()
-            else:
-                image_values = image_values.ravel()
-
-            valid_values = np.isfinite(image_values)
-            if(exclude_saturated is True):
-                dtype_max_value, _ = get_dtype_max_value(image_data)
-                if(dtype_max_value is not None):
-                    valid_values &= image_values != dtype_max_value
-
-            return image_values[valid_values]
-
-        def get_rgb_channel_values(image_data: np.ndarray, exclude_saturated: bool=False) -> dict[str, np.ndarray]:
-            image_values = get_image_array(image_data)
-
-            if(image_values.ndim == 2):
-                channel_values = {
-                    "R": image_values[1::2, 1::2].ravel(),
-                    "G": np.concatenate((image_values[0::2, 1::2].ravel(), image_values[1::2, 0::2].ravel())),
-                    "B": image_values[0::2, 0::2].ravel(),
-                }
-            elif(image_values.ndim == 3 and image_values.shape[-1] >= 3):
-                channel_values = {
-                    "R": image_values[..., 0].ravel(),
-                    "G": image_values[..., 1].ravel(),
-                    "B": image_values[..., 2].ravel(),
-                }
-            else:
-                raise ValueError(f"Unsupported image shape for RGB channel extraction: {image_values.shape}")
-
-            if(exclude_saturated is False):
-                return channel_values
-
-            dtype_max_value, _ = get_dtype_max_value(image_values)
-            return {
-                channel: values[np.isfinite(values) & (values != dtype_max_value if dtype_max_value is not None else True)]
-                for channel, values in channel_values.items()
-            }
-
-        def get_positive_finite_max(*image_groups: dict[str, np.ndarray]) -> float:
-            finite_value_groups = [
-                values[np.isfinite(values)]
-                for image_group in image_groups
-                for values in image_group.values()
-            ]
-            finite_values = np.concatenate(finite_value_groups) if len(finite_value_groups) > 0 else np.array([], dtype=np.float64)
-            finite_positive_values = finite_values[finite_values > 0]
-            return np.max(finite_positive_values) if finite_positive_values.size > 0 else 1
-
-        def normalize_channels_by_image_max(channel_values: dict[str, np.ndarray], image_max: float) -> dict[str, np.ndarray]:
-            return {
-                channel: values[np.isfinite(values)] / image_max
-                for channel, values in channel_values.items()
-            }
-
-        def format_scalar(value: int | float | None) -> str:
-            if(value is None):
-                return "n/a"
-            if(np.issubdtype(np.asarray(value).dtype, np.integer)):
-                return str(value)
-            return f"{value:.3g}"
-
-        def get_image_stats(image_data: np.ndarray) -> dict:
-            image_values = get_image_array(image_data)
-            nonsaturated_values = flatten_image_values(image_values, exclude_saturated=True)
-            dtype_max_value, dtype_max_label = get_dtype_max_value(image_data)
-            observed_max_value = np.max(nonsaturated_values) if nonsaturated_values.size > 0 else None
-            observed_min_value = np.min(nonsaturated_values) if nonsaturated_values.size > 0 else None
-
-            return {
-                "min_excluding_saturated": observed_min_value,
-                "max_excluding_saturated": observed_max_value,
-                "observed_max_count": int(np.count_nonzero(pixel_mask_from_value_mask(image_values == observed_max_value))) if observed_max_value is not None else 0,
-                "zero_count": int(np.count_nonzero(get_zero_pixel_mask(image_data))),
-                "inf_count": int(np.count_nonzero(get_inf_pixel_mask(image_data))),
-                "dtype_max_label": dtype_max_label,
-                "dtype_max_count": int(np.count_nonzero(get_dtype_max_pixel_mask(image_data))) if dtype_max_value is not None else 0,
-                "nan_count": int(np.count_nonzero(pixel_mask_from_value_mask(np.isnan(get_image_array(image_data))))),
-            }
-
-        def format_before_after_stats(before_image: np.ndarray, after_image: np.ndarray) -> str:
-            before_stats = get_image_stats(before_image)
-            after_stats = get_image_stats(after_image)
-            return "\n".join((
-                r"$\bf{Values\ (before\ /\ after)}$",
-                f"observed min, excluding saturation: {format_scalar(before_stats['min_excluding_saturated'])} / {format_scalar(after_stats['min_excluding_saturated'])}",
-                f"observed max, excluding saturation: {format_scalar(before_stats['max_excluding_saturated'])} / {format_scalar(after_stats['max_excluding_saturated'])}",
-                r"$\bf{Pixel\ Counts\ (before\ /\ after)}$",
-                f"zero value: {before_stats['zero_count']} / {after_stats['zero_count']}",
-                f"at observed max: {before_stats['observed_max_count']} / {after_stats['observed_max_count']}",
-                f"Inf: {before_stats['inf_count']} / {after_stats['inf_count']}",
-                f"at dtype max: {before_stats['dtype_max_count']} / {after_stats['dtype_max_count']}",
-                f"NaN: {before_stats['nan_count']} / {after_stats['nan_count']}",
-            ))
-
-        def image_for_display(image_data: np.ndarray, contaminated_contributor_mask: np.ndarray | None=None) -> np.ndarray:
-            image_values = get_image_array(image_data)
-            display_image = image_values.astype(np.float64, copy=True)
-            finite_values = flatten_image_values(image_values, exclude_saturated=True)
-            if(finite_values.size == 0):
-                display_base = np.zeros(display_image.shape[:2], dtype=np.float64)
-            else:
-                finite_min = np.min(finite_values)
-                finite_max = np.max(finite_values)
-                if(finite_max == finite_min):
-                    finite_max = finite_min + 1
-
-                display_image = np.nan_to_num(display_image, nan=finite_min, posinf=finite_max, neginf=finite_min)
-                if(display_image.ndim == 2):
-                    display_base = np.clip((display_image - finite_min) / (finite_max - finite_min), 0, 1)
-                elif(display_image.ndim == 3 and display_image.shape[-1] >= 3):
-                    display_base = np.clip(display_image[..., :3] / finite_max, 0, 1)
-                else:
-                    raise ValueError(f"Unsupported image shape for display: {image_values.shape}")
-
-            if(display_base.ndim == 2):
-                display_rgb = np.repeat(display_base[..., np.newaxis], 3, axis=-1)
-            else:
-                display_rgb = display_base.copy()
-
-            return display_rgb
-
-        def format_micro_pixel_value(value: float) -> str:
-            if(np.isnan(value)):
-                return "NaN"
-            if(np.isposinf(value)):
-                return "Inf"
-            if(np.isneginf(value)):
-                return "-Inf"
-            if(np.isclose(value, np.round(value))):
-                return str(int(np.round(value)))
-            return f"{value:.3g}"
-
-        def format_micro_pixel_channels(pixel_values: np.ndarray) -> str:
-            pixel_values = np.asarray(pixel_values)
-            if(pixel_values.ndim == 0):
-                return format_micro_pixel_value(float(pixel_values))
-            channel_names = ("R", "G", "B")
-            return "\n".join(
-                f"{channel_name}:{format_micro_pixel_value(float(channel_value))}"
-                for channel_name, channel_value in zip(channel_names, pixel_values[:3])
-            )
-
-        def get_bayer_site_label(row_index: int, col_index: int) -> str:
-            if(row_index % 2 == 0 and col_index % 2 == 0):
-                return "B"
-            if(row_index % 2 != 0 and col_index % 2 != 0):
-                return "R"
-            return "G"
-
-        def get_bayer_site_rgb(site_label: str) -> np.ndarray:
-            return {
-                "R": np.array([1.0, 0.0, 0.0]),
-                "G": np.array([0.0, 0.85, 0.0]),
-                "B": np.array([0.0, 0.25, 1.0]),
-            }[site_label]
-
-        def bayer_tinted_micro_display(display_image: np.ndarray, micro_zoom_bounds: tuple[int, int, int, int], alpha: float=0.35) -> np.ndarray:
-            micro_row_start, micro_row_end, micro_col_start, micro_col_end = micro_zoom_bounds
-            micro_display = display_image[micro_row_start:micro_row_end, micro_col_start:micro_col_end].copy()
-            for micro_row in range(micro_row_end - micro_row_start):
-                for micro_col in range(micro_col_end - micro_col_start):
-                    site_label = get_bayer_site_label(micro_row_start + micro_row, micro_col_start + micro_col)
-                    site_rgb = get_bayer_site_rgb(site_label)
-                    micro_display[micro_row, micro_col, :3] = (1 - alpha) * micro_display[micro_row, micro_col, :3] + alpha * site_rgb
-            return np.clip(micro_display, 0, 1)
-
-        def get_micro_pixel_value_labels(image_data: np.ndarray, micro_zoom_bounds: tuple[int, int, int, int]) -> np.ndarray:
-            image_values = get_image_array(image_data)
-            micro_row_start, micro_row_end, micro_col_start, micro_col_end = micro_zoom_bounds
-            micro_values = image_values[micro_row_start:micro_row_end, micro_col_start:micro_col_end]
-            if(micro_values.ndim == 3 and micro_values.shape[-1] >= 3):
-                channel_values = micro_values[..., :3].astype(np.float64, copy=False)
-                micro_labels = np.empty(channel_values.shape[:2], dtype=object)
-                for micro_row in range(channel_values.shape[0]):
-                    for micro_col in range(channel_values.shape[1]):
-                        micro_labels[micro_row, micro_col] = format_micro_pixel_channels(channel_values[micro_row, micro_col])
-                return micro_labels
-            micro_values = micro_values.astype(np.float64, copy=False)
-            micro_labels = np.empty(micro_values.shape, dtype=object)
-            for micro_row in range(micro_values.shape[0]):
-                for micro_col in range(micro_values.shape[1]):
-                    micro_labels[micro_row, micro_col] = format_micro_pixel_value(float(micro_values[micro_row, micro_col]))
-            return micro_labels
-
-        def add_micro_value_labels(image_data: np.ndarray, display_image: np.ndarray, micro_axis: plt.Axes, micro_zoom_bounds: tuple[int, int, int, int]) -> None:
-            micro_row_start, micro_row_end, micro_col_start, micro_col_end = micro_zoom_bounds
-            micro_display = display_image[micro_row_start:micro_row_end, micro_col_start:micro_col_end]
-            micro_labels = get_micro_pixel_value_labels(image_data, micro_zoom_bounds)
-            for micro_row in range(micro_labels.shape[0]):
-                for micro_col in range(micro_labels.shape[1]):
-                    pixel_display = micro_display[micro_row, micro_col]
-                    pixel_brightness = float(np.mean(pixel_display[:3])) if np.ndim(pixel_display) > 0 else float(pixel_display)
-                    text_color = "black" if pixel_brightness > 0.55 else "white"
-                    box_color = "white" if pixel_brightness > 0.55 else "black"
-                    micro_axis.text(
-                        micro_col,
-                        micro_row,
-                        micro_labels[micro_row, micro_col],
-                        ha="center",
-                        va="center",
-                        fontsize=7,
-                        fontweight="bold",
-                        color=text_color,
-                        bbox={"facecolor": box_color, "alpha": 0.45, "edgecolor": "none", "pad": 0.2},
-                    )
-
-        def get_middle_histogram_data(before_image: np.ndarray, after_image: np.ndarray) -> dict:
-            raw_before_channels = get_rgb_channel_values(before_image, exclude_saturated=True)
-            raw_after_channels = get_rgb_channel_values(after_image, exclude_saturated=True)
-            before_image_max = get_positive_finite_max(raw_before_channels)
-            after_image_max = get_positive_finite_max(raw_after_channels)
-            before_channels = normalize_channels_by_image_max(raw_before_channels, before_image_max)
-            after_channels = normalize_channels_by_image_max(raw_after_channels, after_image_max)
-            combined_values = np.concatenate(tuple(before_channels.values()) + tuple(after_channels.values()))
-
-            if(combined_values.size == 0):
-                return {"is_empty": True, "y_max": 0}
-
-            bins = np.linspace(0, 1, 65)
-            bin_centers = (bins[:-1] + bins[1:]) / 2
-
-            log_counts: dict[str, dict[str, np.ndarray]] = {"Before": {}, "After": {}}
-            all_log_counts: list[np.ndarray] = []
-            for group_name, group_channels in (("Before", before_channels), ("After", after_channels)):
-                for channel_name, values in group_channels.items():
-                    clipped_values = np.clip(values, 0, 1)
-                    counts, bin_edges = np.histogram(clipped_values, bins=bins)
-                    channel_log_counts = np.full(counts.shape, np.nan, dtype=np.float64)
-                    positive_counts = counts > 0
-                    channel_log_counts[positive_counts] = np.log10(counts[positive_counts])
-                    log_counts[group_name][channel_name] = channel_log_counts
-                    all_log_counts.append(channel_log_counts[np.isfinite(channel_log_counts)])
-
-            finite_log_counts = np.concatenate(all_log_counts) if len(all_log_counts) > 0 else np.array([], dtype=np.float64)
-            y_max = np.max(finite_log_counts) if finite_log_counts.size > 0 else 0
-
-            return {
-                "is_empty": False,
-                "x": bin_centers,
-                "log_counts": log_counts,
-                "y_max": y_max,
-            }
-
-        def plot_middle_histogram(histogram_data: dict, target_axis: plt.Axes, step_title: str, y_axis_max: float) -> None:
-            if(histogram_data["is_empty"] is True):
-                target_axis.set_title(step_title, fontsize=11, fontweight="bold")
-                target_axis.axis("off")
-                return
-
-            channel_colors = {"R": "red", "G": "green", "B": "blue"}
-            plot_styles = {"Before": "-x", "After": "-o"}
-            for group_name, channel_log_counts in histogram_data["log_counts"].items():
-                for channel_name, log_counts in channel_log_counts.items():
-                    target_axis.plot(
-                        histogram_data["x"],
-                        log_counts,
-                        plot_styles[group_name],
-                        linewidth=1.2,
-                        markersize=8,
-                        color=channel_colors[channel_name],
-                        label=f"{group_name} {channel_name}",
-                    )
-            target_axis.set_title(step_title, fontsize=11, fontweight="bold")
-            target_axis.set_xlabel("Intensity / image max, excluding saturation", fontsize=8)
-            target_axis.set_ylabel("log10(pixel count at intensity)", fontsize=8)
-            target_axis.set_xlim(0, 1)
-            target_axis.set_ylim(0, y_axis_max * 1.05 if y_axis_max > 0 else 1)
-            target_axis.tick_params(axis="both", labelsize=7)
-            target_axis.legend(fontsize=7, loc="center left", bbox_to_anchor=(1.02, 0.5), borderaxespad=0)
-
-        def plot_agc_settings(agc_settings: np.ndarray, target_axis: plt.Axes) -> None:
-            """Draw this frame's AGC settings as a labeled bar chart.
-
-            One bar per AGC setting. Exposure columns span several orders of
-            magnitude, so their bar height is ``log10`` of the value while every
-            bar is annotated with its raw (non-log) value.
-
-            The number of AGC columns has varied across recordings: newer
-            metadata carries the full ``WORLD_AGC_METADATA_COLS``, while older
-            metadata stored only ``(Again, Dgain, Exposure)``. The column labels
-            are chosen to match however many settings this frame actually has.
-
-            Args:
-                agc_settings: 1-D array of AGC values, ordered gain/exposure as
-                    in ``WORLD_AGC_METADATA_COLS`` (or the 3-column legacy layout).
-                target_axis: Axis on which to draw the bar chart.
-            """
-            values = np.asarray(agc_settings, dtype=np.float64).ravel()
-
-            # Pick column labels that match the number of settings actually
-            # present. Newer metadata has the full WORLD_AGC_METADATA_COLS; older
-            # metadata had only (Again, Dgain, Exposure).
-            if(len(values) == len(WORLD_AGC_METADATA_COLS)):
-                column_names = list(WORLD_AGC_METADATA_COLS)
-            elif(len(values) == 3):
-                column_names = ["Again", "Dgain", "Exposure"]
-            else:
-                # Unknown layout: use the leading known names, then positional
-                # labels for any extras, so labels always match the bar count.
-                column_names = [
-                    WORLD_AGC_METADATA_COLS[i] if i < len(WORLD_AGC_METADATA_COLS) else f"col{i}"
-                    for i in range(len(values))
-                ]
-
-            # Exposure columns dwarf the gains, so plot them on a log10 scale to
-            # keep every bar legible on a shared axis; gains are plotted directly.
-            is_exposure = np.array(["exposure" in name.lower() for name in column_names])
-            bar_heights = values.copy()
-            exposure_positive = is_exposure & (values > 0)
-            bar_heights[exposure_positive] = np.log10(values[exposure_positive])
-            bar_heights[is_exposure & ~(values > 0)] = 0.0
-
-            x_positions = np.arange(len(column_names))
-            bar_colors = ["tab:orange" if exposure else "tab:blue" for exposure in is_exposure]
-            bars = target_axis.bar(x_positions, bar_heights, color=bar_colors)
-
-            target_axis.set_title("Frame AGC Settings", fontsize=11, fontweight="bold")
-            target_axis.set_xticks(x_positions)
-            target_axis.set_xticklabels(column_names, rotation=45, ha="right", fontsize=7)
-            target_axis.set_ylabel("value (log10 for exposure)", fontsize=8)
-            target_axis.tick_params(axis="y", labelsize=7)
-
-            # Annotate each bar with its raw setting value, centered inside the bar.
-            for bar, value in zip(bars, values):
-                value_label = str(int(np.round(value))) if np.isclose(value, np.round(value)) else f"{value:.3g}"
-                target_axis.text(
-                    bar.get_x() + bar.get_width() / 2,
-                    bar.get_height() / 2,
-                    value_label,
-                    ha="center",
-                    va="center",
-                    rotation=90,
-                    fontsize=7,
-                    fontweight="bold",
-                    color="white",
-                )
-
-        def add_zoom_inset(image_data: np.ndarray, target_axis: plt.Axes, zoom_bounds: tuple[int, int, int, int] | None, contaminated_contributor_mask: np.ndarray | None=None, micro_zoom_bounds: tuple[int, int, int, int] | None=None, inset_bounds: tuple[float, float, float, float]=(0.03, 0.03, 0.4, 0.4), zoom_title: str="Zoom", zoom_edge_color: str="black", micro_edge_color: str="lime") -> None:
-            if(zoom_bounds is None):
-                return
-
-            row_start, row_end, col_start, col_end = zoom_bounds
-            display_image = image_for_display(image_data, contaminated_contributor_mask)
-            zoom_axis = target_axis.inset_axes(inset_bounds)
-            zoom_axis.imshow(display_image[row_start:row_end, col_start:col_end])
-            zoom_axis.set_xticks([])
-            zoom_axis.set_yticks([])
-            zoom_axis.set_title(zoom_title, fontsize=7)
-            for spine in zoom_axis.spines.values():
-                spine.set_edgecolor(zoom_edge_color)
-                spine.set_linewidth(1.5)
-
-            if(micro_zoom_bounds is not None):
-                micro_row_start, micro_row_end, micro_col_start, micro_col_end = micro_zoom_bounds
-                zoom_axis.add_patch(Rectangle(
-                    (micro_col_start - col_start - 0.5, micro_row_start - row_start - 0.5),
-                    micro_col_end - micro_col_start,
-                    micro_row_end - micro_row_start,
-                    edgecolor=micro_edge_color,
-                    facecolor="none",
-                    linewidth=1.2,
-                ))
-                micro_axis = zoom_axis.inset_axes([0.22, 0.03, 0.76, 0.76])
-                micro_axis.imshow(bayer_tinted_micro_display(display_image, micro_zoom_bounds), interpolation="nearest")
-                micro_axis.set_xticks([])
-                micro_axis.set_yticks([])
-                micro_height = micro_row_end - micro_row_start
-                micro_width = micro_col_end - micro_col_start
-                micro_axis.set_title(f"{micro_height}x{micro_width}", fontsize=9)
-                micro_axis.set_xticks(np.arange(-0.5, micro_col_end - micro_col_start, 1), minor=True)
-                micro_axis.set_yticks(np.arange(-0.5, micro_row_end - micro_row_start, 1), minor=True)
-                micro_axis.grid(which="minor", color="white", linewidth=0.4)
-                if(micro_height % 2 == 1 and micro_width % 2 == 1):
-                    center_micro_row = micro_height // 2
-                    center_micro_col = micro_width // 2
-                    micro_axis.add_patch(Rectangle(
-                        (center_micro_col - 0.5, center_micro_row - 0.5),
-                        1,
-                        1,
-                        edgecolor=micro_edge_color,
-                        facecolor="none",
-                        linewidth=1.6,
-                    ))
-                add_micro_value_labels(image_data, display_image, micro_axis, micro_zoom_bounds)
-                for spine in micro_axis.spines.values():
-                    spine.set_edgecolor(micro_edge_color)
-                    spine.set_linewidth(1.2)
-
-            target_axis.add_patch(Rectangle(
-                (col_start, row_start),
-                col_end - col_start,
-                row_end - row_start,
-                edgecolor=zoom_edge_color,
-                facecolor="none",
-                linewidth=1.5,
-            ))
-
-        def copy_image_data(image_data: np.ndarray, target_axis: plt.Axes, image_title: str, contaminated_contributor_mask: np.ndarray | None=None, zoom_bounds: tuple[int, int, int, int] | None=None, title_extra: str="", micro_zoom_bounds: tuple[int, int, int, int] | None=None, fringe_zoom_bounds: tuple[int, int, int, int] | None=None, fringe_micro_zoom_bounds: tuple[int, int, int, int] | None=None) -> None:
-            target_axis.imshow(image_for_display(image_data, contaminated_contributor_mask))
-            target_axis.set_title(f"{image_title} ({get_image_array(image_data).dtype}){title_extra}")
-            add_zoom_inset(image_data, target_axis, zoom_bounds, contaminated_contributor_mask, micro_zoom_bounds, inset_bounds=(0.01, 0.02, 0.48, 0.5), zoom_title="Saturation", zoom_edge_color="red", micro_edge_color="red")
-            add_zoom_inset(image_data, target_axis, fringe_zoom_bounds, contaminated_contributor_mask, fringe_micro_zoom_bounds, inset_bounds=(0.51, 0.02, 0.48, 0.5), zoom_title="Fringe", zoom_edge_color="blue", micro_edge_color="blue")
-            target_axis.axis("off")
-
-        fig, axes = plt.subplots(6, 4, figsize=(34, 36), gridspec_kw={"width_ratios": [1.55, 0.8, 0.8, 1.55]})
-        fig.suptitle(title, fontweight="bold", fontsize=18)
-
-        steps: list[tuple[str, np.ndarray, np.ndarray]] = []
-
-        # Pipeline constants. Saturation begins as 8-bit 255, then becomes Inf
-        # during floating-point processing so diagnostics can exclude it cleanly.
-        floor, ceiling = (0, 255)
-        debayer_ceiling_marker = 2 ** 16 - 1 # Sentiel value we set saturated INF pixels to in the debayering process because it forces uint16
-        debayer_scale = 100 # Scale and saturation threshold for post distribution change debayered images
-        debayer_saturation_threshold = debayer_ceiling_marker / 3
-
-        # Stage 0: convert the raw Bayer frame to float and mark raw saturated
-        # sensor samples as Inf before any operation changes their numeric value.
-        raw_saturated_pixel_mask = sample_frame >= 250
-        transformed_frame = sample_frame.astype(np.float64, copy=True)
-        assert transformed_frame.dtype == np.float64, f"Failed at stage 0"
-        transformed_frame[raw_saturated_pixel_mask] = np.inf
-
-        # Stage 1: invert the camera response curve. The operation returns a
-        # floating-point Bayer image; original saturated samples remain Inf.
-        linearized_before = transformed_frame.copy()
-        linearized = np.empty_like(transformed_frame)
-        linearize_camera_responsivity(transformed_frame, dst=linearized, original_bit_depth=8)
-        linearized[raw_saturated_pixel_mask] = np.inf # We need to reply the INF here because the INFs got crushed in this operation
-        assert linearized.dtype == np.float64, f"Failed at stage 1"
-        steps.append(("Linearized Camera Response", linearized_before, linearized.copy()))
-
-        # Stage 2: apply the fielding correction in Bayer space to compensate
-        # for spatial nonuniformity before color operations and de-Bayering.
-        fielding_before = linearized.copy()
-        apply_fielding_function(linearized)
-        assert linearized.dtype == np.float64, f"Failed at stage 2"
-        steps.append(("Fielding Function", fielding_before, linearized.copy()))
-
-        # Stage 3: apply per-channel Bayer-site color weights while the image is
-        # still a single mosaiced plane.
-        color_correction_before = linearized.copy()
-        apply_color_weights(linearized)
-        assert linearized.dtype == np.float64, "Failed at stage 3"
-        steps.append(("Color Correction", color_correction_before, linearized.copy()))
-
-        # Stage 4: apply digital gain in Bayer space and restore raw saturated
-        # sites to Inf after the multiplicative gain. The digital gain is the
-        # AGCDgain entry of this frame's AGC settings.
-        digital_gain_before = linearized.copy()
-        dgain: float = float(agc_settings[WORLD_AGC_METADATA_COLS.index("AGCDgain")])
-        apply_digital_gain(linearized, dgain)
-        steps.append(("Digital Gain", digital_gain_before, linearized.copy()))
-
-        # Stage 5: de-Bayer. OpenCV needs finite uint16 input, so the float Bayer
-        # is scaled up (to preserve fractional precision), Inf is mapped to the
-        # uint16 ceiling sentinel, and the frame is converted to uint16. After
-        # interpolation, outputs a saturated contributor pulled up are returned to
-        # Inf and the image is divided back to the original floating-point scale.
-        debayer_before = linearized.copy()
-        floor_ceiling_debayer_input = debayer_before.copy()
-
-        debayer_input = debayer_before * debayer_scale
-        debayer_input[np.isposinf(debayer_input)] = debayer_ceiling_marker
-        raw_debayer_input = np.round(np.clip(debayer_input, 0, debayer_ceiling_marker)).astype(np.uint16)
-
-        debayered = debayer(raw_debayer_input).astype(np.float64)
-        debayered[debayered >= debayer_saturation_threshold] = debayer_ceiling_marker
-        debayered[debayered == debayer_ceiling_marker] = np.inf
-        debayered = debayered / debayer_scale
-        steps.append(("Debayered Image", debayer_before.copy(), debayered.copy()))
-
-        # Stage 6: propagate raw Bayer floor/ceiling contributors into the RGB
-        # de-Bayered image. The helper writes ceiling as 255, then this notebook
-        # converts that sentinel back to Inf for the diagnostic display/histogram.
-        floor_ceiling_before = debayered.copy()
-
-        apply_floor_ceiling(
-            debayered,
-            floor_ceiling_debayer_input, 
-            floor_ceiling=(floor, np.inf), # clip floor values to floor, and np.inf to the ceiling values 
-            clip_values=(floor, ceiling),
+        if not np.isfinite(x) or not np.isfinite(y):
+            return ""
+        row: int = int(np.floor(y + 0.5))
+        col: int = int(np.floor(x + 0.5))
+        if 0 <= row < stage.shape[0] and 0 <= col < stage.shape[1]:
+            value: str = (f"{stage[row, col]:.8g}" if stage.ndim == 2
+                          else np.array2string(stage[row, col], precision=8))
+            return f"row={row}, col={col}, value={value}"
+        return ""
+
+    figure: plt.Figure
+    axes: np.ndarray
+    figure, axes = plt.subplots(2, len(stage_names), figsize=(25, 7), constrained_layout=True)
+    figure.suptitle(title, fontsize=15, fontweight="bold")
+    edges: np.ndarray = np.linspace(0, 1, 256)
+
+    for stage_index, (stage_name, stage) in enumerate(zip(stage_names, stagewise_output)):
+        # Display scaling never changes the saved numerical stage. Empty or
+        # non-positive ranges use a scale of one so all-dark images still plot.
+        finite_values: np.ndarray = stage[np.isfinite(stage)]
+        display_scale: float = float(np.percentile(finite_values, 85)) if finite_values.size else 1.0
+        if display_scale <= 0:
+            display_scale = 1.0
+        normalized: np.ndarray = np.clip(
+            np.nan_to_num(stage / display_scale, nan=0.0, posinf=1.0, neginf=0.0), 0, 1
         )
+        # The final stage already has RGB channels; Bayer stages need replication.
+        display_rgb: np.ndarray = (np.repeat(normalized[..., None], 3, axis=-1)
+                                   if stage.ndim == 2 else normalized.copy())
+        ceiling: np.ndarray = np.isinf(stage)
+        floor: np.ndarray = stage <= 0
+        if(stage.ndim == 3):
+            ceiling = np.any(ceiling, axis=-1)
+            floor = np.any(floor, axis=-1)
+        display_rgb[ceiling] = (1, 0, 0)
+        display_rgb[floor] = (0, 0, 1)
 
-        # For displaying purposes, we just sets it back to INF
-        debayered[debayered >= ceiling] = np.inf
-        floor_ceiling_changed_pixel_mask = get_changed_pixel_mask(floor_ceiling_before, debayered)
-        floor_ceiling_added_saturation_pixel_mask = get_added_saturation_pixel_mask(floor_ceiling_before, debayered)
-        floor_ceiling_added_saturation_count = int(np.count_nonzero(floor_ceiling_added_saturation_pixel_mask))
-        floor_ceiling_contaminated_contributor_mask = get_saturated_contributor_pixel_mask(floor_ceiling_debayer_input, debayered)
-        floor_ceiling_zoom_mask = floor_ceiling_added_saturation_pixel_mask if np.any(floor_ceiling_added_saturation_pixel_mask) else floor_ceiling_changed_pixel_mask
-        floor_ceiling_zoom_bounds = get_zoom_bounds(floor_ceiling_zoom_mask, debayered.shape)
-        floor_ceiling_micro_zoom_center = get_green_pixel_center(floor_ceiling_before, floor_ceiling_zoom_bounds)
-        if(floor_ceiling_micro_zoom_center is None):
-            floor_ceiling_micro_zoom_center = get_green_pixel_center(debayered, floor_ceiling_zoom_bounds)
-        floor_ceiling_micro_zoom_bounds = get_pixel_crop_bounds(floor_ceiling_micro_zoom_center, debayered.shape)
-        floor_ceiling_fringe_zoom_center = get_green_fringe_pixel_center(floor_ceiling_before, debayered)
-        floor_ceiling_fringe_zoom_bounds = get_zoom_bounds_around_pixel(floor_ceiling_fringe_zoom_center, debayered.shape)
-        floor_ceiling_fringe_micro_zoom_bounds = get_pixel_crop_bounds(floor_ceiling_fringe_zoom_center, debayered.shape)
-    
-        steps.append(("Floor / Ceiling Propagation", floor_ceiling_before, debayered.copy()))
+        image_axis: plt.Axes = axes[0, stage_index]
+        image_axis.imshow(display_rgb)
+        image_axis.set_title(f"{stage_index}. {stage_name}", fontsize=11)
+        image_axis.axis("off")
+        # Bind this stage now so every axes reports its own original values.
+        image_axis.format_coord = partial(original_pixel_coordinates, stage=stage)
 
-        # Build middle-panel histograms after all stage images are captured so
-        # every adjacent after/before handoff can be checked for consistency.
-        histogram_data_by_step: list[dict] = [get_middle_histogram_data(before_image, after_image) for _, before_image, after_image in steps]
-        for previous_idx, (previous_histogram_data, next_histogram_data) in enumerate(zip(histogram_data_by_step[:-1], histogram_data_by_step[1:])):
-            if(previous_histogram_data["is_empty"] is True or next_histogram_data["is_empty"] is True):
-                continue
+        # Bayer samples belong to exactly one measured color. Combine both
+        # green subgrids, keeping the channel denominators separate as in MATLAB.
+        channel_values: tuple[np.ndarray, ...] = (
+            stage[1::2, 1::2].ravel(),
+            np.concatenate((stage[0::2, 1::2].ravel(), stage[1::2, 0::2].ravel())),
+            stage[0::2, 0::2].ravel(),
+        ) if stage.ndim == 2 else tuple(stage[..., channel].ravel() for channel in range(3))
+        histogram_scale: float = float(np.max(finite_values)) if finite_values.size else 1.0
+        if histogram_scale <= 0:
+            histogram_scale = 1.0
+        minimum_labels: list[str] = []
+        maximum_labels: list[str] = []
+        histogram_axis: plt.Axes = axes[1, stage_index]
+        for channel_name, color, values in zip("RGB", ("red", "green", "blue"), channel_values):
+            finite_channel: np.ndarray = values[np.isfinite(values)]
+            minimum_labels.append(f"{np.min(finite_channel):.3g}" if finite_channel.size else "n/a")
+            maximum_labels.append(f"{np.max(finite_channel):.3g}" if finite_channel.size else "n/a")
+            # MATLAB puts non-finite samples in the highest bin. Negative
+            # finite samples fall outside [0, 1] but remain in the denominator.
+            histogram_values: np.ndarray = np.where(np.isfinite(values), values, histogram_scale)
+            counts: np.ndarray = np.histogram(histogram_values / histogram_scale, bins=edges)[0]
+            percentages: np.ndarray = counts * (100.0 / values.size) if values.size else counts.astype(float)
+            histogram_axis.plot(edges[:-1] * 100, percentages, color=color, linewidth=1, label=channel_name)
 
-            for channel_name in ("R", "G", "B"):
-                previous_after = previous_histogram_data["log_counts"]["After"][channel_name]
-                next_before = next_histogram_data["log_counts"]["Before"][channel_name]
-                assert np.array_equal(previous_after, next_before, equal_nan=True), (
-                    f"Middle plot mismatch: after line for {steps[previous_idx][0]} does not match "
-                    f"before line for {steps[previous_idx + 1][0]} in {channel_name}."
-                )
-        shared_y_axis_max = max(histogram_data["y_max"] for histogram_data in histogram_data_by_step)
-        before_contributor_masks_by_step = [None for _ in steps]
-        after_contributor_masks_by_step = [None for _ in steps]
-        after_contributor_masks_by_step[-2] = floor_ceiling_contaminated_contributor_mask
-        before_contributor_masks_by_step[-1] = floor_ceiling_contaminated_contributor_mask
-        after_contributor_masks_by_step[-1] = floor_ceiling_contaminated_contributor_mask
-        # Use the final floor/ceiling diagnostic crop for every image panel so
-        # the same physical location can be compared across the full pipeline.
-        zoom_bounds_by_step = [floor_ceiling_zoom_bounds for _ in steps]
-        micro_zoom_bounds_by_step = [floor_ceiling_micro_zoom_bounds for _ in steps]
-        fringe_zoom_bounds_by_step = [floor_ceiling_fringe_zoom_bounds for _ in steps]
-        fringe_micro_zoom_bounds_by_step = [floor_ceiling_fringe_micro_zoom_bounds for _ in steps]
-        after_title_extras_by_step = ["" for _ in steps]
-        after_title_extras_by_step[-1] = f"\n{floor_ceiling_added_saturation_count} new saturated pixels"
+        histogram_axis.text(
+            0.02, 0.98,
+            "RGB min: " + ", ".join(minimum_labels)
+            + "\nRGB max: " + ", ".join(maximum_labels)
+            + f"\nCeiling: {np.count_nonzero(np.isinf(stage)):,}"
+            + f"  Floor: {np.count_nonzero(stage <= 0):,}",
+            transform=histogram_axis.transAxes, va="top", fontsize=7,
+            bbox={"facecolor": "white", "alpha": 0.8, "edgecolor": "none"},
+        )
+        histogram_axis.set_xlim(0, 100)
+        histogram_axis.set_ylim(bottom=0)
+        histogram_axis.set_xlabel("% of stage maximum", fontsize=9)
+        histogram_axis.tick_params(labelsize=8)
+        histogram_axis.spines[["top", "right"]].set_visible(False)
+        if stage_index == 0:
+            histogram_axis.set_ylabel("% of channel pixels", fontsize=9)
+            histogram_axis.legend(loc="lower right", fontsize=8)
 
-        # Render each processing row: before image, distribution comparison, and
-        # after image. Every image panel receives the same diagnostic zoom.
-        for row_idx, ((step_title, before_image, after_image), histogram_data, before_contributor_mask, after_contributor_mask, zoom_bounds, micro_zoom_bounds, fringe_zoom_bounds, fringe_micro_zoom_bounds, after_title_extra) in enumerate(zip(steps, histogram_data_by_step, before_contributor_masks_by_step, after_contributor_masks_by_step, zoom_bounds_by_step, micro_zoom_bounds_by_step, fringe_zoom_bounds_by_step, fringe_micro_zoom_bounds_by_step, after_title_extras_by_step)):
-            copy_image_data(before_image, axes[row_idx, 0], "Before", before_contributor_mask, zoom_bounds, micro_zoom_bounds=micro_zoom_bounds, fringe_zoom_bounds=fringe_zoom_bounds, fringe_micro_zoom_bounds=fringe_micro_zoom_bounds)
-            copy_image_data(after_image, axes[row_idx, 3], "After", after_contributor_mask, zoom_bounds, after_title_extra, micro_zoom_bounds=micro_zoom_bounds, fringe_zoom_bounds=fringe_zoom_bounds, fringe_micro_zoom_bounds=fringe_micro_zoom_bounds)
-            axes[row_idx, 0].text(
-                -0.04,
-                0.5,
-                format_before_after_stats(before_image, after_image),
-                transform=axes[row_idx, 0].transAxes,
-                fontsize=7,
-                va="center",
-                ha="right",
-            )
-            plot_agc_settings(agc_settings, axes[row_idx, 1])
-            plot_middle_histogram(histogram_data, axes[row_idx, 2], step_title, shared_y_axis_max)
-
-        plt.tight_layout()
-
-        plt.show()
-        return fig, axes
+    plt.show()
+    return figure, axes
 
 
-    # Discover the world-camera chunk frame-buffer files, natural-sorted and
-    # excluding the sibling "_metadata" files.
-    chunk_paths: list[str] = natsorted([
-        os.path.join(recording_path, filename)
-        for filename in os.listdir(recording_path)
-        if "world" in filename and "metadata" not in filename
-    ])
-    assert len(chunk_paths) > 0, f"No world chunk files found in: {recording_path}"
+def visualize_pipeline(
+    recording_path: str,
+    chunk_range: tuple[int | None, int | None] = (0, None),
+) -> list[tuple[plt.Figure, np.ndarray]]:
+    """Run the reconstruction once per selected chunk and plot its saved stages.
 
-    # Gather the sibling metadata files
-    metadata_paths: list[str] = natsorted([
-        os.path.join(recording_path, filename)
-        for filename in os.listdir(recording_path)
-        if "world" in filename and "metadata" in filename
-    ])
-    assert len(metadata_paths), f"No metadata chunk files found in: {recording_path}"
+    The middle frame of each chunk is passed to world_transformation_pipeline
+    with an empty stagewise_output list. The resulting snapshots are displayed
+    by plot_reconstruction_stages, following Geoff's MATLAB image/histogram
+    layout. This function does not implement a separate processing pipeline.
 
-    assert len(metadata_paths) == len(chunk_paths), f"Metadata and chunks do not have the same length in: {recording_path}"
+    Args:
+        recording_path: Directory containing world-frame .npy chunks and their
+            matching <chunk stem>_metadata.npy files. Metadata may use either
+            timestamp/Again/Dgain/exposure or timestamp plus WORLD_AGC_METADATA_COLS.
+        chunk_range: Half-open (start, end) slice of the naturally sorted chunk
+            list. None uses the corresponding beginning or end of the list.
 
-    # Splice out the desired chunk ranges 
-    start, end = chunk_range
-    end = end if end is not None else len(chunk_paths)
+    Returns:
+        One (figure, axes) tuple per selected chunk. Each axes array has shape
+        (2, 8): stage images on top and RGB histograms underneath.
 
-    # Pair the chunks and their metadata together 
-    chunks_and_metadata: list[tuple[str]] = [(chunk_path, metadata_path) for chunk_path, metadata_path in zip(chunk_paths, metadata_paths)][start:end]
+    Raises:
+        FileNotFoundError: If no world chunks or a matching metadata file exists.
+        ValueError: If a chunk is empty, has the wrong shape, or its metadata
+            does not match the frame count or a supported column layout.
+    """
+    recording_directory: pathlib.Path = pathlib.Path(recording_path).expanduser()
+    chunk_paths: list[pathlib.Path] = natsorted(
+        [path for path in recording_directory.glob("*world*.npy") if "metadata" not in path.name],
+        key=lambda path: path.name,
+    )
+    if not chunk_paths:
+        raise FileNotFoundError(f"No world chunk files found in: {recording_directory}")
 
-    # Render one figure per chunk and collect the handles for the caller.
     figures: list[tuple[plt.Figure, np.ndarray]] = []
-    for chunk_index, (chunk_path, metadata_path) in enumerate(chunks_and_metadata):
-        # Each chunk file holds a raw Bayer frame buffer of shape
-        # (n_frames, rows, cols).
-        chunk: np.ndarray = np.load(chunk_path)
-        assert chunk.ndim == 3, f"Expected a (frames, rows, cols) chunk. Got shape {chunk.shape} from {chunk_path}"
-        metadata: np.ndarray = np.load(metadata_path)
+    start, end = chunk_range
+    for chunk_path in chunk_paths[start:end]:
+        # Match metadata by filename rather than zipping two independently
+        # sorted lists, which could silently pair unrelated files.
+        metadata_path: pathlib.Path = chunk_path.with_name(f"{chunk_path.stem}_metadata.npy")
+        if not metadata_path.is_file():
+            raise FileNotFoundError(f"Missing metadata for {chunk_path.name}: {metadata_path}")
 
-        # Pick the frame to visualize: default is just the middle
+        # Memory mapping reads only the chosen frame instead of loading the
+        # entire recording chunk into memory for a single diagnostic image.
+        chunk: np.ndarray = np.load(chunk_path, mmap_mode="r")
+        metadata: np.ndarray = np.load(metadata_path, mmap_mode="r")
+        if chunk.ndim != 3 or chunk.shape[0] == 0:
+            raise ValueError(f"Expected a nonempty (frames, rows, cols) chunk: {chunk_path}")
+        if metadata.ndim != 2 or metadata.shape[0] != chunk.shape[0]:
+            raise ValueError(f"Metadata rows must match the frame count: {metadata_path}")
+
         selected_index: int = len(chunk) // 2
-        assert 0 <= selected_index < len(chunk), f"selected frame index {selected_index} out of range for chunk of length {len(chunk)}"
-        sample_frame: np.ndarray = chunk[selected_index]
-        # AGC settings for this frame: the metadata columns after the leading
-        # timestamp, ordered to match WORLD_AGC_METADATA_COLS.
-        agc_settings: np.ndarray = metadata[selected_index, 1:1 + len(WORLD_AGC_METADATA_COLS)]
+        settings_values: np.ndarray = metadata[selected_index, 1:]
+        setting_names: tuple[str, ...]
+        if settings_values.size == len(WORLD_AGC_METADATA_COLS):
+            setting_names = WORLD_AGC_METADATA_COLS
+        elif settings_values.size == 3:
+            setting_names = ("Again", "Dgain", "exposure")
+        else:
+            raise ValueError(f"Unsupported world metadata columns: {metadata_path}")
+        agc_settings: dict[str, float] = {
+            name: float(value) for name, value in zip(setting_names, settings_values)
+        }
 
-        # Compose a descriptive title and render this frame through the pipeline.
-        chunk_title: str = f"{os.path.basename(recording_path.rstrip('/'))} Chunk: {chunk_index + 1} / {len(chunks_and_metadata)}"
-        figures.append(render_pipeline_figure(sample_frame, chunk_title, agc_settings))
+        # Capture independent copies through the actual reconstruction path.
+        # All display logic consumes these snapshots and cannot alter the result.
+        stagewise_output: list[np.ndarray] = []
+        world_transformation_pipeline(
+            chunk[selected_index], agc_settings, n_workers=1,
+            stagewise_output=stagewise_output,
+        )
+        title: str = f"{recording_directory.name} | {chunk_path.name} | frame {selected_index}"
+        figures.append(plot_reconstruction_stages(stagewise_output, title=title))
 
     return figures
 
 
-def main():
-    """Run the command-line entry point."""
+def main() -> None:
+    """Reserved entry point; no command-line processing is implemented yet.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
     pass
 
 

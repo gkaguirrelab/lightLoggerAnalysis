@@ -59,7 +59,8 @@ def _process_raw_world_helper(
     chunk_range: tuple[int | None]=(0, None), 
     overwrite_existing: bool = False,
     verbose: bool = False,
-    n_workers: int = 12,
+    n_workers: int = world_util.WORLD_IMPUTATION_WORKERS,
+    demosaic_n_workers: int = world_util.WORLD_DEMOSAIC_WORKERS,
 ) -> None:
     """Process world-camera chunks and save them as MATLAB files.
 
@@ -68,7 +69,10 @@ def _process_raw_world_helper(
         output_path: Directory in which to save the processed chunks.
         overwrite_existing: Whether to replace existing output files.
         verbose: Whether to display a processing progress bar.
-        n_workers: Number of world-frame imputation workers; 1 runs serially.
+        n_workers: Number of imputation workers, default 6. Set 1 to run both
+            imputation and demosaicing serially.
+        demosaic_n_workers: Persistent demosaicing workers, default 16. The pool
+            is reused across sequential buffers; ignored when n_workers is 1.
 
     Returns:
         None. Processed chunks are written to ``output_path``.
@@ -76,6 +80,22 @@ def _process_raw_world_helper(
     Raises:
         AssertionError: If a world metadata array does not use the supported
             legacy or modern column layout.
+
+    Notes:
+        Benchmarked on 2026-10-05 on a Mac Studio (Mac15,14), Apple M3 Ultra,
+        28-core CPU (20 performance + 8 efficiency), 256 GB unified memory,
+        macOS 15.3 (arm64).
+        Imputation compared 1/2/4/6/8/12 workers on 120 real 480 x 640 frames,
+        including process startup and shared-memory transfers. Six was chosen
+        as the baseline (48.2 s; eight was slightly faster at 47.3 s).
+        Demosaicing compared 8/12/16/24/28 workers on sequential 3,600-frame
+        float64 buffers using repeated seeded radiance data and persistent pools.
+        Three warmed calls included allocation, copies, and cleanup; sixteen
+        was fastest tested at 10.39 s/buffer, with a 22.77 s first call.
+        Estimated demosaicing time for ten buffers is 116.3 s, excluding file I/O
+        and other stages. All configurations matched their serial references.
+        See tmp/benchmark_imputation_workers.json and
+        tmp/benchmark_demosaic_large_buffers.json for the measurements.
     """
     # Get the start and end chunk we wish to process 
     # while replacing the None sentiel if it exists
@@ -95,79 +115,82 @@ def _process_raw_world_helper(
             desc="Processing world chunks",
         )
 
-    # Iterate over the paired metadata and frame-buffer files.
-    for file_num, (metadata_path, data_path) in file_iterator:
-        # Skip files not in the desired range 
-        if(file_num not in desired_chunk_range):
-            continue
+    # Tune demosaicing separately from imputation and reuse its pool across chunks.
+    # A serial request disables both pools; context exit always releases workers.
+    with world_util.demosaic_worker_pool(
+        n_workers=1 if n_workers == 1 else demosaic_n_workers,
+    ) as demosaic_pool:
+        # Iterate over the paired metadata and frame-buffer files.
+        for file_num, (metadata_path, data_path) in file_iterator:
+            # Skip files not in the desired range 
+            if(file_num not in desired_chunk_range):
+                continue
 
-        # Form the output path and skip an existing file unless overwrite was
-        # requested.
-        output_filepath: str = os.path.join(
-            output_path,
-            f"world_chunk{file_num}.mat",
-        )
-        if os.path.exists(output_filepath) and not overwrite_existing:
-            continue
-
-        # Load the metadata and its associated frame buffer.
-        metadata_buffer: np.ndarray = np.load(metadata_path)
-        frame_buffer: np.ndarray = np.load(data_path)
-
-        # The final chunk of a recording may be empty.
-        if len(frame_buffer) == 0:
-            continue
-
-        # The metadata is either legacy shaped or modern shaped
-        # Legacy shape is timestamp, Again, DGain, Exposure
-        # Modern shape is timestamp, "cameraAgain", "AGCDgain", "cameraExposure", "AGCAgain", "AGCExposure"
-        Again_idx: int
-        Dgain_idx: int
-        exposure_idx: int
-
-        # First check to see if the metadata is properly shaped
-        assert metadata_buffer.shape[1] in (4, 6), f"Metadata buffer must have cols: (timestamp, Again, DGain, Exposure) or timestamp, cameraAgain, AGCDgain, cameraExposure, AGCAgain, AGCExposure"
-
-        if(metadata_buffer.shape[1] == 4):
-            Again_idx = 1
-            Dgain_idx = 2
-            exposure_idx = 3
-        else:
-            # Add the timestamp column to the modern AGC column names so the
-            # resulting indices match the complete metadata buffer.
-            modern_metadata_columns: tuple[str, ...] = (
-                "timestamp",
-                *world_util.WORLD_AGC_METADATA_COLS,
+            # Form the output path and skip an existing file unless overwrite was
+            # requested.
+            output_filepath: str = os.path.join(
+                output_path,
+                f"world_chunk{file_num}.mat",
             )
-            Again_idx = modern_metadata_columns.index("cameraAgain")
-            Dgain_idx = modern_metadata_columns.index("AGCDgain")
-            exposure_idx = modern_metadata_columns.index("cameraExposure")
+            if os.path.exists(output_filepath) and not overwrite_existing:
+                continue
 
-        # Repackage the AGC settings specifically into the shape required for the pipeline
-        agc_settings: dict[str, np.ndarray] = {
-            "Again": metadata_buffer[:, Again_idx],
-            "Dgain": metadata_buffer[:, Dgain_idx],
-            "exposure": metadata_buffer[:, exposure_idx],
-        }
+            # Load the metadata and its associated frame buffer.
+            metadata_buffer: np.ndarray = np.load(metadata_path)
+            frame_buffer: np.ndarray = np.load(data_path)
 
-        # Transform the raw frames and combine them with their named metadata.
-        data_dict: dict[str, object] = {
-            "data": world_util.world_transformation_pipeline(
-                frame_buffer,
-                agc_settings,
-                n_workers=n_workers,
-            ),
-            "metadata": agc_settings | {"timestamps": metadata_buffer[:, 0]},
-        }
-        # Save as MATLAB v7.3 so large world-camera arrays are not limited by
-        # the 2 GB matrix limit of the older MATLAB v5 format.
-        hdf5storage.savemat(
-            output_filepath,
-            data_dict,
-            fmt="7.3",
-            store_python_metadata=False,
-            truncate_existing=True,
-        )
+            # The final chunk of a recording may be empty.
+            if len(frame_buffer) == 0:
+                continue
+
+            # The metadata is either legacy shaped or modern shaped
+            # Legacy shape is timestamp, Again, DGain, Exposure
+            # Modern shape is timestamp, "cameraAgain", "AGCDgain", "cameraExposure", "AGCAgain", "AGCExposure"
+            Again_idx: int
+            Dgain_idx: int
+            exposure_idx: int
+
+            # First check to see if the metadata is properly shaped
+            assert metadata_buffer.shape[1] in (4, 6), f"Metadata buffer must have cols: (timestamp, Again, DGain, Exposure) or timestamp, cameraAgain, AGCDgain, cameraExposure, AGCAgain, AGCExposure"
+
+            if(metadata_buffer.shape[1] == 4):
+                Again_idx = 1
+                Dgain_idx = 2
+                exposure_idx = 3
+            else:
+                # Add the timestamp column to the modern AGC column names so the
+                # resulting indices match the complete metadata buffer.
+                modern_metadata_columns: tuple[str, ...] = (
+                    "timestamp",
+                    *world_util.WORLD_AGC_METADATA_COLS,
+                )
+                Again_idx = modern_metadata_columns.index("cameraAgain")
+                Dgain_idx = modern_metadata_columns.index("AGCDgain")
+                exposure_idx = modern_metadata_columns.index("cameraExposure")
+
+            # Repackage the AGC settings specifically into the shape required for the pipeline
+            agc_settings: dict[str, np.ndarray] = {
+                "Again": metadata_buffer[:, Again_idx],
+                "Dgain": metadata_buffer[:, Dgain_idx],
+                "exposure": metadata_buffer[:, exposure_idx],
+            }
+
+            # Keep the pipeline's calibration metadata alongside the recording settings.
+            data_dict: dict[str, object] = world_util.world_transformation_pipeline(
+                frame_buffer, agc_settings, n_workers=n_workers, demosaic_pool=demosaic_pool,
+            )
+            data_dict["metadata"].update(agc_settings | {"timestamps": metadata_buffer[:, 0]})
+            # Save as MATLAB v7.3 so large world-camera arrays are not limited by
+            # the 2 GB matrix limit of the older MATLAB v5 format.
+            hdf5storage.savemat(
+                output_filepath,
+                data_dict,
+                fmt="7.3",
+                store_python_metadata=False,
+                truncate_existing=True,
+            )
+            # Release this large RGB result before allocating the next buffer.
+            del data_dict, frame_buffer, metadata_buffer
 
 
 def _process_raw_ms_helper(
@@ -267,7 +290,8 @@ def process_raw_recording(
     overwrite_existing: bool = False,
     verbose: bool = False,
     chunk_ranges: dict[Literal["W", "M"], tuple[int | None]] = {sensor_name: (0, None) for sensor_name in "WM"},
-    n_workers: int = 12,
+    n_workers: int = world_util.WORLD_IMPUTATION_WORKERS,
+    demosaic_n_workers: int = world_util.WORLD_DEMOSAIC_WORKERS,
 ) -> None:
     """Process all world-camera and minispectrometer chunks in a recording.
 
@@ -276,9 +300,12 @@ def process_raw_recording(
         output_path: Destination directory for the processed sensor folders.
         overwrite_existing: Whether to replace existing processed chunks.
         verbose: Whether to display progress bars during processing.
-        n_workers: Number of world-frame imputation workers, default 12.
+        n_workers: Number of world-frame imputation workers, default 6.
             Use 1 for serial processing. Script callers must guard their entry
             point with ``if __name__ == "__main__":`` when using processes.
+        demosaic_n_workers: Persistent world demosaicing workers, default 16.
+            This is independent of imputation except that n_workers=1 makes
+            both stages serial. Buffers are processed one at a time.
 
     Returns:
         None. World and minispectrometer results are written beneath
@@ -288,6 +315,22 @@ def process_raw_recording(
         AssertionError: If ``path_to_raw`` is not an existing, nonempty
             directory.
         AssertionError: If world metadata has an unsupported column layout.
+
+    Notes:
+        Benchmarked on 2026-10-05 on a Mac Studio (Mac15,14), Apple M3 Ultra,
+        28-core CPU (20 performance + 8 efficiency), 256 GB unified memory,
+        macOS 15.3 (arm64).
+        Imputation compared 1/2/4/6/8/12 workers on 120 real 480 x 640 frames,
+        including process startup and shared-memory transfers. Six was chosen
+        as the baseline (48.2 s; eight was slightly faster at 47.3 s).
+        Demosaicing compared 8/12/16/24/28 workers on sequential 3,600-frame
+        float64 buffers using repeated seeded radiance data and persistent pools.
+        Three warmed calls included allocation, copies, and cleanup; sixteen
+        was fastest tested at 10.39 s/buffer, with a 22.77 s first call.
+        Estimated demosaicing time for ten buffers is 116.3 s, excluding file I/O
+        and other stages. All configurations matched their serial references.
+        See tmp/benchmark_imputation_workers.json and
+        tmp/benchmark_demosaic_large_buffers.json for the measurements.
     """
     # Ensure the raw recording is an existing, non-empty directory.
     assert (
@@ -324,7 +367,8 @@ def process_raw_recording(
             chunk_ranges[sensor_name], 
             overwrite_existing,
             verbose,
-            **({"n_workers": n_workers} if sensor_name == "W" else {}),
+            **({"n_workers": n_workers, "demosaic_n_workers": demosaic_n_workers}
+               if sensor_name == "W" else {}),
         )
 
 

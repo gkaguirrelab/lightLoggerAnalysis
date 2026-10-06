@@ -1290,7 +1290,7 @@ def world_chunks_to_video(recording_path: str,
             # Linearize the recording data to account for the full well effect of the camera
             if(linearize_camera_responsivity is True):
                 assert frame_buffer.dtype == np.float64 and frame_buffer.ndim == 3, f"Frame buffer dtype must be float 64 and bayer format to linearize the camera responsivity. Current dtype is: {frame_buffer.dtype} and ndim is {frame_buffer.ndim}"
-                world_util.linearize_camera_responsivity(frame_buffer, dst=frame_buffer, original_bit_depth=int(config_data["sensors"]["W"]["sensor_mode"]["bit_depth"]), dark_noise=world_util.WORLD_DARK_SIGNAL)
+                world_util.linearize_camera_responsivity(frame_buffer, original_bit_depth=int(config_data["sensors"]["W"]["sensor_mode"]["bit_depth"]), dark_noise=world_util.WORLD_DARK_SIGNAL)
                 
                 # We need to reapply the saturated pixel mask because the above operation performed clipping thereby losing our INF values
                 if(raw_saturated_pixel_mask is not None):
@@ -1764,9 +1764,10 @@ def video_to_illuminance(path_to_video: str,
             matlab_engine.quit()
 
     # Map the raw AGC target through the same response linearization already applied to the video.
-    raw_agc_target: np.ndarray = np.array([world_util.WORLD_AGC_DEFAULT_TARGET], dtype=np.float64)
-    linearized_agc_target_array: np.ndarray = np.empty_like(raw_agc_target)
-    world_util.linearize_camera_responsivity(raw_agc_target, dst=linearized_agc_target_array, original_bit_depth=8)
+    linearized_agc_target_array: np.ndarray = np.array(
+        [world_util.WORLD_AGC_DEFAULT_TARGET], dtype=np.float64
+    )
+    world_util.linearize_camera_responsivity(linearized_agc_target_array, original_bit_depth=8)
     linearized_agc_target: float = float(linearized_agc_target_array[0])
 
     # Allocate either one scalar per frame or a complete RGB illuminance video.
