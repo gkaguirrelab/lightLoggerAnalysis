@@ -98,10 +98,10 @@ cornerSets{6} = [
     ];
 
 cornerSets{7} = [
-    170.4089	237.5856
-    388.9882	218.3506
-    400.6457	353.5783
-    176.8206	389.7168
+    93.8953	121.4302
+    455.5698	139.2907
+    451.1047	339.4767
+    109.5233	378.1744
     ];
 
 % Define standard sRGB reference colors for the 24 Macbeth patches (4x6 layout)
@@ -118,7 +118,7 @@ allMeasMean = cell(length(plotOrder), 1);
 
 %% Loop over the validation sets
 
-for vv = 1:1 %length(plotOrder)
+for vv = 1:length(plotOrder)
 
     valIdx = plotOrder(vv);
 
@@ -449,10 +449,10 @@ figure('Name', 'All Validation Sets - Integrated Radiance', ...
 hold on;
 
 % 1:1 identity line
-plot([-4 0],[-4 0], 'k--', 'LineWidth', 1.5);
+plot([-4 2],[-4 2], 'k--', 'LineWidth', 1.5);
 
 % Define distinct marker symbols for the different validation sets
-markers = {'o', 's', '^', 'd', 'v', 'p'};
+markers = {'o', 's', '^', 'd', 'v', 'p','h'};
 maxValMeanAgg = 0;
 minValMeanAgg = inf;
 
@@ -475,8 +475,8 @@ end
 
 
 axis square;
-xlim([-4 0]);
-ylim([-4 0]);
+xlim([-4 2]);
+ylim([-4 2]);
 xlabel('via PR670 [log_1_0 W/m^2/sr]');
 ylabel('via IMX219 [log_1_0 W/m^2/sr]');
 title('Integrated radiance');

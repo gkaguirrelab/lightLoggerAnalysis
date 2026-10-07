@@ -18,9 +18,9 @@ commonS = [380, 1, 352];
 commonWls = SToWls(commonS);
 
 % Define the datasets and plot order
-valSetOptions = {'indoor','indoor','indoor','outdoor','outdoor','outdoor'};
-valNumOptions = {'1','2','3','1','2','3'};
-plotOrder = [4,5,1,2,6,3]; % Order of decreasing irradiance
+valSetOptions = {'indoor','indoor','indoor','outdoor','outdoor','outdoor','outdoor'};
+valNumOptions = {'1','2','3','1','2','3','4'};
+plotOrder = [7,4,5,1,2,6,3]; % Order of decreasing irradiance
 
 % Set the rows and columns of the Macbeth chart
 nRows = 4;
@@ -33,6 +33,7 @@ cornerSets{3} = [217.9086 160.7658; 449.6694 179.9020; 440.1013 335.1179; 197.70
 cornerSets{4} = [198.7724 194.7857; 418.8389 191.5963; 430.5332 339.3704; 186.0150 344.6860];
 cornerSets{5} = [233.8555 234.1213; 430.5332 211.7957; 447.5432 342.5598; 242.3605 370.2010];
 cornerSets{6} = [134.9850 128.8721; 468.8056  83.1578; 485.8156 287.2774; 184.9518 351.0648];
+cornerSets{7} = [ 93.8953 121.4302; 455.5698 139.2907; 451.1047 339.4767; 109.5233 378.1744];
 
 % Define standard sRGB reference colors for the 24 Macbeth patches
 macbethRGB = zeros(nRows, nColumns, 3);
@@ -208,7 +209,7 @@ figure('Name', 'All Validation Sets - Integrated Radiance', 'WindowStyle', 'Dock
 hold on;
 plot([-4 0],[-4 0], 'k--', 'LineWidth', 1.5);
 
-markers = {'o', 's', '^', 'd', 'v', 'p'};
+markers = {'o', 's', '^', 'd', 'v', 'p','h'};
 for vv = 1:length(plotOrder)
     
     % Scale the unscaled measured values with our newly optimized polynomial
