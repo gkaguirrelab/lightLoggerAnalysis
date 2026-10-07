@@ -115,6 +115,8 @@ macbethRGB = macbethRGB / 255; % Normalize to [0, 1] for MATLAB plots
 % Initialize storage arrays for the aggregate plot across all validation sets
 allPredMean = cell(length(plotOrder), 1);
 allMeasMean = cell(length(plotOrder), 1);
+allPredRGB = cell(length(plotOrder), 1); % Added to store channel ratio prediction
+allMeasRGB = cell(length(plotOrder), 1); % Added to store channel ratio measurement
 
 %% Loop over the validation sets
 
@@ -348,6 +350,8 @@ for vv = 1:length(plotOrder)
     % Store the current predictions and measurements for the final aggregate plot
     allPredMean{vv} = predMean;
     allMeasMean{vv} = measMean;
+    allPredRGB{vv} = predictedRGBRadiance;
+    allMeasRGB{vv} = measuredRGBRadiance;
 
     for r = 1:nRows
         for c = 1:nColumns
@@ -445,14 +449,19 @@ end % loop over valSetOptions
 
 figure('Name', 'All Validation Sets - Integrated Radiance', ...
     'WindowStyle', 'Docked', ...
-    'Position', [50, 50, 600, 600]);
+    'Position', [50, 50, 1000, 500]);
+tiledlayout(1, 2, "TileSpacing", "compact", "Padding", "tight");
+
+% Define distinct marker symbols for the different validation sets
+markers = {'o', 's', '^', 'd', 'v', 'p','h'};
+
+% PANEL 1: Integrated Radiance
+nexttile;
 hold on;
 
 % 1:1 identity line
 plot([-4 2],[-4 2], 'k--', 'LineWidth', 1.5);
 
-% Define distinct marker symbols for the different validation sets
-markers = {'o', 's', '^', 'd', 'v', 'p','h'};
 maxValMeanAgg = 0;
 minValMeanAgg = inf;
 
@@ -473,13 +482,12 @@ for vv = 1:length(plotOrder)
     end
 end
 
-
 axis square;
 xlim([-4 2]);
 ylim([-4 2]);
 xlabel('via PR670 [log_1_0 W/m^2/sr]');
 ylabel('via IMX219 [log_1_0 W/m^2/sr]');
-title('Integrated radiance');
+title('Integrated Radiance');
 a = gca();
 a.XTick = a.YTick;
 a.TickDir = 'out';
@@ -507,9 +515,51 @@ for vv = 1:length(plotOrder)
         setting, AgainStore(vv), DgainStore(vv));
 end
 legend(dummyPlots, legendLabels, 'Location','southeast');
-
-
 hold off;
+
+% PANEL 2: Aggregated R:G:B channel ratio data
+nexttile;
+hold on;
+
+% 1:1 identity line
+plot([0, 0.75], [0, 0.75], 'k--', 'LineWidth', 1.5);
+
+for vv = 1:length(plotOrder)
+    pRGB = allPredRGB{vv};
+    mRGB = allMeasRGB{vv};
+
+    % Calculate total radiance per patch to extract fractional channel ratios
+    pSum = sum(pRGB, 3);
+    mSum = sum(mRGB, 3);
+
+    pFracR = reshape(pRGB(:,:,1) ./ pSum, [], 1);
+    pFracG = reshape(pRGB(:,:,2) ./ pSum, [], 1);
+    pFracB = reshape(pRGB(:,:,3) ./ pSum, [], 1);
+
+    mFracR = reshape(mRGB(:,:,1) ./ mSum, [], 1);
+    mFracG = reshape(mRGB(:,:,2) ./ mSum, [], 1);
+    mFracB = reshape(mRGB(:,:,3) ./ mSum, [], 1);
+
+    % Plot each fractional channel color contribution using the same marker symbol
+    scatter(pFracR, mFracR, 85, 'r', 'filled', 'Marker', markers{vv}, 'MarkerEdgeColor', 'none', 'MarkerFaceAlpha', 0.5);
+    scatter(pFracG, mFracG, 85, 'g', 'filled', 'Marker', markers{vv}, 'MarkerEdgeColor', 'none', 'MarkerFaceAlpha', 0.5);
+    scatter(pFracB, mFracB, 85, 'b', 'filled', 'Marker', markers{vv}, 'MarkerEdgeColor', 'none', 'MarkerFaceAlpha', 0.5);
+end
+
+axis square;
+xlim([0, 0.75]);
+ylim([0, 0.75]);
+xlabel('Predicted Channel Fraction');
+ylabel('Measured Channel Fraction');
+title('R:G:B Ratio');
+a = gca();
+a.XTick = [0 0.25 0.5 0.75];
+a.YTick = [0 0.25 0.5 0.75];
+a.TickDir = 'out';
+grid on;
+box on;
+hold off;
+
 drawnow;
 
 % Save aggregate figure
