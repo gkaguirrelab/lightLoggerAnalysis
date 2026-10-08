@@ -3,7 +3,7 @@
 % This script uses ISETbio to define a variable that supports the
 % conversion of integrated radiance values from the camera sensors to cone
 % isomerization rates for an observer. We loop over a range of ages (and
-% thus lens density parameters).
+% thus lens density parameters) and pupil diameters to precompute optics.
 
 % Housekeeping
 clear
@@ -11,6 +11,7 @@ clear
 % Hard code some options
 options.ageRange  = [18,50];
 options.basePupilDiameterMm = 3.0;
+options.pupilDiameterMmRange = 1.5:0.5:8.0; % Range for pre-computing PSFs
 
 % Load the IMX219 sensitivity functions
 dataFileName = fullfile(...
@@ -55,23 +56,20 @@ eccGrid = 0:0.25:120;
 transformTable = zeros(length(eccGrid), 9);
 densityTable = zeros(length(eccGrid), 3); % Store L, M, S cone densities
 
-% Preallocate a struct array with empty fields
+% Preallocate a struct array with empty fields for the cone mapping
 coneMapVar(options.ageRange(2)) = struct(...
     'eccGrid', [], 'transformTable', [],...
     'densityTable', [], 'basePupilDiameterMm', [],...
     'observerAge', []);
 
-% Report we are starting
-fprintf('Generating %d ISETbio profiles',range(options.ageRange))
+% Report we are starting age loop
+fprintf('Generating %d ISETbio age profiles', range(options.ageRange))
 
 % Loop over observer ages
 for age = options.ageRange(1):options.ageRange(2)
-
-    % Update the console on progress
     fprintf('.');
 
-    % Apply the standard CIE 2006 age-dependent scaling factor to the lens
-    % density
+    % Apply the standard CIE 2006 age-dependent scaling factor to the lens density
     if age <= 60
         ageScalar = 1 + 0.02 * (age - 32);
     else
@@ -83,8 +81,7 @@ for age = options.ageRange(1):options.ageRange(2)
     for ii = 1:length(eccGrid)
         ecc = eccGrid(ii);
 
-        % Clamp eccentricity for the anatomical query to 60 degrees (approx
-        % 18mm) to stay within the bounds of the empirical dataset.
+        % Clamp eccentricity for the anatomical query to 60 degrees
         safeEccAperture = min(ecc, 60);
         eccMeters = safeEccAperture * (300 * 1e-6);
 
@@ -94,44 +91,30 @@ for age = options.ageRange(1):options.ageRange(2)
 
         % Extract total cone density
         coneDensitySqMm = coneDensityReadData('eccentricity', eccMeters, 'angle', 0);
-
-        % Convert cones/mm^2 to cones/degree^2 (assuming ~300 microns/degree)
         mmPerDeg = 300 * 1e-3;
         coneDensitySqDeg = coneDensitySqMm * (mmPerDeg^2);
 
         % Assume a fixed, 10% S-cone fraction
         sFraction = 0.1;
-
-        % Distribute the remaining fraction to L and M cones (using
-        % standard 2:1 ratio)
         lmFraction = 1.0 - sFraction;
         lFraction = lmFraction * (0.6 / 0.9);
         mFraction = lmFraction * (0.3 / 0.9);
 
         % Store the densities
-        densityTable(ii, 1) = coneDensitySqDeg * lFraction; % L-cone
-        densityTable(ii, 2) = coneDensitySqDeg * mFraction; % M-cone
-        densityTable(ii, 3) = coneDensitySqDeg * sFraction; % S-cone
+        densityTable(ii, 1) = coneDensitySqDeg * lFraction;
+        densityTable(ii, 2) = coneDensitySqDeg * mFraction;
+        densityTable(ii, 3) = coneDensitySqDeg * sFraction;
 
-        % Scale macular pigment density using exponential decay against
-        % true ecc
+        % Scale macular pigment density
         macularObj.density = baseMacularDensity .* exp(-ecc / 2.0);
-
-        % Photopigment optical density remains at its baseline foveal
-        % value. Because cone aperture and density are inversely related,
-        % holding this constant yields the expected flat isomerization rate
-        % across the retina.
         pigmentObj.opticalDensity = basePigmentOpticalDensity;
 
         % Recalculate radiometric scalar for this eccentricity
         radiometricScalar = (pupilAreaM2 / focalLengthM^2) * coneApertureM2;
 
-        % Base LMS absorptance (inherently includes constant optical
-        % density)
+        % Base LMS absorptance and sensitivities
         baseLMS = diag(lens.transmittance) * pigmentObj.absorptance;
         baseLMS = diag(energyToQuanta) * baseLMS .* radiometricScalar;
-
-        % Effective LMS sensitivities at this eccentricity
         effectiveLMS = diag(macularObj.transmittance) * baseLMS;
 
         % Calculate 3x3 transformation matrix from Camera RGB to LMS rates
@@ -139,29 +122,63 @@ for age = options.ageRange(1):options.ageRange(2)
 
         % Flatten the 3x3 matrix (column-major) into a 1x9 row for the LUT
         transformTable(ii, :) = T_mat(:)';
-
-        % Make sure that no nans have crept into the result
         assert(~any(isnan(T_mat(:)')))
-
     end
 
-    % Store the results in the index location for the observer age
+    % Store the results
     coneMapVar(age).eccGrid = eccGrid;
     coneMapVar(age).transformTable = transformTable;
     coneMapVar(age).densityTable = densityTable;
     coneMapVar(age).basePupilDiameterMm = options.basePupilDiameterMm;
     coneMapVar(age).observerAge = age;
-
 end
-
-% Report doneness
 fprintf('done\n');
 
-% Save the coneMapVar in the "derived" directory
+% Precompute pre-receptoral optics (PSFs) for the specified pupil range
+fprintf('Generating ISETbio pre-receptoral optics for pupil sizes');
+opticsSupport = struct();
+peakWavelengths = [562, 530, 430]; % L, M, S peaks
+
+for p = 1:length(options.pupilDiameterMmRange)
+    fprintf('.');
+    pupilMm = options.pupilDiameterMmRange(p);
+
+    opticsSupport(p).pupilDiameterMm = pupilMm;
+
+    for c = 1:3
+        % Instantiate a clean wavefront object for EACH wavelength 
+        % independently to bypass ISETbio multi-wavelength bugs.
+        wvf = wvfCreate();
+        wvf = wvfSet(wvf, 'calc wavelengths', peakWavelengths(c));
+
+        % The measured pupil size must remain at 8.0mm to preserve the correct 
+        % scaling of Thibos higher-order biological aberrations.
+        wvf = wvfSet(wvf, 'measured pupil diameter', 8.0);
+        wvf = wvfSet(wvf, 'calc pupil diameter', pupilMm);
+
+        % Provide sufficient spatial resolution
+        wvf = wvfSet(wvf, 'spatial samples', 401);
+
+        % Correct spherical refractive error (defocus)
+        wvf = wvfSet(wvf, 'zcoeffs', 0, {'defocus'});
+
+        % Compute the wavefront and PSF for this single wavelength
+        wvf = wvfCompute(wvf);
+
+        % Extract the 2D PSF and spatial sampling resolution using 'min' for arc minutes
+        opticsSupport(p).psf{c} = wvfGet(wvf, 'psf', peakWavelengths(c));
+        psfSupport = wvfGet(wvf, 'psf spatial samples', 'min', peakWavelengths(c));
+        opticsSupport(p).psfSpacingArcMin(c) = abs(psfSupport(2) - psfSupport(1));
+    end
+end
+fprintf('done\n');
+
+% Save both variables in the derived directory
 saveFileName = fullfile(...
     tbLocateProjectSilent('lightLoggerAnalysis'),...
     'derived',...
     'radianceToConeRateSupport.mat');
 readme = ['Created by defineSensorToConeMapping.\n'...
-    'coneMapVar -- a structure with values needed for conversion of radiance to cone isomerization rate.\n'];
-save(saveFileName,'readme','coneMapVar');
+    'coneMapVar -- a structure with values needed for conversion of radiance to cone isomerization rate.\n'...
+    'opticsSupport -- a structure containing pre-computed PSFs for a range of pupil diameters.\n'];
+save(saveFileName,'readme','coneMapVar','opticsSupport');

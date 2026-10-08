@@ -20,6 +20,11 @@ load(fileName,'worldFrame','AGCSettings','minispectValue')
 % Obtain the demosaiced image
 radianceMapDemosaiced = demosaicRadianceMap(imageStages{end});
 
+radianceMapDemosaiced(:,:,1) = 1.0;
+radianceMapDemosaiced(:,:,2) = 1.1;
+radianceMapDemosaiced(:,:,3) = 1.2;
+
+
 % Obtain the cone isomerization map, which is in units of R*/deg^2/s. We
 % pass the current fixation location (in terms of image pixel) and pupil
 % size to be used in this calculation
