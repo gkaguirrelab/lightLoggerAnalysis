@@ -89,13 +89,9 @@ Each new measurement contains the same five selected patches listed below.
 
 *Outdoor measurement 3, 0.8 NDF: luminance of 2.367 cd/m², as shown on the PR-670 display.*
 
-#### Measurement 4
-
-Outdoor measurement 4 was performed on the roof of Goddard Hall at approximately **1 pm** on a sunny, cloudless day. The selected zero-based global world-frame index is **2703**. The five PR-670 patch measurements are stored in `outdoor/4/PR670/`, named `outdoor4_R<row>C<column>.mat`.
-
 #### Measurement 5
 
-Outdoor measurement 5 was a redo of outdoor measurement 4 on the roof of Goddard Hall, with a white coat placed on the ground to help prevent the black roof from overwhelming the automatic gain control (AGC). The selected zero-based global world-frame index is **8000**. The five PR-670 patch measurements are stored in `outdoor/5/PR670/`, named `outdoor5_R<row>C<column>.mat`. These files were received as `ROOF2WEDNESDAY_R<row>C<column>.mat` in Slack and renamed to match the measurement-directory convention; their contents are unchanged.
+Outdoor measurement 5 was performed on the roof of Goddard Hall, with a white coat placed on the ground to help prevent the black roof from overwhelming the automatic gain control (AGC). The selected zero-based global world-frame index is **8000**. The five PR-670 patch measurements are stored in `outdoor/5/PR670/`, named `outdoor5_R<row>C<column>.mat`. These files were received as `ROOF2WEDNESDAY_R<row>C<column>.mat` in Slack and renamed to match the measurement-directory convention; their contents are unchanged.
 
 ## Selected ColorChecker Patches
 
@@ -138,10 +134,7 @@ The global world-frame indices are zero-based:
 | Outdoor | 1 | 10750 | `outdoor/1/lightLogger/close_AGCandMS_01.mat` |
 | Outdoor | 2 | 11055 | `outdoor/2/lightLogger/close_AGCandMS_01.mat` |
 | Outdoor | 3 | 11000 | `outdoor/3/lightLogger/close_AGCandMS_01.mat` |
-| Outdoor | 4 | 2703 | `outdoor/4/lightLogger/close_AGCandMS_01.mat` |
 | Outdoor | 5 | 8000 | `outdoor/5/lightLogger/close_AGCandMS_01.mat` |
-
-Outdoor measurement 4 contains an incomplete image chunk. When generating settings-over-time figures, `populateData.ipynb` skips incomplete or timed-out image chunks with a warning and leaves their frame means as `NaN`, while retaining all captured metadata timestamps and global frame indices. This produces a gap in the frame-mean plot without shifting later samples or the selected-frame marker.
 
 Outdoor measurement 2 (no filter) uses zero-based global world-frame index **11055**, and measurement 3 (0.8 NDF) uses **11000**. The files listed above are the output destinations. After changing a selection, rerun the Macbeth generation cell with overwrite enabled to update its MAT file and settings plot.
 
