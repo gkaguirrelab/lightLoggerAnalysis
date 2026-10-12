@@ -10,7 +10,7 @@ clear
 
 % Hard code some options
 % Meridian: Select between {'Upper', 'Lower', 'Nasal', 'Temporal'}
-options.meridian= 'Nasal';
+options.meridian= 'Lower';
 options.visualizeEmployedConeMosaics = false;
 options.ageRange  = [18,50];
 options.basePupilDiameterMm = 3.0;
@@ -233,11 +233,6 @@ function theConeMapVar = generateEffectiveLMSusingCmosaicMethod(wlsSensor, eccGr
         theUpdatedOptics = opticsSet(theOptics, 'lens', theUpdatedLens);
         theDiffractionLimitedOptics = oiSet(theDiffractionLimitedOptics, 'optics', theUpdatedOptics);
     
-        % Determine the cones we will sample for computing the effectiveLMS
-        %reportLMSconePositions = false;
-        %[theLconeIndex, theMconeIndex, theSconeIndex] = ...
-        %    determineSampledLMSconeIndices(theConeMosaic, reportLMSconePositions);
-
         % Stimulus params
         pixelsNum = 5; % uniform scene, so we dont need many pixels
         theEnergyWattsPerSteradianPerM2PerNM = 1.0 * 1E-3;  % 1.0 mWatts/Sr/M2/nm
@@ -348,41 +343,6 @@ function coneDensitiesConesPerSquaredDegree = computeConeDensity(theConeMosaic)
     coneDensitiesConesPerSquaredDegree(1) = numel(theLconeIndices)/theArea;
     coneDensitiesConesPerSquaredDegree(2) = numel(theMconeIndices)/theArea;
     coneDensitiesConesPerSquaredDegree(3) = numel(theSconeIndices)/theArea;
-end
-
-%
-% Method to determine the center-most L, M, and S-cone in a given conem mosaic
-%
-function [theLconeIndex, theMconeIndex, theSconeIndex] = determineSampledLMSconeIndices(theConeMosaic, reportLMSconePositions)
-    theLconeIndices = theConeMosaic.lConeIndices;
-    radialEccs = sqrt(sum(theConeMosaic.coneRFpositionsDegs(theLconeIndices,:).^2,2));
-    [~, idx] = sort(radialEccs);
-    theLconeIndex = theLconeIndices(idx(1));
-
-    theMconeIndices = theConeMosaic.mConeIndices;
-    radialEccs = sqrt(sum(theConeMosaic.coneRFpositionsDegs(theMconeIndices,:).^2,2));
-    [~, idx] = sort(radialEccs);
-    theMconeIndex = theMconeIndices(idx(1));
-
-    theSconeIndices = theConeMosaic.sConeIndices;
-    radialEccs = sqrt(sum(theConeMosaic.coneRFpositionsDegs(theSconeIndices,:).^2,2));
-    [~, idx] = sort(radialEccs);
-    theSconeIndex = theSconeIndices(idx(1));
-
-    if (reportLMSconePositions)
-        fprintf('L-cone at (%2.2f, %2.2f) microns\n',...
-            theConeMosaic.coneRFpositionsMicrons(theLconeIndex,1), ...
-            theConeMosaic.coneRFpositionsMicrons(theLconeIndex,2));
-    
-        fprintf('M-cone at (%2.2f, %2.2f) microns\n',...
-            theConeMosaic.coneRFpositionsMicrons(theMconeIndex,1), ...
-            theConeMosaic.coneRFpositionsMicrons(theMconeIndex,2));
-    
-        fprintf('S-cone at (%2.2f, %2.2f) microns\n',...
-            theConeMosaic.coneRFpositionsMicrons(theSconeIndex,1), ...
-            theConeMosaic.coneRFpositionsMicrons(theSconeIndex,2));
-    end
-
 end
 
 %
