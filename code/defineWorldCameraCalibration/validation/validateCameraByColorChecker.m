@@ -309,8 +309,14 @@ for vv = 1:length(plotOrder)
         end
     end
 
-    % Obtain the spectral radiance estimated from the minispect
-    [minispectSPD,minispectS,fVal,fitErrors] = estimateRadianceSpectrumFromMinispect(minispectValue.AS);
+
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    %% Obtain the spectral radiance estimated from the minispect
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    for cc=1:3
+        meanCameraRGBRadiance(cc) = mean(mean(radianceMap(:,:,cc)));
+    end
+    [minispectSPD,minispectS,fVal,fitErrors] = estimateJointRadianceSpectrum(minispectValue.AS, meanCameraRGBRadiance);
     minispectSPD = SplineSpd(SToWls(minispectS), minispectSPD, SToWls(commonS));
 
 
@@ -333,12 +339,15 @@ for vv = 1:length(plotOrder)
     axis off
     axis equal
 
-    % Show the illuminant
+    % Show the illuminant and mean radiance spectrum
     nexttile
     plot(SToWls(commonS),mean(predictedMeasIlluminants),'-k','LineWidth',2);
+    hold on
+    plot(SToWls(commonS),minispectSPD,'-r','LineWidth',2);   
     ylabel('radiance [W/m^2/sr/nm]');
     xlabel('wavelength [nm]');
-    title('Illuminant');
+    title('Scene radiance');
+    legend({'illuminant',['mean' newline 'radiance']},'Location','best');
     axis square
 
     % Show the mean integrated radiance with true-color patches
@@ -376,7 +385,7 @@ for vv = 1:length(plotOrder)
     ylim([minValMean, maxValMean]);
     xlabel('via PR670 [W/m^2/sr]');
     ylabel('via IMX219 [W/m^2/sr]');
-    title('Integrated Radiance');
+    title('Integrated RGB channel radiance');
     a = gca();
     a.XTick = a.YTick;
     grid on;
