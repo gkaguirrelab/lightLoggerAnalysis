@@ -2,9 +2,9 @@
 clear
 
 % Pick a measurement
-%measurementName = 'outdoor_AGCandMS_01.mat';
 measurementName = 'planetarium_AGCandMS_01.mat';
-%measurementName = 'macbeth_AGCandMS_01.mat';
+%measurementName = 'indoor_AGCandMS_02.mat';
+%measurementName = 'macbeth_AGCandMS_02.mat';
 
 % Load the data
 fileName = fullfile(...
@@ -20,6 +20,11 @@ load(fileName,'worldFrame','AGCSettings','minispectValue')
 % Obtain the demosaiced image
 radianceMapDemosaiced = demosaicRadianceMap(imageStages{end});
 
+% Obtain the mean environmental radiance from the  minispect and
+% radianceMap
+[meanSceneRadiance, S, fVal] = ...
+    estimateJointRadianceSpectrum(minispectValue.AS, radianceMapDemosaiced);
+
 % Obtain the cone isomerization map, which is in units of R*/deg^2/s. We
 % pass the current fixation location (in terms of image pixel) and pupil
 % size to be used in this calculation
@@ -33,7 +38,7 @@ pupilDiameterMm = 3.0;
     'gazeY', gazeY, ...
     'pupilDiameterMm', pupilDiameterMm);
 
-% Obtain the Linear Opponent post-receptoral map
+% Obtain the linear opponent post-receptoral map
 [postRecepMap,weights] = computePostRecepExcitation(isomerizationMap,'balanceNeutral',false);
 
 % Display the reconstruction
@@ -51,3 +56,10 @@ xlim([-100 100]);
 ylim([-50 50]);
 pbaspect([2 1 1])
 title('Post-receptoral channels');
+
+% Plot the mean scene radiance
+figure
+plot(SToWls(S),meanSceneRadiance,'r');
+xlabel('wavelength [nm]');
+ylabel('radiance [W/m^2/sr]');
+title('Mean scene radiance')

@@ -1,0 +1,21 @@
+I have a scientific instrument that includes an ASM7341 chip and an IMX219 camera chip.
+
+The ASM7341 contains 8 narrow-band spectral sensors in the visible light range, and a 9th "clear" channel that is broad band. There is a 10th channel that is narrow band in the near infrared. The chip measures light intensity with 16 bit resolution. The chip is behind a cosine integrator and has a 2pi steradian field of view. I have available the tabular spectral sensitivities of each of the channels of the ASM7341 chip. I have obtained calibrated weights for each of the channels that relates the sensor counts to the integrated mean radiance measured by each channel. I am uncertain, however, if the weight is accurate for the 10th, IR channel as I am limited in my ability to produce and measure light in this range.
+
+The IMX219 camera chip records and image subtends 120 x 90° of visual angle. I am able to express the output of the camera as the integrated radiance at each pixel in each of the three channels (R, G, B). I have available the tabular spectral sensitivities of the three channels of the IMX219 chip.
+
+The fields of view of the ASM7341 and IMX219 are aligned and share the same center point.
+
+I wish to reconstruct an estimate of the continuous, mean radiance spectrum as seen by the ASM7341. The routine "estimateRadianceSpectrumFromMinispect" does so using Tikhonov Regularization. I find that the estimated spectra are imperfect, in particular for outdoor settings.
+
+I am interested in the possibility that I can use the mean, integrated radiance values for the R, G, and B channels from the simultaneously collected IMX219 image to constrain the reconstruction of the continuous radiance spectrum from the ASM7341 chip. I have a set of measurements that include:
+
+- The estimated illuminant in a scene (in W/m2/sr/nm) in a scene, along with the "commonS" description of the wavelength support
+- The integrated radiance values (in W/m2/sr) for the R, G, and B channels of the IMX219 camera, averaged over the entire image
+- The channel values for the ASM7341 chip
+
+These measurements are made for a range of light levels, indoors and outside.
+
+Describe a strategy to 1) improve the estimate of the continuous, mean scene radiance spectrum by making use of the measurements from the IMX219 chip; 2) implement this approach in the measurements described above and use properties of the measurements to validate the reconstructed mean scene radiance spectrum.
+
+I have attached relevant code samples and example mat files that contain the measured variables.
