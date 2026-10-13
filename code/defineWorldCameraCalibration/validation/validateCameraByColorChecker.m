@@ -311,13 +311,10 @@ for vv = 1:length(plotOrder)
 
 
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    %% Obtain the spectral radiance estimated from the minispect
+    %% MEAN SCENE RADIANCE
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    for cc=1:3
-        meanCameraRGBRadiance(cc) = mean(mean(radianceMap(:,:,cc)));
-    end
-    [minispectSPD,minispectS,fVal,fitErrors] = estimateJointRadianceSpectrum(minispectValue.AS, meanCameraRGBRadiance);
-    minispectSPD = SplineSpd(SToWls(minispectS), minispectSPD, SToWls(commonS));
+    [meanSceneRadiance,meanSceneS,fVal,fitErrors] = estimateJointRadianceSpectrum(minispectValue.AS, radianceMap);
+    meanSceneRadiance = SplineSpd(SToWls(meanSceneS), meanSceneRadiance, SToWls(commonS));
 
 
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -343,7 +340,7 @@ for vv = 1:length(plotOrder)
     nexttile
     plot(SToWls(commonS),mean(predictedMeasIlluminants),'-k','LineWidth',2);
     hold on
-    plot(SToWls(commonS),minispectSPD,'-r','LineWidth',2);   
+    plot(SToWls(commonS),meanSceneRadiance,'-r','LineWidth',2);   
     ylabel('radiance [W/m^2/sr/nm]');
     xlabel('wavelength [nm]');
     title('Scene radiance');

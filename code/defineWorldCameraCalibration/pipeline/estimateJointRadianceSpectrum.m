@@ -1,4 +1,4 @@
-function [spectralRadiance, S, fVal, fitErrors] = estimateJointRadianceSpectrum(minispectValues, cameraRGBRadiance)
+function [meanSceneRadiance, S, fVal, fitErrors] = estimateJointRadianceSpectrum(minispectValues, radianceMap)
 % Spectral Reconstruction combining 7 of the AS7341 Channels and 3 IMX219
 % Channels. Uses joint Tikhonov Regularization to estimate mean
 % environmental radiance.
@@ -41,6 +41,13 @@ if isempty(cameraT)
     cameraT = (camSensSplined ./ max(camSensSplined, [], 1))'; 
 end
 
+%% Derive the mean integrated radiance for the three camera channels
+cameraRGBRadiance = [0; 0; 0];
+for cc = 1:3
+    thisChannel = squeeze(radianceMap(:,:,cc));
+    cameraRGBRadiance(cc) = mean(thisChannel(:));
+end
+
 
 %% 3. Construct the Unified Forward Model
 N = length(miniSpectWls);
@@ -51,7 +58,7 @@ k = double(miniSpectKVals);
 y_as = V ./ 10.^k;
 
 % IMX219 calibrated integrated radiance (ensure column vector)
-y_cam = double(cameraRGBRadiance(:));
+y_cam = cameraRGBRadiance;
 
 % Concatenate modalities
 A_joint = [miniSpectT; cameraT];
@@ -65,17 +72,17 @@ D = diff(eye(N), 2);
 % Create the identity matrix I_mat to enforce shrinkage (minimize total radiance)
 I_mat = eye(N);
 
-% Dynamic alpha scaling based on joint signal magnitude
-baseAlpha = 1e7;
+% Dynamic alpha scaling based on joint signal magnitude. The baseAlpha
+% controls the smoothness of the solution
+baseAlpha = 5e7;
 referenceIntensity = 0.05; 
 intensityScale = (referenceIntensity / (mean(y_joint) + eps));
 
 % Alpha (smoothness) scales INVERSELY to enforce more smoothing in dim/noisy light
 alpha = baseAlpha * intensityScale;
 
-% Beta (shrinkage) remains CONSTANT to provide a penalty strictly proportional 
-% to the signal magnitude across all light levels. 
-% (Note: You will likely need to tune this down; 1e2 to 1e4 is a good starting range).
+% Beta (shrinkage) to produce the minimum energy spectrum necessary to
+% account for the sensor values
 beta = 1e1; 
 
 % Combine the data fidelity, smoothing, and shrinkage terms
@@ -89,8 +96,9 @@ lb = zeros(N, 1);
 % Initialize upper bounds to infinity
 ub = inf(N, 1);
 
-% Constrain the spectrum to zero power at or below 300 nm and at or above 800 nm.
-% Because lb is 0, setting ub to 0 strictly forces the solution to 0 at these indices.
+% Constrain the spectrum to zero power at or below 300 nm and at or above
+% 800 nm. Because lb is 0, setting ub to 0 strictly forces the solution to
+% 0 at these indices.
 zeroPowerIdx = (miniSpectWls <= 200) | (miniSpectWls >= 1000);
 ub(zeroPowerIdx) = 0;
 
@@ -160,7 +168,7 @@ if showPlots
     legend('Measured (y)', 'Predicted (A*x_{est})', 'Location', 'northwest');
 end
 
-spectralRadiance = x_est;
+meanSceneRadiance = x_est;
 S = WlsToS(miniSpectWls);
 end
 
