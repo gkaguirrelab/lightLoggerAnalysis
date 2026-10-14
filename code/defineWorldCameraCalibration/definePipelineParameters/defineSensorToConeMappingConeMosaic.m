@@ -39,6 +39,7 @@ eccGrid = 0:1:20;
 
 % Preallocate a struct array with empty fields for the cone mapping
 coneMapVar(options.ageRange(2)) = struct(...
+    'theEmployedConeMosaics', [], ...
     'wavelengthSupportNM', [], ...
     'eccGrid', [], ...
     'transformTable', [], ...
@@ -51,6 +52,8 @@ coneMapVar(options.ageRange(2)) = struct(...
 % effectiveLMS. Set to false to use the previous, first-principles based
 % approach.
 useCMosaicMethod = true;
+
+tic
 
 % Loop over observer ages
 for age = options.ageRange(1):options.ageRange(1)
@@ -73,49 +76,13 @@ for age = options.ageRange(1):options.ageRange(1)
     coneMapVar(age) = theConeMapVar;
 end % age
 
+toc
 
-%
-% Have not yet worked on the optics part
-%
 
-% Precompute pre-receptoral optics (PSFs) for the specified pupil range
-fprintf('Generating ISETbio pre-receptoral optics for pupil sizes');
-opticsSupport = struct();
-peakWavelengths = [562, 530, 430]; % L, M, S peaks
+opticsSupport = generateOpticsUsingOldMethod(options);
 
-for p = 1:length(options.pupilDiameterMmRange)
-    fprintf('.');
-    pupilMm = options.pupilDiameterMmRange(p);
 
-    opticsSupport(p).pupilDiameterMm = pupilMm;
 
-    for c = 1:3
-        % Instantiate a clean wavefront object for EACH wavelength 
-        % independently to bypass ISETbio multi-wavelength bugs.
-        wvf = wvfCreate();
-        wvf = wvfSet(wvf, 'calc wavelengths', peakWavelengths(c));
-
-        % The measured pupil size must remain at 8.0mm to preserve the correct 
-        % scaling of Thibos higher-order biological aberrations.
-        wvf = wvfSet(wvf, 'measured pupil diameter', 8.0);
-        wvf = wvfSet(wvf, 'calc pupil diameter', pupilMm);
-
-        % Provide sufficient spatial resolution
-        wvf = wvfSet(wvf, 'spatial samples', 401);
-
-        % Correct spherical refractive error (defocus)
-        wvf = wvfSet(wvf, 'zcoeffs', 0, {'defocus'});
-
-        % Compute the wavefront and PSF for this single wavelength
-        wvf = wvfCompute(wvf);
-
-        % Extract the 2D PSF and spatial sampling resolution using 'min' for arc minutes
-        opticsSupport(p).psf{c} = wvfGet(wvf, 'psf', peakWavelengths(c));
-        psfSupport = wvfGet(wvf, 'psf spatial samples', 'min', peakWavelengths(c));
-        opticsSupport(p).psfSpacingArcMin(c) = abs(psfSupport(2) - psfSupport(1));
-    end
-end
-fprintf('done\n');
 
 if (useCMosaicMethod)
     % Save both variables in the derived directory
@@ -143,8 +110,152 @@ fprintf('Saved data to %s\n', saveFileName);
 % SUPPORTING ROUTINES
 %
 
+function opticsSupport = generateOpticsUsingCmosaicMethod(theEmployedConeMosaics, options)
+
+    opticsParams.zernikeDataBase = 'Polans2015';
+    opticsParams.subjectID = 1;
+    opticsParams.pupilDiameterMM = 3.0;
+    opticsParams.wavefrontSpatialSamples = 101;
+    opticsParams.zeroCenterPSF = false;
+    opticsParams.noLCA = false;
+
+    opticsParams.StrehlRatioOptimizationParams = struct(...
+        'defocusDioptersRange', -4:0.5:3, ...
+        'obliqueAstigmatismDioptersRange', -3:0.5:3, ...
+        'verticalAstigmatismDioptersRange', -6:0.5:3 ...
+    );
+
+    % Search over the 3D search grid to detemine the defocus and
+    % astigmatism values that are needed maximize the Strehl ratio
+    psfUpsampleFactor = [];
+
+    useParfor = true;
+    visualizeStrehlRatioOptimization = true;
+    contrastMaxStrehlRatioPSFtoAsMeasuredAndCentralCorrection = true;
+
+    for ii = 1:numel(theEmployedConeMosaics)
+
+        theConeMosaic = theEmployedConeMosaics{ii};
+
+        fprintf('Optimizing optics at position (%2.0f,%2.0f)\n', ...
+            theConeMosaic.eccentricityDegs(1),theConeMosaic.eccentricityDegs(2));
+        
+        [~, ~, zCoeffsMicrons] = theConeMosaic.oiEnsembleGenerate(theConeMosaic.eccentricityDegs, ...
+                'zernikeDataBase', opticsParams.zernikeDataBase, ...
+                'subjectID', opticsParams.subjectID, ...
+                'pupilDiameterMM', opticsParams.pupilDiameterMM, ...
+                'subtractCentralRefraction', false, ...
+                'subtractCentralRefraction3D', false, ...
+                'zeroCenterPSF', ~true, ...
+                'withZeroedPistonAndTiltZernikeCoefficients', ~true, ...
+                'flipPSFUpsideDown', false, ...
+                'noLCA', opticsParams.noLCA, ...
+                'refractiveErrorDiopters', 0, ...
+                'obliqueAndVerticalAstigmatismErrorsDiopters', [0 0], ...
+                'wavefrontSpatialSamples', opticsParams.wavefrontSpatialSamples);
+
+        % The Artal/Polans Z-coeff indices start from 0, not 1
+        theDefocusZcoeffIndex = wvfOSAIndexToVectorIndex('defocus')-1;
+        theObliqueAstigmatismZcoeffIndex = wvfOSAIndexToVectorIndex('oblique_astigmatism')-1;
+        theVerticalAstigmatismZcoeffIndex = wvfOSAIndexToVectorIndex('vertical_astigmatism')-1;
+    
+        % From microns to diopters
+        defocusDioptersCenter = wvfDefocusMicronsToDiopters(zCoeffsMicrons(theDefocusZcoeffIndex), opticsParams.pupilDiameterMM);
+        obliqueAstigmatismDioptersCenter = wvfAstigmatismMicronsToDiopters(zCoeffsMicrons(theObliqueAstigmatismZcoeffIndex), opticsParams.pupilDiameterMM);
+        verticalAstigmatismDioptersCenter = wvfAstigmatismMicronsToDiopters(zCoeffsMicrons(theVerticalAstigmatismZcoeffIndex), opticsParams.pupilDiameterMM);
+    
+        % Round to closest quarter diopter
+        defocusDioptersCenter = sign(defocusDioptersCenter) * 0.25*round(4*abs(defocusDioptersCenter));
+        obliqueAstigmatismDioptersCenter = sign(obliqueAstigmatismDioptersCenter) * 0.25*round(4*abs(obliqueAstigmatismDioptersCenter));
+        verticalAstigmatismDioptersCenter = sign (verticalAstigmatismDioptersCenter) * 0.25*round(4*abs(verticalAstigmatismDioptersCenter));
+    
+        examinedDefocusDioptersRange = opticsParams.StrehlRatioOptimizationParams.defocusDioptersRange;
+        examinedObliqueAstigmatismDioptersRange = opticsParams.StrehlRatioOptimizationParams.obliqueAstigmatismDioptersRange;
+        examinedVerticalAstigmatismDioptersRange = opticsParams.StrehlRatioOptimizationParams.verticalAstigmatismDioptersRange;
+           
+        % Center the 3D search around (0,0,0) defocus and astigmatism Z coeffs
+        examinedDefocusDiopters = examinedDefocusDioptersRange - defocusDioptersCenter;
+        examinedObliqueAstigmatismDiopters = examinedObliqueAstigmatismDioptersRange - obliqueAstigmatismDioptersCenter;
+        examinedVerticalAstigmatismDiopters = examinedVerticalAstigmatismDioptersRange -verticalAstigmatismDioptersCenter;
+    
+        % 3D search grid
+        [X,Y,Z] = ndgrid(...
+                examinedDefocusDiopters, ...
+                examinedObliqueAstigmatismDiopters, ...
+                examinedVerticalAstigmatismDiopters);
+    
+        examinedDefocusAndAstigmatismDioptersGrid = [...
+                reshape(X, [numel(X) 1]) reshape(Y, [numel(X) 1]) reshape(Z, [numel(X) 1]) ];
+
+       % Go !
+       [theOptics, thePSF, theOptimalStrehlRatioDefocusAndAstigmatismDiopters, ...
+        theOptimalStrehlRatio, StrehlRatioAsAFunctionOfDefocusAndAstigmatism] = ...
+		          RGCMosaicConstructor.helper.optics.optimized3DStrehlRatioPSF(...
+					    examinedDefocusAndAstigmatismDioptersGrid, ...
+					    theConeMosaic, theConeMosaic.eccentricityDegs, opticsParams, ...
+                        opticsParams.wavefrontSpatialSamples, psfUpsampleFactor, ...
+					    visualizeStrehlRatioOptimization, contrastMaxStrehlRatioPSFtoAsMeasuredAndCentralCorrection, ...
+                        examinedDefocusDiopters, examinedObliqueAstigmatismDiopters, examinedVerticalAstigmatismDiopters, ...
+                        useParfor);
+
+       opticsSupport.theOptics{ii} = theOptics;
+       opticsSupport.thePSFs{ii} = thePSF;
+       opticsSupport.theOptimalStrehlRatios{ii} = theOptimalStrehlRatio;
+       opticsSupport.theOptimalStrehlRatioDefocusAndAstigmatismDiopters{ii} = theOptimalStrehlRatioDefocusAndAstigmatismDiopters;
+       opticsSupport.StrehlRatioAsAFunctionOfDefocusAndAstigmatism{ii} = StrehlRatioAsAFunctionOfDefocusAndAstigmatism;
+    end % ii
+
+    for p = 1:length(options.pupilDiameterMmRange)
+        fprintf('.');
+        pupilMm = options.pupilDiameterMmRange(p);
+    end % for p
+end
+
+
+function opticsSupport = generateOpticsUsingOldMethod(options)
+    % Precompute pre-receptoral optics (PSFs) for the specified pupil range
+    fprintf('Generating ISETbio pre-receptoral optics for pupil sizes');
+    opticsSupport = struct();
+    peakWavelengths = [562, 530, 430]; % L, M, S peaks
+    
+    for p = 1:length(options.pupilDiameterMmRange)
+        fprintf('.');
+        pupilMm = options.pupilDiameterMmRange(p);
+    
+        opticsSupport(p).pupilDiameterMm = pupilMm;
+    
+        for c = 1:3
+            % Instantiate a clean wavefront object for EACH wavelength 
+            % independently to bypass ISETbio multi-wavelength bugs.
+            wvf = wvfCreate();
+            wvf = wvfSet(wvf, 'calc wavelengths', peakWavelengths(c));
+    
+            % The measured pupil size must remain at 8.0mm to preserve the correct 
+            % scaling of Thibos higher-order biological aberrations.
+            wvf = wvfSet(wvf, 'measured pupil diameter', 8.0);
+            wvf = wvfSet(wvf, 'calc pupil diameter', pupilMm);
+    
+            % Provide sufficient spatial resolution
+            wvf = wvfSet(wvf, 'spatial samples', 401);
+    
+            % Correct spherical refractive error (defocus)
+            wvf = wvfSet(wvf, 'zcoeffs', 0, {'defocus'});
+    
+            % Compute the wavefront and PSF for this single wavelength
+            wvf = wvfCompute(wvf);
+    
+            % Extract the 2D PSF and spatial sampling resolution using 'min' for arc minutes
+            opticsSupport(p).psf{c} = wvfGet(wvf, 'psf', peakWavelengths(c));
+            psfSupport = wvfGet(wvf, 'psf spatial samples', 'min', peakWavelengths(c));
+            opticsSupport(p).psfSpacingArcMin(c) = abs(psfSupport(2) - psfSupport(1));
+        end
+    end
+    fprintf('done\n');
+end
+
 function theConeMapVar = generateEffectiveLMSusingCmosaicMethod(wlsSensor, eccGrid, lensDensity, pinvCamSens, options, age)
 
+    theEmployedConeMosaics = cell(1,length(eccGrid));
     transformTable = zeros(length(eccGrid), 9);
     densityTable = zeros(length(eccGrid), 3);
 
@@ -190,11 +301,14 @@ function theConeMapVar = generateEffectiveLMSusingCmosaicMethod(wlsSensor, eccGr
                 error('Uknown meridian: ''%s''.', options.meridian)
         end
 
+        % To speed up things lets subsample the wavelenth axis;
+        wlsSensorSubsample = wlsSensor(1):2:wlsSensor(end);
+        
         % Generate cone mosaic at the desired eccentricity
         theConeMosaic = cMosaic(...
             'eccentricityDegs', eccentricityDegs, ...
             'sizeDegs', coneMosaicSizeDegs*[1 1], ...
-            'wave', wlsSensor, ...
+            'wave', wlsSensorSubsample, ...
             'sourceLatticeSizeDegs', 64, ...
             'rodIntrusionAdjustedConeAperture', true, ...
             'coneApertureModifiers', struct('smoothLocalVariations', true));
@@ -218,7 +332,7 @@ function theConeMapVar = generateEffectiveLMSusingCmosaicMethod(wlsSensor, eccGr
         imagingPeakWavelength = 550;
 
         [theDiffractionLimitedOptics, thePSF, psfSupportMinutesX, psfSupportMinutesY, psfSupportWavelength] = ...
-            diffractionLimitedOptics(options.basePupilDiameterMm, wlsSensor, imagingPeakWavelength, ...
+            diffractionLimitedOptics(options.basePupilDiameterMm, wlsSensorSubsample, imagingPeakWavelength, ...
                 micronsPerDegree, opticalDefocusDiopters, ...
                 'wavefrontSpatialSamples', 101, ...
                 'noLCA', true);
@@ -238,14 +352,14 @@ function theConeMapVar = generateEffectiveLMSusingCmosaicMethod(wlsSensor, eccGr
         theEnergyWattsPerSteradianPerM2PerNM = 1.0 * 1E-3;  % 1.0 mWatts/Sr/M2/nm
 
         % Preallocate memory
-        quantalExcitationRateSpectraFromCMosaic = zeros(numel(wlsSensor),3);
+        quantalExcitationRateSpectraFromCMosaic = zeros(numel(wlsSensorSubsample),3);
 
         % Probe the cone mosaic with monochromatic stimuli to extract the effectiveLMS 
-        parfor iWave = 1:numel(wlsSensor)
+        parfor iWave = 1:numel(wlsSensorSubsample)
 
-            monochromaticBandsNM = wlsSensor(iWave);
+            monochromaticBandsNM = wlsSensorSubsample(iWave);
             theScene = generateMonochromaticScene(...
-                max(theConeMosaic.sizeDegs), pixelsNum, wlsSensor, ...
+                max(theConeMosaic.sizeDegs), pixelsNum, wlsSensorSubsample, ...
                 theEnergyWattsPerSteradianPerM2PerNM, monochromaticBandsNM);
     
             % Compute average LMS excitation spectra using the employed coneMosaic
@@ -261,10 +375,14 @@ function theConeMapVar = generateEffectiveLMSusingCmosaicMethod(wlsSensor, eccGr
                     theEnergyWattsPerSteradianPerM2PerNM;
             end
         end % parfor iWave
-    
 
-        effectiveLMS = quantalExcitationRateSpectraFromCMosaic;
-    
+
+        % Back to original sampling
+        effectiveLMS = zeros(numel(wlsSensor),3);
+        for iCone = 1:3
+            effectiveLMS(:,iCone) = ...
+                interp1(wlsSensorSubsample, quantalExcitationRateSpectraFromCMosaic(:,iCone), wlsSensor);
+        end
 
         % Calculate 3x3 transformation matrix from Camera RGB to LMS rates
         T_mat = effectiveLMS' * pinvCamSens;
@@ -275,9 +393,13 @@ function theConeMapVar = generateEffectiveLMSusingCmosaicMethod(wlsSensor, eccGr
         % Flatten the 3x3 matrix (column-major) into a 1x9 row for the LUT
         transformTable(ii, :) = T_mat(:)';
         assert(~any(isnan(T_mat(:)')))
+
+        % Save the employed cone mosaics
+        theEmployedConeMosaics{ii} = theConeMosaic;
     end % ii
 
     % Store the results
+    theConeMapVar.theEmployedConeMosaics = theEmployedConeMosaics;
     theConeMapVar.wavelengthSupportNM = wlsSensor; 
     theConeMapVar.effectiveLMSTable = effectiveLMSTable;
     theConeMapVar.eccGrid = eccGrid;
