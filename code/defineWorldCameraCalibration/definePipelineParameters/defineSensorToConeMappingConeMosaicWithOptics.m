@@ -36,7 +36,6 @@ pinvCamSens = pinv(camSens');
 % eccGrid = 0:0.25:120;
 
 eccGrid = 0:1:20;
-eccGrid = 0:10:20;
 
 % Preallocate a struct array with empty fields for the cone mapping
 coneMapVar(options.ageRange(2)) = struct(...
@@ -90,7 +89,7 @@ if (useCMosaicMethod)
     saveFileName = fullfile(...
         tbLocateProjectSilent('lightLoggerAnalysis'),...
         'derived',...
-        sprintf('radianceToConeRateSupportCMosaicBased%sMeridian.mat', options.meridian));
+        sprintf('radianceToConeRateSupportCMosaicBased%sMeridianWithOptimizedOptics.mat', options.meridian));
 else
     % Save both variables in the derived directory
     saveFileName = fullfile(...
