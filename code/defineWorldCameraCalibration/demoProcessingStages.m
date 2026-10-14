@@ -28,7 +28,7 @@ radianceMapDemosaiced = demosaicRadianceMap(imageStages{end});
 % Obtain the cone isomerization map, which is in units of R*/deg^2/s. We
 % pass the current fixation location (in terms of image pixel) and pupil
 % size to be used in this calculation
-observerAge = 25;
+observerAge = 18;
 gazeX  = 320;
 gazeY = 240;
 pupilDiameterMm = 3.0;
