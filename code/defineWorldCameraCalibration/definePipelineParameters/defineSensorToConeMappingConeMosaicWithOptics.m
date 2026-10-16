@@ -10,11 +10,11 @@ clear
 
 % Hard code some options
 % Meridian: Select between {'Upper', 'Lower', 'Nasal', 'Temporal'}
-options.meridian= 'Lower';
+options.meridian = 'Full2D';
 options.visualizeEmployedConeMosaics = false;
 options.ageRange  = [18,50];
 options.basePupilDiameterMm = 3.0;
-options.pupilDiameterMmRange = 1.5:0.5:8.0; % Range for pre-computing PSFs
+options.pupilDiameterMmRange = 1.5:0.5:4.0; % 1.5:0.5:8.0; % Range for pre-computing PSFs
 
 % Load the IMX219 sensitivity functions
 dataFileName = fullfile(...
@@ -35,7 +35,38 @@ pinvCamSens = pinv(camSens');
 % Create a 1D grid of eccentricities out to the edges of the visual field
 % eccGrid = 0:0.25:120;
 
-eccGrid = 0:1:20;
+
+if (strcmp(options.meridian, 'Full2D'))
+
+    % Full 2D along each (x,y) over central 60x40 degs
+    [X,Y] = meshgrid(-30:5:30, -20:5:20);
+    eccGrid = [X(:) Y(:)];
+
+    % Add some extreme eccs now
+    eccGrid(size(eccGrid,1)+1,:) = [-35 -10];
+    eccGrid(size(eccGrid,1)+1,:) = [-35   0];
+    eccGrid(size(eccGrid,1)+1,:) = [-35  10];
+    eccGrid(size(eccGrid,1)+1,:) = [-40   0];
+
+    eccGrid(size(eccGrid,1)+1,:) = [35 -10];
+    eccGrid(size(eccGrid,1)+1,:) = [35   0];
+    eccGrid(size(eccGrid,1)+1,:) = [35  10];
+    eccGrid(size(eccGrid,1)+1,:) = [40   0];
+    
+    eccGrid(size(eccGrid,1)+1,:) = [  0  25];
+    eccGrid(size(eccGrid,1)+1,:) = [-10  25];
+    eccGrid(size(eccGrid,1)+1,:) = [ 10  25];
+    
+    eccGrid(size(eccGrid,1)+1,:) = [  0  -25];
+    eccGrid(size(eccGrid,1)+1,:) = [-10  -25];
+    eccGrid(size(eccGrid,1)+1,:) = [ 10  -25];
+
+    eccGrid = eccGrid';
+else
+    % just 1D along one of the principal meridians
+    eccGrid = 0:1:25;
+end
+
 
 % Preallocate a struct array with empty fields for the cone mapping
 coneMapVar(options.ageRange(2)) = struct(...
@@ -102,7 +133,7 @@ end
 readme = ['Created by defineSensorToConeMappingConeMosaic.\n'...
     'coneMapVar -- a structure with values needed for conversion of radiance to cone isomerization rate.\n'...
     'opticsSupport -- a structure containing pre-computed PSFs for a range of pupil diameters.\n'];
-save(saveFileName,'readme','coneMapVar','opticsSupport');
+save(saveFileName,'readme','coneMapVar','opticsSupport', '-v7.3');
 
 fprintf('Saved data to %s\n', saveFileName);
 
@@ -112,10 +143,20 @@ fprintf('Saved data to %s\n', saveFileName);
 
 function opticsSupport = generateOpticsUsingCmosaicMethod(theEmployedConeMosaics, options)
 
+    % Find the most central mosaic
+    for ii = 1:numel(theEmployedConeMosaics)
+        theConeMosaic = theEmployedConeMosaics{ii};
+        mosaicRadialEccentricities(ii) = sqrt(sum(theConeMosaic.eccentricityDegs.^2,2));
+    end
+
+    [~,idx] = min(mosaicRadialEccentricities(:));
+    theFovealConeMosaic = theEmployedConeMosaics{idx};
+
+
     opticsParams.zernikeDataBase = 'Polans2015';
-    opticsParams.subjectID = 1;
+    opticsParams.subjectID = 2;
     opticsParams.pupilDiameterMM = 3.0;
-    opticsParams.wavefrontSpatialSamples = 101;
+    opticsParams.wavefrontSpatialSamples = 301;
     opticsParams.zeroCenterPSF = false;
     opticsParams.noLCA = false;
 
@@ -127,88 +168,120 @@ function opticsSupport = generateOpticsUsingCmosaicMethod(theEmployedConeMosaics
 
     % Search over the 3D search grid to detemine the defocus and
     % astigmatism values that are needed maximize the Strehl ratio
+    % We only do this in the fovea 
     psfUpsampleFactor = [];
-
     useParfor = true;
     visualizeStrehlRatioOptimization = true;
     contrastMaxStrehlRatioPSFtoAsMeasuredAndCentralCorrection = true;
+
+    fprintf('Optimizing optics at position (%2.0f,%2.0f)\n', ...
+                theFovealConeMosaic.eccentricityDegs(1),theFovealConeMosaic.eccentricityDegs(2));
+            
+    [~, ~, zCoeffsMicrons] = theFovealConeMosaic.oiEnsembleGenerate(theFovealConeMosaic.eccentricityDegs, ...
+        'zernikeDataBase', opticsParams.zernikeDataBase, ...
+        'subjectID', opticsParams.subjectID, ...
+        'pupilDiameterMM', opticsParams.pupilDiameterMM, ...
+        'subtractCentralRefraction', false, ...
+        'subtractCentralRefraction3D', false, ...
+        'zeroCenterPSF', ~true, ...
+        'withZeroedPistonAndTiltZernikeCoefficients', ~true, ...
+        'flipPSFUpsideDown', false, ...
+        'noLCA', opticsParams.noLCA, ...
+        'refractiveErrorDiopters', 0, ...
+        'obliqueAndVerticalAstigmatismErrorsDiopters', [0 0], ...
+        'wavefrontSpatialSamples', opticsParams.wavefrontSpatialSamples);
+
+
+    % The Artal/Polans Z-coeff indices start from 0, not 1
+    theDefocusZcoeffIndex = wvfOSAIndexToVectorIndex('defocus')-1;
+    theObliqueAstigmatismZcoeffIndex = wvfOSAIndexToVectorIndex('oblique_astigmatism')-1;
+    theVerticalAstigmatismZcoeffIndex = wvfOSAIndexToVectorIndex('vertical_astigmatism')-1;
+
+    % From microns to diopters
+    defocusDioptersCenter = wvfDefocusMicronsToDiopters(zCoeffsMicrons(theDefocusZcoeffIndex), opticsParams.pupilDiameterMM);
+    obliqueAstigmatismDioptersCenter = wvfAstigmatismMicronsToDiopters(zCoeffsMicrons(theObliqueAstigmatismZcoeffIndex), opticsParams.pupilDiameterMM);
+    verticalAstigmatismDioptersCenter = wvfAstigmatismMicronsToDiopters(zCoeffsMicrons(theVerticalAstigmatismZcoeffIndex), opticsParams.pupilDiameterMM);
+
+    % Round to closest quarter diopter
+    defocusDioptersCenter = sign(defocusDioptersCenter) * 0.25*round(4*abs(defocusDioptersCenter));
+    obliqueAstigmatismDioptersCenter = sign(obliqueAstigmatismDioptersCenter) * 0.25*round(4*abs(obliqueAstigmatismDioptersCenter));
+    verticalAstigmatismDioptersCenter = sign (verticalAstigmatismDioptersCenter) * 0.25*round(4*abs(verticalAstigmatismDioptersCenter));
+
+    examinedDefocusDioptersRange = opticsParams.StrehlRatioOptimizationParams.defocusDioptersRange;
+    examinedObliqueAstigmatismDioptersRange = opticsParams.StrehlRatioOptimizationParams.obliqueAstigmatismDioptersRange;
+    examinedVerticalAstigmatismDioptersRange = opticsParams.StrehlRatioOptimizationParams.verticalAstigmatismDioptersRange;
+       
+    % Center the 3D search around (0,0,0) defocus and astigmatism Z coeffs
+    examinedDefocusDiopters = examinedDefocusDioptersRange - defocusDioptersCenter;
+    examinedObliqueAstigmatismDiopters = examinedObliqueAstigmatismDioptersRange - obliqueAstigmatismDioptersCenter;
+    examinedVerticalAstigmatismDiopters = examinedVerticalAstigmatismDioptersRange -verticalAstigmatismDioptersCenter;
+
+    % 3D search grid
+    [X,Y,Z] = ndgrid(...
+            examinedDefocusDiopters, ...
+            examinedObliqueAstigmatismDiopters, ...
+            examinedVerticalAstigmatismDiopters);
+
+
+    examinedDefocusAndAstigmatismDioptersGrid = [...
+            reshape(X, [numel(X) 1]) reshape(Y, [numel(X) 1]) reshape(Z, [numel(X) 1]) ];
+
+    % Go !
+    [theOptics, thePSF, theFovealOptimalStrehlRatioDefocusAndAstigmatismDiopters, ...
+        theOptimalStrehlRatio, StrehlRatioAsAFunctionOfDefocusAndAstigmatism] = ...
+          RGCMosaicConstructor.helper.optics.optimized3DStrehlRatioPSF(...
+			    examinedDefocusAndAstigmatismDioptersGrid, ...
+			    theFovealConeMosaic, theFovealConeMosaic.eccentricityDegs, opticsParams, ...
+                opticsParams.wavefrontSpatialSamples, psfUpsampleFactor, ...
+			    visualizeStrehlRatioOptimization, contrastMaxStrehlRatioPSFtoAsMeasuredAndCentralCorrection, ...
+                examinedDefocusDiopters, examinedObliqueAstigmatismDiopters, examinedVerticalAstigmatismDiopters, ...
+                useParfor);
+
+    opticsSupport.pupilDiameterMmRange = options.pupilDiameterMmRange;
+    opticsSupport.theBasePSF = thePSF;
+    opticsSupport.theOptimalStrehlRatio = theOptimalStrehlRatio;
+    opticsSupport.theFovealOptimalStrehlRatioDefocusAndAstigmatismDiopters = theFovealOptimalStrehlRatioDefocusAndAstigmatismDiopters;
+    opticsSupport.StrehlRatioAsAFunctionOfDefocusAndAstigmatism = StrehlRatioAsAFunctionOfDefocusAndAstigmatism;
+
+
+
 
     for ii = 1:numel(theEmployedConeMosaics)
 
         theConeMosaic = theEmployedConeMosaics{ii};
 
-        fprintf('Optimizing optics at position (%2.0f,%2.0f)\n', ...
-            theConeMosaic.eccentricityDegs(1),theConeMosaic.eccentricityDegs(2));
         
-        [~, ~, zCoeffsMicrons] = theConeMosaic.oiEnsembleGenerate(theConeMosaic.eccentricityDegs, ...
-                'zernikeDataBase', opticsParams.zernikeDataBase, ...
-                'subjectID', opticsParams.subjectID, ...
-                'pupilDiameterMM', opticsParams.pupilDiameterMM, ...
-                'subtractCentralRefraction', false, ...
-                'subtractCentralRefraction3D', false, ...
-                'zeroCenterPSF', ~true, ...
-                'withZeroedPistonAndTiltZernikeCoefficients', ~true, ...
-                'flipPSFUpsideDown', false, ...
-                'noLCA', opticsParams.noLCA, ...
-                'refractiveErrorDiopters', 0, ...
-                'obliqueAndVerticalAstigmatismErrorsDiopters', [0 0], ...
-                'wavefrontSpatialSamples', opticsParams.wavefrontSpatialSamples);
+        examinedDefocusDiopters = theFovealOptimalStrehlRatioDefocusAndAstigmatismDiopters(1);
+        examinedObliqueAstigmatismDiopters = theFovealOptimalStrehlRatioDefocusAndAstigmatismDiopters(2);
+        examinedVerticalAstigmatismDiopters = theFovealOptimalStrehlRatioDefocusAndAstigmatismDiopters(3);
 
-        % The Artal/Polans Z-coeff indices start from 0, not 1
-        theDefocusZcoeffIndex = wvfOSAIndexToVectorIndex('defocus')-1;
-        theObliqueAstigmatismZcoeffIndex = wvfOSAIndexToVectorIndex('oblique_astigmatism')-1;
-        theVerticalAstigmatismZcoeffIndex = wvfOSAIndexToVectorIndex('vertical_astigmatism')-1;
-    
-        % From microns to diopters
-        defocusDioptersCenter = wvfDefocusMicronsToDiopters(zCoeffsMicrons(theDefocusZcoeffIndex), opticsParams.pupilDiameterMM);
-        obliqueAstigmatismDioptersCenter = wvfAstigmatismMicronsToDiopters(zCoeffsMicrons(theObliqueAstigmatismZcoeffIndex), opticsParams.pupilDiameterMM);
-        verticalAstigmatismDioptersCenter = wvfAstigmatismMicronsToDiopters(zCoeffsMicrons(theVerticalAstigmatismZcoeffIndex), opticsParams.pupilDiameterMM);
-    
-        % Round to closest quarter diopter
-        defocusDioptersCenter = sign(defocusDioptersCenter) * 0.25*round(4*abs(defocusDioptersCenter));
-        obliqueAstigmatismDioptersCenter = sign(obliqueAstigmatismDioptersCenter) * 0.25*round(4*abs(obliqueAstigmatismDioptersCenter));
-        verticalAstigmatismDioptersCenter = sign (verticalAstigmatismDioptersCenter) * 0.25*round(4*abs(verticalAstigmatismDioptersCenter));
-    
-        examinedDefocusDioptersRange = opticsParams.StrehlRatioOptimizationParams.defocusDioptersRange;
-        examinedObliqueAstigmatismDioptersRange = opticsParams.StrehlRatioOptimizationParams.obliqueAstigmatismDioptersRange;
-        examinedVerticalAstigmatismDioptersRange = opticsParams.StrehlRatioOptimizationParams.verticalAstigmatismDioptersRange;
-           
-        % Center the 3D search around (0,0,0) defocus and astigmatism Z coeffs
-        examinedDefocusDiopters = examinedDefocusDioptersRange - defocusDioptersCenter;
-        examinedObliqueAstigmatismDiopters = examinedObliqueAstigmatismDioptersRange - obliqueAstigmatismDioptersCenter;
-        examinedVerticalAstigmatismDiopters = examinedVerticalAstigmatismDioptersRange -verticalAstigmatismDioptersCenter;
-    
         % 3D search grid
         [X,Y,Z] = ndgrid(...
-                examinedDefocusDiopters, ...
-                examinedObliqueAstigmatismDiopters, ...
-                examinedVerticalAstigmatismDiopters);
-    
+                    examinedDefocusDiopters, ...
+                    examinedObliqueAstigmatismDiopters, ...
+                    examinedVerticalAstigmatismDiopters);
+        
         examinedDefocusAndAstigmatismDioptersGrid = [...
-                reshape(X, [numel(X) 1]) reshape(Y, [numel(X) 1]) reshape(Z, [numel(X) 1]) ];
+                    reshape(X, [numel(X) 1]) reshape(Y, [numel(X) 1]) reshape(Z, [numel(X) 1]) ];
 
-       % Go !
-       [theOptics, thePSF, theOptimalStrehlRatioDefocusAndAstigmatismDiopters, ...
-        theOptimalStrehlRatio, StrehlRatioAsAFunctionOfDefocusAndAstigmatism] = ...
-		          RGCMosaicConstructor.helper.optics.optimized3DStrehlRatioPSF(...
-					    examinedDefocusAndAstigmatismDioptersGrid, ...
-					    theConeMosaic, theConeMosaic.eccentricityDegs, opticsParams, ...
-                        opticsParams.wavefrontSpatialSamples, psfUpsampleFactor, ...
-					    visualizeStrehlRatioOptimization, contrastMaxStrehlRatioPSFtoAsMeasuredAndCentralCorrection, ...
-                        examinedDefocusDiopters, examinedObliqueAstigmatismDiopters, examinedVerticalAstigmatismDiopters, ...
-                        useParfor);
 
-       opticsSupport.theOptics{ii} = theOptics;
-       opticsSupport.thePSFs{ii} = thePSF;
-       opticsSupport.theOptimalStrehlRatios{ii} = theOptimalStrehlRatio;
-       opticsSupport.theOptimalStrehlRatioDefocusAndAstigmatismDiopters{ii} = theOptimalStrehlRatioDefocusAndAstigmatismDiopters;
-       opticsSupport.StrehlRatioAsAFunctionOfDefocusAndAstigmatism{ii} = StrehlRatioAsAFunctionOfDefocusAndAstigmatism;
-    end % ii
+        for jj = 1:length(options.pupilDiameterMmRange)
+            opticsParams.pupilDiameterMM = options.pupilDiameterMmRange(jj);
+            fprintf('computing for pupil %2.2fMM, at ecc(x,y): (%2.1f,%2.1f) degs\n', opticsParams.pupilDiameterMM, theConeMosaic.eccentricityDegs(1), theConeMosaic.eccentricityDegs(2));
+            
+            [~, thePSF] = ...
+		              RGCMosaicConstructor.helper.optics.optimized3DStrehlRatioPSF(...
+					        examinedDefocusAndAstigmatismDioptersGrid, ...
+					        theConeMosaic, theConeMosaic.eccentricityDegs, opticsParams, ...
+                            opticsParams.wavefrontSpatialSamples, psfUpsampleFactor, ...
+					        visualizeStrehlRatioOptimization, contrastMaxStrehlRatioPSFtoAsMeasuredAndCentralCorrection, ...
+                            examinedDefocusDiopters, examinedObliqueAstigmatismDiopters, examinedVerticalAstigmatismDiopters, ...
+                            useParfor);
+   
+            opticsSupport.thePSFs{ii,jj} = thePSF;
 
-    for p = 1:length(options.pupilDiameterMmRange)
-        fprintf('.');
-        pupilMm = options.pupilDiameterMmRange(p);
-    end % for p
+        end % for jj
+    end % for ii
 end
 
 
@@ -261,44 +334,77 @@ function theConeMapVar = generateEffectiveLMSusingCmosaicMethod(wlsSensor, eccGr
 
     % Loop over scalar eccentricities to build the LUT
     for ii = 1:length(eccGrid)
-        fprintf('Probing cone mosaic at ecc: %2.1f degs (%s meridian)\n', eccGrid(ii), options.meridian);
-        ecc = eccGrid(ii);
+        theEccDegs = eccGrid(:,ii);
         
-        safeEccAperture = min(ecc, 60);
-        eccMeters = safeEccAperture * (300 * 1e-6);
+        if (numel(theEccDegs) == 2)
+            % 2D grid
+            fprintf('Probing cone mosaic at ecc (2D): (%2.1f,%2.1f) degs\n', eccGrid(1,ii), eccGrid(2,ii));
 
-        % Obtain an estimate of the cone aperture at the examined eccentricity
-        % in order to define an appropriate size for the employed cone mosaic 
-        [~, apertureDiameterMeters] = coneSizeReadData('eccentricity', eccMeters, 'angle', 0);
+            radialEccDegs = norm(theEccDegs);
+            safeEccApertureDegs = min(radialEccDegs, 60);
+            radialEccMeters = safeEccApertureDegs * (300 * 1e-6);
+    
+            % Obtain an estimate of the cone aperture at the examined eccentricity
+            % in order to define an appropriate size for the employed cone mosaic 
+            [~, apertureDiameterMeters] = coneSizeReadData('eccentricity', radialEccMeters, 'angle', 0);
+    
+            % Determine cone mosaic size (degs) based on current eccentricity
+            if (radialEccDegs < 0.1)
+                coneMosaicSizeDegs = 0.25;
+            else
+                coneMosaicSizeDegs = -0.5 + 100*(apertureDiameterMeters*1e6/300);
+            end
 
-        % Determine cone mosaic size (degs) based on current eccentricity
-        if (ecc == 0)
-            coneMosaicSizeDegs = 0.25;
+            angularEccDegs = atan2d(theEccDegs(2), theEccDegs(1));
+            if (abs(angularEccDegs) < 15) && (abs(radialEccDegs-15.5)<= 3)
+                % For nasal eccentricities around 15.5, where the optic disk is located,
+                % enlarge the cone mosaic size to ensure that we have some cones in the generated cone mosaic
+                % to compute the effectiveLMS
+                coneMosaicSizeDegs = 4;
+            end
+
+            eccentricityDegs = [theEccDegs(1) theEccDegs(2)];
         else
-            coneMosaicSizeDegs = -0.5 + 100*(apertureDiameterMeters*1e6/300);
-        end
-       
-        if (strcmp(options.meridian, 'Nasal') && (abs(ecc-15.5)<= 3))
-            % For nasal eccentricities (ecc > 0), around 15.5, where the optic disk is located,
-            % enlarge the cone mosaic size to ensure that we have some cones in the generated cone mosaic
-            % to compute the effectiveLMS
-            coneMosaicSizeDegs = 4;
-        end
-
-        switch (options.meridian)
-            case 'Nasal'
-                eccentricityDegs = [ecc 0];
-                
-            case 'Temporal'
-                eccentricityDegs = [-ecc 0];  
-
-            case 'Upper'
-                eccentricityDegs = [0 ecc];
-
-            case 'Lower'
-                eccentricityDegs = [0 -ecc];
-            otherwise
-                error('Uknown meridian: ''%s''.', options.meridian)
+            % 1D grid
+            fprintf('Probing cone mosaic at ecc (1D): %2.1f degs (%s meridian)\n', eccGrid(ii), options.meridian);
+            ecc = eccGrid(ii);
+            
+            safeEccAperture = min(ecc, 60);
+            eccMeters = safeEccAperture * (300 * 1e-6);
+    
+            % Obtain an estimate of the cone aperture at the examined eccentricity
+            % in order to define an appropriate size for the employed cone mosaic 
+            [~, apertureDiameterMeters] = coneSizeReadData('eccentricity', eccMeters, 'angle', 0);
+    
+            % Determine cone mosaic size (degs) based on current eccentricity
+            if (ecc == 0)
+                coneMosaicSizeDegs = 0.25;
+            else
+                coneMosaicSizeDegs = -0.5 + 100*(apertureDiameterMeters*1e6/300);
+            end
+           
+            if (strcmp(options.meridian, 'Nasal') && (abs(ecc-15.5)<= 3))
+                % For nasal eccentricities (ecc > 0), around 15.5, where the optic disk is located,
+                % enlarge the cone mosaic size to ensure that we have some cones in the generated cone mosaic
+                % to compute the effectiveLMS
+                coneMosaicSizeDegs = 4;
+            end
+    
+            switch (options.meridian)
+                case 'Nasal'
+                    eccentricityDegs = [ecc 0];
+                    
+                case 'Temporal'
+                    eccentricityDegs = [-ecc 0];  
+    
+                case 'Upper'
+                    eccentricityDegs = [0 ecc];
+    
+                case 'Lower'
+                    eccentricityDegs = [0 -ecc];
+                otherwise
+                    error('Uknown meridian: ''%s''.', options.meridian)
+            end
         end
 
         % To speed up things lets subsample the wavelenth axis;
@@ -397,6 +503,7 @@ function theConeMapVar = generateEffectiveLMSusingCmosaicMethod(wlsSensor, eccGr
         % Save the employed cone mosaics
         theEmployedConeMosaics{ii} = theConeMosaic;
     end % ii
+
 
     % Store the results
     theConeMapVar.theEmployedConeMosaics = theEmployedConeMosaics;
