@@ -278,6 +278,11 @@ function thePSFs = generateOpticsUsingCmosaicMethod(theEmployedConeMosaics, opti
     % Preallocate memory for thePSFs
     thePSFs = cell(numel(theEmployedConeMosaics), length(options.pupilDiameterMmRange));
 
+    psfUpsampleFactor = [];
+    useParfor = true;
+    visualizeStrehlRatioOptimization = true;
+    contrastMaxStrehlRatioPSFtoAsMeasuredAndCentralCorrection = true;
+    
     for ii = 1:numel(theEmployedConeMosaics)
 
         theConeMosaic = theEmployedConeMosaics{ii};
