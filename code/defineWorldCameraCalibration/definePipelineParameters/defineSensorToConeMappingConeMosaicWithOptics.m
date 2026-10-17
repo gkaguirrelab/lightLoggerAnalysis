@@ -9,6 +9,17 @@
 clear
 
 % Hard code some options
+options.optics.zernikeDataBase = 'Polans2015';
+
+options.optics.subjectID = 2;
+options.optics.StrehlRatioOptimizationParams = struct(...
+        'defocusDioptersRange', -2:0.25:2, ...
+        'obliqueAstigmatismDioptersRange', -2:0.25:2, ...
+        'verticalAstigmatismDioptersRange', -2:0.25:2 ...
+    );
+
+options.optics.wavefrontSpatialSamples = 301;
+
 % Meridian: Select between {'Upper', 'Lower', 'Nasal', 'Temporal'}
 options.meridian = 'Full2D';
 options.visualizeEmployedConeMosaics = false;
@@ -120,7 +131,7 @@ if (useCMosaicMethod)
     saveFileName = fullfile(...
         tbLocateProjectSilent('lightLoggerAnalysis'),...
         'derived',...
-        sprintf('radianceToConeRateSupportCMosaicBased%sMeridianWithOptimizedOptics.mat', options.meridian));
+        sprintf('radianceToConeRateSupportCMosaicBased%sMeridianWithOptimizedOptics%s-%d.mat', options.meridian, options.optics.zernikeDataBase, options.optics.subjectID));
 else
     % Save both variables in the derived directory
     saveFileName = fullfile(...
@@ -152,19 +163,17 @@ function opticsSupport = generateOpticsUsingCmosaicMethod(theEmployedConeMosaics
     [~,idx] = min(mosaicRadialEccentricities(:));
     theFovealConeMosaic = theEmployedConeMosaics{idx};
 
+    opticsParams.zernikeDataBase = options.optics.zernikeDataBase;
+    opticsParams.subjectID = options.optics.subjectID;
+    opticsParams.StrehlRatioOptimizationParams = options.optics.StrehlRatioOptimizationParams;
 
-    opticsParams.zernikeDataBase = 'Polans2015';
-    opticsParams.subjectID = 2;
+    opticsParams.wavefrontSpatialSamples = options.optics.wavefrontSpatialSamples;
     opticsParams.pupilDiameterMM = 3.0;
-    opticsParams.wavefrontSpatialSamples = 301;
     opticsParams.zeroCenterPSF = false;
     opticsParams.noLCA = false;
 
-    opticsParams.StrehlRatioOptimizationParams = struct(...
-        'defocusDioptersRange', -4:0.5:3, ...
-        'obliqueAstigmatismDioptersRange', -3:0.5:3, ...
-        'verticalAstigmatismDioptersRange', -6:0.5:3 ...
-    );
+    
+    
 
     % Search over the 3D search grid to detemine the defocus and
     % astigmatism values that are needed maximize the Strehl ratio
