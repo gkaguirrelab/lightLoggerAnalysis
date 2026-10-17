@@ -11,9 +11,9 @@ clear
 % Hard code some options
 options.optics.zernikeDataBase = 'Polans2015';
 
-options.optics.subjectID = 2;
+options.optics.subjectID = 1;
 options.optics.StrehlRatioOptimizationParams = struct(...
-        'defocusDioptersRange', -2:0.25:2, ...
+        'defocusDioptersRange', -2:0.25:1, ...
         'obliqueAstigmatismDioptersRange', -2:0.25:2, ...
         'verticalAstigmatismDioptersRange', -2:0.25:2 ...
     );
@@ -39,12 +39,8 @@ channelNames = {'red','green','blue'};
 % Extract the sensitivity vectors into an N-wave x 3 array
 camSens = [T.(channelNames{1}), T.(channelNames{2}), T.(channelNames{3})];
 
-
 % Precompute the pseudo-inverse of the camera sensitivities
 pinvCamSens = pinv(camSens');
-
-% Create a 1D grid of eccentricities out to the edges of the visual field
-% eccGrid = 0:0.25:120;
 
 
 if (strcmp(options.meridian, 'Full2D'))
@@ -78,6 +74,22 @@ else
     eccGrid = 0:1:25;
 end
 
+% Set this to true to employ the @coneMosaic based derivation of the
+% effectiveLMS. Set to false to use the previous, first-principles based
+% approach.
+useCMosaicMethod = true;
+
+
+ % To speed up things lets subsample the wavelenth axis;
+wlsSensorSubsample = wlsSensor(1):2:wlsSensor(end);
+
+if (useCMosaicMethod)
+    % Compute defocus and astigmatism for maximizing the foveal Strehl ratio 
+    opticsSupport = computeOptimalStrehlRatioDefocusAndAstigmatismForFovealOptics(options, wlsSensorSubsample);
+    disp('Hit enter to continue')
+    pause
+end
+
 
 % Preallocate a struct array with empty fields for the cone mapping
 coneMapVar(options.ageRange(2)) = struct(...
@@ -90,10 +102,7 @@ coneMapVar(options.ageRange(2)) = struct(...
     'basePupilDiameterMm', [],...
     'observerAge', []);
 
-% Set this to true to employ the @coneMosaic based derivation of the
-% effectiveLMS. Set to false to use the previous, first-principles based
-% approach.
-useCMosaicMethod = true;
+
 
 % Loop over observer ages
 for age = options.ageRange(1):options.ageRange(1)
@@ -118,8 +127,10 @@ end % age
 
 
 
+% Compute PSFs
 if (useCMosaicMethod)
-    opticsSupport = generateOpticsUsingCmosaicMethod(theConeMapVar.theEmployedConeMosaics, options);
+    opticsSupport.thePSFs = generateOpticsUsingCmosaicMethod(...
+        theConeMapVar.theEmployedConeMosaics, options, opticsSupport.theFovealOptimalStrehlRatioDefocusAndAstigmatismDiopters);
 else 
     opticsSupport = generateOpticsUsingOldMethod(options);
 end
@@ -152,17 +163,8 @@ fprintf('Saved data to %s\n', saveFileName);
 % SUPPORTING ROUTINES
 %
 
-function opticsSupport = generateOpticsUsingCmosaicMethod(theEmployedConeMosaics, options)
 
-    % Find the most central mosaic
-    for ii = 1:numel(theEmployedConeMosaics)
-        theConeMosaic = theEmployedConeMosaics{ii};
-        mosaicRadialEccentricities(ii) = sqrt(sum(theConeMosaic.eccentricityDegs.^2,2));
-    end
-
-    [~,idx] = min(mosaicRadialEccentricities(:));
-    theFovealConeMosaic = theEmployedConeMosaics{idx};
-
+function opticsSupport = computeOptimalStrehlRatioDefocusAndAstigmatismForFovealOptics(options, wlsSensorSubsample)
     opticsParams.zernikeDataBase = options.optics.zernikeDataBase;
     opticsParams.subjectID = options.optics.subjectID;
     opticsParams.StrehlRatioOptimizationParams = options.optics.StrehlRatioOptimizationParams;
@@ -171,9 +173,17 @@ function opticsSupport = generateOpticsUsingCmosaicMethod(theEmployedConeMosaics
     opticsParams.pupilDiameterMM = 3.0;
     opticsParams.zeroCenterPSF = false;
     opticsParams.noLCA = false;
-
-    
-    
+        
+    % Generate foveal cone mosaic
+    eccentricityDegs = [0 0];
+    coneMosaicSizeDegs = [0.2 0.2];
+    theFovealConeMosaic = cMosaic(...
+            'eccentricityDegs', eccentricityDegs, ...
+            'sizeDegs', coneMosaicSizeDegs, ...
+            'wave', wlsSensorSubsample, ...
+            'sourceLatticeSizeDegs', 64, ...
+            'rodIntrusionAdjustedConeAperture', true, ...
+            'coneApertureModifiers', struct('smoothLocalVariations', true));
 
     % Search over the 3D search grid to detemine the defocus and
     % astigmatism values that are needed maximize the Strehl ratio
@@ -252,14 +262,26 @@ function opticsSupport = generateOpticsUsingCmosaicMethod(theEmployedConeMosaics
     opticsSupport.theFovealOptimalStrehlRatioDefocusAndAstigmatismDiopters = theFovealOptimalStrehlRatioDefocusAndAstigmatismDiopters;
     opticsSupport.StrehlRatioAsAFunctionOfDefocusAndAstigmatism = StrehlRatioAsAFunctionOfDefocusAndAstigmatism;
 
+end
 
+function thePSFs = generateOpticsUsingCmosaicMethod(theEmployedConeMosaics, options, theFovealOptimalStrehlRatioDefocusAndAstigmatismDiopters)
 
+    opticsParams.zernikeDataBase = options.optics.zernikeDataBase;
+    opticsParams.subjectID = options.optics.subjectID;
+    opticsParams.StrehlRatioOptimizationParams = options.optics.StrehlRatioOptimizationParams;
+
+    opticsParams.wavefrontSpatialSamples = options.optics.wavefrontSpatialSamples;
+    opticsParams.pupilDiameterMM = 3.0;
+    opticsParams.zeroCenterPSF = false;
+    opticsParams.noLCA = false;
+
+    % Preallocate memory for thePSFs
+    thePSFs = cell(numel(theEmployedConeMosaics), length(options.pupilDiameterMmRange));
 
     for ii = 1:numel(theEmployedConeMosaics)
 
         theConeMosaic = theEmployedConeMosaics{ii};
 
-        
         examinedDefocusDiopters = theFovealOptimalStrehlRatioDefocusAndAstigmatismDiopters(1);
         examinedObliqueAstigmatismDiopters = theFovealOptimalStrehlRatioDefocusAndAstigmatismDiopters(2);
         examinedVerticalAstigmatismDiopters = theFovealOptimalStrehlRatioDefocusAndAstigmatismDiopters(3);
@@ -278,8 +300,7 @@ function opticsSupport = generateOpticsUsingCmosaicMethod(theEmployedConeMosaics
             opticsParams.pupilDiameterMM = options.pupilDiameterMmRange(jj);
             fprintf('computing for pupil %2.2fMM, at ecc(x,y): (%2.1f,%2.1f) degs\n', opticsParams.pupilDiameterMM, theConeMosaic.eccentricityDegs(1), theConeMosaic.eccentricityDegs(2));
             
-            [~, thePSF] = ...
-		              RGCMosaicConstructor.helper.optics.optimized3DStrehlRatioPSF(...
+            [~, thePSF] = RGCMosaicConstructor.helper.optics.optimized3DStrehlRatioPSF(...
 					        examinedDefocusAndAstigmatismDioptersGrid, ...
 					        theConeMosaic, theConeMosaic.eccentricityDegs, opticsParams, ...
                             opticsParams.wavefrontSpatialSamples, psfUpsampleFactor, ...
@@ -287,8 +308,7 @@ function opticsSupport = generateOpticsUsingCmosaicMethod(theEmployedConeMosaics
                             examinedDefocusDiopters, examinedObliqueAstigmatismDiopters, examinedVerticalAstigmatismDiopters, ...
                             useParfor);
    
-            opticsSupport.thePSFs{ii,jj} = thePSF;
-
+            thePSFs{ii,jj} = thePSF;
         end % for jj
     end % for ii
 end
