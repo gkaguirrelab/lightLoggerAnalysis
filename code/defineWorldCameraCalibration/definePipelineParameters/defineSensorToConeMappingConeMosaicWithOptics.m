@@ -303,14 +303,14 @@ function thePSFs = generateOpticsUsingCmosaicMethod(theEmployedConeMosaics, opti
                             examinedDefocusDiopters, examinedObliqueAstigmatismDiopters, examinedVerticalAstigmatismDiopters, ...
                             useParfor);
    
-            thePSFs{ii,jj} = longToShortNumericPrecision(thePSF);
+            thePSFs{ii,jj} = doubleToSingleNumericPrecision(thePSF);
         end % for jj
     end % for ii
 end
 
 
-function thePSF = longToShortNumericPrecision(thePSF)
-    thePSF.data = short(thePSF.data);
+function thePSF = doubleToSingleNumericPrecision(thePSF)
+    thePSF.data = single(thePSF.data);
 end
 
 function opticsSupport = generateOpticsUsingOldMethod(options)
