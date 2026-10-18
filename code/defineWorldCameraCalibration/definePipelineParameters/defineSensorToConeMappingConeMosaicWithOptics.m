@@ -11,7 +11,7 @@ clear
 % Hard code some options
 options.optics.zernikeDataBase = 'Polans2015';
 
-options.optics.subjectID = 1;
+options.optics.subjectID = 2;
 options.optics.StrehlRatioOptimizationParams = struct(...
         'defocusDioptersRange', -2:0.25:1, ...
         'obliqueAstigmatismDioptersRange', -2:0.25:2, ...
@@ -46,27 +46,17 @@ pinvCamSens = pinv(camSens');
 if (strcmp(options.meridian, 'Full2D'))
 
     % Full 2D along each (x,y) over central 60x40 degs
-    [X,Y] = meshgrid(-30:5:30, -20:5:20);
+    [X,Y] = meshgrid(-35:5:35, -25:5:25);
     eccGrid = [X(:) Y(:)];
 
     % Add some extreme eccs now
-    eccGrid(size(eccGrid,1)+1,:) = [-35 -10];
-    eccGrid(size(eccGrid,1)+1,:) = [-35   0];
-    eccGrid(size(eccGrid,1)+1,:) = [-35  10];
+    eccGrid(size(eccGrid,1)+1,:) = [-40  -10];
     eccGrid(size(eccGrid,1)+1,:) = [-40   0];
+    eccGrid(size(eccGrid,1)+1,:) = [-40   10];
 
-    eccGrid(size(eccGrid,1)+1,:) = [35 -10];
-    eccGrid(size(eccGrid,1)+1,:) = [35   0];
-    eccGrid(size(eccGrid,1)+1,:) = [35  10];
+    eccGrid(size(eccGrid,1)+1,:) = [40  -10];
     eccGrid(size(eccGrid,1)+1,:) = [40   0];
-    
-    eccGrid(size(eccGrid,1)+1,:) = [  0  25];
-    eccGrid(size(eccGrid,1)+1,:) = [-10  25];
-    eccGrid(size(eccGrid,1)+1,:) = [ 10  25];
-    
-    eccGrid(size(eccGrid,1)+1,:) = [  0  -25];
-    eccGrid(size(eccGrid,1)+1,:) = [-10  -25];
-    eccGrid(size(eccGrid,1)+1,:) = [ 10  -25];
+    eccGrid(size(eccGrid,1)+1,:) = [40   10];
 
     eccGrid = eccGrid';
 else
@@ -94,7 +84,7 @@ end
 % Preallocate a struct array with empty fields for the cone mapping
 coneMapVar(options.ageRange(2)) = struct(...
     'theEmployedConeMosaics', [], ...
-    'wavelengthSupportNM', [], ...
+    'supportWavelength', [], ...
     'eccGrid', [], ...
     'transformTable', [], ...
     'effectiveLMSTable', [], ...
@@ -257,7 +247,7 @@ function opticsSupport = computeOptimalStrehlRatioDefocusAndAstigmatismForFoveal
                 useParfor);
 
     opticsSupport.pupilDiameterMmRange = options.pupilDiameterMmRange;
-    opticsSupport.theBasePSF = thePSF;
+    opticsSupport.theBasePSF = longToShortNumericPrecision(thePSF);
     opticsSupport.theOptimalStrehlRatio = theOptimalStrehlRatio;
     opticsSupport.theFovealOptimalStrehlRatioDefocusAndAstigmatismDiopters = theFovealOptimalStrehlRatioDefocusAndAstigmatismDiopters;
     opticsSupport.StrehlRatioAsAFunctionOfDefocusAndAstigmatism = StrehlRatioAsAFunctionOfDefocusAndAstigmatism;
@@ -313,11 +303,15 @@ function thePSFs = generateOpticsUsingCmosaicMethod(theEmployedConeMosaics, opti
                             examinedDefocusDiopters, examinedObliqueAstigmatismDiopters, examinedVerticalAstigmatismDiopters, ...
                             useParfor);
    
-            thePSFs{ii,jj} = thePSF;
+            thePSFs{ii,jj} = longToShortNumericPrecision(thePSF);
         end % for jj
     end % for ii
 end
 
+
+function thePSF = longToShortNumericPrecision(thePSF)
+    thePSF.data = short(thePSF.data);
+end
 
 function opticsSupport = generateOpticsUsingOldMethod(options)
     % Precompute pre-receptoral optics (PSFs) for the specified pupil range
@@ -541,7 +535,7 @@ function theConeMapVar = generateEffectiveLMSusingCmosaicMethod(wlsSensor, eccGr
 
     % Store the results
     theConeMapVar.theEmployedConeMosaics = theEmployedConeMosaics;
-    theConeMapVar.wavelengthSupportNM = wlsSensor; 
+    theConeMapVar.supportWavelength = wlsSensor; 
     theConeMapVar.effectiveLMSTable = effectiveLMSTable;
     theConeMapVar.eccGrid = eccGrid;
     theConeMapVar.transformTable = transformTable;
@@ -733,7 +727,7 @@ function theConeMapVar = generateEffectiveLMSusingOldMethod(wlsSensor, eccGrid, 
 
     
     % Store the results
-    theConeMapVar.wavelengthSupportNM = wlsSensor; 
+    theConeMapVar.supportWavelength = wlsSensor; 
     theConeMapVar.effectiveLMSTable = effectiveLMSTable;
     theConeMapVar.eccGrid = eccGrid;
     theConeMapVar.transformTable = transformTable;
