@@ -247,7 +247,7 @@ function opticsSupport = computeOptimalStrehlRatioDefocusAndAstigmatismForFoveal
                 useParfor);
 
     opticsSupport.pupilDiameterMmRange = options.pupilDiameterMmRange;
-    opticsSupport.theBasePSF = longToShortNumericPrecision(thePSF);
+    opticsSupport.theBasePSF = doubleToSingleNumericPrecision(thePSF);
     opticsSupport.theOptimalStrehlRatio = theOptimalStrehlRatio;
     opticsSupport.theFovealOptimalStrehlRatioDefocusAndAstigmatismDiopters = theFovealOptimalStrehlRatioDefocusAndAstigmatismDiopters;
     opticsSupport.StrehlRatioAsAFunctionOfDefocusAndAstigmatism = StrehlRatioAsAFunctionOfDefocusAndAstigmatism;
