@@ -18,8 +18,8 @@ options.optics.StrehlRatioOptimizationParams = struct(...
         'verticalAstigmatismDioptersRange', -2:0.25:2 ...
     );
 
-% Need 401 spatial samples to support the spatial extent of PSFs at extreme eccentricities (> 30 degs)
-options.optics.wavefrontSpatialSamples = 401;
+% Need 501 spatial samples to support the spatial extent of PSFs at extreme eccentricities (> 30 degs)
+options.optics.wavefrontSpatialSamples = 501;
 
 % Meridian: Select between {'Upper', 'Lower', 'Nasal', 'Temporal'}
 options.meridian = 'Full2D';
@@ -47,7 +47,7 @@ pinvCamSens = pinv(camSens');
 if (strcmp(options.meridian, 'Full2D'))
 
     % Full 2D along each (x,y) over central 60x40 degs
-    [X,Y] = meshgrid(-35:5:35, -25:5:25);
+    [X,Y] = meshgrid(-35:5:35, -20:5:20);
     eccGrid = [X(:) Y(:)];
 
     % Add some extreme eccs now
