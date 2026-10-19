@@ -18,7 +18,8 @@ options.optics.StrehlRatioOptimizationParams = struct(...
         'verticalAstigmatismDioptersRange', -2:0.25:2 ...
     );
 
-options.optics.wavefrontSpatialSamples = 301;
+% Need 401 spatial samples to support the spatial extent of PSFs at extreme eccentricities (> 30 degs)
+options.optics.wavefrontSpatialSamples = 401;
 
 % Meridian: Select between {'Upper', 'Lower', 'Nasal', 'Temporal'}
 options.meridian = 'Full2D';
@@ -270,8 +271,8 @@ function thePSFs = generateOpticsUsingCmosaicMethod(theEmployedConeMosaics, opti
 
     psfUpsampleFactor = [];
     useParfor = true;
-    visualizeStrehlRatioOptimization = true;
-    contrastMaxStrehlRatioPSFtoAsMeasuredAndCentralCorrection = true;
+    visualizeStrehlRatioOptimization = ~true;
+    contrastMaxStrehlRatioPSFtoAsMeasuredAndCentralCorrection = ~true;
     
     for ii = 1:numel(theEmployedConeMosaics)
 
@@ -353,6 +354,7 @@ function opticsSupport = generateOpticsUsingOldMethod(options)
     end
     fprintf('done\n');
 end
+
 
 function theConeMapVar = generateEffectiveLMSusingCmosaicMethod(wlsSensor, eccGrid, lensDensity, pinvCamSens, options, age)
 
