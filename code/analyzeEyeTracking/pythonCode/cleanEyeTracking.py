@@ -3,7 +3,7 @@
 import pathlib
 import warnings
 import tkinter as tk
-from tkinter import filedialog
+from tkinter import filedialog, messagebox, ttk
 
 import numpy as np
 import pandas as pd
@@ -268,29 +268,115 @@ def clean_eye_data(
 
 
 def main() -> None:
-    """Select the raw export and mapper folders, then display cleaned data."""
+    """Select input folders, optionally save a CSV, and display cleaned data."""
     root = tk.Tk()
-    root.withdraw()
-    try:
-        raw_neon_path: str = filedialog.askdirectory(
-            parent=root,
-            title="Select raw Neon folder containing 3d_eye_states.csv and blinks.csv",
-            mustexist=True,
-        )
-        if not raw_neon_path:
-            return
+    root.title("Eye Tracking · Data Cleaning")
+    root.geometry("780x480")
+    root.minsize(680, 440)
 
-        processing_neon_path: str = filedialog.askdirectory(
-            parent=root,
-            title="Select mapper folder containing alternative_camera_gaze.csv",
-            mustexist=True,
+    style = ttk.Style(root)
+    style.configure("Title.TLabel", font=("Helvetica", 22, "bold"))
+    style.configure("Subtitle.TLabel", font=("Helvetica", 11))
+    style.configure("Section.TLabel", font=("Helvetica", 11, "bold"))
+    style.configure("Folder.TButton", padding=(12, 18))
+    style.configure("Run.TButton", padding=(18, 8))
+
+    raw_path = tk.StringVar(root, value="")
+    mapped_path = tk.StringVar(root, value="")
+    output_path = tk.StringVar(root, value="")
+    status = tk.StringVar(root, value="Choose both input folders to continue.")
+    run_requested: bool = False
+
+    def select_folder(path: tk.StringVar, title: str) -> None:
+        selected: str = filedialog.askdirectory(
+            parent=root, title=title, mustexist=True,
+            initialdir=path.get() or str(pathlib.Path.home()),
         )
-        if not processing_neon_path:
+        if selected:
+            path.set(selected)
+        ready: bool = bool(raw_path.get() and mapped_path.get())
+        run_button.configure(state="normal" if ready else "disabled")
+        status.set("Ready to clean and plot." if ready else "Choose both input folders to continue.")
+
+    def select_output() -> None:
+        current = pathlib.Path(output_path.get()) if output_path.get() else None
+        selected: str = filedialog.asksaveasfilename(
+            parent=root, title="Save cleaned eye data",
+            initialdir=str(current.parent) if current else mapped_path.get() or str(pathlib.Path.home()),
+            initialfile=current.name if current else "cleaned_eye_data.csv",
+            defaultextension=".csv", filetypes=[("CSV files", "*.csv")],
+        )
+        if selected:
+            output_path.set(selected)
+
+    def run() -> None:
+        nonlocal run_requested
+        run_requested = True
+        root.quit()
+
+    content = ttk.Frame(root, padding=24)
+    content.pack(fill="both", expand=True)
+    content.columnconfigure((0, 1), weight=1, uniform="folders")
+    content.rowconfigure(3, weight=1)
+
+    ttk.Label(content, text="Eye tracking", style="Title.TLabel").grid(
+        row=0, column=0, columnspan=2, sticky="w")
+    ttk.Label(content, text="Select your recordings to clean and compare the signals.",
+              style="Subtitle.TLabel").grid(row=1, column=0, columnspan=2, sticky="w", pady=(6, 20))
+
+    for column, (label, path, description) in enumerate((
+        ("RAW", raw_path, "Eye states and blink exports"),
+        ("MAPPED", mapped_path, "Alternative camera gaze export"),
+    )):
+        frame = ttk.Frame(content, padding=14, relief="groove", borderwidth=1)
+        frame.grid(row=2, column=column, rowspan=2, sticky="nsew",
+                   padx=(0, 8) if column == 0 else (8, 0))
+        ttk.Label(frame, text=label, style="Section.TLabel").pack(anchor="w")
+        ttk.Label(frame, text=description).pack(anchor="w", pady=(4, 12))
+        box = ttk.Button(
+            frame, text="Choose folder…", style="Folder.TButton",
+            command=lambda value=path, name=label: select_folder(value, f"Select {name} folder"),
+        )
+        box.pack(fill="x")
+        ttk.Label(frame, textvariable=path, wraplength=290).pack(fill="x", pady=(10, 0))
+
+    output_frame = ttk.Frame(content)
+    output_frame.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(20, 0))
+    output_frame.columnconfigure(0, weight=1)
+    ttk.Label(output_frame, text="CSV OUTPUT · Optional", style="Section.TLabel").grid(
+        row=0, column=0, columnspan=3, sticky="w", pady=(0, 8))
+    output_entry = ttk.Entry(output_frame, textvariable=output_path, state="readonly")
+    output_entry.grid(row=1, column=0, sticky="ew")
+    output_entry.bind("<Button-1>", lambda event: select_output())
+    ttk.Button(output_frame, text="Save as…", command=select_output).grid(row=1, column=1, padx=(8, 0))
+    ttk.Button(output_frame, text="Clear", command=lambda: output_path.set("")).grid(row=1, column=2, padx=(4, 0))
+    ttk.Label(output_frame, text="Leave blank to plot without saving a file.").grid(
+        row=2, column=0, columnspan=3, sticky="w", pady=(6, 0))
+
+    ttk.Separator(content).grid(row=5, column=0, columnspan=2, sticky="ew", pady=(18, 12))
+    ttk.Label(content, textvariable=status).grid(row=6, column=0, sticky="w")
+    run_button = ttk.Button(content, text="Clean and plot", style="Run.TButton", command=run, state="disabled")
+    run_button.grid(row=6, column=1, sticky="e")
+    root.protocol("WM_DELETE_WINDOW", root.quit)
+
+    try:
+        root.mainloop()
+        if not run_requested:
             return
+        root.withdraw()
+        cleaned_data: np.ndarray = clean_eye_data(raw_path.get(), mapped_path.get(), verbose=True)
+        if output_path.get():
+            cleaned_df: pd.DataFrame = pd.DataFrame(cleaned_data, columns=[
+                "time [s]", "pupil diameter [mm]", "eyelid aperture [mm]",
+                "gaze x [px]", "gaze y [px]",
+            ])
+            cleaned_df.to_csv(output_path.get(), index=False)
+    except Exception as error:
+        messagebox.showerror("Eye tracking", str(error), parent=root)
+        return
     finally:
         root.destroy()
 
-    clean_eye_data(raw_neon_path, processing_neon_path, verbose=True)
     plt.show(block=True)
 
 
