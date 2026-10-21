@@ -184,11 +184,13 @@ def run_egocentric_video_mapper(neon_timeseries_dir: str,
     if(show_video_preview is True):
         show_videos_preview(neon_timeseries_dir, alternative_vid_path)
 
-    # First, we need to convert our video to .mp4 if it is not already in 
-    # that format due to the pupil labs code requiring a .avi video 
+    # Convert the world video to MP4 for the Pupil Labs reader.
     temp_output_path: str = os.path.join(output_dir, "temp.mp4")
     os.makedirs(os.path.dirname(temp_output_path), exist_ok=True)
     convert_avi_to_mp4(alternative_vid_path, temp_output_path)
+
+    print(f"NEON TIMESERIES DIR: {neon_timeseries_dir}")
+    print(f"TEMP OUTPUT MP4 GOING TO: {temp_output_path}")
 
     # Package the args for the egocentric video mapper 
     args: Args = Args(neon_timeseries_dir, 
