@@ -11,9 +11,9 @@ clear
 % Hard code some options
 options.optics.zernikeDataBase = 'Polans2015';
 
-options.optics.subjectID = 2;
+options.optics.subjectID = 1;
 options.optics.StrehlRatioOptimizationParams = struct(...
-        'defocusDioptersRange', -2:0.25:1, ...
+        'defocusDioptersRange', -2:0.25:2, ...
         'obliqueAstigmatismDioptersRange', -2:0.25:2, ...
         'verticalAstigmatismDioptersRange', -2:0.25:2 ...
     );
@@ -46,7 +46,7 @@ pinvCamSens = pinv(camSens');
 
 if (strcmp(options.meridian, 'Full2D'))
 
-    % Full 2D along each (x,y) over central 60x40 degs
+    % Full 2D along each (x,y) position over central 70 x 40 degs
     [X,Y] = meshgrid(-35:5:35, -20:5:20);
     eccGrid = [X(:) Y(:)];
 
@@ -62,7 +62,11 @@ if (strcmp(options.meridian, 'Full2D'))
     eccGrid = eccGrid';
 else
     % just 1D along one of the principal meridians
-    eccGrid = 0:1:25;
+    if (ismember(options.meridian, {'Nasal', 'Temporal'}))
+        eccGrid = 0:1:40;
+    else
+        eccGrid = 0:1:25;
+    end
 end
 
 % Set this to true to employ the @coneMosaic based derivation of the
@@ -70,8 +74,7 @@ end
 % approach.
 useCMosaicMethod = true;
 
-
- % To speed up things lets subsample the wavelenth axis;
+% To speed up things lets subsample the wavelenth axis;
 wlsSensorSubsample = wlsSensor(1):2:wlsSensor(end);
 
 if (useCMosaicMethod)
@@ -80,7 +83,6 @@ if (useCMosaicMethod)
     disp('Hit enter to continue')
     pause
 end
-
 
 % Preallocate a struct array with empty fields for the cone mapping
 coneMapVar(options.ageRange(2)) = struct(...
@@ -92,7 +94,6 @@ coneMapVar(options.ageRange(2)) = struct(...
     'densityTable', [], ...
     'basePupilDiameterMm', [],...
     'observerAge', []);
-
 
 
 % Loop over observer ages
@@ -114,17 +115,21 @@ for age = options.ageRange(1):options.ageRange(1)
     end
 
     coneMapVar(age) = theConeMapVar;
-end % age
+end
 
 
+% Compute cone-weighted PSFs for one particular lens age effectiveLMSTable
+theLensAge = 18;
+theConeMapVar = coneMapVar(theLensAge);
+    
 
-% Compute PSFs
 if (useCMosaicMethod)
     opticsSupport.thePSFs = generateOpticsUsingCmosaicMethod(...
-        theConeMapVar.theEmployedConeMosaics, options, opticsSupport.theFovealOptimalStrehlRatioDefocusAndAstigmatismDiopters);
+            theConeMapVar.theEmployedConeMosaics, theConeMapVar.supportWavelength, theConeMapVar.effectiveLMSTable, options, opticsSupport.theFovealOptimalStrehlRatioDefocusAndAstigmatismDiopters);
 else 
     opticsSupport = generateOpticsUsingOldMethod(options);
 end
+
 
 
 
@@ -248,14 +253,16 @@ function opticsSupport = computeOptimalStrehlRatioDefocusAndAstigmatismForFoveal
                 useParfor);
 
     opticsSupport.pupilDiameterMmRange = options.pupilDiameterMmRange;
-    opticsSupport.theBasePSF = doubleToSingleNumericPrecision(thePSF);
+    opticsSupport.theBasePSF = thePSF;
     opticsSupport.theOptimalStrehlRatio = theOptimalStrehlRatio;
     opticsSupport.theFovealOptimalStrehlRatioDefocusAndAstigmatismDiopters = theFovealOptimalStrehlRatioDefocusAndAstigmatismDiopters;
     opticsSupport.StrehlRatioAsAFunctionOfDefocusAndAstigmatism = StrehlRatioAsAFunctionOfDefocusAndAstigmatism;
 
 end
 
-function thePSFs = generateOpticsUsingCmosaicMethod(theEmployedConeMosaics, options, theFovealOptimalStrehlRatioDefocusAndAstigmatismDiopters)
+function thePSFs = generateOpticsUsingCmosaicMethod(theEmployedConeMosaics, ...
+    theEffectiveLMSTableWavelengthSupport, theEffectiveLMSTable, ...
+    options, theFovealOptimalStrehlRatioDefocusAndAstigmatismDiopters)
 
     opticsParams.zernikeDataBase = options.optics.zernikeDataBase;
     opticsParams.subjectID = options.optics.subjectID;
@@ -277,6 +284,7 @@ function thePSFs = generateOpticsUsingCmosaicMethod(theEmployedConeMosaics, opti
     for ii = 1:numel(theEmployedConeMosaics)
 
         theConeMosaic = theEmployedConeMosaics{ii};
+        theConeFundamentalsAtCurrentEccentricity = squeeze(theEffectiveLMSTable(ii,:,:));
 
         examinedDefocusDiopters = theFovealOptimalStrehlRatioDefocusAndAstigmatismDiopters(1);
         examinedObliqueAstigmatismDiopters = theFovealOptimalStrehlRatioDefocusAndAstigmatismDiopters(2);
@@ -292,9 +300,14 @@ function thePSFs = generateOpticsUsingCmosaicMethod(theEmployedConeMosaics, opti
                     reshape(X, [numel(X) 1]) reshape(Y, [numel(X) 1]) reshape(Z, [numel(X) 1]) ];
 
 
+        % Interpolated cone fundamentals: same for all pupil sizes, only
+        % computed for the first pupil size
+        theInterpolatedConeFundamentals = [];
+
         for jj = 1:length(options.pupilDiameterMmRange)
             opticsParams.pupilDiameterMM = options.pupilDiameterMmRange(jj);
-            fprintf('computing for pupil %2.2fMM, at ecc(x,y): (%2.1f,%2.1f) degs\n', opticsParams.pupilDiameterMM, theConeMosaic.eccentricityDegs(1), theConeMosaic.eccentricityDegs(2));
+            tic
+            
             
             [~, thePSF] = RGCMosaicConstructor.helper.optics.optimized3DStrehlRatioPSF(...
 					        examinedDefocusAndAstigmatismDioptersGrid, ...
@@ -304,15 +317,57 @@ function thePSFs = generateOpticsUsingCmosaicMethod(theEmployedConeMosaics, opti
                             examinedDefocusDiopters, examinedObliqueAstigmatismDiopters, examinedVerticalAstigmatismDiopters, ...
                             useParfor);
    
-            thePSFs{ii,jj} = doubleToSingleNumericPrecision(thePSF);
+            if (isempty(theInterpolatedConeFundamentals))
+                theInterpolatedConeFundamentals = nan(numel(thePSF.supportWavelength), 3);
+            end
+
+            % We do not store the full-spectra PSFs (this would required >60 GB data), 
+            % we only store the L/M/C cone weighted PSFs, with
+            % the weights taken from theEffectiveLMSTable at the current position and current
+            for iConeType = 1:3
+                [thePSF.coneWeightedData(iConeType, :,:), theInterpolatedConeFundamentals(:,iConeType)] = fullSpectralPSFtoConeWeightedPSF(...
+                    theConeFundamentalsAtCurrentEccentricity(:,iConeType), theEffectiveLMSTableWavelengthSupport, ...
+                    theInterpolatedConeFundamentals(:,iConeType), thePSF.data, thePSF.supportWavelength);
+            end
+
+            % Zero the full spectral PSF to save memory
+            thePSF.data = [];
+            thePSF.supportWavelength = [];
+
+            % Save the cone weighted data
+            thePSFs{ii,jj} = thePSF;
+
+            fprintf('Cone-weighted PSF computation for pupil size of %2.2fMM at position %d of %d finished in %1.2f minutes.\n', ...
+                opticsParams.pupilDiameterMM, ii, numel(theEmployedConeMosaics), toc/60);
         end % for jj
     end % for ii
 end
 
+function [theConePSF, theInterpolatedConeFundamental] = fullSpectralPSFtoConeWeightedPSF(...
+    theConeFundamental, theConeFundamentalWavelengthSupport, theInterpolatedConeFundamental, ...
+    thePSFdata, thePSFWavelengthSupport)
+    
+    size(thePSFdata)
+    size(theInterpolatedConeFundamental)
 
-function thePSF = doubleToSingleNumericPrecision(thePSF)
-    thePSF.data = single(thePSF.data);
+    if (any(isnan(theInterpolatedConeFundamental(:))))
+        % Interpolate cone fundamental to the spectral support of the PSF
+        theInterpolatedConeFundamental = interp1(theConeFundamentalWavelengthSupport, ...
+            theConeFundamental, thePSFWavelengthSupport);
+    end
+    
+    size(theInterpolatedConeFundamental)
+
+    wavelengthsNum = size(thePSFdata,3);
+    rowsNum = size(thePSFdata,1);
+    colsNum = size(thePSFdata,2);
+
+    thePSFdata = reshape(thePSFdata, [rowsNum*colsNum wavelengthsNum]);
+    size(thePSFdata)
+
+    theConePSF = reshape(thePSFdata * theInterpolatedConeFundamental, [rowsNum colsNum]);
 end
+
 
 function opticsSupport = generateOpticsUsingOldMethod(options)
     % Precompute pre-receptoral optics (PSFs) for the specified pupil range
