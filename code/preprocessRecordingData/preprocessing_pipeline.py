@@ -48,9 +48,10 @@ light_loger_analysis_dir: str = str(pathlib.Path(__file__).parents[2])
 video_util_path: str = os.path.join(light_loger_analysis_dir, "code", "library", "matlabIO", "python_libraries")
 virtual_foveation_util_path: str = os.path.join(light_loger_analysis_dir, "code", "applyVirtualFoveation", "pythonCode")
 spd_util_path: str = os.path.join(light_loger_analysis_dir, "code", "analyzeSPD", "pythonCode")
+eye_tracking_util_path: str = os.path.join(light_loger_analysis_dir, "code", "analyzeEyeTracking", "pythonCode")
 sensor_utility_path: str = os.path.join(light_loger_analysis_dir, "code", "library", "sensor_utility")
 
-custom_library_paths: list[str] = (light_loger_analysis_dir, video_util_path, virtual_foveation_util_path, spd_util_path, sensor_utility_path)
+custom_library_paths: list[str] = (light_loger_analysis_dir, video_util_path, virtual_foveation_util_path, spd_util_path, sensor_utility_path, eye_tracking_util_path)
 assert all(os.path.exists(path) for path in custom_library_paths)
 
 for path in custom_library_paths:
@@ -61,6 +62,7 @@ import video_io
 import virtual_foveation
 import spd_util
 import world_util
+import cleanEyeTracking
 
 
 def _write_chunk_with_blocking_retry(fd, chunk: bytes, save_path: pathlib.Path, verbose: bool, retry_delay_seconds: float=5.0) -> None:
@@ -369,10 +371,9 @@ def generate_world_videos(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
 
 def generate_egocentric_mapper_results(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026", 
                                        dst_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoorVideos2026",
-                                       mapping_choice: Literal["Fixations", "Gaze", "Both"]='Both',
                                        refresh_time_threshold_sec: float=0.5 ,
                                        render_video: bool= False,
-                                       render_video_comparison: bool= False,
+                                       render_video_comparison: bool= True,
                                        optic_flow_algorithm: Literal["Lucas-Kanade", "Gunnar Farneback"] = "Lucas-Kanade", 
                                        image_matcher: Literal["Efficient_LOFTR", "LOFTR_indoor"] = "Efficient_LOFTR",
                                        show_video_preview: bool=False, 
@@ -393,7 +394,6 @@ def generate_egocentric_mapper_results(src_dir: str="/Volumes/FLIC_raw/NEWscript
     Inputs:
       src_dir                    raw dataset directory
       dst_dir                    processing output directory
-      mapping_choice             Fixations / Gaze / Both
       refresh_time_threshold_sec mapping refresh threshold
       render_video               render mapping visualization
       render_video_comparison    render comparison video
@@ -480,6 +480,10 @@ def generate_egocentric_mapper_results(src_dir: str="/Volumes/FLIC_raw/NEWscript
                     neon_timestamp_paths[0]
                 )
 
+                print(f"THIS IS THE NEON TIMESERIES DIR: {neon_timeseries_dir}")
+
+                
+
                 world_video_path: str = os.path.join(
                     dst_dir,
                     subject_id,
@@ -505,7 +509,14 @@ def generate_egocentric_mapper_results(src_dir: str="/Volumes/FLIC_raw/NEWscript
 
                 # Existing results for one recording do not prevent missing
                 # sibling recordings from being generated.
-                if(os.path.exists(neon_output_dir) and overwrite_existing is False):
+                if(overwrite_existing is False and all(
+                    os.path.isfile(os.path.join(neon_output_dir, filename))
+                    for filename in (
+                        "alternative_camera_timestamps.csv",
+                        "alternative_camera_gaze.csv",
+                        "alternative_camera_fixations.csv",
+                    )
+                )):
                     continue
 
                 # Use a fresh temporary directory for this attempt. A mapper failure
@@ -529,7 +540,7 @@ def generate_egocentric_mapper_results(src_dir: str="/Volumes/FLIC_raw/NEWscript
                         neon_timeseries_dir=neon_timeseries_dir,
                         alternative_vid_path=world_video_path,
                         output_dir=temp_output_dir,
-                        mapping_choice=mapping_choice,
+                        mapping_choice="Both",
                         refresh_time_threshold_sec=refresh_time_threshold_sec,
                         render_video=render_video,
                         render_video_comparison=render_video_comparison,
@@ -555,6 +566,133 @@ def generate_egocentric_mapper_results(src_dir: str="/Volumes/FLIC_raw/NEWscript
                     shutil.rmtree(temp_output_dir, ignore_errors=True)
 
     return 
+
+def clean_eye_data(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026",
+                   dst_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoorVideos2026",
+                   overwrite_existing: bool=False,
+                   subjects_to_skip: Iterable[int]=(),
+                   subjects_to_process: Iterable[int]=(),
+                   activities_to_skip: Iterable[str]=(),
+                   activities_to_process: Iterable[str]=(),
+                   verbose: bool=False,
+                   show_plots: bool=False) -> None:
+    """Clean selected subjects/activities and save Neon/<attempt>/cleaned_eye_data.csv.
+
+    Explicit process filters override skip filters. Existing files are skipped
+    unless overwrite_existing=True. verbose shows progress; show_plots displays
+    comparisons. Raw exports may be directly in an attempt or a nested folder.
+    """
+    # Select subjects using the same filters and ordering as the mapper stage.
+    subjects_to_process = set(subjects_to_process)
+    subjects_to_skip = set(subjects_to_skip)
+    activities_to_process = set(activities_to_process)
+    activities_to_skip = set(activities_to_skip)
+    subject_paths: list[str] = natsorted([
+        subject_path
+        for subject_name in os.listdir(src_dir)
+        if re.fullmatch(r"FLIC_\d+", subject_name)
+        and os.path.isdir(subject_path := os.path.join(src_dir, subject_name))
+        and _is_desired_item(_extract_num_from_id(subject_name), subjects_to_process, subjects_to_skip)
+    ])
+    assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}"
+
+    subject_iterator: Iterable[int] = (
+        range(len(subject_paths)) if not verbose else
+        tqdm(range(len(subject_paths)), desc="Processing Subjects", leave=True)
+    )
+
+    # Iterate over the subjects
+    for subject_num in subject_iterator:
+        subject_path: str = subject_paths[subject_num]
+        subject_id: str = os.path.basename(subject_path)
+
+        # Find the desired activities for each subject 
+        activity_paths: list[str] = [
+            activity_path
+            for filename in natsorted(os.listdir(subject_path))
+            if os.path.isdir(activity_path := os.path.join(subject_path, filename))
+            and _is_desired_item(filename, activities_to_process, activities_to_skip)
+        ]
+        activities_iterator: Iterable[int] = (
+            range(len(activity_paths)) if not verbose else
+            tqdm(range(len(activity_paths)), desc="Processing Activities", leave=False)
+        )
+
+        # Iterate over the activities
+        for activity_num in activities_iterator:
+            activity_path: str = activity_paths[activity_num]
+            activity_name: str = os.path.basename(activity_path)
+
+            # Clean each numbered Neon attempt using its matching mapper output.
+            neon_dir: str = os.path.join(activity_path, "Neon")
+            assert os.path.isdir(neon_dir), f"Problem with: {neon_dir}"
+            
+            # Find the number of recordings for the neon recording
+            recording_numbers: list[str] = natsorted([
+                filename
+                for filename in os.listdir(neon_dir)
+                if filename.isdigit()
+                and os.path.isdir(os.path.join(neon_dir, filename))
+            ])
+            assert len(recording_numbers) > 0, (
+                f"No numerical recording directories found in: {neon_dir}"
+            )
+
+            # Iterate over the number of recordings 
+            for recording_number in recording_numbers:
+                # Create the output for this numbered recording 
+                output_dir: str = os.path.join(
+                    dst_dir, subject_id, activity_name, "Neon", recording_number
+                )
+                output_path: str = os.path.join(output_dir, "cleaned_eye_data.csv")
+
+                # Only overwrite if desired 
+                if not overwrite_existing and os.path.isfile(output_path):
+                    continue
+
+                # Find the path to the raw recording and the single directory underneat it
+                raw_recording: str = os.path.join(neon_dir, recording_number)
+                export_directories: list[str] = [
+                    root
+                    for root, _, filenames in os.walk(raw_recording)
+                    if "3d_eye_states.csv" in filenames
+                ]
+
+                assert len(export_directories) == 1, (
+                    f"Expected exactly one 3d_eye_states.csv beneath {raw_recording}; "
+                    f"found {export_directories}"
+                )
+
+                # Save the raw neon path as well as the path to the egocentric video mapper results
+                raw_neon_path: str = export_directories[0]
+                mapper_dir: str = os.path.join(output_dir, "egocentric_mapper_results")
+
+                if verbose:
+                    print(
+                        f"Cleaning {subject_id}/{activity_name}/Neon/"
+                        f"{recording_number}: {output_path}"
+                    )
+
+                # Clean the data 
+                cleaned_data: np.ndarray = cleanEyeTracking.clean_eye_data(
+                    raw_neon_path, mapper_dir, verbose=show_plots
+                )
+                
+                # Format into a dataframe os we can write to CSV easily
+                cleaned_df: pd.DataFrame = pd.DataFrame(
+                cleaned_data,
+                columns=[
+                    "time [s]",
+                    "pupil diameter [mm]",
+                    "eyelid aperture [mm]",
+                    "gaze x [px]",
+                    "gaze y [px]",
+                ],
+            )
+            cleaned_df.to_csv(output_path, index=False)
+    return
+
+
 
 def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026", 
                                        dst_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoorVideos2026",
@@ -4373,17 +4511,18 @@ def download_pupil_cloud_recordings(api_key: str,
         except:
             warnings.warn(f"Recording name: {recording_name} has no recording number, Skipping...")
             continue
-
+        
         activity_recordings: dict[int, dict[str, str]] = (
             parsed_recording_map.setdefault(subject_id, {})
             .setdefault(activity_name, {})
         )
         if(recording_number in activity_recordings):
-            warnings.warn(
+            raise Exception(
                 f"Duplicate Pupil Cloud recording number {recording_number} for "
                 f"FLIC_{subject_id} {activity_name}; replacing cloud recording "
                 f"{activity_recordings[recording_number]['id']} with {recording_id}"
             )
+
         activity_recordings[recording_number] = {
             "id": recording_id,
             "name": recording_name,
