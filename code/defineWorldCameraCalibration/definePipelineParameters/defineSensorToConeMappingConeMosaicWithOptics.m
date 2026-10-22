@@ -11,7 +11,7 @@ clear
 % Hard code some options
 options.optics.zernikeDataBase = 'Polans2015';
 
-options.optics.subjectID = 1;
+options.optics.subjectID = 4;
 options.optics.StrehlRatioOptimizationParams = struct(...
         'defocusDioptersRange', -2:0.25:2, ...
         'obliqueAstigmatismDioptersRange', -2:0.25:2, ...
@@ -129,8 +129,6 @@ if (useCMosaicMethod)
 else 
     opticsSupport = generateOpticsUsingOldMethod(options);
 end
-
-
 
 
 if (useCMosaicMethod)
@@ -304,8 +302,10 @@ function thePSFs = generateOpticsUsingCmosaicMethod(theEmployedConeMosaics, ...
         % computed for the first pupil size
         theInterpolatedConeFundamentals = [];
 
-        for jj = 1:length(options.pupilDiameterMmRange)
-            opticsParams.pupilDiameterMM = options.pupilDiameterMmRange(jj);
+        tic
+
+        for iPupilSize = 1:length(options.pupilDiameterMmRange)
+            opticsParams.pupilDiameterMM = options.pupilDiameterMmRange(iPupilSize);
             tic
             
             
@@ -335,11 +335,12 @@ function thePSFs = generateOpticsUsingCmosaicMethod(theEmployedConeMosaics, ...
             thePSF.supportWavelength = [];
 
             % Save the cone weighted data
-            thePSFs{ii,jj} = thePSF;
+            thePSFs{ii,iPupilSize} = thePSF;
+        end % for iPupilSize
 
-            fprintf('Cone-weighted PSF computation for pupil size of %2.2fMM at position %d of %d finished in %1.2f minutes.\n', ...
-                opticsParams.pupilDiameterMM, ii, numel(theEmployedConeMosaics), toc/60);
-        end % for jj
+        fprintf('Cone-weighted PSF computation at position %d of %d finished in %1.2f minutes.\n', ...
+                ii, numel(theEmployedConeMosaics), toc/60);
+
     end % for ii
 end
 
@@ -347,24 +348,17 @@ function [theConePSF, theInterpolatedConeFundamental] = fullSpectralPSFtoConeWei
     theConeFundamental, theConeFundamentalWavelengthSupport, theInterpolatedConeFundamental, ...
     thePSFdata, thePSFWavelengthSupport)
     
-    size(thePSFdata)
-    size(theInterpolatedConeFundamental)
-
     if (any(isnan(theInterpolatedConeFundamental(:))))
         % Interpolate cone fundamental to the spectral support of the PSF
         theInterpolatedConeFundamental = interp1(theConeFundamentalWavelengthSupport, ...
             theConeFundamental, thePSFWavelengthSupport);
     end
     
-    size(theInterpolatedConeFundamental)
-
     wavelengthsNum = size(thePSFdata,3);
     rowsNum = size(thePSFdata,1);
     colsNum = size(thePSFdata,2);
 
     thePSFdata = reshape(thePSFdata, [rowsNum*colsNum wavelengthsNum]);
-    size(thePSFdata)
-
     theConePSF = reshape(thePSFdata * theInterpolatedConeFundamental, [rowsNum colsNum]);
 end
 
