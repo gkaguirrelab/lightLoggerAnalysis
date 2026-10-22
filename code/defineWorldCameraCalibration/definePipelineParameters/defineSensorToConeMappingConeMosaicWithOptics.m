@@ -13,13 +13,25 @@ options.optics.zernikeDataBase = 'Polans2015';
 
 options.optics.subjectID = 5;
 
+<<<<<<< HEAD
 % 1D (defocus only) optics optimization
+=======
+% 1D (defocus, oblique & vertical astigmatism) optics optimization 
+% options.optics.StrehlRatioOptimizationParams = struct(...
+%        'defocusDioptersRange', -3:0.25:3, ...
+%        'obliqueAstigmatismDioptersRange', nan, ...
+%        'verticalAstigmatismDioptersRange', nan ...
+%    );
+
+% 3D (defocus, oblique & vertical astigmatism) optics optimization 
+>>>>>>> 3a9b15b3151077dc3d932e1fdf4ab0c460b07909
 options.optics.StrehlRatioOptimizationParams = struct(...
     'defocusDioptersRange', -3:0.25:3, ...
     'obliqueAstigmatismDioptersRange', 0:0.25:0, ...
     'verticalAstigmatismDioptersRange', 0:0.25:0 ...
     );
 
+<<<<<<< HEAD
 % 3D (defocus, oblique & vertical astigmatism) optics optimization
 % options.optics.StrehlRatioOptimizationParams = struct(...
 %         'defocusDioptersRange', -2:0.25:2, ...
@@ -29,6 +41,11 @@ options.optics.StrehlRatioOptimizationParams = struct(...
 
 % 601 (or more) spatial samples are required to support the
 % extent of PSFs at extreme eccentricities (> 30 degs),
+=======
+
+% 601 (or more) spatial samples are required to support the 
+% extent of PSFs at extreme eccentricities (> 30 degs), 
+>>>>>>> 3a9b15b3151077dc3d932e1fdf4ab0c460b07909
 % especially at short wavelengths
 options.optics.wavefrontSpatialSamples = 601;
 options.ageRange  = [18];
@@ -218,11 +235,63 @@ examinedDefocusAndAstigmatismDioptersGrid = [...
     examinedDefocusDiopters, examinedObliqueAstigmatismDiopters, examinedVerticalAstigmatismDiopters, ...
     useParfor);
 
+<<<<<<< HEAD
 opticsSupport.pupilDiameterMmRange = options.pupilDiameterMmRange;
 opticsSupport.theBasePSF = thePSF;
 opticsSupport.theOptimalStrehlRatio = theOptimalStrehlRatio;
 opticsSupport.theFovealOptimalStrehlRatioDefocusAndAstigmatismDiopters = theFovealOptimalStrehlRatioDefocusAndAstigmatismDiopters;
 opticsSupport.StrehlRatioAsAFunctionOfDefocusAndAstigmatism = StrehlRatioAsAFunctionOfDefocusAndAstigmatism;
+=======
+    % Round to closest quarter diopter
+    defocusDioptersCenter = sign(defocusDioptersCenter) * 0.25*round(4*abs(defocusDioptersCenter));
+    obliqueAstigmatismDioptersCenter = sign(obliqueAstigmatismDioptersCenter) * 0.25*round(4*abs(obliqueAstigmatismDioptersCenter));
+    verticalAstigmatismDioptersCenter = sign (verticalAstigmatismDioptersCenter) * 0.25*round(4*abs(verticalAstigmatismDioptersCenter));
+
+    examinedDefocusDioptersRange = opticsParams.StrehlRatioOptimizationParams.defocusDioptersRange;
+    examinedObliqueAstigmatismDioptersRange = opticsParams.StrehlRatioOptimizationParams.obliqueAstigmatismDioptersRange;
+    examinedVerticalAstigmatismDioptersRange = opticsParams.StrehlRatioOptimizationParams.verticalAstigmatismDioptersRange;
+       
+    % Center the 3D search around (0,0,0) defocus and astigmatism Z coeffs
+
+    examinedDefocusDiopters = examinedDefocusDioptersRange - defocusDioptersCenter;
+    if (isnan(examinedObliqueAstigmatismDioptersRange))
+        examinedObliqueAstigmatismDiopters = 0;
+    else
+        examinedObliqueAstigmatismDiopters = examinedObliqueAstigmatismDioptersRange - obliqueAstigmatismDioptersCenter;
+    end
+    if (isnan(examinedVerticalAstigmatismDioptersRange))
+        examinedVerticalAstigmatismDiopters = 0;
+    else
+        examinedVerticalAstigmatismDiopters = examinedVerticalAstigmatismDioptersRange -verticalAstigmatismDioptersCenter;
+    end
+
+    % 3D search grid
+    [X,Y,Z] = ndgrid(...
+            examinedDefocusDiopters, ...
+            examinedObliqueAstigmatismDiopters, ...
+            examinedVerticalAstigmatismDiopters);
+
+
+    examinedDefocusAndAstigmatismDioptersGrid = [...
+            reshape(X, [numel(X) 1]) reshape(Y, [numel(X) 1]) reshape(Z, [numel(X) 1]) ];
+
+    % Go !
+    [theOptics, thePSF, theFovealOptimalStrehlRatioDefocusAndAstigmatismDiopters, ...
+        theOptimalStrehlRatio, StrehlRatioAsAFunctionOfDefocusAndAstigmatism] = ...
+          RGCMosaicConstructor.helper.optics.optimized3DStrehlRatioPSF(...
+			    examinedDefocusAndAstigmatismDioptersGrid, ...
+			    theFovealConeMosaic, theFovealConeMosaic.eccentricityDegs, opticsParams, ...
+                opticsParams.wavefrontSpatialSamples, psfUpsampleFactor, ...
+			    visualizeStrehlRatioOptimization, contrastMaxStrehlRatioPSFtoAsMeasuredAndCentralCorrection, ...
+                examinedDefocusDiopters, examinedObliqueAstigmatismDiopters, examinedVerticalAstigmatismDiopters, ...
+                useParfor);
+
+    opticsSupport.pupilDiameterMmRange = options.pupilDiameterMmRange;
+    opticsSupport.theBasePSF = thePSF;
+    opticsSupport.theOptimalStrehlRatio = theOptimalStrehlRatio;
+    opticsSupport.theFovealOptimalStrehlRatioDefocusAndAstigmatismDiopters = theFovealOptimalStrehlRatioDefocusAndAstigmatismDiopters;
+    opticsSupport.StrehlRatioAsAFunctionOfDefocusAndAstigmatism = StrehlRatioAsAFunctionOfDefocusAndAstigmatism;
+>>>>>>> 3a9b15b3151077dc3d932e1fdf4ab0c460b07909
 
 end
 
