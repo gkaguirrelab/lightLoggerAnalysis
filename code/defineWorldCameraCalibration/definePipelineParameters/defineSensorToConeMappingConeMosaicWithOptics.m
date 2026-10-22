@@ -14,10 +14,10 @@ options.optics.zernikeDataBase = 'Polans2015';
 options.optics.subjectID = 5;
 
 % 1D (defocus, oblique & vertical astigmatism) optics optimization 
-%options.optics.StrehlRatioOptimizationParams = struct(...
+% options.optics.StrehlRatioOptimizationParams = struct(...
 %        'defocusDioptersRange', -3:0.25:3, ...
-%        'obliqueAstigmatismDioptersRange', 0:0.25:0, ...
-%        'verticalAstigmatismDioptersRange', 0:0.25:0 ...
+%        'obliqueAstigmatismDioptersRange', nan, ...
+%        'verticalAstigmatismDioptersRange', nan ...
 %    );
 
 % 3D (defocus, oblique & vertical astigmatism) optics optimization 
@@ -26,6 +26,7 @@ options.optics.StrehlRatioOptimizationParams = struct(...
         'obliqueAstigmatismDioptersRange', -2:0.25:2, ...
         'verticalAstigmatismDioptersRange', -2:0.25:2 ...
     );
+
 
 % 601 (or more) spatial samples are required to support the 
 % extent of PSFs at extreme eccentricities (> 30 degs), 
@@ -237,9 +238,18 @@ function opticsSupport = computeOptimalStrehlRatioDefocusAndAstigmatismForFoveal
     examinedVerticalAstigmatismDioptersRange = opticsParams.StrehlRatioOptimizationParams.verticalAstigmatismDioptersRange;
        
     % Center the 3D search around (0,0,0) defocus and astigmatism Z coeffs
+
     examinedDefocusDiopters = examinedDefocusDioptersRange - defocusDioptersCenter;
-    examinedObliqueAstigmatismDiopters = examinedObliqueAstigmatismDioptersRange - obliqueAstigmatismDioptersCenter;
-    examinedVerticalAstigmatismDiopters = examinedVerticalAstigmatismDioptersRange -verticalAstigmatismDioptersCenter;
+    if (isnan(examinedObliqueAstigmatismDioptersRange))
+        examinedObliqueAstigmatismDiopters = 0;
+    else
+        examinedObliqueAstigmatismDiopters = examinedObliqueAstigmatismDioptersRange - obliqueAstigmatismDioptersCenter;
+    end
+    if (isnan(examinedVerticalAstigmatismDioptersRange))
+        examinedVerticalAstigmatismDiopters = 0;
+    else
+        examinedVerticalAstigmatismDiopters = examinedVerticalAstigmatismDioptersRange -verticalAstigmatismDioptersCenter;
+    end
 
     % 3D search grid
     [X,Y,Z] = ndgrid(...
