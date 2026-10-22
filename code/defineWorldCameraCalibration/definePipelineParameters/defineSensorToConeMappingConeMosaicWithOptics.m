@@ -169,7 +169,6 @@ fprintf('Optimizing foveal optics.\n');
     'obliqueAndVerticalAstigmatismErrorsDiopters', [0 0], ...
     'wavefrontSpatialSamples', opticsParams.wavefrontSpatialSamples);
 
-
 % The Artal/Polans Z-coeff indices start from 0, not 1
 theDefocusZcoeffIndex = wvfOSAIndexToVectorIndex('defocus')-1;
 theObliqueAstigmatismZcoeffIndex = wvfOSAIndexToVectorIndex('oblique_astigmatism')-1;
@@ -232,6 +231,7 @@ opticsSupport.StrehlRatioAsAFunctionOfDefocusAndAstigmatism = StrehlRatioAsAFunc
 
 end
 
+
 function thePSFs = generateOpticsUsingCmosaicMethod(theEmployedConeMosaics, ...
     theEffectiveLMSTableWavelengthSupport, theEffectiveLMSTable, ...
     options, theFovealOptimalStrehlRatioDefocusAndAstigmatismDiopters)
@@ -253,7 +253,17 @@ useParfor = true;
 visualizeStrehlRatioOptimization = ~true;
 contrastMaxStrehlRatioPSFtoAsMeasuredAndCentralCorrection = ~true;
 
+% Setup the console
+fprintf('\nLooping over %d cone mosaics to generate optics...',numel(theEmployedConeMosaics));
+numChars = 0;
+
 for ii = 1:numel(theEmployedConeMosaics)
+
+    % Update the console
+    idxStr = sprintf('%d', ii);
+    fprintf(repmat('\b', 1, numChars));
+    fprintf('%s', idxStr);
+    numChars = length(idxStr);
 
     theConeMosaic = theEmployedConeMosaics{ii};
     theConeFundamentalsAtCurrentEccentricity = squeeze(theEffectiveLMSTable(ii,:,:));
@@ -270,7 +280,6 @@ for ii = 1:numel(theEmployedConeMosaics)
 
     examinedDefocusAndAstigmatismDioptersGrid = [...
         reshape(X, [numel(X) 1]) reshape(Y, [numel(X) 1]) reshape(Z, [numel(X) 1]) ];
-
 
     % Interpolated cone fundamentals: same for all pupil sizes, only
     % computed for the first pupil size
@@ -310,9 +319,15 @@ for ii = 1:numel(theEmployedConeMosaics)
 
         % Save the cone weighted data
         thePSFs{ii,iPupilSize} = thePSF;
+
     end % for iPupilSize
 
 end % for ii
+
+% Finish the console counter
+fprintf([repmat('\b', 1, numChars),'done\n']);
+
+
 end
 
 function [theConePSF, theInterpolatedConeFundamental] = fullSpectralPSFtoConeWeightedPSF(...
@@ -344,7 +359,7 @@ densityTable = zeros(length(eccGrid), 3);
 
 % Loop over scalar eccentricities to build the LUT. Set up a console
 % report.
-fprintf('Looping over %d grid locations...',length(eccGrid));
+fprintf('Looping over %d grid locations to calculate effective LMS...',length(eccGrid));
 numChars = 0;
 
 for ii = 1:length(eccGrid)
@@ -357,8 +372,6 @@ for ii = 1:length(eccGrid)
 
     % 2D grid
     theEccDegs = eccGrid(:,ii);
-    fprintf('Cone mosaic at [%2.1f,%2.1f] degs...', eccGrid(1,ii), eccGrid(2,ii));
-
     radialEccDegs = norm(theEccDegs);
     safeEccApertureDegs = min(radialEccDegs, 60);
     radialEccMeters = safeEccApertureDegs * (300 * 1e-6);
