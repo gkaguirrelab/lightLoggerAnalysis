@@ -14,18 +14,18 @@ options.optics.zernikeDataBase = 'Polans2015';
 options.optics.subjectID = 5;
 
 % 1D (defocus, oblique & vertical astigmatism) optics optimization 
-% options.optics.StrehlRatioOptimizationParams = struct(...
-%        'defocusDioptersRange', -3:0.25:3, ...
-%        'obliqueAstigmatismDioptersRange', nan, ...
-%        'verticalAstigmatismDioptersRange', nan ...
-%    );
+options.optics.StrehlRatioOptimizationParams = struct(...
+       'defocusDioptersRange', -3:0.25:3, ...
+       'obliqueAstigmatismDioptersRange', nan, ...
+       'verticalAstigmatismDioptersRange', nan ...
+   );
 
 % 3D (defocus, oblique & vertical astigmatism) optics optimization 
-options.optics.StrehlRatioOptimizationParams = struct(...
-        'defocusDioptersRange', -2:0.25:2, ...
-        'obliqueAstigmatismDioptersRange', -2:0.25:2, ...
-        'verticalAstigmatismDioptersRange', -2:0.25:2 ...
-    );
+% options.optics.StrehlRatioOptimizationParams = struct(...
+%         'defocusDioptersRange', -2:0.25:2, ...
+%         'obliqueAstigmatismDioptersRange', -2:0.25:2, ...
+%         'verticalAstigmatismDioptersRange', -2:0.25:2 ...
+%     );
 
 
 % 601 (or more) spatial samples are required to support the 
@@ -51,9 +51,9 @@ camSens = [T.(channelNames{1}), T.(channelNames{2}), T.(channelNames{3})];
 % Precompute the pseudo-inverse of the camera sensitivities
 pinvCamSens = pinv(camSens');
 
-    % Full 2D eccentricity grid along each (x,y) position over central 70 x 40 degs
+    % 2D eccentricity grid
     deltaEccGridDeg = 10;
-    [X,Y] = meshgrid(-35:deltaEccGridDeg:35, -20:deltaEccGridDeg:20);
+    [X,Y] = meshgrid(-40:deltaEccGridDeg:40, -20:deltaEccGridDeg:20);
     eccGrid = [X(:) Y(:)];
 
     % Add some extreme eccs now
@@ -71,11 +71,11 @@ pinvCamSens = pinv(camSens');
 deltaWls = 10;
 wlsSensorSubsample = wlsSensor(1):deltaWls:wlsSensor(end);
 
-    % Compute defocus and astigmatism for maximizing the foveal Strehl ratio 
-    opticsSupport = computeOptimalStrehlRatioDefocusAndAstigmatismForFovealOptics(options, wlsSensorSubsample);
+% Compute defocus and astigmatism for maximizing the foveal Strehl ratio
+opticsSupport = computeOptimalStrehlRatioDefocusAndAstigmatismForFovealOptics(options, wlsSensorSubsample);
 
 % Preallocate a struct array with empty fields for the cone mapping
-coneMapVar(options.ageRange(2)) = struct(...
+coneMapVar(options.ageRange(1)) = struct(...
     'theEmployedConeMosaics', [], ...
     'supportWavelength', [], ...
     'eccGrid', [], ...
@@ -96,7 +96,7 @@ for age = options.ageRange(1):options.ageRange(1)
     end
     lensDensity = ageScalar;
 
-        theConeMapVar = generateEffectiveLMSusingCmosaicMethod(wlsSensor, eccGrid, lensDensity, pinvCamSens, options, age);
+        theConeMapVar = generateEffectiveLMSusingCmosaicMethod(wlsSensor, deltaWls, eccGrid, lensDensity, pinvCamSens, options, age);
     coneMapVar(age) = theConeMapVar;
 end
 
@@ -153,8 +153,7 @@ function opticsSupport = computeOptimalStrehlRatioDefocusAndAstigmatismForFoveal
     visualizeStrehlRatioOptimization = true;
     contrastMaxStrehlRatioPSFtoAsMeasuredAndCentralCorrection = true;
 
-    fprintf('Optimizing optics at position (%2.0f,%2.0f)\n', ...
-                theFovealConeMosaic.eccentricityDegs(1),theFovealConeMosaic.eccentricityDegs(2));
+    fprintf('Optimizing foveal optics.\n');
             
     [~, ~, zCoeffsMicrons] = theFovealConeMosaic.oiEnsembleGenerate(theFovealConeMosaic.eccentricityDegs, ...
         'zernikeDataBase', opticsParams.zernikeDataBase, ...
@@ -335,49 +334,7 @@ function [theConePSF, theInterpolatedConeFundamental] = fullSpectralPSFtoConeWei
 end
 
 
-function opticsSupport = generateOpticsUsingOldMethod(options)
-    % Precompute pre-receptoral optics (PSFs) for the specified pupil range
-    fprintf('Generating ISETbio pre-receptoral optics for pupil sizes');
-    opticsSupport = struct();
-    peakWavelengths = [562, 530, 430]; % L, M, S peaks
-    
-    for p = 1:length(options.pupilDiameterMmRange)
-        fprintf('.');
-        pupilMm = options.pupilDiameterMmRange(p);
-    
-        opticsSupport(p).pupilDiameterMm = pupilMm;
-    
-        for c = 1:3
-            % Instantiate a clean wavefront object for EACH wavelength 
-            % independently to bypass ISETbio multi-wavelength bugs.
-            wvf = wvfCreate();
-            wvf = wvfSet(wvf, 'calc wavelengths', peakWavelengths(c));
-    
-            % The measured pupil size must remain at 8.0mm to preserve the correct 
-            % scaling of Thibos higher-order biological aberrations.
-            wvf = wvfSet(wvf, 'measured pupil diameter', 8.0);
-            wvf = wvfSet(wvf, 'calc pupil diameter', pupilMm);
-    
-            % Provide sufficient spatial resolution
-            wvf = wvfSet(wvf, 'spatial samples', 401);
-    
-            % Correct spherical refractive error (defocus)
-            wvf = wvfSet(wvf, 'zcoeffs', 0, {'defocus'});
-    
-            % Compute the wavefront and PSF for this single wavelength
-            wvf = wvfCompute(wvf);
-    
-            % Extract the 2D PSF and spatial sampling resolution using 'min' for arc minutes
-            opticsSupport(p).psf{c} = wvfGet(wvf, 'psf', peakWavelengths(c));
-            psfSupport = wvfGet(wvf, 'psf spatial samples', 'min', peakWavelengths(c));
-            opticsSupport(p).psfSpacingArcMin(c) = abs(psfSupport(2) - psfSupport(1));
-        end
-    end
-    fprintf('done\n');
-end
-
-
-function theConeMapVar = generateEffectiveLMSusingCmosaicMethod(wlsSensor, eccGrid, lensDensity, pinvCamSens, options, age)
+function theConeMapVar = generateEffectiveLMSusingCmosaicMethod(wlsSensor, deltaWls, eccGrid, lensDensity, pinvCamSens, options, age)
 
     theEmployedConeMosaics = cell(1,length(eccGrid));
     transformTable = zeros(length(eccGrid), 9);
@@ -387,9 +344,8 @@ function theConeMapVar = generateEffectiveLMSusingCmosaicMethod(wlsSensor, eccGr
     for ii = 1:length(eccGrid)
         theEccDegs = eccGrid(:,ii);
         
-        if (numel(theEccDegs) == 2)
             % 2D grid
-            fprintf('Probing cone mosaic at ecc (2D): (%2.1f,%2.1f) degs\n', eccGrid(1,ii), eccGrid(2,ii));
+            fprintf('Cone mosaic at [%2.1f,%2.1f] degs...', eccGrid(1,ii), eccGrid(2,ii));
 
             radialEccDegs = norm(theEccDegs);
             safeEccApertureDegs = min(radialEccDegs, 60);
@@ -415,51 +371,9 @@ function theConeMapVar = generateEffectiveLMSusingCmosaicMethod(wlsSensor, eccGr
             end
 
             eccentricityDegs = [theEccDegs(1) theEccDegs(2)];
-        else
-            % 1D grid
-            fprintf('Probing cone mosaic at ecc (1D): %2.1f degs (%s meridian)\n', eccGrid(ii), options.meridian);
-            ecc = eccGrid(ii);
-            
-            safeEccAperture = min(ecc, 60);
-            eccMeters = safeEccAperture * (300 * 1e-6);
-    
-            % Obtain an estimate of the cone aperture at the examined eccentricity
-            % in order to define an appropriate size for the employed cone mosaic 
-            [~, apertureDiameterMeters] = coneSizeReadData('eccentricity', eccMeters, 'angle', 0);
-    
-            % Determine cone mosaic size (degs) based on current eccentricity
-            if (ecc == 0)
-                coneMosaicSizeDegs = 0.25;
-            else
-                coneMosaicSizeDegs = -0.5 + 100*(apertureDiameterMeters*1e6/300);
-            end
-           
-            if (strcmp(options.meridian, 'Nasal') && (abs(ecc-15.5)<= 3))
-                % For nasal eccentricities (ecc > 0), around 15.5, where the optic disk is located,
-                % enlarge the cone mosaic size to ensure that we have some cones in the generated cone mosaic
-                % to compute the effectiveLMS
-                coneMosaicSizeDegs = 4;
-            end
-    
-            switch (options.meridian)
-                case 'Nasal'
-                    eccentricityDegs = [ecc 0];
-                    
-                case 'Temporal'
-                    eccentricityDegs = [-ecc 0];  
-    
-                case 'Upper'
-                    eccentricityDegs = [0 ecc];
-    
-                case 'Lower'
-                    eccentricityDegs = [0 -ecc];
-                otherwise
-                    error('Uknown meridian: ''%s''.', options.meridian)
-            end
-        end
+        
 
-        % To speed up things lets subsample the wavelenth axis;
-        deltaWls = 10;
+        % To speed up things lets subsample the wavelength axis;
         wlsSensorSubsample = wlsSensor(1):deltaWls:wlsSensor(end);
         
         % Generate cone mosaic at the desired eccentricity
@@ -470,13 +384,6 @@ function theConeMapVar = generateEffectiveLMSusingCmosaicMethod(wlsSensor, eccGr
             'sourceLatticeSizeDegs', 64, ...
             'rodIntrusionAdjustedConeAperture', true, ...
             'coneApertureModifiers', struct('smoothLocalVariations', true));
-
-        if (options.visualizeEmployedConeMosaics)
-            hFig = figure(8000+ii);
-            ax = subplot(1,1,1);
-            theConeMosaic.visualize('figureHandle', hFig, 'axesHandle', ax);
-            drawnow;
-        end
 
         % Compute and store the L,M,S cone densities
         coneDensitiesConesPerSquaredDegree = computeConeDensity(theConeMosaic);
