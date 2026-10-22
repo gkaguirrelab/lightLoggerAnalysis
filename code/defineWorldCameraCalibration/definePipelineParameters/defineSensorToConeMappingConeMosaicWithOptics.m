@@ -11,22 +11,36 @@ clear
 % Hard code some options
 options.optics.zernikeDataBase = 'Polans2015';
 
-options.optics.subjectID = 4;
+options.optics.subjectID = 5;
+
+% 1D (defocus, oblique & vertical astigmatism) optics optimization 
+%options.optics.StrehlRatioOptimizationParams = struct(...
+%        'defocusDioptersRange', -3:0.25:3, ...
+%        'obliqueAstigmatismDioptersRange', 0:0.25:0, ...
+%        'verticalAstigmatismDioptersRange', 0:0.25:0 ...
+%    );
+
+% 3D (defocus, oblique & vertical astigmatism) optics optimization 
 options.optics.StrehlRatioOptimizationParams = struct(...
         'defocusDioptersRange', -2:0.25:2, ...
         'obliqueAstigmatismDioptersRange', -2:0.25:2, ...
         'verticalAstigmatismDioptersRange', -2:0.25:2 ...
     );
 
-% Need 501 spatial samples to support the spatial extent of PSFs at extreme eccentricities (> 30 degs)
-options.optics.wavefrontSpatialSamples = 501;
+% 601 (or more) spatial samples are required to support the 
+% extent of PSFs at extreme eccentricities (> 30 degs), 
+% especially at short wavelengths
+options.optics.wavefrontSpatialSamples = 601;
 
-% Meridian: Select between {'Upper', 'Lower', 'Nasal', 'Temporal'}
+% Meridian: Select between {'Full2D', 'Upper', 'Lower', 'Nasal', 'Temporal'}
 options.meridian = 'Full2D';
-options.visualizeEmployedConeMosaics = false;
+
 options.ageRange  = [18,50];
 options.basePupilDiameterMm = 3.0;
 options.pupilDiameterMmRange = 1.5:0.5:4.0; % 1.5:0.5:8.0; % Range for pre-computing PSFs
+
+% Option to visualize the employed cone mosaics
+options.visualizeEmployedConeMosaics = false;
 
 % Load the IMX219 sensitivity functions
 dataFileName = fullfile(...
@@ -46,7 +60,7 @@ pinvCamSens = pinv(camSens');
 
 if (strcmp(options.meridian, 'Full2D'))
 
-    % Full 2D along each (x,y) position over central 70 x 40 degs
+    % Full 2D eccentricity grid along each (x,y) position over central 70 x 40 degs
     [X,Y] = meshgrid(-35:5:35, -20:5:20);
     eccGrid = [X(:) Y(:)];
 
@@ -61,7 +75,7 @@ if (strcmp(options.meridian, 'Full2D'))
 
     eccGrid = eccGrid';
 else
-    % just 1D along one of the principal meridians
+    % 1D eccentricity grid along one of the 4 principal meridians
     if (ismember(options.meridian, {'Nasal', 'Temporal'}))
         eccGrid = 0:1:40;
     else
@@ -70,8 +84,8 @@ else
 end
 
 % Set this to true to employ the @coneMosaic based derivation of the
-% effectiveLMS. Set to false to use the previous, first-principles based
-% approach.
+% effectiveLMS. 
+% Set to false to use the previous, first-principles based approach.
 useCMosaicMethod = true;
 
 % To speed up things lets subsample the wavelenth axis;
@@ -80,8 +94,6 @@ wlsSensorSubsample = wlsSensor(1):2:wlsSensor(end);
 if (useCMosaicMethod)
     % Compute defocus and astigmatism for maximizing the foveal Strehl ratio 
     opticsSupport = computeOptimalStrehlRatioDefocusAndAstigmatismForFovealOptics(options, wlsSensorSubsample);
-    disp('Hit enter to continue')
-    pause
 end
 
 % Preallocate a struct array with empty fields for the cone mapping
@@ -308,7 +320,7 @@ function thePSFs = generateOpticsUsingCmosaicMethod(theEmployedConeMosaics, ...
             opticsParams.pupilDiameterMM = options.pupilDiameterMmRange(iPupilSize);
             tic
             
-            
+            % Compute the full spectra PSF
             [~, thePSF] = RGCMosaicConstructor.helper.optics.optimized3DStrehlRatioPSF(...
 					        examinedDefocusAndAstigmatismDioptersGrid, ...
 					        theConeMosaic, theConeMosaic.eccentricityDegs, opticsParams, ...
@@ -322,8 +334,9 @@ function thePSFs = generateOpticsUsingCmosaicMethod(theEmployedConeMosaics, ...
             end
 
             % We do not store the full-spectra PSFs (this would required >60 GB data), 
-            % we only store the L/M/C cone weighted PSFs, with
-            % the weights taken from theEffectiveLMSTable at the current position and current
+            % we only store the L/M/S-cone--weighted PSFs, with
+            % the weights taken from theEffectiveLMSTable at the current
+            % eccentricity and current lens age
             for iConeType = 1:3
                 [thePSF.coneWeightedData(iConeType, :,:), theInterpolatedConeFundamentals(:,iConeType)] = fullSpectralPSFtoConeWeightedPSF(...
                     theConeFundamentalsAtCurrentEccentricity(:,iConeType), theEffectiveLMSTableWavelengthSupport, ...
@@ -354,11 +367,13 @@ function [theConePSF, theInterpolatedConeFundamental] = fullSpectralPSFtoConeWei
             theConeFundamental, thePSFWavelengthSupport);
     end
     
+    % Reshape the full-spectra PSF for efficient computation of theConePSF
     wavelengthsNum = size(thePSFdata,3);
     rowsNum = size(thePSFdata,1);
     colsNum = size(thePSFdata,2);
-
     thePSFdata = reshape(thePSFdata, [rowsNum*colsNum wavelengthsNum]);
+
+    % Compute theConePSF
     theConePSF = reshape(thePSFdata * theInterpolatedConeFundamental, [rowsNum colsNum]);
 end
 
@@ -516,11 +531,11 @@ function theConeMapVar = generateEffectiveLMSusingCmosaicMethod(wlsSensor, eccGr
         opticalDefocusDiopters = 0;
         imagingPeakWavelength = 550;
 
-        [theDiffractionLimitedOptics, thePSF, psfSupportMinutesX, psfSupportMinutesY, psfSupportWavelength] = ...
-            diffractionLimitedOptics(options.basePupilDiameterMm, wlsSensorSubsample, imagingPeakWavelength, ...
-                micronsPerDegree, opticalDefocusDiopters, ...
-                'wavefrontSpatialSamples', 101, ...
-                'noLCA', true);
+        theDiffractionLimitedOptics = diffractionLimitedOptics(...
+            options.basePupilDiameterMm, wlsSensorSubsample, imagingPeakWavelength, ...
+            micronsPerDegree, opticalDefocusDiopters, ...
+            'wavefrontSpatialSamples', 101, ...
+            'noLCA', true);
 
         % Apply the desired lens density
         theOptics = oiGet(theDiffractionLimitedOptics, 'optics');
@@ -572,6 +587,14 @@ function theConeMapVar = generateEffectiveLMSusingCmosaicMethod(wlsSensor, eccGr
         % Calculate 3x3 transformation matrix from Camera RGB to LMS rates
         T_mat = effectiveLMS' * pinvCamSens;
     
+        % Preallocate memory for the fundamentals
+        if (ii==1)
+            effectiveLMSTable = zeros(...
+                length(eccGrid), ...
+	            size(effectiveLMS,1), ...
+	            size(effectiveLMS,2) );
+        end
+
         % Store the fundamentals
         effectiveLMSTable(ii,:,:) = effectiveLMS;
 
