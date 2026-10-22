@@ -32,16 +32,9 @@ options.optics.StrehlRatioOptimizationParams = struct(...
 % extent of PSFs at extreme eccentricities (> 30 degs), 
 % especially at short wavelengths
 options.optics.wavefrontSpatialSamples = 601;
-
-% Meridian: Select between {'Full2D', 'Upper', 'Lower', 'Nasal', 'Temporal'}
-options.meridian = 'Full2D';
-
-options.ageRange  = [18,50];
+options.ageRange  = 18;
 options.basePupilDiameterMm = 3.0;
-options.pupilDiameterMmRange = 1.5:0.5:4.0; % 1.5:0.5:8.0; % Range for pre-computing PSFs
-
-% Option to visualize the employed cone mosaics
-options.visualizeEmployedConeMosaics = false;
+options.pupilDiameterMmRange = 3.0; %1.5:0.5:4.0; % 1.5:0.5:8.0; % Range for pre-computing PSFs
 
 % Load the IMX219 sensitivity functions
 dataFileName = fullfile(...
@@ -58,11 +51,9 @@ camSens = [T.(channelNames{1}), T.(channelNames{2}), T.(channelNames{3})];
 % Precompute the pseudo-inverse of the camera sensitivities
 pinvCamSens = pinv(camSens');
 
-
-if (strcmp(options.meridian, 'Full2D'))
-
     % Full 2D eccentricity grid along each (x,y) position over central 70 x 40 degs
-    [X,Y] = meshgrid(-35:5:35, -20:5:20);
+    deltaEccGridDeg = 10;
+    [X,Y] = meshgrid(-35:deltaEccGridDeg:35, -20:deltaEccGridDeg:20);
     eccGrid = [X(:) Y(:)];
 
     % Add some extreme eccs now
@@ -75,27 +66,13 @@ if (strcmp(options.meridian, 'Full2D'))
     eccGrid(size(eccGrid,1)+1,:) = [40   10];
 
     eccGrid = eccGrid';
-else
-    % 1D eccentricity grid along one of the 4 principal meridians
-    if (ismember(options.meridian, {'Nasal', 'Temporal'}))
-        eccGrid = 0:1:40;
-    else
-        eccGrid = 0:1:25;
-    end
-end
-
-% Set this to true to employ the @coneMosaic based derivation of the
-% effectiveLMS. 
-% Set to false to use the previous, first-principles based approach.
-useCMosaicMethod = true;
 
 % To speed up things lets subsample the wavelenth axis;
-wlsSensorSubsample = wlsSensor(1):2:wlsSensor(end);
+deltaWls = 10;
+wlsSensorSubsample = wlsSensor(1):deltaWls:wlsSensor(end);
 
-if (useCMosaicMethod)
     % Compute defocus and astigmatism for maximizing the foveal Strehl ratio 
     opticsSupport = computeOptimalStrehlRatioDefocusAndAstigmatismForFovealOptics(options, wlsSensorSubsample);
-end
 
 % Preallocate a struct array with empty fields for the cone mapping
 coneMapVar(options.ageRange(2)) = struct(...
@@ -108,10 +85,8 @@ coneMapVar(options.ageRange(2)) = struct(...
     'basePupilDiameterMm', [],...
     'observerAge', []);
 
-
 % Loop over observer ages
 for age = options.ageRange(1):options.ageRange(1)
-    fprintf('.');
 
     % Apply the standard CIE 2006 age-dependent scaling factor to the lens density
     if age <= 60
@@ -121,43 +96,21 @@ for age = options.ageRange(1):options.ageRange(1)
     end
     lensDensity = ageScalar;
 
-    if (useCMosaicMethod)
         theConeMapVar = generateEffectiveLMSusingCmosaicMethod(wlsSensor, eccGrid, lensDensity, pinvCamSens, options, age);
-    else
-        theConeMapVar = generateEffectiveLMSusingOldMethod(wlsSensor, eccGrid, lensDensity, pinvCamSens, options, age);
-    end
-
     coneMapVar(age) = theConeMapVar;
 end
 
 
 % Compute cone-weighted PSFs for one particular lens age effectiveLMSTable
-theLensAge = 18;
-theConeMapVar = coneMapVar(theLensAge);
+theConeMapVar = coneMapVar(options.ageRange(1));
     
-
-if (useCMosaicMethod)
     opticsSupport.thePSFs = generateOpticsUsingCmosaicMethod(...
             theConeMapVar.theEmployedConeMosaics, theConeMapVar.supportWavelength, theConeMapVar.effectiveLMSTable, options, opticsSupport.theFovealOptimalStrehlRatioDefocusAndAstigmatismDiopters);
-else 
-    opticsSupport = generateOpticsUsingOldMethod(options);
-end
-
-
-if (useCMosaicMethod)
     % Save both variables in the derived directory
     saveFileName = fullfile(...
         tbLocateProjectSilent('lightLoggerAnalysis'),...
         'derived',...
-        sprintf('radianceToConeRateSupportCMosaicBased%sMeridianWithOptimizedOptics%s-%d.mat', options.meridian, options.optics.zernikeDataBase, options.optics.subjectID));
-else
-    % Save both variables in the derived directory
-    saveFileName = fullfile(...
-        tbLocateProjectSilent('lightLoggerAnalysis'),...
-        'derived',...
-        'radianceToConeRateSupport.mat');
-end
-
+        'radianceToConeSupport.mat');
 
 readme = ['Created by defineSensorToConeMappingConeMosaic.\n'...
     'coneMapVar -- a structure with values needed for conversion of radiance to cone isomerization rate.\n'...
@@ -324,12 +277,9 @@ function thePSFs = generateOpticsUsingCmosaicMethod(theEmployedConeMosaics, ...
         % computed for the first pupil size
         theInterpolatedConeFundamentals = [];
 
-        tic
-
         for iPupilSize = 1:length(options.pupilDiameterMmRange)
             opticsParams.pupilDiameterMM = options.pupilDiameterMmRange(iPupilSize);
-            tic
-            
+
             % Compute the full spectra PSF
             [~, thePSF] = RGCMosaicConstructor.helper.optics.optimized3DStrehlRatioPSF(...
 					        examinedDefocusAndAstigmatismDioptersGrid, ...
@@ -360,9 +310,6 @@ function thePSFs = generateOpticsUsingCmosaicMethod(theEmployedConeMosaics, ...
             % Save the cone weighted data
             thePSFs{ii,iPupilSize} = thePSF;
         end % for iPupilSize
-
-        fprintf('Cone-weighted PSF computation at position %d of %d finished in %1.2f minutes.\n', ...
-                ii, numel(theEmployedConeMosaics), toc/60);
 
     end % for ii
 end
@@ -512,7 +459,8 @@ function theConeMapVar = generateEffectiveLMSusingCmosaicMethod(wlsSensor, eccGr
         end
 
         % To speed up things lets subsample the wavelenth axis;
-        wlsSensorSubsample = wlsSensor(1):2:wlsSensor(end);
+        deltaWls = 10;
+        wlsSensorSubsample = wlsSensor(1):deltaWls:wlsSensor(end);
         
         % Generate cone mosaic at the desired eccentricity
         theConeMosaic = cMosaic(...
