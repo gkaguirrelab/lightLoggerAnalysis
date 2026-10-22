@@ -372,7 +372,6 @@ function theConeMapVar = generateEffectiveLMSusingCmosaicMethod(wlsSensor, delta
 
             eccentricityDegs = [theEccDegs(1) theEccDegs(2)];
         
-
         % To speed up things lets subsample the wavelength axis;
         wlsSensorSubsample = wlsSensor(1):deltaWls:wlsSensor(end);
         
@@ -530,10 +529,6 @@ function coneDensitiesConesPerSquaredDegree = computeConeDensity(theConeMosaic)
     idx = find(theConeMosaic.coneTypes(theConeIndices) == cMosaic.SCONE_ID);
     theSconeIndices = theConeIndices(idx);
 
-    fprintf('Will compute density based on %d (out of %d) cones (%d+%d+%d) within a radius of %2.2fdegs\n', ...
-        numel(theConeIndices), theConeMosaic.conesNum, ...
-        numel(theLconeIndices), numel(theMconeIndices), numel(theSconeIndices), theRadiusDegs);
-
     theArea = pi * theRadiusDegs^2;
     
     coneDensitiesConesPerSquaredDegree(1) = numel(theLconeIndices)/theArea;
@@ -563,115 +558,5 @@ function theScene = generateMonochromaticScene(fovDegs, pixelsNum, ...
         end
     end
     theScene = sceneSet(theScene,'energy',energy);
-end
-
-
-
-function theConeMapVar = generateEffectiveLMSusingOldMethod(wlsSensor, eccGrid, lensDensity, pinvCamSens, options, age)
-
-    % Instantiate ISETbio lens directly
-    lens = Lens('wave', wlsSensor);
-    lens.density = lensDensity;
-
-    % Instantiate continuous Macular and PhotoPigment objects.
-    % Bypassing discrete cMosaic spatial generation eliminates lattice noise
-    % and drastically improves execution speed.
-    suppressedText = evalc('dummyCm = cMosaic(''sizeDegs'', [0.1 0.1], ''wave'', wlsSensor);');
-    macularObj = dummyCm.macular;
-    pigmentObj = dummyCm.pigment;
-
-    % Cache the baseline foveal densities to scale inside the loop
-    baseMacularDensity = macularObj.density;
-    basePigmentOpticalDensity = pigmentObj.opticalDensity;
-
-    % Pre-calculate constants for photon conversion
-    h = 6.626e-34; % Planck's constant (J*s)
-    c = 2.998e8;   % Speed of light (m/s)
-    energyToQuanta = (wlsSensor .* 1e-9) ./ (h * c); % Quanta per Joule
-
-    % Eye geometry constants for calculating retinal irradiance
-    focalLengthM = 0.017;
-    pupilAreaM2 = pi * (options.basePupilDiameterMm / 2000)^2;
-
-    transformTable = zeros(length(eccGrid), 9);
-    densityTable = zeros(length(eccGrid), 3); % Store L, M, S cone densities
-
-    % Report we are starting age loop
-    fprintf('Generating %d ISETbio age profiles', range(options.ageRange))
-
-    % Loop over scalar eccentricities to build the LUT
-    for ii = 1:length(eccGrid)
-        fprintf('Analyzing ecc: %f\n', eccGrid(ii));
-        ecc = eccGrid(ii);
-
-        % Clamp eccentricity for the anatomical query to 60 degrees
-        safeEccAperture = min(ecc, 60);
-        eccMeters = safeEccAperture * (300 * 1e-6);
-
-        % Calculate the scaled cone outer segment aperture area
-        [~, apertureDiameterMeters] = coneSizeReadData('eccentricity', eccMeters, 'angle', 0);
-        coneApertureM2 = pi * (apertureDiameterMeters / 2)^2;
-
-
-        % Extract total cone density
-        coneDensitySqMm = coneDensityReadData('eccentricity', eccMeters, 'angle', 0);
-        mmPerDeg = 300 * 1e-3;
-        coneDensitySqDeg = coneDensitySqMm * (mmPerDeg^2);
-
-        % Assume a fixed, 10% S-cone fraction
-        sFraction = 0.1;
-        lmFraction = 1.0 - sFraction;
-        lFraction = lmFraction * (0.6 / 0.9);
-        mFraction = lmFraction * (0.3 / 0.9);
-
-        % Store the densities
-        densityTable(ii, 1) = coneDensitySqDeg * lFraction;
-        densityTable(ii, 2) = coneDensitySqDeg * mFraction;
-        densityTable(ii, 3) = coneDensitySqDeg * sFraction;
-
-        % Scale macular pigment density
-        macularObj.density = baseMacularDensity .* exp(-ecc / 2.0);
-        pigmentObj.opticalDensity = basePigmentOpticalDensity;
-
-        % Recalculate radiometric scalar for this eccentricity
-        radiometricScalar = (pupilAreaM2 / focalLengthM^2) * coneApertureM2;
-
-        % Base LMS absorptance and sensitivities
-        baseLMS = diag(lens.transmittance) * pigmentObj.absorptance;
-        baseLMS = diag(energyToQuanta) * baseLMS .* radiometricScalar;
-        effectiveLMS = diag(macularObj.transmittance) * baseLMS;
-
-        if (1==2)
-            figure(1); clf;
-            plot(wlsSensor, effectiveLMS(:,1), 'r-');
-            hold on;
-            plot(wlsSensor, effectiveLMS(:,2), 'g-');
-            plot(wlsSensor, effectiveLMS(:,3), 'b-');
-            
-            save('effectiveLMSoldmethod.mat', 'effectiveLMS', 'wlsSensor');
-            disp('here')
-            pause;
-        end
-
-        % Calculate 3x3 transformation matrix from Camera RGB to LMS rates
-        T_mat = effectiveLMS' * pinvCamSens;
-
-        % Store the fundamentals
-        effectiveLMSTable(ii,:,:) = effectiveLMS;
-
-        % Flatten the 3x3 matrix (column-major) into a 1x9 row for the LUT
-        transformTable(ii, :) = T_mat(:)';
-        assert(~any(isnan(T_mat(:)')))
-    end
-
-    
-    % Store the results
-    theConeMapVar.supportWavelength = wlsSensor; 
-    theConeMapVar.effectiveLMSTable = effectiveLMSTable;
-    theConeMapVar.eccGrid = eccGrid;
-    theConeMapVar.transformTable = transformTable;
-    theConeMapVar.densityTable = densityTable;
-    theConeMapVar.basePupilDiameterMm = options.basePupilDiameterMm;
-    theConeMapVar.observerAge = age;
 end
 
