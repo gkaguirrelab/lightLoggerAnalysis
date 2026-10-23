@@ -7,16 +7,19 @@ loading, and accelerometer timestamp generation.
 """
 
 import os
-import numpy as np 
-from pathlib import Path
-from natsort import natsorted 
-from tqdm.auto import tqdm
-from typing import Any, Iterable
 import sys
+from functools import lru_cache
+from pathlib import Path
+from typing import Any, Iterable
+
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import scipy.io
+from natsort import natsorted
+from scipy.interpolate import CubicSpline
 from scipy.optimize import lsq_linear
+from tqdm.auto import tqdm
 
 
 # Define constants for the project calibration data used to reconstruct the
@@ -86,6 +89,119 @@ MS_NAMES_AND_CHANNELS: dict[str, int] = {sensor_name: num_channels
                                          for sensor_name, num_channels 
                                          in zip(MS_SENSOR_NAMES, (MS_AS_CHANNELS, MS_TS_CHANNELS, MS_LS_CHANNELS, MS_TEMP_CHANNELS))
                                         }
+
+
+# Joint-fit defaults match estimateJointRadianceSpectrum.m. These are model
+# choices, not measured calibration coefficients; callers may tune the fit defaults.
+MS_JOINT_CHANNEL_COUNT: int = 7  # AS7341 F1-F7; combined with camera RGB.
+MS_JOINT_BASE_ALPHA: float = 5e7
+MS_JOINT_REFERENCE_INTENSITY: float = 0.05
+MS_JOINT_BETA: float = 10.0
+MS_JOINT_SOLVER_TOLERANCE: float = 1e-12
+MS_JOINT_SOLVER_MAX_ITERATIONS: int = 5000
+
+
+@lru_cache(maxsize=1)
+def _joint_radiance_model() -> tuple[np.ndarray, np.ndarray]:
+    """Return the joint sensitivity matrix and the fitted-wavelength mask.
+
+    Camera sensitivities are splined onto the minispect wavelength support,
+    zeroed outside their measured range, and max-normalized as in MATLAB.
+    """
+    # Numeric export of the canonical MATLAB table (cameraWls=T{:,1},
+    # cameraSens=[T.red,T.green,T.blue]); checked by the validation notebook.
+    camera: dict[str, Any] = scipy.io.loadmat(
+        _DATA_DIR / "IMX219_spectralSensitivity_numeric.mat"
+    )
+    camera_t: np.ndarray = CubicSpline(
+        camera["cameraWls"].ravel(), camera["cameraSens"], axis=0
+    )(MS_SPECTRAL_WAVELENGTHS)
+    camera_t[
+        (MS_SPECTRAL_WAVELENGTHS < camera["cameraWls"].min())
+        | (MS_SPECTRAL_WAVELENGTHS > camera["cameraWls"].max())
+    ] = 0
+    camera_t /= camera_t.max(axis=0)
+    model: np.ndarray = np.vstack((MS_SPECTRAL_SENSITIVITY[:MS_JOINT_CHANNEL_COUNT], camera_t.T))
+    active: np.ndarray = (MS_SPECTRAL_WAVELENGTHS > 200) & (
+        MS_SPECTRAL_WAVELENGTHS < 1000
+    )
+    return model, active
+
+
+def estimate_joint_radiance_spectrum(
+    minispect_values: np.ndarray,
+    camera_rgb_radiance: np.ndarray,
+    base_alpha: float = MS_JOINT_BASE_ALPHA,
+    reference_intensity: float = MS_JOINT_REFERENCE_INTENSITY,
+    beta: float = MS_JOINT_BETA,
+    solver_tolerance: float = MS_JOINT_SOLVER_TOLERANCE,
+    solver_max_iterations: int = MS_JOINT_SOLVER_MAX_ITERATIONS,
+) -> tuple[np.ndarray, np.ndarray, float | np.ndarray, np.ndarray]:
+    """Match estimateJointRadianceSpectrum using spatial/temporal RGB means.
+
+    Accept one AS reading and RGB triplet, or matching buffers (readings, channels)
+    and (readings, 3). Returns spectrum, S, fVal and ten signed channel residuals.
+    Spatial means of the temporally averaged demosaiced maps are sufficient;
+    callers need not allocate or retain full mean maps. S is [start, step, count].
+
+    base_alpha controls smoothness, reference_intensity scales that penalty by
+    measured intensity, and beta controls shrinkage. Solver tolerance/iteration
+    defaults govern numerical convergence. Defaults preserve the existing fit.
+    """
+    values: np.ndarray = np.asarray(minispect_values, dtype=np.float64)
+    rgb: np.ndarray = np.asarray(camera_rgb_radiance, dtype=np.float64)
+    single: bool = values.ndim == 1
+    if values.ndim not in (1, 2) or values.shape[-1] < MS_JOINT_CHANNEL_COUNT:
+        raise ValueError(
+            "Expected one AS reading or a buffer with at least seven channels."
+        )
+    values = np.atleast_2d(values)
+    if rgb.shape != ((3,) if single else (len(values), 3)):
+        raise ValueError("Camera RGB means must match the AS reading count.")
+    y: np.ndarray = np.column_stack(
+        (values[:, :MS_JOINT_CHANNEL_COUNT] / 10 ** MS_RADIANCE_WEIGHTS[:MS_JOINT_CHANNEL_COUNT], np.atleast_2d(rgb))
+    )
+    if not np.all(np.isfinite(y)) or np.any(y < 0):
+        raise ValueError("Joint radiance measurements must be finite and nonnegative.")
+
+    # Reuse the calibrated model across readings and recording chunks.
+    model, active = _joint_radiance_model()
+    spectra: np.ndarray = np.zeros((len(values), model.shape[1]))
+    channel_count: int = model.shape[0]
+    errors: np.ndarray = np.empty((len(values), channel_count))
+
+    # Eliminate fixed-zero variables: scipy requires strictly unequal bounds.
+    forward: np.ndarray = model[:, active]
+    derivative: np.ndarray = MS_RADIANCE_SECOND_DERIVATIVE[:, active]
+    shrinkage: np.ndarray = np.sqrt(beta) * np.eye(np.count_nonzero(active))
+    target: np.ndarray = np.zeros(
+        forward.shape[0] + derivative.shape[0] + shrinkage.shape[0]
+    )
+
+    # Allocate the augmented system once per buffer; only smoothness changes.
+    system: np.ndarray = np.vstack((forward, derivative, shrinkage))
+
+    for index, observed in enumerate(y):
+        if not np.any(observed):
+            errors[index] = 0
+            continue
+        alpha = base_alpha * reference_intensity / (observed.mean() + np.finfo(float).eps)
+        np.multiply(derivative, np.sqrt(alpha), out=system[channel_count : channel_count + len(derivative)])
+        target[:channel_count] = observed
+        fit = lsq_linear(system, target, bounds=(0, np.inf), tol=solver_tolerance, max_iter=solver_max_iterations)
+        if not fit.success:
+            raise RuntimeError(
+                f"Joint spectral fit failed at reading {index}: {fit.message}"
+            )
+        spectra[index, active] = fit.x
+        errors[index] = observed - model @ spectra[index]
+
+    fvals: np.ndarray = np.linalg.norm(errors, axis=1)
+    # Restore the caller's single-reading or buffer shape.
+    if single:
+        return spectra[0], MS_SPECTRAL_SAMPLING.copy(), float(fvals[0]), errors[0]
+
+    return spectra, MS_SPECTRAL_SAMPLING.copy(), fvals, errors
 
 
 def estimate_radiance_spectrum_form_ms(minispect_values: np.ndarray,

@@ -58,6 +58,7 @@ for path in custom_library_paths:
     sys.path.append(path)
 
 # Import the custom libraries
+import sensors_utility
 import video_io 
 import virtual_foveation
 import spd_util
@@ -112,22 +113,28 @@ def _open_path_for_writing_with_blocking_retry(save_path: pathlib.Path, verbose:
 
             time.sleep(retry_delay_seconds)
 
-def get_subject_ids(FLIC_subject_dir: str="/Users/zacharykelly/Library/CloudStorage/Dropbox-Aguirre-BrainardLab/Zachary Kelly/FLIC_subject/NEWscriptedIndoorOutdoorVideos2026") -> set[int]:
-    """Return the union of the Migraine and test-subject session IDs."""
+def get_subject_ids(FLIC_subject_dir: str="/Users/zacharykelly/Library/CloudStorage/Dropbox-Aguirre-BrainardLab/Zachary Kelly/FLIC_subject/NEWscriptedIndoorOutdoorVideos2026") -> dict[int, int]:
+    """Return {numeric subject ID: age in years} from both session workbooks.
 
-    # First, let's collect the expected subjects from both session workbooks.
-    # We use a set so a subject listed more than once is only checked once.
-    # These are the subjects we EXPECT to find, including any missing on disk.
+    Duplicate IDs within or across workbooks are allowed when ages agree;
+    conflicting ages raise ValueError. Rows without an ID are ignored; subjects require a
+    nonnegative whole-number age.
+    """
+
+    # Collect the expected subjects from both session workbooks.
     session_filepaths: tuple[str, str] = (
-        os.path.join(FLIC_subject_dir, "FLIC_SessionsMigraine_LL.xlsx"),
+        os.path.join(FLIC_subject_dir, "FLIC_SubjectSummaryMigraine_LL.xlsx"),
         os.path.join(
             FLIC_subject_dir,
             "Test_Subjects",
-            "FLIC_Sessions_LL.xlsx",
+            "FLIC_SubjectSummary_LL.xlsx",
         ),
     )
 
-    subject_ids: set[int] = set()
+    # Map each numeric subject ID to its age in years.
+    subject_ids: dict[int, int] = {}
+
+    # Iterate over the filepaths which contain the subject information
     for session_filepath in session_filepaths:
         if(not os.path.isfile(session_filepath)):
             raise FileNotFoundError(
@@ -135,7 +142,9 @@ def get_subject_ids(FLIC_subject_dir: str="/Users/zacharykelly/Library/CloudStor
                 f"{session_filepath}"
             )
 
+        # Make it a pandas dataframe
         df: pd.DataFrame = pd.read_excel(session_filepath, header=0)
+        
         # Strip spaces from the headings before looking up the ID column.
         # Blank ID cells are dropped below before parsing the FLIC_<ID> names.
         df.columns = df.columns.astype(str).str.strip()
@@ -144,11 +153,26 @@ def get_subject_ids(FLIC_subject_dir: str="/Users/zacharykelly/Library/CloudStor
                 f"Subject ID column not found in {session_filepath}. "
                 f"Columns: {list(df.columns)}"
             )
+        if("Age" not in df.columns):
+            raise KeyError(f"Age column not found in {session_filepath}. Columns: {list(df.columns)}")
 
-        subject_ids.update(
-            _extract_num_from_id(str(subject_id).strip())
-            for subject_id in df["Subject ID"].dropna()
-        )
+        # Ignore empty ID rows, but do not silently omit subjects missing an age.
+        relevant_columns_df: pd.DataFrame = df[["Subject ID", "Age"]]
+        for subject_name, age in relevant_columns_df.itertuples(index=False, name=None):
+            if pd.isna(subject_name) or str(subject_name).strip().lower() == "nan":
+                break
+
+            # Get the subject name and ID
+            subject_id: int = _extract_num_from_id(str(subject_name).strip().strip("*"))    
+            numeric_age: int = int(age)
+
+            # Repeated IDs are fine only when their validated ages agree.
+            if subject_id in subject_ids and subject_ids[subject_id] != int(numeric_age):
+                raise ValueError(
+                    f"Age mismatch for FLIC_{subject_id} in {session_filepath}: "
+                    f"previous age {subject_ids[subject_id]}, new age {int(numeric_age)}"
+                )
+            subject_ids[subject_id] = int(numeric_age)
 
     return subject_ids
 
@@ -478,11 +502,7 @@ def generate_egocentric_mapper_results(src_dir: str="/Volumes/FLIC_raw/NEWscript
                 )
                 neon_timeseries_dir: str = os.path.dirname(
                     neon_timestamp_paths[0]
-                )
-
-                print(f"THIS IS THE NEON TIMESERIES DIR: {neon_timeseries_dir}")
-
-                
+                )        
 
                 world_video_path: str = os.path.join(
                     dst_dir,
@@ -567,6 +587,126 @@ def generate_egocentric_mapper_results(src_dir: str="/Volumes/FLIC_raw/NEWscript
 
     return 
 
+def run_transformation_pipeline(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026",
+                                dst_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoorVideos2026",
+                                overwrite_existing: bool=False,
+                                subjects_to_skip: Iterable=set(),
+                                subjects_to_process: Iterable=set(),
+                                activities_to_skip: Iterable=set(),
+                                activities_to_process: Iterable=set(),
+                                verbose: bool=False,
+                                n_workers: int=world_util.WORLD_IMPUTATION_WORKERS,
+                                demosaic_n_workers: int=world_util.WORLD_DEMOSAIC_WORKERS,
+                               ) -> None:
+    """Run world reconstruction, then joint MS spectra, for each numbered recording.
+
+    Uses the same dataset roots, subject/activity filters, overwrite switch,
+    and progress reporting as generate_egocentric_mapper_results. The chunk
+    wrapper processes world frames first and saves W/transformed.hdf5 beneath
+    GKA/<recording_number>. Saved per-frame RGB averages then feed MS midpoint
+    windows and joint spectrum fitting, saved to M/transformed.hdf5.
+    Completed world files and completed MS files are skipped independently unless
+    overwrite_existing=True. Set both worker counts to 1 for serial processing.
+    """
+
+    # Retrieve the ages of all subjects. We will need this for the transformation 
+    # pipeline 
+    subject_ages: dict[int, int] = get_subject_ids()
+
+    # Gather the subject paths for the desired subjects
+    subject_paths: list[str] = natsorted([
+        subject_path
+        for subject_name in os.listdir(src_dir)
+        if re.fullmatch(r"FLIC_\d+", subject_name)
+        and os.path.isdir( (subject_path := os.path.join(src_dir, subject_name) ) )
+        and _is_desired_item(_extract_num_from_id(subject_name), subjects_to_process, subjects_to_skip)
+    ])
+    assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}"
+
+    # Now, let's iterate over all the subject paths
+    subject_iterator: Iterable = range(len(subject_paths)) if verbose is False else tqdm(range(len(subject_paths)), desc="Processing Subjects", leave=True)
+    for subject_num in subject_iterator:
+        # Retrieve the subject path and subject name
+        subject_path: str = subject_paths[subject_num]
+        subject_id: str = os.path.basename(subject_path)
+        subject_age: int = subject_ages[_extract_num_from_id(subject_id)]
+        
+
+        # Iterate over the activities for this subject
+        activites_paths: list[str] = [
+            activity_path
+            for filename in natsorted(os.listdir(subject_path))
+            if os.path.isdir(  ( activity_path := os.path.join(subject_path, filename)  ))
+            and _is_desired_item(filename, activities_to_process, activities_to_skip)
+        ]
+        activities_iterator: Iterable = range(len(activites_paths)) if verbose is False else tqdm(range(len(activites_paths)), desc="Processing Activities", leave=False)
+        for activity_num in activities_iterator:
+            # Retrieve the activity path and activity name
+            activity_path: str = activites_paths[activity_num]
+            activity_name: str = os.path.basename(activity_path)
+
+            # GKA now contains one numerical directory per recording attempt.
+            # Ignore nonnumeric entries so ancillary files cannot be mistaken
+            # for raw chunk directories.
+            gka_input_dir: str = os.path.join(activity_path, "GKA")
+            assert os.path.isdir(gka_input_dir), f"Problem with: {gka_input_dir}"
+            
+            # Get the number of recordings for this activity
+            recording_numbers: list[str] = natsorted([
+                filename
+                for filename in os.listdir(gka_input_dir)
+                if filename.isdigit()
+                and os.path.isdir(os.path.join(gka_input_dir, filename))
+            ])
+            assert len(recording_numbers) > 0, (
+                f"No numerical recording directories found in: {gka_input_dir}"
+            )
+
+            # Transform each recording independently, preserving its recording number.
+            for recording_number in recording_numbers:
+                world_recording_in: str = os.path.join(
+                    gka_input_dir, recording_number
+                )
+                assert len(os.listdir(world_recording_in)) > 0, (
+                    f"World recording directory is empty: {world_recording_in}"
+                )
+
+                # Generate the output path for this recording
+                recording_output_path: str = os.path.join(
+                    dst_dir,
+                    subject_id,
+                    activity_name,
+                    "GKA",
+                    recording_number,
+                )
+
+                if verbose:
+                    print(f"Input: {world_recording_in}")
+                    print(f"Output: {recording_output_path}")
+
+                # Load this recording's cleaned mapped gaze (x/y are in pixels).
+                # The transformation currently accepts this array but does not yet use it.
+                cleaned_gaze_path: str = os.path.join(
+                    dst_dir, subject_id, activity_name, "Neon", recording_number,
+                    "egocentric_mapper_results", "cleaned_eye_data.csv",
+                )
+                gaze_angles_xy: np.ndarray = pd.read_csv(
+                    cleaned_gaze_path, usecols=["gaze x [px]", "gaze y [px]"]
+                )[["gaze x [px]", "gaze y [px]"]].to_numpy(dtype=np.float64)
+
+                # Process world data first, then MS spectra using the saved RGB averages.
+                sensors_utility.process_raw_recording(
+                    path_to_raw=world_recording_in,
+                    output_path=recording_output_path,
+                    age=subject_age,
+                    gaze_angles_xy=gaze_angles_xy,
+                    overwrite_existing=overwrite_existing,
+                    verbose=verbose,
+                    n_workers=n_workers,
+                    demosaic_n_workers=demosaic_n_workers,
+                )
+
+
 def clean_eye_data(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026",
                    dst_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoorVideos2026",
                    overwrite_existing: bool=False,
@@ -576,7 +716,10 @@ def clean_eye_data(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideo
                    activities_to_process: Iterable[str]=(),
                    verbose: bool=False,
                    show_plots: bool=False) -> None:
-    """Clean selected subjects/activities and save Neon/<attempt>/cleaned_eye_data.csv.
+    """Save cleaned_eye_data.csv in Neon/<attempt>/egocentric_mapper_results.
+
+    The cleaned pixel gaze and eye measurements sit beside the mapper CSVs
+    and egocentric_mapper_metadata.pkl from the mapping stage.
 
     Explicit process filters override skip filters. Existing files are skipped
     unless overwrite_existing=True. verbose shows progress; show_plots displays
@@ -644,7 +787,9 @@ def clean_eye_data(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideo
                 output_dir: str = os.path.join(
                     dst_dir, subject_id, activity_name, "Neon", recording_number
                 )
-                output_path: str = os.path.join(output_dir, "cleaned_eye_data.csv")
+                # Keep cleaned gaze beside this recording's mapper metadata/CSVs.
+                mapper_dir: str = os.path.join(output_dir, "egocentric_mapper_results")
+                output_path: str = os.path.join(mapper_dir, "cleaned_eye_data.csv")
 
                 # Only overwrite if desired 
                 if not overwrite_existing and os.path.isfile(output_path):
@@ -665,7 +810,6 @@ def clean_eye_data(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideo
 
                 # Save the raw neon path as well as the path to the egocentric video mapper results
                 raw_neon_path: str = export_directories[0]
-                mapper_dir: str = os.path.join(output_dir, "egocentric_mapper_results")
 
                 if verbose:
                     print(
@@ -678,18 +822,19 @@ def clean_eye_data(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideo
                     raw_neon_path, mapper_dir, verbose=show_plots
                 )
                 
-                # Format into a dataframe os we can write to CSV easily
+                # Write inside the recording loop so every attempt gets its own CSV.
                 cleaned_df: pd.DataFrame = pd.DataFrame(
-                cleaned_data,
-                columns=[
-                    "time [s]",
-                    "pupil diameter [mm]",
-                    "eyelid aperture [mm]",
-                    "gaze x [px]",
-                    "gaze y [px]",
-                ],
-            )
-            cleaned_df.to_csv(output_path, index=False)
+                    cleaned_data,
+                    columns=[
+                        "time [s]",
+                        "pupil diameter [mm]",
+                        "eyelid aperture [mm]",
+                        "gaze x [px]",
+                        "gaze y [px]",
+                    ],
+                )
+                os.makedirs(mapper_dir, exist_ok=True)
+                cleaned_df.to_csv(output_path, index=False)
     return
 
 
