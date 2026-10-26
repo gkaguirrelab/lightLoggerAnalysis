@@ -4,6 +4,12 @@ import os
 import sys
 import matplotlib.pyplot as plt
 import subprocess
+import pickle
+import time
+from datetime import datetime, timezone
+from mapper_metadata import (
+    MapperMetadata, ParsedMapperMetadata, capture_mapper_output, parse_mapper_output,
+)
 from typing import Literal
 
 egocentric_video_mapper_path: str = os.path.join(os.path.dirname(__file__), "egocentric_video_mapper")
@@ -162,6 +168,11 @@ def run_egocentric_video_mapper(neon_timeseries_dir: str,
     
     """Run egocentric video mapper.
 
+    Preserve live console output and save temporal alignment diagnostics and
+    run settings to output_dir/egocentric_mapper_metadata.pkl. The temporary
+    console transcript is removed on success or failure. Existing pipeline
+    results skipped by overwrite_existing=False are not backfilled.
+
     Args:
         neon_timeseries_dir: Path-like input for neon timeseries dir.
         alternative_vid_path: Path-like input for alternative vid path.
@@ -189,9 +200,6 @@ def run_egocentric_video_mapper(neon_timeseries_dir: str,
     os.makedirs(os.path.dirname(temp_output_path), exist_ok=True)
     convert_avi_to_mp4(alternative_vid_path, temp_output_path)
 
-    print(f"NEON TIMESERIES DIR: {neon_timeseries_dir}")
-    print(f"TEMP OUTPUT MP4 GOING TO: {temp_output_path}")
-
     # Package the args for the egocentric video mapper 
     args: Args = Args(neon_timeseries_dir, 
                       temp_output_path, 
@@ -204,8 +212,42 @@ def run_egocentric_video_mapper(neon_timeseries_dir: str,
                       render_video
                     )
 
-    # Run the egocentric video mapper
-    egocentric_main.main(args)
+    # Capture the same output in a temporary text file 
+    # as displayed in e.g. a jupyter output cell. We do 
+    # this to extract metadata such as the quality of the match 
+    # between videos and so on
+    started_at: str = datetime.now(timezone.utc).isoformat()
+    started: float = time.perf_counter()
+    with capture_mapper_output() as transcript:
+        
+        egocentric_main.main(args)
+        
+        # Read while the temporary file is still open; leaving the context deletes it.
+        parsed: ParsedMapperMetadata = parse_mapper_output(transcript)
+    
+    
+    # Only successful mapper runs reach this point and receive completed metadata.
+    metadata: MapperMetadata = {
+        **parsed,
+        "started_at_utc": started_at,
+        "elapsed_seconds": time.perf_counter() - started,
+        "status": "completed",
+        "inputs": {
+            "neon_timeseries_dir": os.fspath(neon_timeseries_dir),
+            "alternative_vid_path": os.fspath(alternative_vid_path),
+        },
+        "settings": {
+            "mapping_choice": mapping_choice,
+            "refresh_time_threshold_sec": refresh_time_threshold_sec,
+            "render_video": render_video,
+            "render_video_comparison": render_video_comparison,
+            "optic_flow_algorithm": optic_flow_algorithm,
+            "image_matcher": image_matcher,
+        },
+    }
+    # Save beside the CSVs so the preprocessing pipeline copies it with the results.
+    with open(os.path.join(output_dir, "egocentric_mapper_metadata.pkl"), "wb") as f:
+        pickle.dump(metadata, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     # Remove the temporary video 
     os.remove(temp_output_path)

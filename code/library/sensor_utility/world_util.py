@@ -1681,7 +1681,8 @@ def _interpolate_channel(radiance_map: np.ndarray,
 def _interpolate_ratio_channel(radiance_map: np.ndarray,
                                channel_idx: np.ndarray,
                                full_grid_g: np.ndarray,
-                               image_shape: tuple[int, int]
+                               image_shape: tuple[int, int],
+                               ratio_epsilon: float = 1e-6
                               ) -> np.ndarray:
     """Interpolate a red or blue channel using green as a guide.
 
@@ -1694,6 +1695,7 @@ def _interpolate_ratio_channel(radiance_map: np.ndarray,
         channel_idx: Array of (row, col) positions for the red or blue channel.
         full_grid_g: Interpolated green plane, with the same spatial shape.
         image_shape: Output dimensions as (rows, cols).
+        ratio_epsilon: Added to the green denominator, default 1e-6.
 
     Returns:
         The reconstructed color plane, with original infinite sites restored.
@@ -1718,9 +1720,8 @@ def _interpolate_ratio_channel(radiance_map: np.ndarray,
 
     # Compute the colour ratio (R/G or B/G) using the NaN-masked working values.
     # Add a small epsilon to the denominator to prevent division by zero.
-    epsilon: float = 1e-6
     with np.errstate(divide="ignore", invalid="ignore"):
-        ratio_sub: np.ndarray = work_sub / (guide_val + epsilon)
+        ratio_sub: np.ndarray = work_sub / (guide_val + ratio_epsilon)
 
     # Filter out NaN values for fitting.
     valid_idx: np.ndarray = ~np.isnan(ratio_sub)
@@ -1767,7 +1768,8 @@ def _interpolate_ratio_channel(radiance_map: np.ndarray,
 # ratio supplies the colour. Blue is handled identically.
 # ---------------------------------------------------------------------------
 def _demosaic_radiance_map_rcd_single(radiance_map: np.ndarray,
-                                      bayer_pattern: str
+                                      bayer_pattern: str,
+                                      ratio_epsilon: float = 1e-6
                                      ) -> np.ndarray:
     """Reconstruct RGB radiance from one Bayer frame using green-guided ratios.
 
@@ -1809,10 +1811,10 @@ def _demosaic_radiance_map_rcd_single(radiance_map: np.ndarray,
     # 2. Interpolate Red and Blue channels using the Ratio-Corrected approach.
     # This interpolates the R/G and B/G ratios, then multiplies by the full Green channel.
     full_grid_r: np.ndarray = _interpolate_ratio_channel(
-        radiance_map, rgb_idx[0], full_grid_g, (rows, cols)
+        radiance_map, rgb_idx[0], full_grid_g, (rows, cols), ratio_epsilon
     )
     full_grid_b: np.ndarray = _interpolate_ratio_channel(
-        radiance_map, rgb_idx[2], full_grid_g, (rows, cols)
+        radiance_map, rgb_idx[2], full_grid_g, (rows, cols), ratio_epsilon
     )
 
     # Assemble into a rows x cols x 3 matrix (R, G, B).
@@ -1865,7 +1867,8 @@ def _demosaic_shared_worker(frame_index: int,
                              bayer_pattern: str,
                              input_name: str,
                              output_name: str,
-                             input_shape: tuple[int, ...]
+                             input_shape: tuple[int, ...],
+                             ratio_epsilon: float = 1e-6
                             ) -> None:
     """Demosaic one frame into its exclusive shared RGB output slice.
 
@@ -1887,7 +1890,7 @@ def _demosaic_shared_worker(frame_index: int,
             source: np.ndarray = np.ndarray(input_shape, dtype=np.float64, buffer=input_memory.buf)
             output: np.ndarray = np.ndarray((*input_shape, 3), dtype=np.float64, buffer=output_memory.buf)
             try:
-                output[frame_index] = _demosaic_radiance_map_rcd_single(source[frame_index], bayer_pattern)
+                output[frame_index] = _demosaic_radiance_map_rcd_single(source[frame_index], bayer_pattern, ratio_epsilon)
             finally:
                 del source, output
         finally:
@@ -1898,7 +1901,8 @@ def _demosaic_shared_worker(frame_index: int,
 
 def _demosaic_shared_buffer(values: np.ndarray,
                              bayer_pattern: str,
-                             worker_pool: Pool
+                             worker_pool: Pool,
+                             ratio_epsilon: float = 1e-6
                             ) -> np.ndarray:
     """Process a buffer with existing workers, transferring only task descriptors.
 
@@ -1922,7 +1926,7 @@ def _demosaic_shared_buffer(values: np.ndarray,
                 np.copyto(shared_input, values)
                 worker_pool.starmap(
                     _demosaic_shared_worker,
-                    ((index, bayer_pattern, input_memory.name, output_memory.name, values.shape)
+                    ((index, bayer_pattern, input_memory.name, output_memory.name, values.shape, ratio_epsilon)
                      for index in range(len(values))),
                     chunksize=1,
                 )
@@ -1941,7 +1945,8 @@ def _demosaic_shared_buffer(values: np.ndarray,
 def demosaic_radiance_map_rcd(radiance_map_or_buffer: np.ndarray,
                               bayer_pattern: str="BGGR",
                               visualize_results: bool=False,
-                              worker_pool: Pool | None = None
+                              worker_pool: Pool | None = None,
+                              ratio_epsilon: float = 1e-6
                              ) -> np.ndarray | tuple[np.ndarray, object]:
     """Demosaic a Bayer-pattern radiance map into a 3-D RGB image.
 
@@ -1954,7 +1959,8 @@ def demosaic_radiance_map_rcd(radiance_map_or_buffer: np.ndarray,
     their respective output channel after demosaicing when usable samples exist.
     A channel with no usable samples is NaN, matching MATLAB's early return.
     Input values are preserved and output uses float64 in the same radiance units.
-    Green is interpolated first; red and blue use color / (green + 1e-6).
+    Green is interpolated first; red and blue use color / (green + ratio_epsilon).
+    ratio_epsilon defaults to 1e-6 and is passed to serial and pooled workers.
     Intact channel geometry is cached to avoid triangulating every video frame.
     Missing samples use the scattered fallback, where SciPy and MATLAB may
     choose different valid triangles.
@@ -2009,14 +2015,14 @@ def demosaic_radiance_map_rcd(radiance_map_or_buffer: np.ndarray,
 
     # Demosaic one map directly, or every frame of a buffer independently.
     if(values.ndim == 2):
-        result: np.ndarray = _demosaic_radiance_map_rcd_single(values, bayer_pattern)
+        result: np.ndarray = _demosaic_radiance_map_rcd_single(values, bayer_pattern, ratio_epsilon)
     elif(worker_pool is not None and len(values) > 1):
-        result = _demosaic_shared_buffer(values, bayer_pattern, worker_pool)
+        result = _demosaic_shared_buffer(values, bayer_pattern, worker_pool, ratio_epsilon)
     else:
         # Allocate the buffer once instead of retaining frames and stacking a copy.
         result = np.empty((*values.shape, 3), dtype=np.float64)
         for frame_index, frame in enumerate(values):
-            result[frame_index] = _demosaic_radiance_map_rcd_single(frame, bayer_pattern)
+            result[frame_index] = _demosaic_radiance_map_rcd_single(frame, bayer_pattern, ratio_epsilon)
 
     # If visualize results is true, we will print an output of what the image looks like
     if(visualize_results is True):
@@ -3611,7 +3617,9 @@ def world_raw_frames_from_chunks(path_to_recording: str,
 
 def world_counts_to_radiance(image_or_video: np.ndarray,
                              agc_settings: dict[str, float | np.ndarray],
-                             visualize_results: bool=False
+                             visualize_results: bool=False,
+                             radiance_agc_target: float = 127.0,
+                             camera_bit_depth: int = 8
                             ) -> None:
     """Convert corrected world-camera counts to absolute radiance units.
 
@@ -3624,6 +3632,8 @@ def world_counts_to_radiance(image_or_video: np.ndarray,
             ``cameraExposure``, ``cameraAgain``, and ``AGCDgain``. Values may
             be scalars or one-dimensional arrays containing one value per
             frame.
+        radiance_agc_target: AGC target in sensor counts, default 127.
+        camera_bit_depth: Bit depth defining the maximum sensor count, default 8.
         visualize_results: When ``True``, display the counts before and after
             conversion. Visualization supports a single frame only.
 
@@ -3643,8 +3653,8 @@ def world_counts_to_radiance(image_or_video: np.ndarray,
 
     # Match reconstructionPipeline.m: undo digital gain at the AGC target,
     # subtract dark signal, then invert the sensor response for each frame.
-    set_point: np.ndarray = 127.0 / np.asarray(digital_gain, dtype=np.float64) - WORLD_DARK_SIGNAL
-    smax: float = 255.0 - WORLD_DARK_SIGNAL
+    set_point: np.ndarray = radiance_agc_target / np.asarray(digital_gain, dtype=np.float64) - WORLD_DARK_SIGNAL
+    smax: float = (2 ** camera_bit_depth - 1) - WORLD_DARK_SIGNAL
     exponent: float = WORLD_FULL_WELL_CLIPPING_EXPONENT
     linearized_set_point: np.ndarray = set_point / (1 - (set_point / smax) ** exponent) ** (1 / exponent)
     effective_set_point: np.ndarray = (
@@ -3690,7 +3700,12 @@ def world_transformation_pipeline(raw_frame_or_buffer: np.ndarray,
                                   age: int | None = None,
                                   n_workers: int=WORLD_IMPUTATION_WORKERS,
                                   stagewise_output: list[np.ndarray] | None = None,
-                                  demosaic_pool: Pool | None = None
+                                  demosaic_pool: Pool | None = None, 
+                                  quantization_correction: float = 0.375, 
+                                  camera_bit_depth: int = 8,
+                                  radiance_agc_target: float = 127.0,
+                                  demosaic_ratio_epsilon: float = 1e-6
+
                                  ) -> dict[str, np.ndarray | dict[str, object]]:
     """Reconstruct and demosaic world-camera radiance using Geoff's seven stages.
 
@@ -3710,6 +3725,10 @@ def world_transformation_pipeline(raw_frame_or_buffer: np.ndarray,
             Accepts legacy or modern metadata keys.
         gaze_angles_xy: Reserved for later processing; unused here.
         age: Reserved for later processing; unused here.
+        quantization_correction: Added sensor-count bias, default 0.375.
+        camera_bit_depth: Sensor count bit depth, default 8 (maximum 255).
+        radiance_agc_target: AGC target in sensor counts, default 127.
+        demosaic_ratio_epsilon: Denominator offset for color/green ratios, default 1e-6.
         n_workers: Maximum number of processes used for frame-wise imputation. Use 1 for serial
             execution.
         stagewise_output: Optional empty list that receives eight independent
@@ -3783,7 +3802,7 @@ def world_transformation_pipeline(raw_frame_or_buffer: np.ndarray,
     # 0.375 counts in 8-bit units.
     # We make a single copy at the start to not edit the input array
     quantization_corrected: np.ndarray = raw_frame_or_buffer.astype(np.float64, copy=True)
-    quantization_corrected += 0.375
+    quantization_corrected += quantization_correction
 
     # Store this stage in the stagewise output if desired
     if(store_stagewise_output is True):
@@ -3794,7 +3813,7 @@ def world_transformation_pipeline(raw_frame_or_buffer: np.ndarray,
     # to a non-negative input. Unreliable high-count samples become Inf.
     linearize_camera_responsivity(
         quantization_corrected,
-        original_bit_depth=8,
+        original_bit_depth=camera_bit_depth,
         dark_noise=WORLD_DARK_SIGNAL,
         clipping_exponent=WORLD_FULL_WELL_CLIPPING_EXPONENT,
         visualize_results=False,
@@ -3843,6 +3862,8 @@ def world_transformation_pipeline(raw_frame_or_buffer: np.ndarray,
     world_counts_to_radiance(
         color_corrected,
         agc_settings=agc_settings,
+        radiance_agc_target=radiance_agc_target,
+        camera_bit_depth=camera_bit_depth,
         visualize_results=False,
     )
     # Rename the same array after radiance scaling; this alias does not copy data.
@@ -3854,6 +3875,7 @@ def world_transformation_pipeline(raw_frame_or_buffer: np.ndarray,
     # The standalone helper reuses interpolation weights across buffered frames.
     demosaiced: np.ndarray = demosaic_radiance_map_rcd(
         radiance_map, bayer_pattern="BGGR", worker_pool=demosaic_pool,
+        ratio_epsilon=demosaic_ratio_epsilon,
     )
     if(store_stagewise_output is True):
         stagewise_output.append(demosaiced.copy())
@@ -3876,10 +3898,10 @@ def world_transformation_pipeline(raw_frame_or_buffer: np.ndarray,
         "agc_settings": agc_settings,
         "image_shape": image_shape,
         "bayer_pattern": "BGGR",
-        "original_bit_depth": 8,
-        "quantization_bias": 0.375,
-        "radiance_agc_target": 127.0,
-        "demosaic_ratio_epsilon": 1e-6,
+        "original_bit_depth": camera_bit_depth,
+        "quantization_bias": quantization_correction,
+        "radiance_agc_target": radiance_agc_target,
+        "demosaic_ratio_epsilon": demosaic_ratio_epsilon,
         "units": "W/m²/sr",
     })
     return {"data": demosaiced, "metadata": calibration_metadata}
