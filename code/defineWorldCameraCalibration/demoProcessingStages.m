@@ -2,9 +2,10 @@
 clear
 
 % Pick a measurement
-measurementName = 'planetarium_AGCandMS_01.mat';
-%measurementName = 'indoor_AGCandMS_02.mat';
-%measurementName = 'macbeth_AGCandMS_02.mat';
+%measurementName = 'planetarium_AGCandMS_01.mat';
+%measurementName = 'outdoor_AGCandMS_02.mat';
+%measurementName = 'indoor_AGCandMS_01.mat';
+measurementName = 'macbeth_AGCandMS_02.mat';
 
 % Load the data
 fileName = fullfile(...
@@ -25,21 +26,15 @@ radianceMapDemosaiced = demosaicRadianceMap(imageStages{end});
 [meanSceneRadiance, S, fVal] = ...
     estimateJointRadianceSpectrum(minispectValue.AS, radianceMapDemosaiced);
 
-% Obtain the cone isomerization map, which is in units of R*/deg^2/s. We
-% pass the current fixation location (in terms of image pixel) and pupil
-% size to be used in this calculation
-observerAge = 18;
-gazeX  = 320;
+% Obtain the foveated integrated cone radiance, further converted into
+% post-receptoral channels.
+gazeX = 320;
 gazeY = 240;
-pupilDiameterMm = 3.0;
-[isomerizationMap,AzGrid,ElGrid] = computeFoveatedConeIsomerizationMap(radianceMapDemosaiced, ...
-    'observerAge',observerAge,...
-    'gazeX', gazeX, ...
-    'gazeY', gazeY, ...
-    'pupilDiameterMm', pupilDiameterMm);
 
-% Obtain the linear opponent post-receptoral map
-[postRecepMap,weights] = computePostRecepExcitation(isomerizationMap,'balanceNeutral',false);
+[opponentConeRadianceMap,coneWeights, AzGrid,ElGrid] = computeFoveatedOpponentMap(radianceMapDemosaiced, ...
+    'gazeX', gazeX, ...
+    'gazeY', gazeY,...
+    'balanceNeutral', true);
 
 % Display the reconstruction
 plotReconstructionStages(imageStages)
@@ -48,9 +43,9 @@ plotReconstructionStages(imageStages)
 faceColors = {'k','r','b'};
 figure
 for cc = 1:3
-    surf(AzGrid,ElGrid,isomerizationMap(:,:,cc),'FaceColor',faceColors{cc},'FaceAlpha',0.5);
+    surf(AzGrid,ElGrid,opponentConeRadianceMap(:,:,cc),'FaceColor',faceColors{cc},'FaceAlpha',0.5);
     hold on
-    zlabel('pooled opponent isomerization rate [R^*/deg^2/s]');
+    zlabel('opponent cone radiance');
 end
 xlim([-100 100]);
 ylim([-50 50]);
