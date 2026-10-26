@@ -48,7 +48,7 @@ plotReconstructionStages(imageStages)
 faceColors = {'k','r','b'};
 figure
 for cc = 1:3
-    surf(AzGrid,ElGrid,postRecepMap(:,:,cc),'FaceColor',faceColors{cc},'FaceAlpha',0.5);
+    surf(AzGrid,ElGrid,isomerizationMap(:,:,cc),'FaceColor',faceColors{cc},'FaceAlpha',0.5);
     hold on
     zlabel('pooled opponent isomerization rate [R^*/deg^2/s]');
 end

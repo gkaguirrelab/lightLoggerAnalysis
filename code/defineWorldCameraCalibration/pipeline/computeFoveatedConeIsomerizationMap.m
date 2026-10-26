@@ -119,10 +119,11 @@ dotProducts = gridUnitDirs_1 .* fixVec_1 + gridUnitDirs_2 .* fixVec_2 + gridUnit
 dotProducts = min(max(dotProducts, -1), 1);
 dynamicEccMap = rad2deg(acos(dotProducts));
 
-% Evaluate T_map and densityMap based on 2D coordinates relative to gaze
+% Evaluate T_map and densityMap based on 2D coordinates relative to gaze.
+% We wrap AzGrid in abs() because the derived maps are now defined symmetrically for X >= 0
 T_map = zeros(outH, outW, 9);
 for k = 1:9
-    T_map(:,:,k) = F_transform{k}(AzGrid, ElGrid);
+    T_map(:,:,k) = F_transform{k}(abs(AzGrid), ElGrid);
 end
 T_map = reshape(T_map, outH, outW, 3, 3);
 
@@ -134,7 +135,7 @@ end
 
 densityMap = zeros(outH, outW, 3);
 for k = 1:3
-    densityMap(:,:,k) = F_density{k}(AzGrid, ElGrid);
+    densityMap(:,:,k) = F_density{k}(abs(AzGrid), ElGrid);
 end
 
 if any(isnan(densityMap(:)))
@@ -169,7 +170,8 @@ eccWeights = zeros(outH, outW, numEccs);
 for iEcc = 1:numEccs
     eccX = thisConeMapVar.eccGrid(1, iEcc);
     eccY = thisConeMapVar.eccGrid(2, iEcc);
-    distSq = (AzGrid - eccX).^2 + (ElGrid - eccY).^2;
+    % Use abs(AzGrid) to symmetrically map blending distances on both sides of the vertical meridian
+    distSq = (abs(AzGrid) - eccX).^2 + (ElGrid - eccY).^2;
     eccWeights(:,:,iEcc) = 1 ./ (distSq + 1e-4); % Inverse distance squared
 end
 % Normalize blending weights globally
