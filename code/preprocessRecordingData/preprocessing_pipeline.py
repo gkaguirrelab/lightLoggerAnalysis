@@ -12,6 +12,7 @@
 # verify_data_integrity. display_integrity_issues formats its returned results.
 #
 # Current raw folders use FLIC_<ID>/<activity>/<GKA or Neon>/<attempt number>.
+# Neon attempts contain timeseries_and_video_export and native_recording_data.
 # Some older helpers below still use one unnumbered recording per activity;
 # the comments at those functions point out the paths they expect.
 #
@@ -25,13 +26,12 @@ import shutil
 from natsort import natsorted
 import re
 from tqdm.auto import tqdm
-from typing import Any, Iterable, Literal, TypedDict, cast
+from typing import Any, BinaryIO, Iterable, Literal, TypedDict, cast
 import pathlib
 import sys
 import zipfile
 import warnings
 import math
-import time
 import tempfile
 import matplotlib.pyplot as plt
 import json
@@ -65,53 +65,6 @@ import spd_util
 import world_util
 import cleanEyeTracking
 
-
-def _write_chunk_with_blocking_retry(fd, chunk: bytes, save_path: pathlib.Path, verbose: bool, retry_delay_seconds: float=5.0) -> None:
-    """Write a chunk, retrying when the destination temporarily blocks."""
-    # First, let's keep track of how much of this downloaded chunk made it to disk.
-    # A write can accept only part of the bytes, so each retry starts where the
-    # previous write stopped. This prevents us from writing the same bytes twice.
-    bytes_written: int = 0
-    while(bytes_written < len(chunk)):
-        try:
-            write_result = fd.write(chunk[bytes_written:])
-            # This branch treats a None return as accepting the remaining chunk.
-            # For a numeric return, advance only by the reported byte count.
-            if(write_result is None):
-                bytes_written = len(chunk)
-            elif(write_result > 0):
-                bytes_written += write_result
-            else:
-                if(verbose is True):
-                    print(f"Write accepted 0 bytes for {save_path}; retrying in {retry_delay_seconds:g} seconds...", flush=True)
-
-                time.sleep(retry_delay_seconds)
-        except BlockingIOError as error:
-            # A blocked write may still have accepted some bytes. Account for those
-            # before retrying the remainder of this same chunk.
-            characters_written: int | None = getattr(error, "characters_written", None)
-            if(characters_written is not None):
-                bytes_written += characters_written
-
-            if(verbose is True):
-                print(f"Write blocked for {save_path}; retrying in {retry_delay_seconds:g} seconds...", flush=True)
-
-            time.sleep(retry_delay_seconds)
-
-
-def _open_path_for_writing_with_blocking_retry(save_path: pathlib.Path, verbose: bool, retry_delay_seconds: float=5.0):
-    """Open a file for writing, retrying when the destination temporarily blocks."""
-    # First, let's wait until the destination will let us open the file.
-    # Only a temporary BlockingIOError is retried here; other errors propagate
-    # so the caller can see why the download could not be saved.
-    while(True):
-        try:
-            return save_path.open("wb")
-        except BlockingIOError:
-            if(verbose is True):
-                print(f"Open blocked for {save_path}; retrying in {retry_delay_seconds:g} seconds...", flush=True)
-
-            time.sleep(retry_delay_seconds)
 
 def get_subject_ids(FLIC_subject_dir: str="/Users/zacharykelly/Library/CloudStorage/Dropbox-Aguirre-BrainardLab/Zachary Kelly/FLIC_subject/NEWscriptedIndoorOutdoorVideos2026") -> dict[int, int]:
     """Return {numeric subject ID: age in years} from both session workbooks.
@@ -479,12 +432,10 @@ def generate_egocentric_mapper_results(src_dir: str="/Volumes/FLIC_raw/NEWscript
             assert os.path.isdir(neon_raw_dir), f"Problem with: {neon_raw_dir}"
 
             for recording_number in recording_numbers:
-                # A newly downloaded Neon recording stores its timeseries files
-                # directly in Neon/<number>. Older recordings migrated into the
-                # numbered layout may retain one nested export directory. Find
-                # the unique world_timestamps.csv so both layouts are accepted.
+                # Search only the timeseries export, preserving any enclosing
+                # directory supplied by Cloud. Native data is a separate format.
                 neon_recording_dir: str = os.path.join(
-                    neon_raw_dir, recording_number
+                    neon_raw_dir, recording_number, "timeseries_and_video_export"
                 )
                 assert os.path.isdir(neon_recording_dir), (
                     f"No matching Neon recording directory for GKA recording "
@@ -714,16 +665,17 @@ def clean_eye_data(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideo
                    subjects_to_process: Iterable[int]=(),
                    activities_to_skip: Iterable[str]=(),
                    activities_to_process: Iterable[str]=(),
-                   verbose: bool=False,
-                   show_plots: bool=False) -> None:
+                   verbose: bool=True
+                   ) -> None:
     """Save cleaned_eye_data.csv in Neon/<attempt>/egocentric_mapper_results.
 
     The cleaned pixel gaze and eye measurements sit beside the mapper CSVs
     and egocentric_mapper_metadata.pkl from the mapping stage.
 
     Explicit process filters override skip filters. Existing files are skipped
-    unless overwrite_existing=True. verbose shows progress; show_plots displays
-    comparisons. Raw exports may be directly in an attempt or a nested folder.
+    unless overwrite_existing=True. verbose defaults to True and shows progress
+    plus Geoff's six-panel comparison, saved as eye_cleaned_vs_raw.pdf beside
+    the CSV. show_plots optionally overrides plotting independently of progress. Raw exports may be directly in an attempt or a nested folder.
     """
     # Select subjects using the same filters and ordering as the mapper stage.
     subjects_to_process = set(subjects_to_process)
@@ -796,7 +748,7 @@ def clean_eye_data(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideo
                     continue
 
                 # Find the path to the raw recording and the single directory underneat it
-                raw_recording: str = os.path.join(neon_dir, recording_number)
+                raw_recording: str = os.path.join(neon_dir, recording_number, "timeseries_and_video_export")
                 export_directories: list[str] = [
                     root
                     for root, _, filenames in os.walk(raw_recording)
@@ -819,19 +771,15 @@ def clean_eye_data(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideo
 
                 # Clean the data 
                 cleaned_data: np.ndarray = cleanEyeTracking.clean_eye_data(
-                    raw_neon_path, mapper_dir, verbose=show_plots
+                    raw_neon_path, mapper_dir,
+                    verbose=verbose,
+                    plot_label=f"{subject_id}/{activity_name}/Neon/{recording_number}",
                 )
                 
                 # Write inside the recording loop so every attempt gets its own CSV.
                 cleaned_df: pd.DataFrame = pd.DataFrame(
                     cleaned_data,
-                    columns=[
-                        "time [s]",
-                        "pupil diameter [mm]",
-                        "eyelid aperture [mm]",
-                        "gaze x [px]",
-                        "gaze y [px]",
-                    ],
+                    columns=cleanEyeTracking.OUTPUT_COLUMNS,
                 )
                 os.makedirs(mapper_dir, exist_ok=True)
                 cleaned_df.to_csv(output_path, index=False)
@@ -3047,93 +2995,6 @@ def plot_mean_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbo
 
 
 
-def unpack_neon_recordings(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026",
-                           overwrite_existing: bool=False,
-                           verbose: bool=False, 
-                           subjects_to_skip: Iterable=set(),
-                           subjects_to_process: Iterable=set(),  
-                           activities_to_skip: Iterable=set(), 
-                           activities_to_process: Iterable=set()
-                          ) -> None:
-    """
-    Extracts Neon eye-tracking recordings from zipped archives inside each
-    activity folder and places them into a "Neon" directory. The original
-    zip archive is removed after extraction.
-
-    Inputs:
-      src_dir            raw dataset directory
-      overwrite_existing re-extract if Neon folder already exists
-      verbose            print progress
-    """
-    # This helper uses the older layout: one timeseries ZIP directly under
-    # each activity, extracted into Neon. It does not loop over numbered
-    # recording attempts. The cloud downloader below handles numbered exports.
-    subject_paths: list[str] = natsorted([
-        subject_path
-        for subject_name in os.listdir(src_dir)
-        if re.fullmatch(r"FLIC_\d+", subject_name)
-        and os.path.isdir( (subject_path := os.path.join(src_dir, subject_name) ) )
-        and _is_desired_item(_extract_num_from_id(subject_name), subjects_to_process, subjects_to_skip)
-    ]) 
-    assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
-
-
-    # Now, let's iterate over all the subject paths
-    subject_iterator: Iterable = range(len(subject_paths)) if verbose is False else tqdm(range(len(subject_paths)), desc="Processing Subjects", leave=True)
-    for subject_num in subject_iterator:
-        # Retrieve the subject path and subject name
-        subject_path: str = subject_paths[subject_num]
-        subject_id: str = os.path.basename(subject_path)
-        
-        # Iterate over the activities for this subject
-        activites_paths: list[str] = [
-            activity_path
-            for filename in natsorted(os.listdir(subject_path))
-            if os.path.isdir(  ( activity_path := os.path.join(subject_path, filename)  ))
-            and _is_desired_item(filename, activities_to_process, activities_to_skip)
-        ]
-        activities_iterator: Iterable = range(len(activites_paths)) if verbose is False else tqdm(range(len(activites_paths)), desc="Processing Activities", leave=False)
-        for activity_num in activities_iterator:
-            # Retrieve the activity path and activity name
-            activity_path: str = activites_paths[activity_num]
-            activity_name: str = os.path.basename(activity_path)
-        
-            # Define the output path
-            neon_recording_output_dir: str = os.path.join(activity_path, "Neon")
-
-            # Skip files we do not want to overwrite
-            if(os.path.exists(neon_recording_output_dir) and len(os.listdir(neon_recording_output_dir)) > 0 and overwrite_existing is False):
-               continue
-
-            # Find the .zip file containing the neon recording
-            try:
-                neon_recording_filename: str = [filename for filename in os.listdir(activity_path)
-                                            if "timeseries" in filename.lower() and filename.endswith(".zip")
-                                           ][0]
-            except: 
-                raise Exception(f"No Neon timeseries .zip file in {activity_path}")    
-            
-            neon_recording_zip: str = os.path.join(activity_path, neon_recording_filename)
-
-            if(verbose is True):
-                print(f"Input: {neon_recording_zip}")
-                print(f"Output: {neon_recording_output_dir}")
-
-            # Unzip the file
-            try:
-                with zipfile.ZipFile(neon_recording_zip, 'r') as zip_ref:
-                    zip_ref.extractall(neon_recording_output_dir)
-            except Exception as e:
-                shutil.rmtree(neon_recording_output_dir)
-                raise Exception(f"Error when unzipping: {e}")
-
-
-            # Remove the original file
-            # We only reach this after extraction succeeds. The extracted files
-            # become the local copy, so the original ZIP is removed here.
-            os.remove(neon_recording_zip)
-
-    return 
 
 
 def rename_world_recordings(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026",
@@ -3638,12 +3499,20 @@ def verify_data_integrity(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
                                    "blinks.csv", "events.csv", "fixations.csv", "gaze.csv",
                                    "world_timestamps.csv", "saccades.csv", "template.csv")
             for number in natsorted(recording_numbers["Neon"]):
-                neon_recording_path: str = recording_paths[f"Neon/{number}"]
-                # New exports place files directly in the numbered folder. Migrated
-                # exports can contain one further directory with the data files.
-                # world_timestamps.csv identifies the timeseries directory. There
-                # should be exactly one beneath a numbered attempt, whether the
-                # export is flat or retained an extra enclosing folder.
+                # Check both format folders before inspecting the CSV export,
+                # so both missing directories are reported for this attempt.
+                for folder in ("timeseries_and_video_export", "native_recording_data"):
+                    folder_path: str = os.path.join(recording_paths[f"Neon/{number}"], folder)
+                    if not os.path.isdir(folder_path):
+                        activity_issues["Neon"].append(
+                            f"Recording {number}: missing directory {folder}")
+                        problems_detected = True
+
+                neon_recording_path: str = os.path.join(recording_paths[f"Neon/{number}"], "timeseries_and_video_export")
+                if not os.path.isdir(neon_recording_path):
+                    continue
+                # Cloud can retain an enclosing folder inside this export.
+                # Never search the sibling native_recording_data directory.
                 timeseries_dirs: list[str] = [root for root, _, filenames in os.walk(neon_recording_path)
                                    if "world_timestamps.csv" in filenames]
                 if(len(timeseries_dirs) != 1):
@@ -3654,7 +3523,7 @@ def verify_data_integrity(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
                         timeseries_dirs = [neon_recording_path]
                 for timeseries_dir in timeseries_dirs:
                     for filename in required_neon_files:
-                        # The export-level summary files may be at the attempt root or
+                        # The export-level summary files may be at the export root or
                         # with the timeseries. The remaining CSVs must be with timestamps.
                         candidate_dirs: tuple[str, ...] = (neon_recording_path, timeseries_dir) if filename in ("enrichment_info.txt", "sections.csv") else (timeseries_dir,)
                         if(not any(os.path.isfile(os.path.join(directory, filename)) for directory in candidate_dirs)):
@@ -3794,8 +3663,8 @@ def verify_neon_integrity(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
     """
     
     # First, let's find all of the subjects in this experiment
-    # This is the older Neon layout check. It expects enrichment_info.txt and
-    # sections.csv directly inside Neon, then checks the first subdirectory
+    # Check the timeseries export of each numbered Neon attempt, including
+    # export-level summary files and the directory
     # for the timeseries and video. For every numbered recording attempt,
     # use verify_data_integrity instead. This helper reports through warnings.
     subject_paths: list[str] = natsorted([os.path.join(src_dir, subject_name) 
@@ -3831,36 +3700,33 @@ def verify_neon_integrity(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
                 warnings.warn(f"{neon_folder_path} does not exist or is empty")
                 continue 
                 
-            # If the folder exists, ensure it has the desired content
-            for filename in ("enrichment_info.txt", "sections.csv"):
-                filepath: str = os.path.join(neon_folder_path, filename)
-                if(not os.path.exists(filepath)):
-                    warnings.warn(f"{filepath} does not exist")
+            # Check every numbered attempt, excluding the native format.
+            for number in natsorted(name for name in os.listdir(neon_folder_path)
+                                    if name.isdigit()):
+                export_root = os.path.join(neon_folder_path, number, "timeseries_and_video_export")
+                try:
+                    export_directories = []
+                    for root, directories, filenames in os.walk(export_root):
+                        directories[:] = [name for name in directories if name != "native_recording_data"
+                                          and not name.startswith(".pupil-download-")]
+                        if "world_timestamps.csv" in filenames:
+                            export_directories.append(root)
+                    if len(export_directories) != 1:
+                        raise ValueError(f"Expected one timeseries export beneath {export_root}; found {export_directories}")
+                    neon_recording_folder = export_directories[0]
+                except ValueError as error:
+                    warnings.warn(str(error))
+                    continue
+                for filename in ("enrichment_info.txt", "sections.csv", "3d_eye_states.csv",
+                                 "blinks.csv", "events.csv", "fixations.csv", "gaze.csv",
+                                 "world_timestamps.csv", "saccades.csv", "template.csv"):
+                    directories = (export_root, neon_recording_folder) if filename in (
+                        "enrichment_info.txt", "sections.csv") else (neon_recording_folder,)
+                    if not any(os.path.isfile(os.path.join(d, filename)) for d in directories):
+                        warnings.warn(f"{export_root}: missing {filename}")
+                if not any(name.lower().endswith(".mp4") for name in os.listdir(neon_recording_folder)):
+                    warnings.warn(f"{neon_recording_folder} does not have an .mp4 video")
 
-            # Then, there should be a single directory in this file containing other
-            # information
-            neon_recording_folder: str | None = None
-            try:
-                neon_recording_folder = [os.path.join(neon_folder_path, filename)
-                                            for filename in os.listdir(neon_folder_path)
-                                            if os.path.isdir(os.path.join(neon_folder_path, filename))
-                                            ][0]
-            except:
-                warnings.warn(f"Subfolder does not exist in {neon_folder_path}")
-
-            # Next, make sure the required files exist in this folder
-            for filename in ("3d_eye_states.csv", "blinks.csv", "events.csv", "fixations.csv", "gaze.csv", "world_timestamps.csv", "saccades.csv", "template.csv"):
-                filepath: str = os.path.join(neon_recording_folder, filename)
-                if(not os.path.exists(filepath)):
-                    warnings.warn(f"{filepath} does not exist")
-            
-            # Make sure there is a .mp4 video in this folder
-            try:
-                mp4_video_name: str = [filename for filename in os.listdir(neon_recording_folder)
-                                       if filename.endswith(".mp4")
-                                      ][0]
-            except:
-                warnings.warn(f"{neon_recording_folder} does not have an .mp4 video")
 
 
     return 
@@ -3936,14 +3802,26 @@ def verify_world_neon_pairing(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorO
             # and the world recording in the processing dir
             neon_dir: str = os.path.join(activity_path, "Neon")
             assert os.path.exists(neon_dir) and len(os.listdir(neon_dir)) > 0, f"Problem with: {neon_dir}"
-            neon_recording_subdir_name: str | None = None
-            try:
-                neon_recording_subdir_name = [filename for filename in os.listdir(neon_dir) 
-                                              if os.path.isdir(os.path.join(neon_dir, filename))
-                                             ][0]
-            except:
-                raise Exception(f"No neon recording subdir @: {neon_dir}")
-            neon_recording_subdir: str = os.path.join(neon_dir, neon_recording_subdir_name)
+            # This stage accepts one recording per activity. Search only its
+            # timeseries export, never native data or files at the attempt root.
+            recording_numbers: list[str] = natsorted(
+                name for name in os.listdir(neon_dir)
+                if name.isdigit() and os.path.isdir(os.path.join(neon_dir, name))
+            )
+            if len(recording_numbers) != 1:
+                raise ValueError(f"Expected one numbered recording in {neon_dir}; found {recording_numbers}")
+            export_root: str = os.path.join(
+                neon_dir, recording_numbers[0], "timeseries_and_video_export"
+            )
+            if not os.path.isdir(export_root):
+                raise FileNotFoundError(export_root)
+            export_directories: list[str] = [
+                root for root, _, filenames in os.walk(export_root)
+                if "world_timestamps.csv" in filenames
+            ]
+            if len(export_directories) != 1:
+                raise ValueError(f"Expected one timeseries export beneath {export_root}; found {export_directories}")
+            neon_recording_subdir = export_directories[0]
 
             neon_recording_filename: str | None
             try:   
@@ -4592,7 +4470,10 @@ def download_pupil_cloud_recordings(api_key: str,
 
     Recording names are grouped by subject, activity, and their final numeric
     suffix. Every attempt is downloaded and extracted independently beneath
-    ``FLIC_<subject>/<activity>/Neon/<recording_number>``.
+    ``FLIC_<subject>/<activity>/Neon/<recording_number>`` with separate
+    ``timeseries_and_video_export`` and ``native_recording_data`` subfolders.
+    Each format is skipped independently unless overwrite_existing is True.
+    ZIP-internal folders are preserved.
 
     Args:
         api_key: Input value for api key.
@@ -4702,93 +4583,103 @@ def download_pupil_cloud_recordings(api_key: str,
             activity_recordings: dict[int, dict[str, str]] = subject_recordings[
                 activity_name
             ]
+
+            # Define the neon output dir for this activity
+            neon_output_dir: str = os.path.join(
+                dst_dir,
+                f"FLIC_{subject_id_num}",
+                activity_name,
+                "Neon",
+            )
+
+            # Iterate over the number of recordings for this activity
             for recording_number in sorted(activity_recordings):
                 activity_recording: dict[str, str] = activity_recordings[
                     recording_number
                 ]
+
+                # Find the recording ID
                 recording_id: str = activity_recording["id"]
 
-                neon_output_dir: str = os.path.join(
-                    dst_dir,
-                    f"FLIC_{subject_id_num}",
-                    activity_name,
-                    "Neon",
-                )
+                # Create the output dir for this recording number 
                 recording_output_dir: str = os.path.join(
                     neon_output_dir, str(recording_number)
                 )
-                output_filename: str = os.path.join(
-                    recording_output_dir, "Timeseries Data + Scene Video.zip"
-                )
 
-                # A successful prior run removes the archive and leaves its
-                # extracted contents. Treat any such contents as complete when
-                # overwrite_existing is false.
-                # This is only a resume/skip heuristic: any non-ZIP entry counts
-                # as existing output. Run verify_data_integrity afterward to check
-                # that the full set of expected files is actually present.
-                existing_extracted_entries: list[str] = []
-                if(os.path.isdir(recording_output_dir)):
-                    existing_extracted_entries = [
-                        filename
-                        for filename in os.listdir(recording_output_dir)
-                        if filename != os.path.basename(output_filename)
-                    ]
-                if(existing_extracted_entries and overwrite_existing is False):
-                    continue
+                # We will download both the timeseries + scene video endpoint, 
+                # as well as the "Native recording" endpoint. The former gives us 
+                # the data for the egocentric video mapper and the later includes
+                # the eye videos
 
-                # Overwriting one attempt must not remove any sibling numbered
-                # recording directories.
-                if(os.path.exists(recording_output_dir) and overwrite_existing):
-                    if(not os.path.isdir(recording_output_dir)):
-                        raise NotADirectoryError(
-                            f"Recording output exists but is not a directory: "
-                            f"{recording_output_dir}"
-                        )
-                    shutil.rmtree(recording_output_dir)
-                os.makedirs(recording_output_dir, exist_ok=True)
+                # Resume each format separately: an existing CSV export must not
+                # suppress the native download. Both preserve ZIP internal paths.
 
-                recording_zip_url: str = (
-                    f"{api_url}/workspaces/{workspace_id}/recordings:raw-data-export"
-                )
-                params: dict = {"ids": [recording_id], "exclude": []}
-                r: object = requests.get(
-                    recording_zip_url,
-                    stream=True,
-                    params=params,
-                    headers={"api-key": api_key, "workspace_id": workspace_id},
-                )
-                r.raise_for_status()
-                save_path: pathlib.Path = pathlib.Path(output_filename)
-                if(verbose is True):
-                    print(
-                        f"Downloading: {subject_id_num} | {activity_name} | "
-                        f"recording {recording_number} | {save_path}"
-                    )
+                # Each tuple supplies three values for one download:
+                # folder: local subfolder beneath Neon/<recording_number>.
+                # endpoint: API route appended to /workspaces/<workspace_id>/.
+                # params: query parameters sent with the GET request;
+                #         ids selects this recording using its Cloud ID.
+                for folder, endpoint, params in (
+                    # Save the Cloud CSV timeseries and scene video in this folder.
+                    # recordings:raw-data-export requests that export format;
+                    # exclude=[] excludes nothing, so the scene video is included.
+                    ("timeseries_and_video_export", "recordings:raw-data-export",
+                     {"ids": [recording_id], "exclude": []}),
+                    
+                    # Save the native recording files (including eye videos) here.
+                    # recordings.zip requests the native recording archive;
+                    # only ids is needed to select which recording to download.
+                    ("native_recording_data", "recordings.zip",
+                     {"ids": [recording_id]}),
+                ):
+                    
+                    output_dir: pathlib.Path = pathlib.Path(recording_output_dir) / folder
+                    save_path: pathlib.Path = output_dir / "download.zip"
 
-                # Stream one MiB at a time so the full video archive does not need
-                # to fit in memory. The write helper retries temporarily blocked
-                # disk writes while retaining its position within each chunk.
-                with _open_path_for_writing_with_blocking_retry(save_path, verbose) as fd:
-                    for chunk in r.iter_content(chunk_size=1024 * 1024):
-                        _write_chunk_with_blocking_retry(fd, chunk, save_path, verbose)
+                    # If the output dir exists and is a directory
+                    # and we do not want to overwrite it, continue
+                    if (output_dir.exists() and output_dir.is_dir() ) and not overwrite_existing:
+                        continue
 
-                # Extract into the same numbered directory. On extraction
-                # failure, remove the partial attempt so a later run cannot
-                # mistake incomplete files for a completed download.
-                try:
-                    with zipfile.ZipFile(output_filename, "r") as zip_ref:
-                        zip_ref.extractall(recording_output_dir)
-                except Exception as error:
-                    shutil.rmtree(recording_output_dir, ignore_errors=True)
-                    raise RuntimeError(
-                        f"Error unpacking Pupil Cloud recording "
-                        f"FLIC_{subject_id_num} {activity_name} "
-                        f"recording {recording_number}: {error}"
-                    ) from error
-                os.remove(output_filename)
+                    # Keep the existing output until a new archive is extracted.
+                    # The temporary folder and ZIP are cleaned up on exit.
+                    output_dir.parent.mkdir(parents=True, exist_ok=True)
+                    staging: str
+                    with tempfile.TemporaryDirectory(prefix=".pupil-download-", dir=output_dir.parent) as staging:
+                        save_path = pathlib.Path(staging) / "download.zip"
+                        extracted_dir: pathlib.Path = pathlib.Path(staging) / "extracted"
+                        extracted_dir.mkdir()
 
+                        # Use the original streaming request: no network retry loop
+                        # or additional timeout. HTTP and connection errors propagate.
+                        recording_zip_url: str = f"{api_url}/workspaces/{workspace_id}/{endpoint}"
+                        response: requests.Response
+                        with requests.get(
+                            recording_zip_url, stream=True, params=params,
+                            headers={"api-key": api_key, "workspace_id": workspace_id},
+                        ) as response:
+                            response.raise_for_status()
+                            if verbose:
+                                print(f"Downloading: {subject_id_num} | {activity_name} | recording {recording_number} | {folder}")
 
+                            # Save the streamed response to the temporary ZIP,
+                            # one MiB at a time, without loading it all into memory.
+                            fd: BinaryIO
+                            chunk: bytes
+                            with save_path.open("wb") as fd:
+                                for chunk in response.iter_content(chunk_size=1024 * 1024):
+                                    fd.write(chunk)
+
+                        # Unpack the ZIP inside the temporary staging directory.
+                        # Keep the archive's internal folders as they are.
+                        zip_ref: zipfile.ZipFile
+                        with zipfile.ZipFile(save_path, "r") as zip_ref:
+                            zip_ref.extractall(extracted_dir)
+
+                        # Replace this format's output only after extraction succeeds.
+                        if output_dir.exists():
+                            shutil.rmtree(output_dir)
+                        extracted_dir.rename(output_dir)
 
     return 
 
@@ -4821,8 +4712,9 @@ def generate_actigraphy_graphs(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoor
     """
     # Here, we gather Neon motion and eye data together with the processed
     # recording paths, then pass them to MATLAB's participant-state plotting
-    # routine. This helper still selects the first raw Neon subdirectory and
-    # uses an unnumbered processed Neon/egocentric_mapper_results path.
+    # routine. This helper requires one numbered RAW Neon attempt and reads
+    # its timeseries_and_video_export. Its MATLAB processing inputs still use
+    # the legacy unnumbered processed Neon/egocentric_mapper_results path.
     import matlab.engine
     
     # Initialize the MATLAB engine to utilize the MATLAB function we have developed for this purpose
@@ -4879,14 +4771,30 @@ def generate_actigraphy_graphs(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoor
             neon_processing_dir: str = os.path.join(activitiy_processing_path, "Neon")
             neon_raw_dir: str = os.path.join(activity_raw_path, "Neon")
             assert all(os.path.exists(filepath) for filepath in (gka_raw_dir, neon_processing_dir, neon_raw_dir)), f"Problem with {subject_id} | {activity_name}"
-            neon_raw_recording_dir_name: str = [ filename for filename in os.listdir(neon_raw_dir) 
-                                                 if os.path.isdir(os.path.join(neon_raw_dir, filename)) 
-                                                ][0]
-
-            # Now, we are going to gather all of the import paths
-            neon_actigraphy_filepaths: dict[str, str] = {data_type: os.path.join(neon_raw_dir, neon_raw_recording_dir_name, data_type+".csv")
-                                                         for data_type in ("imu", "3d_eye_states", "blinks", "gaze")
-                                                        }
+            # This stage accepts one recording per activity. Search only its
+            # timeseries export, never native data or files at the attempt root.
+            recording_numbers: list[str] = natsorted(
+                name for name in os.listdir(neon_raw_dir)
+                if name.isdigit() and os.path.isdir(os.path.join(neon_raw_dir, name))
+            )
+            if len(recording_numbers) != 1:
+                raise ValueError(f"Expected one numbered recording in {neon_raw_dir}; found {recording_numbers}")
+            export_root: str = os.path.join(
+                neon_raw_dir, recording_numbers[0], "timeseries_and_video_export"
+            )
+            if not os.path.isdir(export_root):
+                raise FileNotFoundError(export_root)
+            export_directories: list[str] = [
+                root for root, _, filenames in os.walk(export_root)
+                if "world_timestamps.csv" in filenames
+            ]
+            if len(export_directories) != 1:
+                raise ValueError(f"Expected one timeseries export beneath {export_root}; found {export_directories}")
+            neon_timeseries_dir = export_directories[0]
+            neon_actigraphy_filepaths: dict[str, str] = {
+                data_type: os.path.join(neon_timeseries_dir, data_type + ".csv")
+                for data_type in ("imu", "3d_eye_states", "blinks", "gaze")
+            }
 
             # Require the mapper's timestamps in the Neon time base before
             # plotting. This local variable checks existence; the MATLAB call

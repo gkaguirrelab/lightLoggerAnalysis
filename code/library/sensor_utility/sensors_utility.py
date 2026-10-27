@@ -77,8 +77,8 @@ def _process_raw_world_helper(
         files: Ordered (metadata .npy path, frame-buffer .npy path) pairs.
         output_path: HDF5 filename, not a directory. Parent directories are created.
         age: Optional participant age forwarded to the transformation, currently unused.
-        gaze_angles_xy: Optional gaze array forwarded unchanged for each chunk,
-            currently unused by the transformation.
+        gaze_angles_xy: Camera pixel X/Y pairs aligned to all input frames, or a single
+            pair shared by every frame. Coordinates are one-based, as in MATLAB.
         chunk_range: Zero-based (start, stop) chunk indices; stop is exclusive.
             None means the beginning/end. Defaults to all chunks. Empty buffers
             are skipped, and selected frames are concatenated in input order.
@@ -91,8 +91,8 @@ def _process_raw_world_helper(
             Set both worker counts to 1 for fully serial processing.
 
     Returns:
-        None. Writes /data/frames as int32 (frames, rows, cols, RGB) in NumPy order
-        with fractions truncated; /data/average_frames retains floating-point means,
+        None. Writes /data/frames as float64 (frames, azimuth, elevation,
+        post-receptoral channel), preserving signed fractions and NaNs; /data/average_frames retains floating-point means,
         and /agcSettings/{Again,Dgain,exposure,timestamps} as aligned per-frame
         arrays. Timestamps retain raw nanosecond units. These datasets use
         lossless gzip level 4 with shuffle and automatic HDF5 storage chunks.
@@ -201,6 +201,13 @@ def _process_raw_world_helper(
                 raise ValueError(f"Incomplete HDF5 output; retry with overwrite_existing=True: {output_path}")
         return
 
+    # Validate gaze before opening (and potentially replacing) the output file.
+    gaze = None if gaze_angles_xy is None else np.asarray(gaze_angles_xy, dtype=float)
+    if gaze is not None and gaze.shape != (2,):
+        total_frames = sum(len(np.load(path, mmap_mode="r")) for _, path in files)
+        if gaze.shape != (total_frames, 2):
+            raise ValueError("Gaze must have one X/Y pixel pair per input world frame")
+
     # Make the path to the output file if it does not already exist
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
 
@@ -230,10 +237,15 @@ def _process_raw_world_helper(
         metadata_group: h5py.Group = output.create_group("metadata")
 
         # Keep track of how many frames we have written 
-        frames_written: int = 0 
+        frames_written: int = 0
+        gaze_offset = 0
         
         # Iterate over the paired metadata and frame-buffer files.
         for file_num, (metadata_path, data_path) in file_iterator:
+            frame_count = len(np.load(data_path, mmap_mode="r"))
+            chunk_gaze = (gaze if gaze is None or gaze.shape == (2,)
+                          else gaze[gaze_offset:gaze_offset + frame_count])
+            gaze_offset += frame_count
             # Skip files not in the desired range 
             if(file_num not in desired_chunk_range):
                 continue
@@ -286,7 +298,7 @@ def _process_raw_world_helper(
 
             # Run the transformation pipeline
             data_and_processing_metadata: dict[str, object] = world_util.world_transformation_pipeline(
-                frame_buffer, agc_settings, gaze_angles_xy, age, n_workers=n_workers, demosaic_pool=demosaic_pool,
+                frame_buffer, agc_settings, chunk_gaze, age, n_workers=n_workers, demosaic_pool=demosaic_pool,
             )
             transformed_data: np.ndarray = data_and_processing_metadata["data"]
 
@@ -310,7 +322,7 @@ def _process_raw_world_helper(
                 data_group.create_dataset(
                     "frames", shape=(0, *transformed_data.shape[1:]),
                     maxshape=(None, *transformed_data.shape[1:]),
-                    chunks=True, dtype=np.int32,
+                    chunks=True, dtype=np.float64,
                     compression="gzip", compression_opts=4, shuffle=True,
                 )
 
@@ -321,16 +333,19 @@ def _process_raw_world_helper(
             # Reset the dataset to accomodate the new frames we are going to put in 
             data_dataset.resize(end_frame, axis=0)
 
-            # Store integer frames (fractional radiance is truncated). Reject values
-            # int32 cannot represent rather than silently wrapping or replacing NaNs.
-            limits: np.iinfo = np.iinfo(np.int32)
-            if not np.all(np.isfinite(transformed_data)) or np.any(transformed_data < limits.min) or np.any(transformed_data > limits.max):
-                raise ValueError("World frames contain nonfinite or out-of-range int32 values")
-            data_dataset[frames_written:end_frame] = transformed_data.astype(np.int32)
+            # Preserve fractional, signed radiance and NaNs outside camera coverage.
+            data_dataset[frames_written:end_frame] = transformed_data
 
-            # Average spatially while this chunk is already in memory. Keeping one
-            # RGB triplet per frame lets MS windows cross input chunk boundaries.
-            mean_rgb: np.ndarray = transformed_data.mean(axis=(1, 2))
+            # Scene balancing varies per frame, so save these weights alongside maps.
+            if "cone_weights" not in data_group:
+                data_group.create_dataset("cone_weights", shape=(0, 3), maxshape=(None, 3),
+                                          chunks=True, dtype=np.float64)
+            weights_dataset = data_group["cone_weights"]
+            weights_dataset.resize(end_frame, axis=0)
+            weights_dataset[frames_written:end_frame] = data_and_processing_metadata["cone_weights"]
+
+            # MS fitting still requires camera RGB radiance, not opponent channels.
+            mean_rgb: np.ndarray = data_and_processing_metadata["average_rgb"]
             if "average_frames" not in data_group:
                 data_group.create_dataset(
                     "average_frames", shape=(0, 3), maxshape=(None, 3),
@@ -936,7 +951,7 @@ def process_raw_recording(
             WORLD_DEMOSAIC_WORKERS (16). Set both counts to 1 for serial execution.
 
         age: Required participant age forwarded to world reconstruction.
-        gaze_angles_xy: Required gaze array forwarded unchanged to world reconstruction.
+        gaze_angles_xy: Camera pixel X/Y pairs aligned to all world frames (one-based).
 
     Returns:
         None. Writes native HDF5 world and MS output files.

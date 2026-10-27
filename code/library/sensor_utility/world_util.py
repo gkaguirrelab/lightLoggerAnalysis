@@ -26,7 +26,7 @@ import dill
 import pandas as pd
 from numba import njit, prange
 import scipy.io
-from scipy.interpolate import LinearNDInterpolator
+from scipy.interpolate import RegularGridInterpolator, LinearNDInterpolator
 from scipy.spatial import Delaunay, QhullError, cKDTree
 from scipy.special import ndtr
 from scipy.sparse import csr_matrix
@@ -3694,6 +3694,77 @@ def world_counts_to_radiance(image_or_video: np.ndarray,
     return None
 
 
+@lru_cache(maxsize=1)
+def _opponent_calibration():
+    """Load the shared RGB-to-LMS calibration and camera angular triangulation."""
+    maps = scipy.io.loadmat(_DERIVED_CALIBRATION_DIR / "cameraToVisualAngles.mat")
+    az = np.asarray(maps["nativeAzimuthMap"], dtype=np.float64)
+    el = np.asarray(maps["nativeElevationMap"], dtype=np.float64)
+    matrix = scipy.io.loadmat(_DERIVED_CALIBRATION_DIR / "sensorToConeMatrix.mat")["rgb2lmsMatrix"]
+    triangulation = Delaunay(np.column_stack((az.ravel(), el.ravel())))
+    return az, el, matrix, triangulation
+
+
+def compute_foveated_opponent_map(radiance, gaze_xy=None, *, balance_neutral=True,
+                                  azimuth=None, elevation=None):
+    """Project RGB radiance to foveated Ach, RG, BY channels, as in Geoff's demo.
+
+    gaze_xy is a MATLAB-style (one-based) camera pixel (X, Y), or one pair
+    per frame. None uses the image center, matching the demo's explicit
+    (320, 240) fixation for 640-by-480 frames. The MATLAB helper itself uses
+    reversed dimensions when gaze is omitted; this API follows the demo.
+    Nonfinite gaze produces a NaN map.
+    Returns float64 maps in (azimuth, elevation, channel) order (with a leading
+    frame axis for buffers), plus per-frame effective LMS weights. Outside
+    camera coverage remains NaN; signed opponent values are never clipped.
+    """
+    radiance = np.asarray(radiance, dtype=np.float64)
+    single = radiance.ndim == 3
+    frames = radiance[None] if single else radiance
+    az, el, matrix, triangulation = _opponent_calibration()
+    if frames.ndim != 4 or frames.shape[1:] != (*az.shape, 3):
+        raise ValueError("RGB radiance must match the calibrated camera geometry")
+    height, width = az.shape
+    gaze = np.asarray((width / 2, height / 2) if gaze_xy is None else gaze_xy, dtype=float)
+    if gaze.shape == (2,):
+        gaze = np.broadcast_to(gaze, (len(frames), 2))
+    if gaze.shape != (len(frames), 2):
+        raise ValueError("Gaze must be an (X, Y) pair or one pixel pair per frame")
+    azimuth = np.arange(-90, 90.25, 0.5) if azimuth is None else np.asarray(azimuth)
+    elevation = np.arange(-90, 90.25, 0.5) if elevation is None else np.asarray(elevation)
+    query = np.stack(np.meshgrid(azimuth, elevation, indexing="ij"), axis=-1)
+    axes = (np.arange(1, height + 1), np.arange(1, width + 1))
+    angle_at_pixel = RegularGridInterpolator(axes, np.stack((az, el), axis=-1))
+    result = np.full((len(frames), len(azimuth), len(elevation), 3), np.nan)
+    weights = np.full((len(frames), 3), np.nan)
+    for index, (frame, xy) in enumerate(zip(frames, gaze)):
+        if not np.all(np.isfinite(xy)):
+            continue
+        gx, gy = np.clip(xy, (1, 1), (width, height))
+        offset = angle_at_pixel([[gy, gx]])[0]
+        rgb = LinearNDInterpolator(triangulation, frame.reshape(-1, 3))(query + offset)
+        # MATLAB defines coverage from red before replacing individual NaNs.
+        coverage = ~np.isnan(rgb[..., 0])
+        rgb = np.where(np.isnan(rgb), 0.0, rgb)
+        lms = rgb @ matrix.T
+        valid = np.all(np.isfinite(lms), axis=-1) & coverage
+        w = np.array([1.0, 1.33, 5.0])
+        if balance_neutral:
+            mean_l, mean_m, mean_s = (lms[valid].mean(axis=0) if np.any(valid)
+                                     else np.full(3, np.nan))
+            # Preserve MATLAB's per-channel NaN/Inf behavior for degenerate scenes.
+            with np.errstate(divide="ignore", invalid="ignore"):
+                w[1] = mean_l / mean_m
+                w[2] = (mean_l + w[1] * mean_m) / mean_s
+        with np.errstate(invalid="ignore"):
+            L, M, S = np.moveaxis(lms * w, -1, 0)
+        ach = L + M
+        result[index] = np.stack((ach, L - M, S - ach), axis=-1)
+        result[index][~valid] = np.nan
+        weights[index] = w
+    return (result[0], weights[0]) if single else (result, weights)
+
+
 def world_transformation_pipeline(raw_frame_or_buffer: np.ndarray,
                                   agc_settings: dict[str, float | np.ndarray],
                                   gaze_angles_xy: np.ndarray | None = None,
@@ -3707,10 +3778,10 @@ def world_transformation_pipeline(raw_frame_or_buffer: np.ndarray,
                                   demosaic_ratio_epsilon: float = 1e-6
 
                                  ) -> dict[str, np.ndarray | dict[str, object]]:
-    """Reconstruct and demosaic world-camera radiance using Geoff's seven stages.
+    """Reconstruct RGB radiance and return foveated opponent cone radiance.
 
-    The result is RGB radiance, matching MATLAB ``reconstructionPipeline``
-    followed by ``demosaicRadianceMap``. Each processing stage calls its standalone
+    The result matches MATLAB ``computeFoveatedOpponentMap`` with scene-neutral
+    balancing, after reconstruction and demosaicing. Each processing stage calls its standalone
     helper, whose ``visualize_results`` option can be used independently.
 
     Raw input is preserved. After imputation, the fielding, color, and radiance
@@ -3723,7 +3794,8 @@ def world_transformation_pipeline(raw_frame_or_buffer: np.ndarray,
             is preserved.
         agc_settings: Exposure, analog gain, and digital gain as scalars or one value per frame.
             Accepts legacy or modern metadata keys.
-        gaze_angles_xy: Reserved for later processing; unused here.
+        gaze_angles_xy: Camera pixel X/Y (one-based, as in MATLAB), despite the legacy
+            name; a pair or one pair per frame. None uses the image center.
         age: Reserved for later processing; unused here.
         quantization_correction: Added sensor-count bias, default 0.375.
         camera_bit_depth: Sensor count bit depth, default 8 (maximum 255).
@@ -3741,8 +3813,8 @@ def world_transformation_pipeline(raw_frame_or_buffer: np.ndarray,
             None keeps demosaicing serial, avoiding startup for one-off calls.
 
     Returns:
-        Dictionary with "data", the float64 RGB radiance in W/m²/sr shaped
-        (rows, cols, 3) or (frames, rows, cols, 3), and "metadata", a dictionary
+        Dictionary with "data", float64 opponent cone radiance shaped
+        (azimuth, elevation, 3) or (frames, azimuth, elevation, 3), and "metadata", a dictionary
         containing the processing calibration constants under their module names,
         source calibration records, input AGC settings, and processing settings.
         Shape-indexed constants contain the selected frame's value. Metadata is
@@ -3904,7 +3976,21 @@ def world_transformation_pipeline(raw_frame_or_buffer: np.ndarray,
         "demosaic_ratio_epsilon": demosaic_ratio_epsilon,
         "units": "W/m²/sr",
     })
-    return {"data": demosaiced, "metadata": calibration_metadata}
+    opponent, cone_weights = compute_foveated_opponent_map(demosaiced, gaze_angles_xy)
+    calibration_metadata.update({
+        "units": "opponent cone integrated radiance",
+        "dimensions": "azimuth,elevation,post_receptoral_channel",
+        "channels": "Ach,RG,BY",
+        "azimuth": np.arange(-90, 90.25, 0.5),
+        "elevation": np.arange(-90, 90.25, 0.5),
+        "angle_units": "degrees",
+        "gaze_coordinates": "one-based camera pixels (X,Y)",
+        "balance_neutral": True,
+        "rgb2lmsMatrix": _opponent_calibration()[2].copy(),
+    })
+    return {"data": opponent, "metadata": calibration_metadata,
+            "cone_weights": cone_weights,
+            "average_rgb": demosaiced.mean(axis=(-3, -2))}
 
 
 
