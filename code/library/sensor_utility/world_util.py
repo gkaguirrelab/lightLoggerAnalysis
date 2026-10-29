@@ -827,72 +827,106 @@ def calculate_world_saturation_threshold(
 ) -> int:
     """Return Geoff's raw-count threshold for unreliable response inversion.
 
-    The threshold is the raw sensor value at which the derivative of the
-    inverse full-well response reaches ``max_allowed_derivative``. Values at
-    or above it are represented as ``Inf`` and subsequently imputed.
-
     Args:
-        original_bit_depth: Bit depth used to determine the largest raw count.
-        dark_noise: Dark offset in the same count units as the raw input.
-        clipping_exponent: Positive exponent of the fitted full-well response.
-        max_allowed_derivative: Largest trusted inverse-response slope; must be greater than one.
+        original_bit_depth (int):
+            Bit depth used to determine the largest raw count.
+
+        dark_noise (float):
+            Dark offset in the same count units as the raw input.
+
+        clipping_exponent (float):
+            Positive exponent of the fitted full-well response.
+
+        max_allowed_derivative (float):
+            Largest trusted inverse-response slope; must be greater than one.
 
     Returns:
         Integer raw-count threshold at which samples are marked as saturated.
+
+    Notes:
+        The threshold is the raw sensor value at which the derivative of the
+        inverse full-well response reaches ``max_allowed_derivative``. Values at
+        or above it are represented as ``Inf`` and subsequently imputed.
+
+        The threshold is computed before dark subtraction and rounded down to an
+        integer raw count. It controls where linearization marks unreliable
+        samples as Inf.
     """
-    if(original_bit_depth <= 0):
+    if original_bit_depth <= 0:
         raise ValueError("original_bit_depth must be positive")
-    if(clipping_exponent <= 0):
+    if clipping_exponent <= 0:
         raise ValueError("clipping_exponent must be positive")
-    if(max_allowed_derivative <= 1):
+    if max_allowed_derivative <= 1:
         raise ValueError("max_allowed_derivative must be greater than one")
 
-    sensor_max: float = float(2 ** original_bit_depth - 1)
+    # Compute the largest representable raw sensor count from its bit depth.
+    sensor_max: float = float(2**original_bit_depth - 1)
+    # Subtract the dark offset to obtain the usable sensor range.
     smax: float = sensor_max - float(dark_noise)
-    if(smax <= 0):
+    if smax <= 0:
         raise ValueError(
             f"dark_noise={dark_noise} leaves no usable range for "
             f"original_bit_depth={original_bit_depth}."
         )
 
+    # Rearrange the inverse-response derivative to solve for its count threshold.
     exponent_ratio: float = clipping_exponent / (clipping_exponent + 1)
+    # Evaluate the largest dark-subtracted signal with a trusted inverse slope.
     threshold_above_dark: float = smax * (
         1 - max_allowed_derivative ** (-exponent_ratio)
     ) ** (1 / clipping_exponent)
     return int(np.floor(threshold_above_dark + dark_noise))
 
 
-def linearize_camera_responsivity(image_or_video: np.ndarray,
-                                  original_bit_depth: int = 8,
-                                  dark_noise: float = WORLD_DARK_SIGNAL,
-                                  clipping_exponent: float = WORLD_FULL_WELL_CLIPPING_EXPONENT,
-                                  max_allowed_derivative: float = WORLD_MAX_ALLOWED_LINEARIZATION_DERIVATIVE,
-                                  visualize_results: bool=False
-                                  ) -> None:
+def linearize_camera_responsivity(
+    image_or_video: np.ndarray,
+    original_bit_depth: int = 8,
+    dark_noise: float = WORLD_DARK_SIGNAL,
+    clipping_exponent: float = WORLD_FULL_WELL_CLIPPING_EXPONENT,
+    max_allowed_derivative: float = WORLD_MAX_ALLOWED_LINEARIZATION_DERIVATIVE,
+    visualize_results: bool = False,
+) -> None:
     """Linearize world-camera values using the fitted full-well model.
 
-    This uses the same equation as Stage 2 of ``reconstructionPipeline.m``.
-    Negative dark-subtracted values retain their sign. Only the nonlinear
-    gain uses a non-negative signal. Quantization correction belongs to Stage 1.
-
     Args:
-        image_or_video: Writable floating-point array of camera counts. The
-            values are modified in place. Pass a copy if the original counts
-            need to be retained, and convert integer arrays to float first.
-        original_bit_depth: Bit depth of the input image values.
-        dark_noise: The measured dark offset to remove before inversion.
-        clipping_exponent: The fitted soft-clipping exponent from the
-            full-well calibration.
-        max_allowed_derivative: Maximum inverse-response derivative. Raw
-            values at or above the resulting threshold are marked ``Inf``.
-        visualize_results: When ``True``, display a before/after figure. Visualization supports only
-            a single ``(rows, cols)`` frame and asserts otherwise.
+        image_or_video (np.ndarray):
+            Writable floating-point array of camera counts. The values are
+            modified in place. Pass a copy if the original counts need to be
+            retained, and convert integer arrays to float first.
+
+        original_bit_depth (int):
+            Bit depth of the input image values.
+
+        dark_noise (float):
+            The measured dark offset to remove before inversion.
+
+        clipping_exponent (float):
+            The fitted soft-clipping exponent from the full-well calibration.
+
+        max_allowed_derivative (float):
+            Maximum inverse-response derivative. Raw values at or above the
+            resulting threshold are marked ``Inf``.
+
+        visualize_results (bool):
+            When ``True``, display a before/after figure. Visualization supports
+            only a single ``(rows, cols)`` frame and asserts otherwise.
 
     Returns:
         None. The supplied array is modified in place. When visualization is
         enabled, the before/after figure is displayed without returning it.
+
     Raises:
         TypeError: If the input does not have a floating-point dtype.
+
+    Notes:
+        This uses the same equation as Stage 2 of ``reconstructionPipeline.m``.
+        Negative dark-subtracted values retain their sign. Only the nonlinear
+        gain uses a non-negative signal. Quantization correction belongs to Stage 1.
+
+        This operation mutates floating-point input in place. Signed dark-
+        subtracted values are retained, while the nonlinear gain uses only the
+        nonnegative part of the signal. Apply quantization correction before
+        this stage.
     """
 
     # Linearization always writes into the supplied array. Check its dtype
@@ -904,34 +938,39 @@ def linearize_camera_responsivity(image_or_video: np.ndarray,
 
     # Keep the original values only when a before/after figure is requested.
     unmodified_image_or_video: np.ndarray | None = None
-    if(visualize_results is True):
+    if visualize_results is True:
         assert image_or_video.ndim == 2, (
             f"Camera responsivity linearization visualization only supports "
             f"a single frame with shape (rows, cols). Got shape "
             f"{image_or_video.shape}."
         )
+        # Reserve the original image only when a comparison plot is requested.
         unmodified_image_or_video = image_or_video.copy()
 
     # First, let's find the max sensor value based on the bit depth
     # and also correct this for the dark noise observed in the signal
-    max_sensor_value: float = float(2 ** original_bit_depth - 1)
+    max_sensor_value: float = float(2**original_bit_depth - 1)
+    # Normalize the calibrated dark offset to a scalar for subtraction.
     dark_signal: float = float(dark_noise)
+    # Subtract the dark offset to obtain the usable sensor range.
     smax: float = max_sensor_value - dark_signal
 
     # If the dark noise is somehow so great it's larger than the signal
     # something has really gone wrong
-    if(smax <= 0):
+    if smax <= 0:
         raise ValueError(
             f"dark_noise={dark_noise} leaves no usable range for "
             f"original_bit_depth={original_bit_depth}."
         )
 
+    # Find the raw count where inverse-response amplification becomes unreliable.
     saturation_threshold: int = calculate_world_saturation_threshold(
         original_bit_depth=original_bit_depth,
         dark_noise=dark_noise,
         clipping_exponent=clipping_exponent,
         max_allowed_derivative=max_allowed_derivative,
     )
+    # Identify unreliable samples before dark subtraction changes their counts.
     saturation_mask: np.ndarray = image_or_video >= saturation_threshold
 
     # Preserve signed dark-subtracted values, as in MATLAB.
@@ -939,6 +978,7 @@ def linearize_camera_responsivity(image_or_video: np.ndarray,
 
     # Match MATLAB's yPrime ./ (1 - (yPrime ./ Smax).^n).^(1./n).
     with np.errstate(divide="ignore", invalid="ignore"):
+        # Invert the fitted full-well response directly in the supplied array.
         image_or_video[:] = image_or_video / (
             1 - (np.maximum(image_or_video, 0) / smax) ** clipping_exponent
         ) ** (1 / clipping_exponent)
@@ -949,9 +989,14 @@ def linearize_camera_responsivity(image_or_video: np.ndarray,
     image_or_video[saturation_mask] = np.inf
 
     # If visualize results is true, we will print an output of what the image looks like
-    if(visualize_results is True):
+    if visualize_results is True:
+        fig: plt.Figure
+        axes: np.ndarray
+        # Create aligned before/after panels for visual inspection of this stage.
         fig, axes = plt.subplots(1, 2, figsize=(12, 4))
-        fig.suptitle("Full Well Correction (Before / After)", fontweight='bold', fontsize=18)
+        fig.suptitle(
+            "Full Well Correction (Before / After)", fontweight="bold", fontsize=18
+        )
 
         axes[0].imshow(unmodified_image_or_video, cmap="gray")
         axes[0].set_title("Before")
@@ -969,52 +1014,80 @@ def linearize_camera_responsivity(image_or_video: np.ndarray,
     return None
 
 
-def _scattered_interpolant(sample_x: np.ndarray,
-                           sample_y: np.ndarray,
-                           sample_values: np.ndarray,
-                           image_shape: tuple[int, int]
-                          ) -> np.ndarray:
+def _scattered_interpolant(
+    sample_x: np.ndarray,
+    sample_y: np.ndarray,
+    sample_values: np.ndarray,
+    image_shape: tuple[int, int],
+) -> np.ndarray:
     """Interpolate Bayer samples using linear interpolation and nearest extrapolation.
 
-    This follows MATLAB ``scatteredInterpolant(x, y, v, 'linear', 'nearest')``,
-    but does not guarantee identical results around missing-sample regions:
-    MATLAB and SciPy can choose different valid Delaunay triangulations there.
-
-    MATLAB builds the interpolant and then evaluates it over the full pixel
-    grid with ``F(X, Y)``. Both steps happen here, so this returns the grid
-    directly rather than a callable.
-
-    What the MATLAB call does, and therefore what this reproduces:
-
-    * It triangulates the scattered sample points, splitting the plane into
-      triangles whose corners are samples (a Delaunay triangulation).
-    * For a query inside a triangle, the value is a weighted blend of that
-      triangle's three corners. That is the ``'linear'`` method.
-    * A query outside the outer boundary of all the samples sits in no
-      triangle, so it instead copies its single closest sample. That is the
-      ``'nearest'`` extrapolation method.
-
     Args:
-        sample_x: One-based integer column coordinate of each Bayer sample.
-        sample_y: One-based integer row coordinate of each Bayer sample.
-            Samples must belong to one color channel. Input order may vary;
-            nearest-neighbor ties use the MATLAB Bayer-coordinate rank.
-        sample_values: Value at each sample.
-        image_shape: The ``(rows, cols)`` grid to evaluate over.
+        sample_x (np.ndarray):
+            One-based integer column coordinate of each Bayer sample.
+
+        sample_y (np.ndarray):
+            One-based integer row coordinate of each Bayer sample. Samples must
+            belong to one color channel. Input order may vary; nearest-neighbor
+            ties use the MATLAB Bayer-coordinate rank.
+
+        sample_values (np.ndarray):
+            Value at each sample.
+
+        image_shape (tuple[int, int]):
+            The ``(rows, cols)`` grid to evaluate over.
 
     Returns:
         The interpolated grid, shaped ``image_shape``.
+
+    Notes:
+        This follows MATLAB ``scatteredInterpolant(x, y, v, 'linear', 'nearest')``,
+        but does not guarantee identical results around missing-sample regions:
+        MATLAB and SciPy can choose different valid Delaunay triangulations there.
+
+        MATLAB builds the interpolant and then evaluates it over the full pixel
+        grid with ``F(X, Y)``. Both steps happen here, so this returns the grid
+        directly rather than a callable.
+
+        What the MATLAB call does, and therefore what this reproduces:
+
+        * It triangulates the scattered sample points, splitting the plane into
+          triangles whose corners are samples (a Delaunay triangulation).
+        * For a query inside a triangle, the value is a weighted blend of that
+          triangle's three corners. That is the ``'linear'`` method.
+        * A query outside the outer boundary of all the samples sits in no
+          triangle, so it instead copies its single closest sample. That is the
+          ``'nearest'`` extrapolation method.
+
+        Linear interpolation is evaluated over the entire one-based image grid.
+        Outside the convex hull, nearest samples are selected using MATLAB
+        Bayer-order tie breaking. The affine shear resolves intact-lattice
+        triangulation ties; missing-sample triangulations may still differ from
+        MATLAB.
     """
+    rows: int
+    cols: int
+    # Separate the spatial dimensions for coordinate generation and reshaping.
     rows, cols = image_shape
 
     # MATLAB queries every pixel via [X, Y] = meshgrid(1:W, 1:H).
-    query_x, query_y = np.meshgrid(np.arange(1, cols + 1, dtype=np.float64),
-                                   np.arange(1, rows + 1, dtype=np.float64))
+    query_x: np.ndarray
+    query_y: np.ndarray
+    # Build one-based column and row positions for every output pixel.
+    query_x, query_y = np.meshgrid(
+        np.arange(1, cols + 1, dtype=np.float64),
+        np.arange(1, rows + 1, dtype=np.float64),
+    )
+    # Flatten horizontal query coordinates to match the interpolation result order.
     query_x = query_x.ravel()
+    # Flatten vertical query coordinates in the same order as horizontal coordinates.
     query_y = query_y.ravel()
 
+    # Normalize measured column positions to floating point for triangulation.
     sample_x = np.asarray(sample_x, dtype=np.float64)
+    # Normalize measured row positions to the same coordinate precision.
     sample_y = np.asarray(sample_y, dtype=np.float64)
+    # Normalize channel samples to double precision for interpolation.
     sample_values = np.asarray(sample_values, dtype=np.float64)
 
     # Shear y by a multiple of x before triangulating. Every four neighbouring
@@ -1026,14 +1099,18 @@ def _scattered_interpolant(sample_x: np.ndarray,
     sheared_samples: np.ndarray = np.column_stack(
         (sample_x, sample_y + WORLD_TRIANGULATION_SHEAR * sample_x)
     )
+    # Prepare output coordinates for the same shear applied to sample positions.
     sheared_queries: np.ndarray = np.column_stack(
         (query_x, query_y + WORLD_TRIANGULATION_SHEAR * query_x)
     )
 
     # 'linear' interpolates inside the convex hull of the samples.
     try:
+        # Evaluate the linear interpolant, leaving unsupported locations as NaN.
         interpolated: np.ndarray = np.asarray(
-            LinearNDInterpolator(Delaunay(sheared_samples), sample_values, fill_value=np.nan)(sheared_queries),
+            LinearNDInterpolator(
+                Delaunay(sheared_samples), sample_values, fill_value=np.nan
+            )(sheared_queries),
             dtype=np.float64,
         )
     except QhullError:
@@ -1043,22 +1120,37 @@ def _scattered_interpolant(sample_x: np.ndarray,
 
     # 'nearest' extrapolates every query that fell outside the convex hull.
     outside_hull: np.ndarray = np.isnan(interpolated)
-    if(np.any(outside_hull)):
+    if np.any(outside_hull):
+        # Index the original sample coordinates for nearest-neighbor queries.
         tree: cKDTree = cKDTree(np.column_stack((sample_x, sample_y)))
-        outside_points: np.ndarray = np.column_stack((query_x[outside_hull], query_y[outside_hull]))
+        # Select query positions that need nearest-neighbor extrapolation.
+        outside_points: np.ndarray = np.column_stack(
+            (query_x[outside_hull], query_y[outside_hull])
+        )
 
         # Gather equally close samples, then select by MATLAB's Bayer ordering:
         # cell-position block first, followed by column, then row. This rank
         # preserves MATLAB's last-sample tie rule regardless of input order.
-        sample_rows = sample_y.astype(np.int64) - 1
-        sample_cols = sample_x.astype(np.int64) - 1
-        cell_blocks = (sample_rows % 2) * 2 + sample_cols % 2
-        matlab_rank = cell_blocks * (rows * cols) + sample_cols * rows + sample_rows
+        sample_rows: np.ndarray = sample_y.astype(np.int64) - 1
+        # Convert sample columns to zero-based coordinates for Bayer-order ranking.
+        sample_cols: np.ndarray = sample_x.astype(np.int64) - 1
+        # Identify each sample position within the repeating two-by-two Bayer cell.
+        cell_blocks: np.ndarray = (sample_rows % 2) * 2 + sample_cols % 2
+        # Rank samples by Bayer position, column, and row to reproduce MATLAB ties.
+        matlab_rank: np.ndarray = (
+            cell_blocks * (rows * cols) + sample_cols * rows + sample_rows
+        )
+        nearest_distance: np.ndarray
+        # Measure the shortest distance from each exterior pixel to a sample.
         nearest_distance, _ = tree.query(outside_points)
+        # Gather all samples within numerical tolerance of the nearest distance.
         tied_samples: list[list[int]] = tree.query_ball_point(
             outside_points, nearest_distance * (1 + 1e-9) + 1e-12
         )
-        interpolated[outside_hull] = sample_values[[tied[np.argmax(matlab_rank[tied])] for tied in tied_samples]]
+        # Fill exterior queries with the nearest sample selected by MATLAB rank.
+        interpolated[outside_hull] = sample_values[
+            [tied[np.argmax(matlab_rank[tied])] for tied in tied_samples]
+        ]
 
     return interpolated.reshape(rows, cols)
 
@@ -1101,61 +1193,87 @@ def _scattered_interpolant(sample_x: np.ndarray,
 #      mean of that Gaussian restricted to the far side of the bound, which
 #      has a closed form. Exponentiate to get back to linear sensor units.
 # ---------------------------------------------------------------------------
-def _impute_pixel_values_single(radiance_map: np.ndarray,
-                                bayer_pattern: str,
-                                dst: np.ndarray | None=None
-                               ) -> np.ndarray:
+def _impute_pixel_values_single(
+    radiance_map: np.ndarray, bayer_pattern: str, dst: np.ndarray | None = None
+) -> np.ndarray:
     """Replace floor and ceiling samples in one Bayer frame.
 
-    The estimate uses the positive RGB samples in this frame to fit a
-    log-space color distribution, then conditions that distribution on the
-    usable neighboring colors. Pixels with valid measurements pass through.
-
     Args:
-        radiance_map: Two-dimensional linearized Bayer frame; non-positive and infinite values are
-            imputation targets.
-        bayer_pattern: Bayer layout: BGGR, RGGB, GRBG, or GBRG.
-        dst: Optional float64 output with the same shape. It must not share memory with the input.
+        radiance_map (np.ndarray):
+            Two-dimensional linearized Bayer frame; non-positive and infinite
+            values are imputation targets.
+
+        bayer_pattern (str):
+            Bayer layout: BGGR, RGGB, GRBG, or GBRG.
+
+        dst (np.ndarray | None):
+            Optional float64 output with the same shape. It must not share
+            memory with the input.
 
     Returns:
         An independent float64 frame, or the supplied dst filled with the result.
         The input frame is not modified.
+
+    Notes:
+        The estimate uses the positive RGB samples in this frame to fit a
+        log-space color distribution, then conditions that distribution on the
+        usable neighboring colors. Pixels with valid measurements pass through.
+
+        The prior is fitted independently for each frame in log-RGB space.
+        Conditional Gaussian estimates are truncated at the observed floor or
+        ceiling bound and exponentiated back to linear units. Valid measurements
+        pass through unchanged.
     """
+    rows: int
+    cols: int
+    # Separate the spatial dimensions for coordinate generation and reshaping.
     rows, cols = radiance_map.shape
 
-    pattern = str(bayer_pattern).upper()
-    if(pattern not in ("BGGR", "RGGB", "GRBG", "GBRG")):
+    # Normalize the Bayer layout name before validating or indexing its channels.
+    pattern: str = str(bayer_pattern).upper()
+    if pattern not in ("BGGR", "RGGB", "GRBG", "GBRG"):
         raise ValueError(f"Unknown Bayer pattern: {bayer_pattern}")
 
     # Initialize the output directly in its final storage. Buffered callers
     # supply a slice, avoiding a separate frame allocation and later stack copy.
-    if(dst is None):
+    if dst is None:
         dst = np.empty(radiance_map.shape, dtype=np.float64)
-    elif(dst.shape != radiance_map.shape or dst.dtype != np.float64):
-        raise ValueError("Imputation destination must match the frame shape and have dtype float64.")
-    elif(np.shares_memory(dst, radiance_map)):
+    elif dst.shape != radiance_map.shape or dst.dtype != np.float64:
+        raise ValueError(
+            "Imputation destination must match the frame shape and have dtype float64."
+        )
+    elif np.shares_memory(dst, radiance_map):
         raise ValueError("Imputation destination must not overlap the input frame.")
     np.copyto(dst, radiance_map, casting="unsafe")
 
     # A finite, positive frame has no samples to impute. Skip interpolation
     # and prior fitting, but preserve the function's independent float64 output.
-    if(not np.any(~np.isfinite(radiance_map) | (radiance_map <= 0))):
+    if not np.any(~np.isfinite(radiance_map) | (radiance_map <= 0)):
         return dst
 
-    if((rows, cols) == tuple(WORLD_FRAME_SHAPE) and pattern == "BGGR"):
+    if (rows, cols) == tuple(WORLD_FRAME_SHAPE) and pattern == "BGGR":
         # Reuse row-ordered coordinates directly for sequential image access.
         # The interpolant handles MATLAB nearest-neighbor ties explicitly.
-        bayer_idx = (WORLD_R_PIXELS, WORLD_G_PIXELS,
-                     WORLD_B_PIXELS)
+        bayer_idx: tuple[np.ndarray, ...] | list[np.ndarray] = (
+            WORLD_R_PIXELS,
+            WORLD_G_PIXELS,
+            WORLD_B_PIXELS,
+        )
     else:
         # Preserve support for other Bayer patterns and frame dimensions.
-        cell_positions = ((0, 0), (0, 1), (1, 0), (1, 1))
+        cell_positions: tuple[tuple[int, int], ...] = ((0, 0), (0, 1), (1, 0), (1, 1))
+        # Collect the sensor coordinates belonging to each of the RGB channels.
         bayer_idx = [
-            np.array([(r, c)
-                      for position, (row_parity, col_parity) in enumerate(cell_positions)
-                      if(pattern[position] == channel)
-                      for c in range(col_parity, cols, 2)
-                      for r in range(row_parity, rows, 2)], dtype=np.uint64)
+            np.array(
+                [
+                    (r, c)
+                    for position, (row_parity, col_parity) in enumerate(cell_positions)
+                    if (pattern[position] == channel)
+                    for c in range(col_parity, cols, 2)
+                    for r in range(row_parity, rows, 2)
+                ],
+                dtype=np.uint64,
+            )
             for channel in "RGB"
         ]
 
@@ -1164,7 +1282,9 @@ def _impute_pixel_values_single(radiance_map: np.ndarray,
     # Bayer position measured.
     rgb_map: np.ndarray = np.zeros((rows, cols, 3), dtype=np.float64)
     for channel in range(3):
+        # Extract the measured row positions for the selected color channel.
         channel_rows: np.ndarray = bayer_idx[channel][:, 0]
+        # Extract the corresponding measured column positions.
         channel_cols: np.ndarray = bayer_idx[channel][:, 1]
 
         # Read this channel's own samples out of the raw map.
@@ -1172,19 +1292,24 @@ def _impute_pixel_values_single(radiance_map: np.ndarray,
 
         # A ceiling sample is Inf and a floor sample is non-positive.
         inf_mask: np.ndarray = np.isinf(sub_val)
-        floor_mask: np.ndarray = (sub_val <= 0)
+        # Identify samples that provide only an upper bound on the true signal.
+        floor_mask: np.ndarray = sub_val <= 0
 
         # Neither carries usable information, so blank both out for the fit.
         work_sub: np.ndarray = sub_val.copy()
+        # Exclude censored measurements while fitting the interpolated channel.
         work_sub[inf_mask | floor_mask] = np.nan
+        # Keep only observed samples that can contribute to interpolation.
         valid_idx: np.ndarray = ~np.isnan(work_sub)
 
         # MATLAB works in one-based (x=column, y=row) coordinates.
         sub_x: np.ndarray = channel_cols.astype(np.float64) + 1
+        # Convert measured rows to the one-based coordinates used by MATLAB.
         sub_y: np.ndarray = channel_rows.astype(np.float64) + 1
 
         # With no usable sample the channel plane is left at zero.
-        if(np.any(valid_idx)):
+        if np.any(valid_idx):
+            # Store this channel plane in the RGB evidence array.
             rgb_map[:, :, channel] = _scattered_interpolant(
                 sub_x[valid_idx], sub_y[valid_idx], work_sub[valid_idx], (rows, cols)
             )
@@ -1192,43 +1317,63 @@ def _impute_pixel_values_single(radiance_map: np.ndarray,
         # Restore Inf and 0 at sub-grid locations so the imputation step can
         # find them again after the interpolation has smoothed over them.
         channel_grid: np.ndarray = rgb_map[:, :, channel]
+        # Restore ceiling markers at their measured sensor positions.
         channel_grid[channel_rows[inf_mask], channel_cols[inf_mask]] = np.inf
+        # Restore floor markers so later conditioning recognizes missing evidence.
         channel_grid[channel_rows[floor_mask], channel_cols[floor_mask]] = 0.0
+        # Store this channel plane in the RGB evidence array.
         rgb_map[:, :, channel] = channel_grid
 
     # Extract prior statistics. Only pixels whose three channels are all
     # present and positive describe the scene's colour distribution.
     pixels: np.ndarray = rgb_map.reshape(-1, 3)
+    # Select pixels whose channels can support the scene-wide prior fit.
     valid_mask: np.ndarray = np.all(np.isfinite(pixels) & (pixels > 0), axis=1)
     # A completely dark frame has no positive RGB triples. Match Geoff's
     # fallback by fitting finite triples after lifting non-positive values
     # to a small positive floor, so their logarithms remain defined.
     if not np.any(valid_mask):
+        # Fall back to finite triples when no fully positive RGB triples are available.
         valid_mask = np.all(np.isfinite(pixels), axis=1)
+        # Lift nonpositive fallback samples to a finite value before taking logarithms.
         pixels[pixels <= 0] = 1e-6
+    # Gather RGB triples eligible for estimating the log-space distribution.
     valid_pixels: np.ndarray = pixels[valid_mask]
     if not valid_pixels.size:
         raise ValueError("No finite RGB samples available for Bayesian imputation.")
 
     # The model is Gaussian in log space, so the prior is fit to log radiance.
     log_valid: np.ndarray = np.log(valid_pixels)
+    # Estimate the scene mean separately for each log-transformed color channel.
     mu: np.ndarray = np.mean(log_valid, axis=0)
-    covariance: np.ndarray = (np.cov(log_valid, rowvar=False, ddof=1)
-                              if len(log_valid) > 1 else np.zeros((3, 3)))
+    # Estimate cross-channel covariance, or use zeros for a single observation.
+    covariance: np.ndarray = (
+        np.cov(log_valid, rowvar=False, ddof=1)
+        if len(log_valid) > 1
+        else np.zeros((3, 3))
+    )
 
     # Record how bright a ceiling sample must be, and how dim a floor sample
     # must be, from each channel's observed range.
     s_log: np.ndarray = np.zeros(3, dtype=np.float64)
+    # Reserve each channel's lower truncation bound in log units.
     f_log: np.ndarray = np.zeros(3, dtype=np.float64)
     for channel in range(3):
+        # Inspect the observed range of one interpolated channel.
         channel_values: np.ndarray = pixels[:, channel]
-        valid_c: np.ndarray = channel_values[(channel_values > 0) & ~np.isinf(channel_values)]
-        if(valid_c.size == 0):
+        # Keep positive, non-infinite values for this channel's observed bounds.
+        valid_c: np.ndarray = channel_values[
+            (channel_values > 0) & ~np.isinf(channel_values)
+        ]
+        if valid_c.size == 0:
             # Fall back to a fixed range when a channel has no valid sample.
             s_log[channel] = np.log(1.0)
+            # Record the lower log-space bound for censored floor estimates.
             f_log[channel] = np.log(1e-4)
         else:
+            # Record the upper log-space bound for censored ceiling estimates.
             s_log[channel] = np.log(np.max(valid_c))
+            # Record the lower log-space bound for censored floor estimates.
             f_log[channel] = np.log(max(np.min(valid_c), 1e-6))
 
     # The destination already contains the original samples; only ceiling
@@ -1238,6 +1383,7 @@ def _impute_pixel_values_single(radiance_map: np.ndarray,
     # Pre-compute the log of every interpolated pixel once. log(0) is -Inf and
     # log(Inf) is Inf, so the finiteness test below rejects both.
     with np.errstate(divide="ignore", invalid="ignore"):
+        # Precompute log RGB once so each target can reuse neighboring evidence.
         log_fixed_pixels: np.ndarray = np.log(pixels.reshape(rows, cols, 3))
 
     # Constant factor of the Gaussian density, hoisted out of the pixel loop.
@@ -1249,37 +1395,53 @@ def _impute_pixel_values_single(radiance_map: np.ndarray,
 
         # Restricted to the Bayer positions belonging to this channel.
         bayer_target_mask: np.ndarray = np.zeros((rows, cols), dtype=bool)
+        # Restrict replacement to the target channel's measured Bayer positions.
         bayer_target_mask[bayer_idx[c_target][:, 0], bayer_idx[c_target][:, 1]] = True
 
         # The pixels this pass will replace. MATLAB walks these in column-major
         # order; each pixel is independent, so the order does not matter.
         active_impute_indices: np.ndarray = np.argwhere(target_mask & bayer_target_mask)
 
-        if(active_impute_indices.size == 0):
+        if active_impute_indices.size == 0:
             continue
 
         # Within a frame, conditioning depends only on the target color and
         # which other channels are known. Precompute the three nonempty cases
         # once per target, rather than repeating matrix inversions per pixel.
         # This requires at most nine inversions for the entire frame.
-        other_channels: list[int] = [channel for channel in range(3) if channel != c_target]
+        other_channels: list[int] = [
+            channel for channel in range(3) if channel != c_target
+        ]
+        # Enumerate the possible nonempty sets of surviving color channels.
         known_channel_cases: tuple[tuple[int, ...], ...] = (
             (other_channels[0],),
             (other_channels[1],),
             tuple(other_channels),
         )
+        # Cache conditional-model coefficients for each surviving-channel combination.
         conditioning: dict[tuple[int, ...], tuple[np.ndarray, np.ndarray, float]] = {}
         for known_channels in known_channel_cases:
+            # Convert the surviving channel identifiers into NumPy column indices.
             known_cols: np.ndarray = np.array(known_channels, dtype=np.intp)
+            # Select prior means for the channels used as evidence.
             mu_k: np.ndarray = mu[known_cols]
+            # Select the covariance among the surviving evidence channels.
             s_k: np.ndarray = covariance[np.ix_(known_cols, known_cols)]
+            # Select covariance between the target channel and its evidence channels.
             s_sk: np.ndarray = covariance[c_target, known_cols]
             # Preserve the existing ridge regularization and operation order.
             s_k_inv: np.ndarray = np.linalg.inv(s_k + 1e-6 * np.eye(known_cols.size))
+            # Compute the linear weights that map evidence deviations to target estimates.
             coefficients: np.ndarray = s_sk @ s_k_inv
-            conditional_variance: float = float(covariance[c_target, c_target] - coefficients @ s_sk.T)
+            # Subtract variance explained by the evidence from the target prior variance.
+            conditional_variance: float = float(
+                covariance[c_target, c_target] - coefficients @ s_sk.T
+            )
+            # Clamp residual variance away from zero before taking its square root.
             conditional_std: float = np.sqrt(max(conditional_variance, 1e-8))
+            # Store the conditional mean weights and spread for reuse across pixels.
             conditioning[known_channels] = (mu_k, coefficients, conditional_std)
+        # Compute the fallback spread when no other color channel survives.
         prior_std: float = np.sqrt(max(float(covariance[c_target, c_target]), 1e-8))
 
         # Group target pixels by which of the other two channels survived.
@@ -1287,76 +1449,117 @@ def _impute_pixel_values_single(radiance_map: np.ndarray,
         # Every pixel in a group shares the same conditional covariance, so
         # NumPy can calculate all conditional means in one operation.
         target_rows: np.ndarray = active_impute_indices[:, 0]
+        # Extract target columns in the same order as target rows.
         target_cols: np.ndarray = active_impute_indices[:, 1]
+        # Gather the available log-RGB evidence at replacement positions.
         evidence: np.ndarray = log_fixed_pixels[target_rows, target_cols]
-        cases: np.ndarray = (
-            np.isfinite(evidence[:, other_channels[0]]).astype(np.uint8)
-            + 2 * np.isfinite(evidence[:, other_channels[1]])
-        )
+        # Encode which of the two neighboring color channels remain finite.
+        cases: np.ndarray = np.isfinite(evidence[:, other_channels[0]]).astype(
+            np.uint8
+        ) + 2 * np.isfinite(evidence[:, other_channels[1]])
         for case in range(4):
+            # Select targets sharing this evidence pattern for vectorized estimation.
             selected: np.ndarray = cases == case
             if not np.any(selected):
                 continue
+            # Keep the row coordinates belonging to this evidence group.
             pixel_rows: np.ndarray = target_rows[selected]
+            # Keep matching column coordinates for the same group.
             pixel_cols: np.ndarray = target_cols[selected]
             conditional_mean: np.ndarray
             conditional_std: float
             if case:
+                # Decode the evidence bits into the surviving channel identifiers.
                 known: tuple[int, ...] = tuple(
                     other_channels[i] for i in range(2) if case & (1 << i)
                 )
+                # Reuse the precomputed conditional model for this evidence combination.
                 mu_k, coefficients, conditional_std = conditioning[known]
-                conditional_mean = mu[c_target] + (evidence[selected][:, known] - mu_k) @ coefficients
+                # Adjust the target prior mean using the surviving channels' deviations.
+                conditional_mean = (
+                    mu[c_target] + (evidence[selected][:, known] - mu_k) @ coefficients
+                )
             else:
                 # With no usable neighboring color, use the scene-wide prior.
                 conditional_std = prior_std
+                # Use the scene-wide mean where no usable neighboring color remains.
                 conditional_mean = np.full(pixel_rows.size, mu[c_target])
 
             # A ceiling sample constrains the answer above the observed range;
             # a floor sample constrains it below. Apply the corresponding
             # truncated-normal expectation in log space to the whole group.
             ceiling: np.ndarray = np.isinf(radiance_map[pixel_rows, pixel_cols])
+            # Select the upper or lower observed bound according to the missing-sample type.
             bound: np.ndarray = np.where(ceiling, s_log[c_target], f_log[c_target])
+            # Express each truncation bound in conditional standard-deviation units.
             z_score: np.ndarray = (bound - conditional_mean) / conditional_std
+            # Replace undefined standardized bounds with zero to match the reference fallback.
             z_score = np.where(np.isnan(z_score), 0, z_score)
+            # Compute the Gaussian probability on the allowed side of each bound.
             tail: np.ndarray = np.where(ceiling, 1 - ndtr(z_score), ndtr(z_score))
-            numerator: np.ndarray = (conditional_std / sqrt_two_pi) * np.exp(-z_score * z_score / 2)
+            # Compute the density term needed for the truncated-normal expectation.
+            numerator: np.ndarray = (conditional_std / sqrt_two_pi) * np.exp(
+                -z_score * z_score / 2
+            )
 
             # Extremely unlikely tails make the division unstable. Geoff pins
             # those estimates to the bound; compute the ratio only elsewhere.
             adjustment: np.ndarray = np.zeros_like(tail)
             np.divide(numerator, tail, out=adjustment, where=tail >= 1e-15)
+            # Use the bound for unstable tails and the conditional expectation elsewhere.
             expected_log: np.ndarray = np.where(
-                tail < 1e-15, bound,
+                tail < 1e-15,
+                bound,
                 conditional_mean + np.where(ceiling, adjustment, -adjustment),
             )
+            # Convert estimated log values back to linear sensor units at target sites.
             raw_fixed[pixel_rows, pixel_cols] = np.exp(expected_log)
 
     return raw_fixed
 
 
-def _impute_pixel_values_shared_worker(frame_index: int,
-                                      bayer_pattern: str,
-                                      shared_name: str,
-                                      output_shape: tuple[int, ...]
-                                     ) -> None:
+def _impute_pixel_values_shared_worker(
+    frame_index: int,
+    bayer_pattern: str,
+    shared_name: str,
+    output_shape: tuple[int, ...],
+) -> None:
     """Impute one frame in the shared buffer owned by the parent process.
 
     Args:
-        frame_index: Index of the frame assigned to this worker.
-        bayer_pattern: Bayer layout used to interpret the frame.
-        shared_name: Name of the existing shared-memory allocation.
-        output_shape: Shape of the shared (frames, rows, cols) float64 buffer.
+        frame_index (int):
+            Index of the frame assigned to this worker.
+
+        bayer_pattern (str):
+            Bayer layout used to interpret the frame.
+
+        shared_name (str):
+            Name of the existing shared-memory allocation.
+
+        output_shape (tuple[int, ...]):
+            Shape of the shared (frames, rows, cols) float64 buffer.
 
     Returns:
         None. The worker replaces its frame slice in place and closes its handle;
         the parent remains responsible for releasing the shared allocation.
+
+    Notes:
+        The worker opens an existing allocation and modifies only its assigned
+        frame. It closes its own handle; the parent owns unlinking the
+        allocation after all workers finish.
     """
-    shared_memory = SharedMemory(name=shared_name)
+    # Attach to the shared allocation created and owned by the parent process.
+    shared_memory: SharedMemory = SharedMemory(name=shared_name)
     try:
-        output = np.ndarray(output_shape, dtype=np.float64, buffer=shared_memory.buf)
+        # Map the shared output bytes to their float64 array shape without copying.
+        output: np.ndarray = np.ndarray(
+            output_shape, dtype=np.float64, buffer=shared_memory.buf
+        )
         try:
-            output[frame_index] = _impute_pixel_values_single(output[frame_index], bayer_pattern)
+            # Write this worker's reconstructed frame into its exclusive shared slice.
+            output[frame_index] = _impute_pixel_values_single(
+                output[frame_index], bayer_pattern
+            )
         finally:
             del output
     finally:
@@ -1364,47 +1567,55 @@ def _impute_pixel_values_shared_worker(frame_index: int,
         shared_memory.close()
 
 
-def impute_pixel_values(linearized_image_or_buffer: np.ndarray,
-                        bayer_pattern: str="BGGR",
-                        visualize_results: bool=False,
-                        n_workers: int=WORLD_IMPUTATION_WORKERS
-                       ) -> np.ndarray | tuple[np.ndarray, object]:
+def impute_pixel_values(
+    linearized_image_or_buffer: np.ndarray,
+    bayer_pattern: str = "BGGR",
+    visualize_results: bool = False,
+    n_workers: int = WORLD_IMPUTATION_WORKERS,
+) -> np.ndarray | tuple[np.ndarray, plt.Figure]:
     """Impute floor and ceiling Bayer samples using Geoff's Bayesian model.
 
-    This is the Python equivalent of MATLAB ``imputePixelValues``, which
-    implements a Bayesian estimate of the linearized sensor value at pixels
-    that sit at the ceiling (``Inf``) or on the floor (non-positive), following:
-
-        Zhang X, Brainard DH. Estimation of saturated pixel values in digital
-        color imaging. Journal of the Optical Society of America A. 2004 Dec
-        1;21(12):2301-10.
-
-    Modified to add imputation of floor values, and to consider the
-    distribution of pixel values in the log transformed space.
-
-    MATLAB handles one frame. A ``(frames, rows, cols)`` buffer is accepted
-    here and each frame is modeled independently, matching repeated calls to
-    the MATLAB function.
-
     Args:
-        linearized_image_or_buffer: Nonempty float64 NumPy frame or frame buffer whose
-            ceiling samples are ``Inf`` and whose floor samples are non-positive.
-            Callers supply this dtype; the function does not convert the input.
-        bayer_pattern: Bayer layout of the sensor.
-        visualize_results: When ``True``, display a before/after figure and
-            return it alongside the result. Supported for one frame only.
-        n_workers: Positive integer number of processes for a frame buffer,
-            default WORLD_IMPUTATION_WORKERS (6). Callers supply a valid value. Use 1
-            for serial processing. Single frames are processed directly.
-            Input and output use shared memory; only frame indices are sent.
-            Script callers must guard their entry point with
-            ``if __name__ == "__main__":`` for multiprocessing spawn.
+        linearized_image_or_buffer (np.ndarray):
+            Nonempty float64 NumPy frame or frame buffer whose ceiling samples
+            are ``Inf`` and whose floor samples are non-positive. Callers supply
+            this dtype; the function does not convert the input.
+
+        bayer_pattern (str):
+            Bayer layout of the sensor.
+
+        visualize_results (bool):
+            When ``True``, display a before/after figure and return it alongside
+            the result. Supported for one frame only.
+
+        n_workers (int):
+            Positive integer number of processes for a frame buffer, default
+            WORLD_IMPUTATION_WORKERS (6). Callers supply a valid value. Use 1
+            for serial processing. Single frames are processed directly. Input
+            and output use shared memory; only frame indices are sent. Script
+            callers must guard their entry point with ``if __name__ ==
+            "__main__":`` for multiprocessing spawn.
 
     Returns:
         The imputed frame or buffer, or ``(imputed, figure)`` when
         visualization is requested.
 
     Notes:
+        This is the Python equivalent of MATLAB ``imputePixelValues``, which
+        implements a Bayesian estimate of the linearized sensor value at pixels
+        that sit at the ceiling (``Inf``) or on the floor (non-positive), following:
+
+            Zhang X, Brainard DH. Estimation of saturated pixel values in digital
+            color imaging. Journal of the Optical Society of America A. 2004 Dec
+            1;21(12):2301-10.
+
+        Modified to add imputation of floor values, and to consider the
+        distribution of pixel values in the log transformed space.
+
+        MATLAB handles one frame. A ``(frames, rows, cols)`` buffer is accepted
+        here and each frame is modeled independently, matching repeated calls to
+        the MATLAB function.
+
         Benchmarked on 2026-10-05 on a Mac Studio (Mac15,14), Apple M3 Ultra,
         28-core CPU (20 performance + 8 efficiency), 256 GB unified memory,
         macOS 15.3 (arm64).
@@ -1428,21 +1639,24 @@ def impute_pixel_values(linearized_image_or_buffer: np.ndarray,
     # Visualization supports one frame. Keep its original values for the
     # before/after figure only when visualization is requested.
     unmodified_image_or_buffer: np.ndarray | None = None
-    if(visualize_results is True):
+    if visualize_results is True:
         assert linearized_image_or_buffer.ndim == 2, (
             "Imputation visualization only supports a single frame "
             f"with shape (rows, cols). Got shape {linearized_image_or_buffer.shape}."
         )
+        # Preserve a separate input snapshot for the optional comparison plot.
         unmodified_image_or_buffer = linearized_image_or_buffer.copy()
 
     # Case 1: a single (rows, cols) frame. Process it directly in this
     # process, regardless of n_workers, and return a separate output array.
-    if(linearized_image_or_buffer.ndim == 2):
-        result: np.ndarray = _impute_pixel_values_single(linearized_image_or_buffer, bayer_pattern)
+    if linearized_image_or_buffer.ndim == 2:
+        result: np.ndarray = _impute_pixel_values_single(
+            linearized_image_or_buffer, bayer_pattern
+        )
 
     # Case 2: a (frames, rows, cols) buffer with one worker.
     # Allocate the output once and process frames one at a time.
-    elif(n_workers == 1):
+    elif n_workers == 1:
         result = np.empty(linearized_image_or_buffer.shape, dtype=np.float64)
         for frame_index, frame in enumerate(linearized_image_or_buffer):
             # Write directly into this frame's output slice instead of making
@@ -1456,7 +1670,11 @@ def impute_pixel_values(linearized_image_or_buffer: np.ndarray,
         # rows and columns reduces that to one flag per frame. np.flatnonzero
         # then returns the indices of the flagged frames, such as [0, 3, 7].
         frames_to_impute: np.ndarray = np.flatnonzero(
-            np.any(~np.isfinite(linearized_image_or_buffer) | (linearized_image_or_buffer <= 0), axis=(1, 2))
+            np.any(
+                ~np.isfinite(linearized_image_or_buffer)
+                | (linearized_image_or_buffer <= 0),
+                axis=(1, 2),
+            )
         )
         if not frames_to_impute.size:
             # There are frames in the buffer, but none need any values replaced.
@@ -1469,12 +1687,16 @@ def impute_pixel_values(linearized_image_or_buffer: np.ndarray,
         # processes. SharedMemory provides the shared bytes; it does not yet
         # contain an image or know the shape of our frame buffer.
         # Both input and output are float64, so the input's byte count fits.
-        shared_memory: SharedMemory = SharedMemory(create=True, size=linearized_image_or_buffer.nbytes)
+        shared_memory: SharedMemory = SharedMemory(
+            create=True, size=linearized_image_or_buffer.nbytes
+        )
         try:
             # Give those shared bytes a NumPy shape and dtype. This creates a
             # view of the shared memory, not another allocation of image data.
             shared_output: np.ndarray = np.ndarray(
-                linearized_image_or_buffer.shape, dtype=np.float64, buffer=shared_memory.buf
+                linearized_image_or_buffer.shape,
+                dtype=np.float64,
+                buffer=shared_memory.buf,
             )
             try:
                 # Step 3: initialize the shared buffer with every input frame.
@@ -1487,7 +1709,9 @@ def impute_pixel_values(linearized_image_or_buffer: np.ndarray,
                 # For example, three flagged frames need at most three workers,
                 # even if the caller requested twelve.
                 worker_count: int = min(n_workers, len(frames_to_impute))
-                with multiprocessing.get_context("spawn").Pool(processes=worker_count) as pool:
+                with multiprocessing.get_context("spawn").Pool(
+                    processes=worker_count
+                ) as pool:
                     # Each tuple below supplies the arguments for one worker call.
                     # The worker uses the shared-memory name to open this buffer,
                     # reads its assigned frame, and writes the imputed frame back
@@ -1498,8 +1722,15 @@ def impute_pixel_values(linearized_image_or_buffer: np.ndarray,
                     # one frame per task, and starmap waits for all tasks to finish.
                     pool.starmap(
                         _impute_pixel_values_shared_worker,
-                        ((index, bayer_pattern, shared_memory.name, linearized_image_or_buffer.shape)
-                         for index in frames_to_impute),
+                        (
+                            (
+                                index,
+                                bayer_pattern,
+                                shared_memory.name,
+                                linearized_image_or_buffer.shape,
+                            )
+                            for index in frames_to_impute
+                        ),
                         chunksize=1,
                     )
 
@@ -1523,9 +1754,16 @@ def impute_pixel_values(linearized_image_or_buffer: np.ndarray,
                 shared_memory.unlink()
 
     # If visualize results is true, we will print an output of what the image looks like
-    if(visualize_results is True):
+    if visualize_results is True:
+        fig: plt.Figure
+        axes: np.ndarray
+        # Create aligned before/after panels for visual inspection of this stage.
         fig, axes = plt.subplots(1, 2, figsize=(12, 4))
-        fig.suptitle("Floor / Ceiling Imputation (Before / After)", fontweight="bold", fontsize=18)
+        fig.suptitle(
+            "Floor / Ceiling Imputation (Before / After)",
+            fontweight="bold",
+            fontsize=18,
+        )
 
         axes[0].imshow(unmodified_image_or_buffer, cmap="gray")
         axes[0].set_title("Before")
@@ -1544,80 +1782,142 @@ def impute_pixel_values(linearized_image_or_buffer: np.ndarray,
 
 
 @lru_cache(maxsize=12)
-def _demosaic_interpolation_weights(image_shape: tuple[int, int],
-                                     coordinate_bytes: bytes
-                                    ) -> csr_matrix:
+def _demosaic_interpolation_weights(
+    image_shape: tuple[int, int], coordinate_bytes: bytes
+) -> csr_matrix:
     """Cache linear interpolation and nearest-edge weights for an intact channel.
 
     Args:
-        image_shape: Output dimensions as (rows, cols).
-        coordinate_bytes: Contiguous int64 (row, col) Bayer coordinates encoded
-            as bytes, so channel geometry forms an immutable cache key.
+        image_shape (tuple[int, int]):
+            Output dimensions as (rows, cols).
+
+        coordinate_bytes (bytes):
+            Contiguous int64 (row, col) Bayer coordinates encoded as bytes, so
+            channel geometry forms an immutable cache key.
 
     Returns:
         A sparse matrix mapping measured channel samples to all image pixels.
         At most twelve channel geometries are retained across calls.
+
+    Notes:
+        The cache key includes both image geometry and channel coordinates.
+        Interior pixels use three barycentric weights; exterior pixels copy a
+        single nearest sample with MATLAB-compatible tie ordering.
     """
+    rows: int
+    cols: int
+    # Separate the spatial dimensions for coordinate generation and reshaping.
     rows, cols = image_shape
-    coordinates: np.ndarray = np.frombuffer(coordinate_bytes, dtype=np.int64).reshape(-1, 2)
+    # Decode the immutable coordinate cache key into row/column pairs.
+    coordinates: np.ndarray = np.frombuffer(coordinate_bytes, dtype=np.int64).reshape(
+        -1, 2
+    )
+    # Convert row/column sites into one-based X/Y coordinates.
     sample_points: np.ndarray = coordinates[:, ::-1].astype(np.float64) + 1
+    query_y: np.ndarray
+    query_x: np.ndarray
+    # Build row and column indices for the full output image grid.
     query_y, query_x = np.indices(image_shape, dtype=np.float64)
-    query_points: np.ndarray = np.column_stack((query_x.ravel() + 1, query_y.ravel() + 1))
+    # Pair flattened output X/Y coordinates for triangulation queries.
+    query_points: np.ndarray = np.column_stack(
+        (query_x.ravel() + 1, query_y.ravel() + 1)
+    )
 
     # Use the same tie-breaking shear as the scattered interpolation fallback.
     sheared_samples: np.ndarray = sample_points.copy()
+    # Prepare output coordinates for the same shear applied to sample positions.
     sheared_queries: np.ndarray = query_points.copy()
+    # Apply the tie-breaking shear to sample Y coordinates.
     sheared_samples[:, 1] += WORLD_TRIANGULATION_SHEAR * sheared_samples[:, 0]
+    # Apply the same affine shear to output query Y coordinates.
     sheared_queries[:, 1] += WORLD_TRIANGULATION_SHEAR * sheared_queries[:, 0]
+    # Triangulate the sheared sample lattice to select consistent cell diagonals.
     triangulation: Delaunay = Delaunay(sheared_samples)
+    # Find the triangle containing each query, using negative indices outside the hull.
     simplex: np.ndarray = triangulation.find_simplex(sheared_queries)
+    # Select output pixels that can use barycentric interpolation.
     inside: np.ndarray = np.flatnonzero(simplex >= 0)
 
     # Store three barycentric weights per interior pixel; reuse them every frame.
     transforms: np.ndarray = triangulation.transform[simplex[inside]]
+    # Compute interpolation weights from the cached triangle transforms.
     weights: np.ndarray = np.einsum(
         "nij,nj->ni", transforms[:, :2], sheared_queries[inside] - transforms[:, 2]
     )
+    # Complete the third barycentric weight so each triangle's weights sum to one.
     weights = np.column_stack((weights, 1 - weights.sum(axis=1)))
+    # Map each interior query to the three samples at its triangle corners.
     vertices: np.ndarray = triangulation.simplices[simplex[inside]]
 
     # Edge pixels copy the nearest sample, using the existing MATLAB tie rule.
     outside: np.ndarray = np.flatnonzero(simplex < 0)
+    # Index the original sample coordinates for nearest-neighbor queries.
     tree: cKDTree = cKDTree(sample_points)
+    distances: np.ndarray
+    # Measure the nearest-sample distance for each exterior query.
     distances, _ = tree.query(query_points[outside])
+    # Collect equally close samples before applying the deterministic rank rule.
     ties: list[list[int]] = tree.query_ball_point(
         query_points[outside], distances * (1 + 1e-9) + 1e-12
     )
+    sample_rows: np.ndarray
+    sample_cols: np.ndarray
+    # Separate the zero-based coordinates used by the Bayer ordering rule.
     sample_rows, sample_cols = coordinates.T
-    rank: np.ndarray = ((sample_rows % 2) * 2 + sample_cols % 2) * rows * cols + sample_cols * rows + sample_rows
-    nearest: np.ndarray = np.array([indices[np.argmax(rank[indices])] for indices in ties], dtype=np.int64)
+    # Build MATLAB-compatible ordering for resolving equally close sample choices.
+    rank: np.ndarray = (
+        ((sample_rows % 2) * 2 + sample_cols % 2) * rows * cols
+        + sample_cols * rows
+        + sample_rows
+    )
+    # Choose the highest-ranked sample among each exterior query's ties.
+    nearest: np.ndarray = np.array(
+        [indices[np.argmax(rank[indices])] for indices in ties], dtype=np.int64
+    )
     return csr_matrix(
-        (np.concatenate((weights.ravel(), np.ones(outside.size))),
-         (np.concatenate((np.repeat(inside, 3), outside)),
-          np.concatenate((vertices.ravel(), nearest)))),
+        (
+            np.concatenate((weights.ravel(), np.ones(outside.size))),
+            (
+                np.concatenate((np.repeat(inside, 3), outside)),
+                np.concatenate((vertices.ravel(), nearest)),
+            ),
+        ),
         shape=(rows * cols, len(coordinates)),
     )
 
 
-def _interpolate_demosaic_samples(channel_idx: np.ndarray,
-                                  sample_values: np.ndarray,
-                                  image_shape: tuple[int, int]
-                                 ) -> np.ndarray:
+def _interpolate_demosaic_samples(
+    channel_idx: np.ndarray, sample_values: np.ndarray, image_shape: tuple[int, int]
+) -> np.ndarray:
     """Apply cached Bayer weights, falling back for missing or degenerate samples.
 
     Args:
-        channel_idx: Measured channel coordinates as (row, col) pairs.
-        sample_values: Channel values or color-to-green ratios at those sites.
-        image_shape: Output dimensions as (rows, cols).
+        channel_idx (np.ndarray):
+            Measured channel coordinates as (row, col) pairs.
+
+        sample_values (np.ndarray):
+            Channel values or color-to-green ratios at those sites.
+
+        image_shape (tuple[int, int]):
+            Output dimensions as (rows, cols).
 
     Returns:
         A float64 interpolated channel plane with nearest extrapolation.
+
+    Notes:
+        Finite samples use cached sparse interpolation weights. Missing samples
+        or degenerate triangulations fall back to scattered interpolation with
+        nearest extrapolation.
     """
     # Normal reconstructed frames are finite: triangulate only on the first call.
-    if(np.all(np.isfinite(sample_values))):
+    if np.all(np.isfinite(sample_values)):
+        # Encode channel geometry as an immutable key for cached interpolation weights.
         coordinate_bytes: bytes = np.asarray(channel_idx, dtype=np.int64).tobytes()
         try:
-            weights: csr_matrix = _demosaic_interpolation_weights(image_shape, coordinate_bytes)
+            # Retrieve cached sparse weights for this channel geometry.
+            weights: csr_matrix = _demosaic_interpolation_weights(
+                image_shape, coordinate_bytes
+            )
             return (weights @ sample_values).reshape(image_shape)
         except QhullError:
             pass
@@ -1625,30 +1925,46 @@ def _interpolate_demosaic_samples(channel_idx: np.ndarray,
     # Missing samples change the triangulation, so retain Geoff's scattered fit.
     valid: np.ndarray = ~np.isnan(sample_values)
     return _scattered_interpolant(
-        channel_idx[valid, 1] + 1, channel_idx[valid, 0] + 1,
-        sample_values[valid], image_shape,
+        channel_idx[valid, 1] + 1,
+        channel_idx[valid, 0] + 1,
+        sample_values[valid],
+        image_shape,
     )
 
 
-def _interpolate_channel(radiance_map: np.ndarray,
-                         channel_idx: np.ndarray,
-                         image_shape: tuple[int, int]
-                        ) -> np.ndarray:
+def _interpolate_channel(
+    radiance_map: np.ndarray, channel_idx: np.ndarray, image_shape: tuple[int, int]
+) -> np.ndarray:
     """Fill a channel plane from its Bayer samples using linear interpolation.
 
-    Outside the sample region, use the nearest sample. Restore infinite
-    values at their original sensor sites after interpolation.
-
     Args:
-        radiance_map: Two-dimensional Bayer radiance frame.
-        channel_idx: Array of (row, col) positions belonging to this color channel.
-        image_shape: Output dimensions as (rows, cols).
+        radiance_map (np.ndarray):
+            Two-dimensional Bayer radiance frame.
+
+        channel_idx (np.ndarray):
+            Array of (row, col) positions belonging to this color channel.
+
+        image_shape (tuple[int, int]):
+            Output dimensions as (rows, cols).
 
     Returns:
         A float64 channel plane. With no usable samples, the plane contains NaN.
+
+    Notes:
+        Outside the sample region, use the nearest sample. Restore infinite
+        values at their original sensor sites after interpolation.
+
+        Interpolation uses measured channel sites only. Infinite measurements
+        are excluded from fitting and restored at their original sites
+        afterward. The input Bayer frame is preserved.
     """
+    rows: int
+    cols: int
+    # Separate the spatial dimensions for coordinate generation and reshaping.
     rows, cols = image_shape
+    # Extract the measured row positions for the selected color channel.
     channel_rows: np.ndarray = channel_idx[:, 0]
+    # Extract the corresponding measured column positions.
     channel_cols: np.ndarray = channel_idx[:, 1]
 
     # Extract values for this channel from the raw radiance map.
@@ -1659,50 +1975,75 @@ def _interpolate_channel(radiance_map: np.ndarray,
 
     # Prepare work values by turning Inf and NaN into NaN for the interpolant.
     work_sub: np.ndarray = sub_val.copy()
+    # Exclude infinite measurements from the interpolation fit.
     work_sub[np.isinf(work_sub)] = np.nan
 
     # Filter out NaN values for fitting.
     valid_idx: np.ndarray = ~np.isnan(work_sub)
 
     # Nothing to fit, so the whole plane is undefined.
-    if(not np.any(valid_idx)):
+    if not np.any(valid_idx):
         return np.full((rows, cols), np.nan, dtype=np.float64)
 
     # Perform piecewise-linear interpolation with nearest extrapolation for edge robustness.
-    full_grid: np.ndarray = _interpolate_demosaic_samples(channel_idx, work_sub, (rows, cols))
+    full_grid: np.ndarray = _interpolate_demosaic_samples(
+        channel_idx, work_sub, (rows, cols)
+    )
 
     # Restore Inf values at their original sub-grid locations.
-    if(np.any(inf_mask_sub)):
+    if np.any(inf_mask_sub):
+        # Restore original infinite measurements in their reconstructed channel.
         full_grid[channel_rows[inf_mask_sub], channel_cols[inf_mask_sub]] = np.inf
 
     return full_grid
 
 
-def _interpolate_ratio_channel(radiance_map: np.ndarray,
-                               channel_idx: np.ndarray,
-                               full_grid_g: np.ndarray,
-                               image_shape: tuple[int, int],
-                               ratio_epsilon: float = 1e-6
-                              ) -> np.ndarray:
+def _interpolate_ratio_channel(
+    radiance_map: np.ndarray,
+    channel_idx: np.ndarray,
+    full_grid_g: np.ndarray,
+    image_shape: tuple[int, int],
+    ratio_epsilon: float = 1e-6,
+) -> np.ndarray:
     """Interpolate a red or blue channel using green as a guide.
 
-    Interpolate the measured color-to-green ratios, then multiply by the
-    full green plane. This lets the color channel follow detail resolved
-    by green while preserving its measured color ratios.
-
     Args:
-        radiance_map: Two-dimensional Bayer radiance frame.
-        channel_idx: Array of (row, col) positions for the red or blue channel.
-        full_grid_g: Interpolated green plane, with the same spatial shape.
-        image_shape: Output dimensions as (rows, cols).
-        ratio_epsilon: Added to the green denominator, default 1e-6.
+        radiance_map (np.ndarray):
+            Two-dimensional Bayer radiance frame.
+
+        channel_idx (np.ndarray):
+            Array of (row, col) positions for the red or blue channel.
+
+        full_grid_g (np.ndarray):
+            Interpolated green plane, with the same spatial shape.
+
+        image_shape (tuple[int, int]):
+            Output dimensions as (rows, cols).
+
+        ratio_epsilon (float):
+            Added to the green denominator, default 1e-6.
 
     Returns:
         The reconstructed color plane, with original infinite sites restored.
         If no ratios are usable, the plane contains NaN.
+
+    Notes:
+        Interpolate the measured color-to-green ratios, then multiply by the
+        full green plane. This lets the color channel follow detail resolved
+        by green while preserving its measured color ratios.
+
+        Green supplies spatial detail, while the interpolated red/green or
+        blue/green ratio supplies color. The denominator offset stabilizes
+        ratios near zero green response. Original infinite sites are restored
+        after reconstruction.
     """
+    rows: int
+    cols: int
+    # Separate the spatial dimensions for coordinate generation and reshaping.
     rows, cols = image_shape
+    # Extract the measured row positions for the selected color channel.
     channel_rows: np.ndarray = channel_idx[:, 0]
+    # Extract the corresponding measured column positions.
     channel_cols: np.ndarray = channel_idx[:, 1]
 
     # Extract values for the target colour channel (R or B).
@@ -1713,6 +2054,7 @@ def _interpolate_ratio_channel(radiance_map: np.ndarray,
 
     # Prepare work values by turning Inf into NaN for the interpolant.
     work_sub: np.ndarray = sub_val.copy()
+    # Exclude infinite measurements from the interpolation fit.
     work_sub[np.isinf(work_sub)] = np.nan
 
     # Extract corresponding Green guide values at these specific locations.
@@ -1721,23 +2063,27 @@ def _interpolate_ratio_channel(radiance_map: np.ndarray,
     # Compute the colour ratio (R/G or B/G) using the NaN-masked working values.
     # Add a small epsilon to the denominator to prevent division by zero.
     with np.errstate(divide="ignore", invalid="ignore"):
+        # Divide measured color by the green guide, adding the denominator offset.
         ratio_sub: np.ndarray = work_sub / (guide_val + ratio_epsilon)
 
     # Filter out NaN values for fitting.
     valid_idx: np.ndarray = ~np.isnan(ratio_sub)
 
     # Nothing to fit, so the whole plane is undefined.
-    if(not np.any(valid_idx)):
+    if not np.any(valid_idx):
         return np.full((rows, cols), np.nan, dtype=np.float64)
 
     # Perform piecewise-linear interpolation of the colour ratio.
-    full_ratio_grid: np.ndarray = _interpolate_demosaic_samples(channel_idx, ratio_sub, (rows, cols))
+    full_ratio_grid: np.ndarray = _interpolate_demosaic_samples(
+        channel_idx, ratio_sub, (rows, cols)
+    )
 
     # Calculate the final grid by multiplying the interpolated ratio by the full Green guide.
     full_grid: np.ndarray = full_ratio_grid * full_grid_g
 
     # Restore Inf values at their original sub-grid locations.
-    if(np.any(inf_mask_sub)):
+    if np.any(inf_mask_sub):
+        # Restore original infinite measurements in their reconstructed channel.
         full_grid[channel_rows[inf_mask_sub], channel_cols[inf_mask_sub]] = np.inf
 
     return full_grid
@@ -1767,52 +2113,78 @@ def _interpolate_ratio_channel(radiance_map: np.ndarray,
 # Red inherits its detail from green, which actually resolved it, while the
 # ratio supplies the colour. Blue is handled identically.
 # ---------------------------------------------------------------------------
-def _demosaic_radiance_map_rcd_single(radiance_map: np.ndarray,
-                                      bayer_pattern: str,
-                                      ratio_epsilon: float = 1e-6
-                                     ) -> np.ndarray:
+def _demosaic_radiance_map_rcd_single(
+    radiance_map: np.ndarray, bayer_pattern: str, ratio_epsilon: float = 1e-6
+) -> np.ndarray:
     """Reconstruct RGB radiance from one Bayer frame using green-guided ratios.
 
     Args:
-        radiance_map: Two-dimensional Bayer radiance frame.
-        bayer_pattern: Bayer layout: BGGR, RGGB, GRBG, or GBRG.
+        radiance_map (np.ndarray):
+            Two-dimensional Bayer radiance frame.
+
+        bayer_pattern (str):
+            Bayer layout: BGGR, RGGB, GRBG, or GBRG.
+
+        ratio_epsilon (float):
+            Offset added to the green denominator when forming color ratios.
 
     Returns:
         A float64 array shaped (rows, cols, 3), in red, green, blue order.
+
+    Notes:
+        Green is reconstructed first because it is sampled twice as densely as
+        red and blue. Red and blue are reconstructed from their ratios to that
+        guide. The input is preserved.
     """
+    rows: int
+    cols: int
+    # Separate the spatial dimensions for coordinate generation and reshaping.
     rows, cols = radiance_map.shape
 
-    pattern = str(bayer_pattern).upper()
-    if(pattern not in ("BGGR", "RGGB", "GRBG", "GBRG")):
+    # Normalize the Bayer layout name before validating or indexing its channels.
+    pattern: str = str(bayer_pattern).upper()
+    if pattern not in ("BGGR", "RGGB", "GRBG", "GBRG"):
         raise ValueError(f"Unknown Bayer pattern: {bayer_pattern}")
 
-    if((rows, cols) == tuple(WORLD_FRAME_SHAPE) and pattern == "BGGR"):
+    if (rows, cols) == tuple(WORLD_FRAME_SHAPE) and pattern == "BGGR":
         # Reuse row-ordered coordinates directly for sequential image access.
         # The interpolant handles MATLAB nearest-neighbor ties explicitly.
-        rgb_idx = (WORLD_R_PIXELS, WORLD_G_PIXELS,
-                     WORLD_B_PIXELS)
+        rgb_idx: tuple[np.ndarray, ...] | list[np.ndarray] = (
+            WORLD_R_PIXELS,
+            WORLD_G_PIXELS,
+            WORLD_B_PIXELS,
+        )
     else:
         # Preserve support for other Bayer patterns and frame dimensions.
-        cell_positions = ((0, 0), (0, 1), (1, 0), (1, 1))
+        cell_positions: tuple[tuple[int, int], ...] = ((0, 0), (0, 1), (1, 0), (1, 1))
+        # Collect the sensor coordinates used to reconstruct each RGB channel.
         rgb_idx = [
-            np.array([(r, c)
-                      for position, (row_parity, col_parity) in enumerate(cell_positions)
-                      if(pattern[position] == channel)
-                      for c in range(col_parity, cols, 2)
-                      for r in range(row_parity, rows, 2)], dtype=np.uint64)
+            np.array(
+                [
+                    (r, c)
+                    for position, (row_parity, col_parity) in enumerate(cell_positions)
+                    if (pattern[position] == channel)
+                    for c in range(col_parity, cols, 2)
+                    for r in range(row_parity, rows, 2)
+                ],
+                dtype=np.uint64,
+            )
             for channel in "RGB"
         ]
 
     # 1. Interpolate Green channel first to act as the spatial luminance guide.
     # Green is sampled twice as densely as red or blue, so it carries the most
     # spatial detail.
-    full_grid_g: np.ndarray = _interpolate_channel(radiance_map, rgb_idx[1], (rows, cols))
+    full_grid_g: np.ndarray = _interpolate_channel(
+        radiance_map, rgb_idx[1], (rows, cols)
+    )
 
     # 2. Interpolate Red and Blue channels using the Ratio-Corrected approach.
     # This interpolates the R/G and B/G ratios, then multiplies by the full Green channel.
     full_grid_r: np.ndarray = _interpolate_ratio_channel(
         radiance_map, rgb_idx[0], full_grid_g, (rows, cols), ratio_epsilon
     )
+    # Reconstruct blue using its interpolated ratio to the full green guide.
     full_grid_b: np.ndarray = _interpolate_ratio_channel(
         radiance_map, rgb_idx[2], full_grid_g, (rows, cols), ratio_epsilon
     )
@@ -1822,11 +2194,14 @@ def _demosaic_radiance_map_rcd_single(radiance_map: np.ndarray,
 
 
 @contextmanager
-def demosaic_worker_pool(n_workers: int=WORLD_DEMOSAIC_WORKERS) -> Iterator[Pool | None]:
+def demosaic_worker_pool(
+    n_workers: int = WORLD_DEMOSAIC_WORKERS,
+) -> Iterator[Pool | None]:
     """Reuse demosaicing workers and their interpolation caches across buffers.
 
     Args:
-        n_workers: Positive process count, default WORLD_DEMOSAIC_WORKERS (16).
+        n_workers (int):
+            Positive process count, default WORLD_DEMOSAIC_WORKERS (16).
             Selected from sequential 3,600-frame benchmarks including startup
             amortized over ten buffers. One yields None for serial processing.
 
@@ -1854,43 +2229,72 @@ def demosaic_worker_pool(n_workers: int=WORLD_DEMOSAIC_WORKERS) -> Iterator[Pool
         serial to avoid repeatedly paying startup and cache-construction costs.
         Measurements: tmp/benchmark_demosaic_large_buffers.json.
     """
-    if(not isinstance(n_workers, int) or isinstance(n_workers, bool) or n_workers < 1):
+    if not isinstance(n_workers, int) or isinstance(n_workers, bool) or n_workers < 1:
         raise ValueError("n_workers must be a positive integer.")
-    if(n_workers == 1):
+    if n_workers == 1:
         yield None
     else:
         with multiprocessing.get_context("spawn").Pool(processes=n_workers) as pool:
             yield pool
 
 
-def _demosaic_shared_worker(frame_index: int,
-                             bayer_pattern: str,
-                             input_name: str,
-                             output_name: str,
-                             input_shape: tuple[int, ...],
-                             ratio_epsilon: float = 1e-6
-                            ) -> None:
+def _demosaic_shared_worker(
+    frame_index: int,
+    bayer_pattern: str,
+    input_name: str,
+    output_name: str,
+    input_shape: tuple[int, ...],
+    ratio_epsilon: float = 1e-6,
+) -> None:
     """Demosaic one frame into its exclusive shared RGB output slice.
 
     Args:
-        frame_index: Frame assigned to this worker.
-        bayer_pattern: Bayer layout used to interpret the input.
-        input_name: Parent-owned shared float64 Bayer allocation.
-        output_name: Parent-owned shared float64 RGB allocation.
-        input_shape: Shape of the input (frames, rows, cols) buffer.
+        frame_index (int):
+            Frame assigned to this worker.
+
+        bayer_pattern (str):
+            Bayer layout used to interpret the input.
+
+        input_name (str):
+            Parent-owned shared float64 Bayer allocation.
+
+        output_name (str):
+            Parent-owned shared float64 RGB allocation.
+
+        input_shape (tuple[int, ...]):
+            Shape of the input (frames, rows, cols) buffer.
+
+        ratio_epsilon (float):
+            Offset added to the green denominator when forming color ratios.
 
     Returns:
         None. Only this frame's output slice is modified. The parent unlinks
         both allocations after all tasks finish; workers retain cached weights.
+
+    Notes:
+        Input and output allocations belong to the parent. Each worker writes a
+        disjoint RGB frame, releases its NumPy views, and closes both handles
+        without unlinking them.
     """
+    # Open the shared Bayer input allocation for this operation.
     input_memory: SharedMemory = SharedMemory(name=input_name)
     try:
+        # Open the shared RGB output allocation for this operation.
         output_memory: SharedMemory = SharedMemory(name=output_name)
         try:
-            source: np.ndarray = np.ndarray(input_shape, dtype=np.float64, buffer=input_memory.buf)
-            output: np.ndarray = np.ndarray((*input_shape, 3), dtype=np.float64, buffer=output_memory.buf)
+            # View the shared Bayer bytes as the original frame-buffer shape.
+            source: np.ndarray = np.ndarray(
+                input_shape, dtype=np.float64, buffer=input_memory.buf
+            )
+            # Map the shared output bytes to their float64 array shape without copying.
+            output: np.ndarray = np.ndarray(
+                (*input_shape, 3), dtype=np.float64, buffer=output_memory.buf
+            )
             try:
-                output[frame_index] = _demosaic_radiance_map_rcd_single(source[frame_index], bayer_pattern, ratio_epsilon)
+                # Write this worker's reconstructed frame into its exclusive shared slice.
+                output[frame_index] = _demosaic_radiance_map_rcd_single(
+                    source[frame_index], bayer_pattern, ratio_epsilon
+                )
             finally:
                 del source, output
         finally:
@@ -1899,35 +2303,66 @@ def _demosaic_shared_worker(frame_index: int,
         input_memory.close()
 
 
-def _demosaic_shared_buffer(values: np.ndarray,
-                             bayer_pattern: str,
-                             worker_pool: Pool,
-                             ratio_epsilon: float = 1e-6
-                            ) -> np.ndarray:
+def _demosaic_shared_buffer(
+    values: np.ndarray,
+    bayer_pattern: str,
+    worker_pool: Pool,
+    ratio_epsilon: float = 1e-6,
+) -> np.ndarray:
     """Process a buffer with existing workers, transferring only task descriptors.
 
     Args:
-        values: Nonempty float64 Bayer buffer shaped (frames, rows, cols).
-        bayer_pattern: Bayer layout used to interpret each frame.
-        worker_pool: Persistent spawned pool owned by the caller.
+        values (np.ndarray):
+            Nonempty float64 Bayer buffer shaped (frames, rows, cols).
+
+        bayer_pattern (str):
+            Bayer layout used to interpret each frame.
+
+        worker_pool (Pool):
+            Persistent spawned pool owned by the caller.
+
+        ratio_epsilon (float):
+            Offset added to the green denominator when forming color ratios.
 
     Returns:
         An independent float64 RGB buffer. Shared allocations are released on
         success or failure, and no shared-memory handles escape to the caller.
+
+    Notes:
+        Only frame indices, geometry, and allocation names cross the task queue.
+        Image data live in shared memory; the returned copy owns ordinary NumPy
+        storage after cleanup.
     """
+    # Allocate parent-owned shared storage for the Bayer input.
     input_memory: SharedMemory = SharedMemory(create=True, size=values.nbytes)
     try:
+        # Allocate parent-owned shared storage for the three-channel RGB output.
         output_memory: SharedMemory = SharedMemory(create=True, size=values.nbytes * 3)
         try:
-            shared_input: np.ndarray = np.ndarray(values.shape, dtype=np.float64, buffer=input_memory.buf)
-            shared_output: np.ndarray = np.ndarray((*values.shape, 3), dtype=np.float64, buffer=output_memory.buf)
+            # Expose shared input storage as a float64 Bayer buffer.
+            shared_input: np.ndarray = np.ndarray(
+                values.shape, dtype=np.float64, buffer=input_memory.buf
+            )
+            # Expose shared output storage with a trailing RGB channel axis.
+            shared_output: np.ndarray = np.ndarray(
+                (*values.shape, 3), dtype=np.float64, buffer=output_memory.buf
+            )
             try:
                 # Copy input once. Each worker writes a disjoint RGB frame.
                 np.copyto(shared_input, values)
                 worker_pool.starmap(
                     _demosaic_shared_worker,
-                    ((index, bayer_pattern, input_memory.name, output_memory.name, values.shape, ratio_epsilon)
-                     for index in range(len(values))),
+                    (
+                        (
+                            index,
+                            bayer_pattern,
+                            input_memory.name,
+                            output_memory.name,
+                            values.shape,
+                            ratio_epsilon,
+                        )
+                        for index in range(len(values))
+                    ),
                     chunksize=1,
                 )
                 # Return ordinary NumPy storage before releasing shared memory.
@@ -1942,43 +2377,36 @@ def _demosaic_shared_buffer(values: np.ndarray,
         input_memory.unlink()
 
 
-def demosaic_radiance_map_rcd(radiance_map_or_buffer: np.ndarray,
-                              bayer_pattern: str="BGGR",
-                              visualize_results: bool=False,
-                              worker_pool: Pool | None = None,
-                              ratio_epsilon: float = 1e-6
-                             ) -> np.ndarray | tuple[np.ndarray, object]:
+def demosaic_radiance_map_rcd(
+    radiance_map_or_buffer: np.ndarray,
+    bayer_pattern: str = "BGGR",
+    visualize_results: bool = False,
+    worker_pool: Pool | None = None,
+    ratio_epsilon: float = 1e-6,
+) -> np.ndarray | tuple[np.ndarray, plt.Figure]:
     """Demosaic a Bayer-pattern radiance map into a 3-D RGB image.
 
-    This is the Python equivalent of MATLAB ``demosaicRadianceMap``. It
-    takes a 2-D radiance map with a specified Bayer pattern and returns a
-    ``rows x cols x 3`` array containing the interpolated Red, Green, and Blue
-    channels using a Ratio-Corrected Demosaicing (RCD) algorithm.
-
-    Pixels assigned an ``Inf`` value in the input retain their ``Inf`` value in
-    their respective output channel after demosaicing when usable samples exist.
-    A channel with no usable samples is NaN, matching MATLAB's early return.
-    Input values are preserved and output uses float64 in the same radiance units.
-    Green is interpolated first; red and blue use color / (green + ratio_epsilon).
-    ratio_epsilon defaults to 1e-6 and is passed to serial and pooled workers.
-    Intact channel geometry is cached to avoid triangulating every video frame.
-    Missing samples use the scattered fallback, where SciPy and MATLAB may
-    choose different valid triangles.
-
-    MATLAB handles one map. A ``(frames, rows, cols)`` buffer is accepted here
-    and each frame is demosaiced independently.
-
     Args:
-        radiance_map_or_buffer: Bayer radiance map shaped ``(rows, cols)`` or a
-            buffer shaped ``(frames, rows, cols)``.
-        bayer_pattern: Bayer layout of the sensor.
-        visualize_results: When ``True``, display a before/after figure and
-            return it alongside the result. Supported for one frame only.
-        worker_pool: Optional persistent pool from demosaic_worker_pool(n_workers).
+        radiance_map_or_buffer (np.ndarray):
+            Bayer radiance map shaped ``(rows, cols)`` or a buffer shaped
+            ``(frames, rows, cols)``.
+
+        bayer_pattern (str):
+            Bayer layout of the sensor.
+
+        visualize_results (bool):
+            When ``True``, display a before/after figure and return it alongside
+            the result. Supported for one frame only.
+
+        worker_pool (Pool | None):
+            Optional persistent pool from demosaic_worker_pool(n_workers).
             Buffers use shared memory when supplied; None runs serially. Single
-            frames run serially. Reuse the pool across chunks to amortize startup
-            and interpolation-cache construction. Input and output are copied
-            once across the shared-memory boundary.
+            frames run serially. Reuse the pool across chunks to amortize
+            startup and interpolation-cache construction. Input and output are
+            copied once across the shared-memory boundary.
+
+        ratio_epsilon (float):
+            Offset added to the green denominator when forming color ratios.
 
     Returns:
         ``(rows, cols, 3)`` for one map or ``(frames, rows, cols, 3)`` for a
@@ -1986,6 +2414,24 @@ def demosaic_radiance_map_rcd(radiance_map_or_buffer: np.ndarray,
         requested.
 
     Notes:
+        This is the Python equivalent of MATLAB ``demosaicRadianceMap``. It
+        takes a 2-D radiance map with a specified Bayer pattern and returns a
+        ``rows x cols x 3`` array containing the interpolated Red, Green, and Blue
+        channels using a Ratio-Corrected Demosaicing (RCD) algorithm.
+
+        Pixels assigned an ``Inf`` value in the input retain their ``Inf`` value in
+        their respective output channel after demosaicing when usable samples exist.
+        A channel with no usable samples is NaN, matching MATLAB's early return.
+        Input values are preserved and output uses float64 in the same radiance units.
+        Green is interpolated first; red and blue use color / (green + ratio_epsilon).
+        ratio_epsilon defaults to 1e-6 and is passed to serial and pooled workers.
+        Intact channel geometry is cached to avoid triangulating every video frame.
+        Missing samples use the scattered fallback, where SciPy and MATLAB may
+        choose different valid triangles.
+
+        MATLAB handles one map. A ``(frames, rows, cols)`` buffer is accepted here
+        and each frame is demosaiced independently.
+
         Benchmarked on 2026-10-05 on a Mac Studio (Mac15,14), Apple M3 Ultra,
         28-core CPU (20 performance + 8 efficiency), 256 GB unified memory,
         macOS 15.3 (arm64).
@@ -2002,40 +2448,62 @@ def demosaic_radiance_map_rcd(radiance_map_or_buffer: np.ndarray,
         serial to avoid repeatedly paying startup and cache-construction costs.
         Measurements: tmp/benchmark_demosaic_large_buffers.json.
     """
+    # Normalize incoming Bayer radiance to double precision.
     values: np.ndarray = np.asarray(radiance_map_or_buffer, dtype=np.float64)
 
     # Accept one radiance map or a buffer of them, and nothing else.
-    if(values.ndim not in (2, 3)):
+    if values.ndim not in (2, 3):
         raise ValueError(
             "RCD demosaicing requires shape (rows, cols) or "
             f"(frames, rows, cols). Got {values.shape}."
         )
-    if(visualize_results is True and values.ndim != 2):
-        raise AssertionError("RCD demosaicing visualization supports a single frame only")
+    if visualize_results is True and values.ndim != 2:
+        raise AssertionError(
+            "RCD demosaicing visualization supports a single frame only"
+        )
 
     # Demosaic one map directly, or every frame of a buffer independently.
-    if(values.ndim == 2):
-        result: np.ndarray = _demosaic_radiance_map_rcd_single(values, bayer_pattern, ratio_epsilon)
-    elif(worker_pool is not None and len(values) > 1):
-        result = _demosaic_shared_buffer(values, bayer_pattern, worker_pool, ratio_epsilon)
+    if values.ndim == 2:
+        result: np.ndarray = _demosaic_radiance_map_rcd_single(
+            values, bayer_pattern, ratio_epsilon
+        )
+    elif worker_pool is not None and len(values) > 1:
+        result = _demosaic_shared_buffer(
+            values, bayer_pattern, worker_pool, ratio_epsilon
+        )
     else:
         # Allocate the buffer once instead of retaining frames and stacking a copy.
         result = np.empty((*values.shape, 3), dtype=np.float64)
         for frame_index, frame in enumerate(values):
-            result[frame_index] = _demosaic_radiance_map_rcd_single(frame, bayer_pattern, ratio_epsilon)
+            # Write one reconstructed frame directly into the preallocated RGB buffer.
+            result[frame_index] = _demosaic_radiance_map_rcd_single(
+                frame, bayer_pattern, ratio_epsilon
+            )
 
     # If visualize results is true, we will print an output of what the image looks like
-    if(visualize_results is True):
+    if visualize_results is True:
         # Radiance is unbounded, so stretch the middle 98% into the display range.
         finite_values: np.ndarray = result[np.isfinite(result)]
+        # Copy RGB output for display scaling without altering returned radiance.
         display_result: np.ndarray = result.copy()
-        if(finite_values.size):
+        if finite_values.size:
+            lower: float
+            upper: float
+            # Use the finite first and ninety-ninth percentiles as display limits.
             lower, upper = np.percentile(finite_values, (1, 99))
-            if(upper > lower):
-                display_result = np.clip((display_result - lower) / (upper - lower), 0, 1)
+            if upper > lower:
+                # Stretch the selected percentile range to [0, 1] only in the display copy.
+                display_result = np.clip(
+                    (display_result - lower) / (upper - lower), 0, 1
+                )
 
+        fig: plt.Figure
+        axes: np.ndarray
+        # Create aligned before/after panels for visual inspection of this stage.
         fig, axes = plt.subplots(1, 2, figsize=(12, 4))
-        fig.suptitle("Radiance Demosaicing (Before / After)", fontweight="bold", fontsize=18)
+        fig.suptitle(
+            "Radiance Demosaicing (Before / After)", fontweight="bold", fontsize=18
+        )
 
         axes[0].imshow(values, cmap="gray")
         axes[0].set_title("Bayer radiance")
@@ -2053,28 +2521,38 @@ def demosaic_radiance_map_rcd(radiance_map_or_buffer: np.ndarray,
     return result
 
 
-def apply_fielding_function(image_or_video: np.ndarray, 
-                            visualize_results: bool=False,
-                            fielding_function: np.ndarray | None = None
-                           ) -> None:
+def apply_fielding_function(
+    image_or_video: np.ndarray,
+    visualize_results: bool = False,
+    fielding_function: np.ndarray | None = None,
+) -> None:
     """Apply the registered fielding correction in place.
 
     Args:
-        image_or_video: A floating-point raw Bayer frame with shape
-            ``(rows, cols)`` or frame buffer with shape
-            ``(frames, rows, cols)``. The spatial frame size must exist in
-            ``WORLD_FIELDING_FUNCTIONS``.
-        visualize_results: When ``True``, display a before/after figure. Visualization supports
+        image_or_video (np.ndarray):
+            A floating-point raw Bayer frame with shape ``(rows, cols)`` or
+            frame buffer with shape ``(frames, rows, cols)``. The spatial frame
+            size must exist in ``WORLD_FIELDING_FUNCTIONS``.
+
+        visualize_results (bool):
+            When ``True``, display a before/after figure. Visualization supports
             only a single ``(rows, cols)`` frame and asserts otherwise.
-        fielding_function: Optional two-dimensional correction map. If omitted, use the calibrated
-            map for the frame shape.
+
+        fielding_function (np.ndarray | None):
+            Optional two-dimensional correction map. If omitted, use the
+            calibrated map for the frame shape.
 
     Returns:
         None. The supplied array is modified in place. When visualization is
         enabled, the before/after figure is displayed without returning it.
+
+    Notes:
+        The two-dimensional correction map broadcasts across a frame buffer.
+        Multiplication is in place; pass a copy to preserve the input. The
+        default map is selected by spatial image shape.
     """
 
-    # Input must either be a single image or a buffer of images 
+    # Input must either be a single image or a buffer of images
     assert image_or_video.ndim in (2, 3), (
         f"Fielding function requires a single frame with shape (rows, cols) "
         f"or a frame buffer with shape (frames, rows, cols). Got shape "
@@ -2084,26 +2562,33 @@ def apply_fielding_function(image_or_video: np.ndarray,
     # If we want to visualize we need to copy an unmodified version of the input
     # as this is an in-place operation
     unmodified_image_or_video: np.ndarray | None = None
-    if(visualize_results is True):
+    if visualize_results is True:
         assert image_or_video.ndim == 2, (
             f"Fielding function visualization only supports a single frame "
             f"with shape (rows, cols). Got shape {image_or_video.shape}."
         )
-        unmodified_image_or_video = image_or_video.copy() 
+        # Reserve the original image only when a comparison plot is requested.
+        unmodified_image_or_video = image_or_video.copy()
 
     # If the fielding function was not passed in,
     # load it manually.
     image_shape: tuple[int, int] = image_or_video.shape[-2:]
-    if(fielding_function is None):
+    if fielding_function is None:
+        # Select the calibrated correction map matching the input spatial dimensions.
         fielding_function: np.ndarray = WORLD_FIELDING_FUNCTIONS[image_shape]
 
     # Element wise multiply the two matrices together in place
     image_or_video *= fielding_function
 
-    # Visualize the results if desired 
-    if(visualize_results is True):
+    # Visualize the results if desired
+    if visualize_results is True:
+        fig: plt.Figure
+        axes: np.ndarray
+        # Create aligned before/after panels for visual inspection of this stage.
         fig, axes = plt.subplots(1, 2, figsize=(12, 4))
-        fig.suptitle("Fielding Function (Before / After)", fontweight='bold', fontsize=18)
+        fig.suptitle(
+            "Fielding Function (Before / After)", fontweight="bold", fontsize=18
+        )
 
         axes[0].imshow(unmodified_image_or_video, cmap="gray")
         axes[0].set_title("Before")
@@ -2121,61 +2606,79 @@ def apply_fielding_function(image_or_video: np.ndarray,
     return None
 
 # Apply the per-color weights to the color pixels of a frame.
-def apply_color_correction(image_or_video: np.ndarray, 
-                           visualize_results: bool=False,
-                           ) -> None:
+def apply_color_correction(
+    image_or_video: np.ndarray,
+    visualize_results: bool = False,
+) -> None:
     """Apply calibrated Bayer-site RGB scaling factors in place.
 
-    The correction constants in ``WORLD_RGB_SCALARS`` are applied to raw
-    Bayer samples using a cached BGGR weight map for each image size. The
-    same 2-D map broadcasts across every frame of a buffer.
-
     Args:
-        image_or_video: A floating-point raw Bayer frame with shape
-            ``(rows, cols)`` or frame buffer with shape
-            ``(frames, rows, cols)``.
-        visualize_results: When ``True``, display a before/after figure. Visualization supports
+        image_or_video (np.ndarray):
+            A floating-point raw Bayer frame with shape ``(rows, cols)`` or
+            frame buffer with shape ``(frames, rows, cols)``.
+
+        visualize_results (bool):
+            When ``True``, display a before/after figure. Visualization supports
             only a single ``(rows, cols)`` frame and asserts otherwise.
 
     Returns:
         None. The supplied array is modified in place. When visualization is
         enabled, the before/after figure is displayed without returning it.
+
     Raises:
         ValueError: If no cached correction map exists for the frame shape.
+
+    Notes:
+        The correction constants in ``WORLD_RGB_SCALARS`` are applied to raw
+        Bayer samples using a cached BGGR weight map for each image size. The
+        same 2-D map broadcasts across every frame of a buffer.
+
+        The cached correction map assigns calibrated RGB weights to BGGR sensor
+        sites. It broadcasts across a buffer and modifies the supplied floating-
+        point array in place.
     """
 
-    # Input must either be a single image or a buffer of images 
+    # Input must either be a single image or a buffer of images
     assert image_or_video.ndim in (2, 3), (
         f"Color correction requires a single raw Bayer frame with shape "
         f"(rows, cols) or a raw Bayer frame buffer with shape "
         f"(frames, rows, cols). Got shape {image_or_video.shape}."
     )
 
-    # If we want to do visualization we need do make a copy of the original image 
+    # If we want to do visualization we need do make a copy of the original image
     unmodified_image_or_video: np.ndarray | None = None
-    if(visualize_results is True):
+    if visualize_results is True:
         assert image_or_video.ndim == 2, (
             f"Color correction visualization only supports a single frame "
             f"with shape (rows, cols). Got shape {image_or_video.shape}."
         )
-        unmodified_image_or_video = image_or_video.copy() 
+        # Reserve the original image only when a comparison plot is requested.
+        unmodified_image_or_video = image_or_video.copy()
 
     # Use the spatial shape for either a single image or a frame buffer.
     image_shape: tuple[int, int] = image_or_video.shape[-2:]
 
     # Each supported shape has a correction map cached when the module loads.
-    if(image_shape not in WORLD_BAYER_CORRECTION_MATRICES):
-        raise ValueError(f"Unsupported image shape for Bayer color correction: {image_shape}.")
+    if image_shape not in WORLD_BAYER_CORRECTION_MATRICES:
+        raise ValueError(
+            f"Unsupported image shape for Bayer color correction: {image_shape}."
+        )
+    # Retrieve the cached per-site RGB correction weights for this geometry.
     bayer_correction_matrix: np.ndarray = WORLD_BAYER_CORRECTION_MATRICES[image_shape]
 
     # Elementwise multiplication writes directly to the input. Broadcasting
     # avoids creating a separate weight map for each frame in a buffer.
     image_or_video *= bayer_correction_matrix
 
-    # Visualize the results if desired 
-    if(visualize_results is True):
+    # Visualize the results if desired
+    if visualize_results is True:
+        fig: plt.Figure
+        axes: np.ndarray
+        # Create aligned before/after panels for visual inspection of this stage.
         fig, axes = plt.subplots(1, 2, figsize=(12, 4))
-        fig.suptitle("Color Correction (Before / After)", fontweight='bold', fontsize=18)
+        fig.suptitle(
+            "Color Correction (Before / After)", fontweight="bold", fontsize=18
+        )
 
         axes[0].imshow(unmodified_image_or_video, cmap="gray")
         axes[0].set_title("Before")
@@ -3615,56 +4118,100 @@ def world_raw_frames_from_chunks(path_to_recording: str,
 
     return np.array(frames)
 
-def world_counts_to_radiance(image_or_video: np.ndarray,
-                             agc_settings: dict[str, float | np.ndarray],
-                             visualize_results: bool=False,
-                             radiance_agc_target: float = 127.0,
-                             camera_bit_depth: int = 8
-                            ) -> None:
+def world_counts_to_radiance(
+    image_or_video: np.ndarray,
+    agc_settings: dict[str, float | np.ndarray],
+    visualize_results: bool = False,
+    radiance_agc_target: float = 127.0,
+    camera_bit_depth: int = 8,
+) -> None:
     """Convert corrected world-camera counts to absolute radiance units.
 
     Args:
-        image_or_video: Flat-fielded and color-corrected world-camera counts
-            with shape ``(rows, cols)`` or ``(frames, rows, cols)``. The input
-            is scaled in place.
-        agc_settings: Camera settings containing either the legacy keys
-            ``exposure``, ``Again``, and ``Dgain`` or the modern keys
-            ``cameraExposure``, ``cameraAgain``, and ``AGCDgain``. Values may
-            be scalars or one-dimensional arrays containing one value per
-            frame.
-        radiance_agc_target: AGC target in sensor counts, default 127.
-        camera_bit_depth: Bit depth defining the maximum sensor count, default 8.
-        visualize_results: When ``True``, display the counts before and after
-            conversion. Visualization supports a single frame only.
+        image_or_video (np.ndarray):
+            Flat-fielded and color-corrected world-camera counts with shape
+            ``(rows, cols)`` or ``(frames, rows, cols)``. The input is scaled in
+            place.
+
+        agc_settings (dict[str, float | np.ndarray]):
+            Camera settings containing either the legacy keys ``exposure``,
+            ``Again``, and ``Dgain`` or the modern keys ``cameraExposure``,
+            ``cameraAgain``, and ``AGCDgain``. Values may be scalars or one-
+            dimensional arrays containing one value per frame.
+
+        radiance_agc_target (float):
+            AGC target in sensor counts, default 127.
+
+        camera_bit_depth (int):
+            Bit depth defining the maximum sensor count, default 8.
+
+        visualize_results (bool):
+            When ``True``, display the counts before and after conversion.
+            Visualization supports a single frame only.
 
     Returns:
         None. The supplied array is modified in place. When visualization is
         enabled, the before/after figure is displayed without returning it.
+
+    Notes:
+        Digital gain enters through the AGC target rather than direct
+        multiplication of pixels. The camera score predicts mean integrated
+        radiance through the log-polynomial calibration. Scalar settings
+        broadcast to all frames; per-frame scales are reshaped for spatial
+        broadcasting.
     """
+    # Reserve the original image only when a comparison plot is requested.
     unmodified_image_or_video: np.ndarray | None = None
-    if(visualize_results is True):
-        assert image_or_video.ndim == 2, "Radiance visualization only supports a single frame"
+    if visualize_results is True:
+        assert (
+            image_or_video.ndim == 2
+        ), "Radiance visualization only supports a single frame"
+        # Reserve the original image only when a comparison plot is requested.
         unmodified_image_or_video = image_or_video.copy()
 
     # Accept both generations of world-camera metadata names.
-    exposure: float | np.ndarray = agc_settings["exposure"] if "exposure" in agc_settings else agc_settings["cameraExposure"]
-    analog_gain: float | np.ndarray = agc_settings["Again"] if "Again" in agc_settings else agc_settings["cameraAgain"]
-    digital_gain: float | np.ndarray = agc_settings["Dgain"] if "Dgain" in agc_settings else agc_settings["AGCDgain"]
+    exposure: float | np.ndarray = (
+        agc_settings["exposure"]
+        if "exposure" in agc_settings
+        else agc_settings["cameraExposure"]
+    )
+    # Accept either legacy or modern metadata naming for analog gain.
+    analog_gain: float | np.ndarray = (
+        agc_settings["Again"]
+        if "Again" in agc_settings
+        else agc_settings["cameraAgain"]
+    )
+    # Accept either legacy or modern metadata naming for digital gain.
+    digital_gain: float | np.ndarray = (
+        agc_settings["Dgain"] if "Dgain" in agc_settings else agc_settings["AGCDgain"]
+    )
 
     # Match reconstructionPipeline.m: undo digital gain at the AGC target,
     # subtract dark signal, then invert the sensor response for each frame.
-    set_point: np.ndarray = radiance_agc_target / np.asarray(digital_gain, dtype=np.float64) - WORLD_DARK_SIGNAL
-    smax: float = (2 ** camera_bit_depth - 1) - WORLD_DARK_SIGNAL
+    set_point: np.ndarray = (
+        radiance_agc_target / np.asarray(digital_gain, dtype=np.float64)
+        - WORLD_DARK_SIGNAL
+    )
+    # Subtract the dark offset to obtain the usable sensor range.
+    smax: float = (2**camera_bit_depth - 1) - WORLD_DARK_SIGNAL
+    # Use the calibrated full-well exponent when inverting the AGC target.
     exponent: float = WORLD_FULL_WELL_CLIPPING_EXPONENT
-    linearized_set_point: np.ndarray = set_point / (1 - (set_point / smax) ** exponent) ** (1 / exponent)
+    # Invert the sensor response at the dark-subtracted AGC target.
+    linearized_set_point: np.ndarray = set_point / (
+        1 - (set_point / smax) ** exponent
+    ) ** (1 / exponent)
+    # Apply the mean spatial correction to express the target in corrected counts.
     effective_set_point: np.ndarray = (
-        linearized_set_point
-        * WORLD_MEAN_SPATIAL_CORRECTIONS[image_or_video.shape[-2:]]
+        linearized_set_point * WORLD_MEAN_SPATIAL_CORRECTIONS[image_or_video.shape[-2:]]
     )
 
     # Match MATLAB: 10.^polyval(agcToRadianceP, log10(cameraScore)).
     # The fitted coefficients directly predict mean integrated radiance.
-    this_camera_score: np.ndarray = np.asarray(np.asarray(exposure) * np.asarray(analog_gain) / effective_set_point, dtype=np.float64)
+    this_camera_score: np.ndarray = np.asarray(
+        np.asarray(exposure) * np.asarray(analog_gain) / effective_set_point,
+        dtype=np.float64,
+    )
+    # Evaluate the fitted log-polynomial and convert back to linear radiance.
     mean_integrated_radiance: np.ndarray = np.power(
         10.0, np.polyval(WORLD_AGC_TO_RADIANCE_P, np.log10(this_camera_score))
     )
@@ -3672,15 +4219,21 @@ def world_counts_to_radiance(image_or_video: np.ndarray,
     # Give each buffered frame its own broadcastable radiance scale. Scalar
     # settings naturally apply the same scale to every frame.
     radiance_scale: np.ndarray = mean_integrated_radiance / effective_set_point
-    if(image_or_video.ndim == 3 and np.ndim(radiance_scale) > 0):
+    if image_or_video.ndim == 3 and np.ndim(radiance_scale) > 0:
+        # Add singleton spatial axes so each frame receives its own radiance multiplier.
         radiance_scale: np.ndarray = radiance_scale.reshape(-1, 1, 1)
 
     # Scale corrected counts by the fitted mean integrated radiance.
     image_or_video *= radiance_scale
 
-    if(visualize_results is True):
+    if visualize_results is True:
+        fig: plt.Figure
+        axes: np.ndarray
+        # Create aligned before/after panels for visual inspection of this stage.
         fig, axes = plt.subplots(1, 2, figsize=(12, 4))
-        fig.suptitle("World Counts to Radiance (Before / After)", fontweight='bold', fontsize=18)
+        fig.suptitle(
+            "World Counts to Radiance (Before / After)", fontweight="bold", fontsize=18
+        )
         axes[0].imshow(unmodified_image_or_video, cmap="gray")
         axes[0].set_title("Before")
         axes[0].axis("off")
@@ -3695,89 +4248,206 @@ def world_counts_to_radiance(image_or_video: np.ndarray,
 
 
 @lru_cache(maxsize=1)
-def _opponent_calibration():
-    """Load the shared RGB-to-LMS calibration and camera angular triangulation."""
-    maps = scipy.io.loadmat(_DERIVED_CALIBRATION_DIR / "cameraToVisualAngles.mat")
-    az = np.asarray(maps["nativeAzimuthMap"], dtype=np.float64)
-    el = np.asarray(maps["nativeElevationMap"], dtype=np.float64)
-    matrix = scipy.io.loadmat(_DERIVED_CALIBRATION_DIR / "sensorToConeMatrix.mat")["rgb2lmsMatrix"]
-    triangulation = Delaunay(np.column_stack((az.ravel(), el.ravel())))
+def _opponent_calibration() -> tuple[np.ndarray, np.ndarray, np.ndarray, Delaunay]:
+    """Load and cache the camera geometry and RGB-to-LMS calibration.
+
+    Args:
+        None.
+
+    Returns:
+        Azimuth and elevation maps in degrees, the RGB-to-LMS matrix, and the
+        Delaunay triangulation of the camera's angular sample positions.
+
+    Notes:
+        The cached arrays are shared between calls and must be treated as
+        read-only. Metadata receives a copy of the conversion matrix.
+    """
+    # Load the per-pixel angular calibration from the MATLAB calibration file.
+    maps: dict[str, object] = scipy.io.loadmat(
+        _DERIVED_CALIBRATION_DIR / "cameraToVisualAngles.mat"
+    )
+    # Convert the native azimuth map to double precision for interpolation.
+    az: np.ndarray = np.asarray(maps["nativeAzimuthMap"], dtype=np.float64)
+    # Convert the native elevation map using the same numerical precision.
+    el: np.ndarray = np.asarray(maps["nativeElevationMap"], dtype=np.float64)
+    # Load the calibrated linear transformation from camera RGB to cone LMS.
+    matrix: np.ndarray = scipy.io.loadmat(
+        _DERIVED_CALIBRATION_DIR / "sensorToConeMatrix.mat"
+    )["rgb2lmsMatrix"]
+    # Triangulate camera samples in angular coordinates for RGB interpolation.
+    triangulation: Delaunay = Delaunay(np.column_stack((az.ravel(), el.ravel())))
     return az, el, matrix, triangulation
 
 
-def compute_foveated_opponent_map(radiance, gaze_xy=None, *, balance_neutral=True,
-                                  azimuth=None, elevation=None):
-    """Project RGB radiance to foveated Ach, RG, BY channels, as in Geoff's demo.
+def compute_foveated_opponent_map(
+    radiance: np.ndarray,
+    gaze_xy: np.ndarray | tuple[float, float] | None = None,
+    *,
+    balance_neutral: bool = True,
+    azimuth: np.ndarray | None = None,
+    elevation: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Project RGB radiance into gaze-centered Ach, RG, and BY channels.
 
-    gaze_xy is a MATLAB-style (one-based) camera pixel (X, Y), or one pair
-    per frame. None uses the image center, matching the demo's explicit
-    (320, 240) fixation for 640-by-480 frames. The MATLAB helper itself uses
-    reversed dimensions when gaze is omitted; this API follows the demo.
-    Nonfinite gaze produces a NaN map.
-    Returns float64 maps in (azimuth, elevation, channel) order (with a leading
-    frame axis for buffers), plus per-frame effective LMS weights. Outside
-    camera coverage remains NaN; signed opponent values are never clipped.
+    Args:
+        radiance (np.ndarray):
+            RGB radiance shaped (rows, cols, 3) or (frames, rows, cols, 3).
+
+        gaze_xy (np.ndarray | tuple[float, float] | None):
+            One-based camera pixel (X, Y), or one pair per frame. None uses the
+            image center.
+
+        balance_neutral (bool):
+            Balance M and S weights using each frame's valid scene mean. False
+            retains the fixed LMS weights (1.0, 1.33, 5.0).
+
+        azimuth (np.ndarray | None):
+            Output azimuth coordinates in degrees; defaults to -90 to 90
+            inclusive at 0.5-degree intervals.
+
+        elevation (np.ndarray | None):
+            Output elevation coordinates in degrees; defaults to -90 to 90
+            inclusive at 0.5-degree intervals.
+
+    Returns:
+        Opponent maps and effective LMS weights. Single-frame maps have shape
+        (azimuth, elevation, 3), with weights shaped (3,). Buffers add a leading
+        frame axis to both outputs. Channel order is Ach, RG, BY.
+
+    Raises:
+        ValueError: Image geometry differs from calibration or gaze has an
+            incompatible shape.
+
+    Notes:
+        Nonfinite gaze produces a NaN map; finite gaze is clipped to the camera
+        bounds. Coverage outside the camera remains NaN and signed opponent
+        responses are never clipped. Center fixation follows the MATLAB demo's
+        (320, 240) convention for 640-by-480 frames. Scene balancing preserves
+        MATLAB's NaN/Inf behavior for degenerate scenes.
     """
+    # Normalize input values to double precision before geometric interpolation.
     radiance = np.asarray(radiance, dtype=np.float64)
-    single = radiance.ndim == 3
-    frames = radiance[None] if single else radiance
+    # Remember whether the caller supplied one frame or a frame buffer.
+    single: bool = radiance.ndim == 3
+    # Add a temporary frame axis so both input forms share the same loop.
+    frames: np.ndarray = radiance[None] if single else radiance
+    az: np.ndarray
+    el: np.ndarray
+    matrix: np.ndarray
+    triangulation: Delaunay
+    # Reuse cached camera geometry and the RGB-to-LMS calibration.
     az, el, matrix, triangulation = _opponent_calibration()
+    # Reject inputs that cannot be mapped using the calibrated RGB geometry.
     if frames.ndim != 4 or frames.shape[1:] != (*az.shape, 3):
         raise ValueError("RGB radiance must match the calibrated camera geometry")
+    # Read the sensor dimensions from the calibrated angular maps.
+    height: int
+    width: int
     height, width = az.shape
-    gaze = np.asarray((width / 2, height / 2) if gaze_xy is None else gaze_xy, dtype=float)
+    # Use center fixation by default, then normalize gaze to a numeric array.
+    gaze: np.ndarray = np.asarray(
+        (width / 2, height / 2) if gaze_xy is None else gaze_xy, dtype=float
+    )
+    # Accept either a shared fixation or one fixation per frame.
     if gaze.shape == (2,):
+        # Repeat one fixation across every frame in the buffer.
         gaze = np.broadcast_to(gaze, (len(frames), 2))
+    # Require one X/Y coordinate pair for every frame after broadcasting.
     if gaze.shape != (len(frames), 2):
         raise ValueError("Gaze must be an (X, Y) pair or one pixel pair per frame")
+    # Construct the default horizontal angular grid when none was supplied.
     azimuth = np.arange(-90, 90.25, 0.5) if azimuth is None else np.asarray(azimuth)
-    elevation = np.arange(-90, 90.25, 0.5) if elevation is None else np.asarray(elevation)
-    query = np.stack(np.meshgrid(azimuth, elevation, indexing="ij"), axis=-1)
-    axes = (np.arange(1, height + 1), np.arange(1, width + 1))
-    angle_at_pixel = RegularGridInterpolator(axes, np.stack((az, el), axis=-1))
-    result = np.full((len(frames), len(azimuth), len(elevation), 3), np.nan)
-    weights = np.full((len(frames), 3), np.nan)
+    # Construct the default vertical angular grid when none was supplied.
+    elevation = (
+        np.arange(-90, 90.25, 0.5) if elevation is None else np.asarray(elevation)
+    )
+    # Pair horizontal and vertical angles into the output sampling grid.
+    query: np.ndarray = np.stack(
+        np.meshgrid(azimuth, elevation, indexing="ij"), axis=-1
+    )
+    # Build one-based row and column coordinates matching MATLAB camera pixels.
+    axes: tuple[np.ndarray, np.ndarray] = (
+        np.arange(1, height + 1),
+        np.arange(1, width + 1),
+    )
+    # Interpolate camera angles at a possibly fractional gaze pixel.
+    angle_at_pixel: RegularGridInterpolator = RegularGridInterpolator(
+        axes, np.stack((az, el), axis=-1)
+    )
+    # Initialize all output maps as missing until a valid frame is processed.
+    result: np.ndarray = np.full((len(frames), len(azimuth), len(elevation), 3), np.nan)
+    # Reserve one set of effective LMS weights for each frame.
+    weights: np.ndarray = np.full((len(frames), 3), np.nan)
     for index, (frame, xy) in enumerate(zip(frames, gaze)):
+        # Leave the preallocated NaN output for frames lacking finite gaze.
         if not np.all(np.isfinite(xy)):
             continue
+        # Clamp finite gaze coordinates to the calibrated sensor bounds.
+        gx: float
+        gy: float
         gx, gy = np.clip(xy, (1, 1), (width, height))
-        offset = angle_at_pixel([[gy, gx]])[0]
-        rgb = LinearNDInterpolator(triangulation, frame.reshape(-1, 3))(query + offset)
+        # Convert the gaze pixel to angles, passing row before column.
+        offset: np.ndarray = angle_at_pixel([[gy, gx]])[0]
+        # Sample RGB at camera angles shifted by the gaze direction.
+        rgb: np.ndarray = LinearNDInterpolator(triangulation, frame.reshape(-1, 3))(
+            query + offset
+        )
         # MATLAB defines coverage from red before replacing individual NaNs.
-        coverage = ~np.isnan(rgb[..., 0])
+        coverage: np.ndarray = ~np.isnan(rgb[..., 0])
+        # Replace missing RGB components with zero while preserving the coverage mask.
         rgb = np.where(np.isnan(rgb), 0.0, rgb)
-        lms = rgb @ matrix.T
-        valid = np.all(np.isfinite(lms), axis=-1) & coverage
-        w = np.array([1.0, 1.33, 5.0])
+        # Transform interpolated RGB vectors into calibrated cone responses.
+        lms: np.ndarray = rgb @ matrix.T
+        # Keep only covered positions with finite values in all three cone channels.
+        valid: np.ndarray = np.all(np.isfinite(lms), axis=-1) & coverage
+        # Start with the fixed L, M, and S channel weights.
+        w: np.ndarray = np.array([1.0, 1.33, 5.0])
+        # Adapt cone weights so the valid scene mean has neutral opponency.
         if balance_neutral:
-            mean_l, mean_m, mean_s = (lms[valid].mean(axis=0) if np.any(valid)
-                                     else np.full(3, np.nan))
+            # Estimate scene means over valid locations for neutral balancing.
+            mean_l: float
+            mean_m: float
+            mean_s: float
+            mean_l, mean_m, mean_s = (
+                lms[valid].mean(axis=0) if np.any(valid) else np.full(3, np.nan)
+            )
             # Preserve MATLAB's per-channel NaN/Inf behavior for degenerate scenes.
             with np.errstate(divide="ignore", invalid="ignore"):
+                # Scale M so its weighted mean equals the L mean.
                 w[1] = mean_l / mean_m
+                # Scale S so its weighted mean equals the combined L+M mean.
                 w[2] = (mean_l + w[1] * mean_m) / mean_s
         with np.errstate(invalid="ignore"):
+            # Apply the effective weights and separate the three cone response planes.
+            L: np.ndarray
+            M: np.ndarray
+            S: np.ndarray
             L, M, S = np.moveaxis(lms * w, -1, 0)
-        ach = L + M
+        # Form the achromatic channel by summing weighted L and M responses.
+        ach: np.ndarray = L + M
+        # Store achromatic, red-green, and blue-yellow responses in that order.
         result[index] = np.stack((ach, L - M, S - ach), axis=-1)
+        # Restore missing values wherever the calibrated scene has no valid coverage.
         result[index][~valid] = np.nan
+        # Retain the exact weights used for this frame for downstream interpretation.
         weights[index] = w
+    # Remove the temporary frame axis only when the caller supplied a single image.
     return (result[0], weights[0]) if single else (result, weights)
 
 
-def world_transformation_pipeline(raw_frame_or_buffer: np.ndarray,
-                                  agc_settings: dict[str, float | np.ndarray],
-                                  gaze_angles_xy: np.ndarray | None = None,
-                                  age: int | None = None,
-                                  n_workers: int=WORLD_IMPUTATION_WORKERS,
-                                  stagewise_output: list[np.ndarray] | None = None,
-                                  demosaic_pool: Pool | None = None, 
-                                  quantization_correction: float = 0.375, 
-                                  camera_bit_depth: int = 8,
-                                  radiance_agc_target: float = 127.0,
-                                  demosaic_ratio_epsilon: float = 1e-6
-
-                                 ) -> dict[str, np.ndarray | dict[str, object]]:
+def world_transformation_pipeline(
+    raw_frame_or_buffer: np.ndarray,
+    agc_settings: dict[str, float | np.ndarray],
+    gaze_angles_xy: np.ndarray | None = None,
+    age: int | None = None,
+    n_workers: int = WORLD_IMPUTATION_WORKERS,
+    stagewise_output: list[np.ndarray] | None = None,
+    demosaic_pool: Pool | None = None,
+    quantization_correction: float = 0.375,
+    camera_bit_depth: int = 8,
+    radiance_agc_target: float = 127.0,
+    demosaic_ratio_epsilon: float = 1e-6,
+) -> dict[str, np.ndarray | dict[str, object]]:
     """Reconstruct RGB radiance and return foveated opponent cone radiance.
 
     The result matches MATLAB ``computeFoveatedOpponentMap`` with scene-neutral
@@ -3790,27 +4460,48 @@ def world_transformation_pipeline(raw_frame_or_buffer: np.ndarray,
     processing. Digital gain enters only through the radiance AGC set point.
 
     Args:
-        raw_frame_or_buffer: Raw 8-bit counts shaped (rows, cols) or (frames, rows, cols). The input
-            is preserved.
-        agc_settings: Exposure, analog gain, and digital gain as scalars or one value per frame.
-            Accepts legacy or modern metadata keys.
-        gaze_angles_xy: Camera pixel X/Y (one-based, as in MATLAB), despite the legacy
-            name; a pair or one pair per frame. None uses the image center.
-        age: Reserved for later processing; unused here.
-        quantization_correction: Added sensor-count bias, default 0.375.
-        camera_bit_depth: Sensor count bit depth, default 8 (maximum 255).
-        radiance_agc_target: AGC target in sensor counts, default 127.
-        demosaic_ratio_epsilon: Denominator offset for color/green ratios, default 1e-6.
-        n_workers: Maximum number of processes used for frame-wise imputation. Use 1 for serial
-            execution.
-        stagewise_output: Optional empty list that receives eight independent
-            float64 snapshots: raw counts, quantization correction, linearization,
-            imputation, fielding, RGB correction, Bayer radiance, and demosaiced
-            RGB radiance. The final snapshot adds a trailing RGB dimension. Omit this argument to avoid the snapshot copies.
+        raw_frame_or_buffer (np.ndarray):
+            Raw 8-bit counts shaped (rows, cols) or (frames, rows, cols). The
+            input is preserved.
 
-        demosaic_pool: Optional persistent pool from demosaic_worker_pool(n_workers).
-            Reuse it across recording chunks for shared-memory demosaicing.
-            None keeps demosaicing serial, avoiding startup for one-off calls.
+        agc_settings (dict[str, float | np.ndarray]):
+            Exposure, analog gain, and digital gain as scalars or one value per
+            frame. Accepts legacy or modern metadata keys.
+
+        gaze_angles_xy (np.ndarray | None):
+            Camera pixel X/Y (one-based, as in MATLAB), despite the legacy name;
+            a pair or one pair per frame. None uses the image center.
+
+        age (int | None):
+            Reserved for later processing; unused here.
+
+        quantization_correction (float):
+            Added sensor-count bias, default 0.375.
+
+        camera_bit_depth (int):
+            Sensor count bit depth, default 8 (maximum 255).
+
+        radiance_agc_target (float):
+            AGC target in sensor counts, default 127.
+
+        demosaic_ratio_epsilon (float):
+            Denominator offset for color/green ratios, default 1e-6.
+
+        n_workers (int):
+            Maximum number of processes used for frame-wise imputation. Use 1
+            for serial execution.
+
+        stagewise_output (list[np.ndarray] | None):
+            Optional empty list that receives eight independent float64
+            snapshots: raw counts, quantization correction, linearization,
+            imputation, fielding, RGB correction, Bayer radiance, and demosaiced
+            RGB radiance. The final snapshot adds a trailing RGB dimension. Omit
+            this argument to avoid the snapshot copies.
+
+        demosaic_pool (Pool | None):
+            Optional persistent pool from demosaic_worker_pool(n_workers). Reuse
+            it across recording chunks for shared-memory demosaicing. None keeps
+            demosaicing serial, avoiding startup for one-off calls.
 
     Returns:
         Dictionary with "data", float64 opponent cone radiance shaped
@@ -3819,8 +4510,20 @@ def world_transformation_pipeline(raw_frame_or_buffer: np.ndarray,
         source calibration records, input AGC settings, and processing settings.
         Shape-indexed constants contain the selected frame's value. Metadata is
         copied once per call so editing it cannot change shared calibrations.
+        "cone_weights" contains effective LMS weights, shaped (3,) or
+        (frames, 3). "average_rgb" contains the spatial mean RGB radiance
+        before opponent conversion, shaped (3,) or (frames, 3).
+
+    Raises:
+        ValueError: Input dimensions or calibrated image geometry are unsupported,
+            stagewise_output is nonempty, or gaze has an incompatible shape.
+        TypeError: stagewise_output is neither a list nor None.
 
     Notes:
+        Raw input is preserved. Fielding, color correction, and radiance scaling
+        reuse the imputed array in place. Digital gain enters through the AGC
+        set point. Each standalone stage exposes its own visualization option.
+
         Benchmarked on 2026-10-05 on a Mac Studio (Mac15,14), Apple M3 Ultra,
         28-core CPU (20 performance + 8 efficiency), 256 GB unified memory,
         macOS 15.3 (arm64).
@@ -3837,30 +4540,28 @@ def world_transformation_pipeline(raw_frame_or_buffer: np.ndarray,
         tmp/benchmark_demosaic_large_buffers.json for the measurements.
     """
 
-    # First, we need to ensure that the transformation pipeline
-    # can accept either a single raw frame or a buffer of frames,
-    # that's it
-    if(raw_frame_or_buffer.ndim not in (2, 3)):
+    # Accept one Bayer image or a leading frame axis containing Bayer images.
+    if raw_frame_or_buffer.ndim not in (2, 3):
         raise ValueError(
             "World reconstruction requires shape (rows, cols) or "
             f"(frames, rows, cols). Got {raw_frame_or_buffer.shape}."
         )
 
-    # Get the image shape (r, c). We can get this from .shape[-2]
-    # because if it's a buffer [f, r, c] we would extract r, c
-    # and if it's a single frame [r, c] then it's just the entire thing
+    # Read row and column dimensions independently of the optional frame axis.
     image_shape: tuple[int, int] = raw_frame_or_buffer.shape[-2:]
 
     # We need to ensure we support this size of image
     # for the fielding functions and the bayer correction matrices.
     # These calibrations were made for specific image shapes
-    if(image_shape not in WORLD_FIELDING_FUNCTIONS
-       or image_shape not in WORLD_BAYER_CORRECTION_MATRICES):
+    if (
+        image_shape not in WORLD_FIELDING_FUNCTIONS
+        or image_shape not in WORLD_BAYER_CORRECTION_MATRICES
+    ):
         raise ValueError(f"Unsupported calibrated image shape: {image_shape}.")
 
-    # Save a boolean of whether we want to store stagewise output or not
+    # Enable independent stage snapshots only when the caller supplies a list.
     store_stagewise_output: bool = stagewise_output is not None
-    if(store_stagewise_output is True):
+    if store_stagewise_output is True:
         if not isinstance(stagewise_output, list):
             raise TypeError("stagewise_output must be an empty list or None.")
         if stagewise_output:
@@ -3873,11 +4574,13 @@ def world_transformation_pipeline(raw_frame_or_buffer: np.ndarray,
     # quantization bias. The camera's 10-to-8-bit shift discards an average of
     # 0.375 counts in 8-bit units.
     # We make a single copy at the start to not edit the input array
-    quantization_corrected: np.ndarray = raw_frame_or_buffer.astype(np.float64, copy=True)
+    quantization_corrected: np.ndarray = raw_frame_or_buffer.astype(
+        np.float64, copy=True
+    )
     quantization_corrected += quantization_correction
 
     # Store this stage in the stagewise output if desired
-    if(store_stagewise_output is True):
+    if store_stagewise_output is True:
         stagewise_output.append(quantization_corrected.copy())
 
     # Stage 2: invert the fitted sensor response in place. Negative counts
@@ -3892,7 +4595,7 @@ def world_transformation_pipeline(raw_frame_or_buffer: np.ndarray,
     )
     # Rename the same array after the in-place operation; no data are copied.
     linearized: np.ndarray = quantization_corrected
-    if(store_stagewise_output is True):
+    if store_stagewise_output is True:
         stagewise_output.append(linearized.copy())
 
     # Stage 3: replace non-positive floor samples and infinite ceiling samples
@@ -3905,7 +4608,7 @@ def world_transformation_pipeline(raw_frame_or_buffer: np.ndarray,
         n_workers=n_workers,
     )
     # Imputation allocates its output, so this stage uses the returned array.
-    if(store_stagewise_output is True):
+    if store_stagewise_output is True:
         stagewise_output.append(imputed.copy())
 
     # Stage 4: correct spatial sensitivity with the calibrated fielding map.
@@ -3914,7 +4617,7 @@ def world_transformation_pipeline(raw_frame_or_buffer: np.ndarray,
     apply_fielding_function(imputed, visualize_results=False)
     # Rename the same array after fielding; this alias does not copy data.
     fielding_corrected: np.ndarray = imputed
-    if(store_stagewise_output is True):
+    if store_stagewise_output is True:
         stagewise_output.append(fielding_corrected.copy())
 
     # Stage 5: equalize the Bayer RGB channels with their calibrated weights.
@@ -3925,7 +4628,7 @@ def world_transformation_pipeline(raw_frame_or_buffer: np.ndarray,
     )
     # Rename the same array after RGB correction; this alias does not copy data.
     color_corrected: np.ndarray = fielding_corrected
-    if(store_stagewise_output is True):
+    if store_stagewise_output is True:
         stagewise_output.append(color_corrected.copy())
 
     # Stage 6: convert corrected counts to absolute integrated radiance.
@@ -3940,58 +4643,75 @@ def world_transformation_pipeline(raw_frame_or_buffer: np.ndarray,
     )
     # Rename the same array after radiance scaling; this alias does not copy data.
     radiance_map: np.ndarray = color_corrected
-    if(store_stagewise_output is True):
+    if store_stagewise_output is True:
         stagewise_output.append(radiance_map.copy())
 
     # Stage 7: use green-guided color ratios to reconstruct full RGB radiance.
     # The standalone helper reuses interpolation weights across buffered frames.
     demosaiced: np.ndarray = demosaic_radiance_map_rcd(
-        radiance_map, bayer_pattern="BGGR", worker_pool=demosaic_pool,
+        radiance_map,
+        bayer_pattern="BGGR",
+        worker_pool=demosaic_pool,
         ratio_epsilon=demosaic_ratio_epsilon,
     )
-    if(store_stagewise_output is True):
+    if store_stagewise_output is True:
         stagewise_output.append(demosaiced.copy())
 
     # Record every processing calibration, including the source fit metadata.
     # Store only the applied geometry's maps, once per buffer rather than per frame.
-    calibration_metadata: dict[str, object] = deepcopy({
-        "WORLD_FULL_WELL_CLIPPING_EXPONENT": WORLD_FULL_WELL_CLIPPING_EXPONENT,
-        "WORLD_DARK_SIGNAL": WORLD_DARK_SIGNAL,
-        "WORLD_MAX_ALLOWED_LINEARIZATION_DERIVATIVE": WORLD_MAX_ALLOWED_LINEARIZATION_DERIVATIVE,
-        "WORLD_FIELDING_FUNCTIONS": WORLD_FIELDING_FUNCTIONS[image_shape],
-        "WORLD_RADIOMETRIC_CALIBRATION": WORLD_RADIOMETRIC_CALIBRATION,
-        "WORLD_RGB_SCALARS": WORLD_RGB_SCALARS,
-        "WORLD_RADIOMETRIC_CORRECTION_MAP": WORLD_RADIOMETRIC_CORRECTION_MAP,
-        "WORLD_BAYER_CORRECTION_MATRICES": WORLD_BAYER_CORRECTION_MATRICES[image_shape],
-        "WORLD_INTEGRATED_RADIANCE_CALIBRATION": WORLD_INTEGRATED_RADIANCE_CALIBRATION,
-        "WORLD_AGC_TO_RADIANCE_P": WORLD_AGC_TO_RADIANCE_P,
-        "WORLD_MEAN_SPATIAL_CORRECTIONS": WORLD_MEAN_SPATIAL_CORRECTIONS[image_shape],
-        "WORLD_TRIANGULATION_SHEAR": WORLD_TRIANGULATION_SHEAR,
-        "agc_settings": agc_settings,
-        "image_shape": image_shape,
-        "bayer_pattern": "BGGR",
-        "original_bit_depth": camera_bit_depth,
-        "quantization_bias": quantization_correction,
-        "radiance_agc_target": radiance_agc_target,
-        "demosaic_ratio_epsilon": demosaic_ratio_epsilon,
-        "units": "W/m²/sr",
-    })
+    calibration_metadata: dict[str, object] = deepcopy(
+        {
+            "WORLD_FULL_WELL_CLIPPING_EXPONENT": WORLD_FULL_WELL_CLIPPING_EXPONENT,
+            "WORLD_DARK_SIGNAL": WORLD_DARK_SIGNAL,
+            "WORLD_MAX_ALLOWED_LINEARIZATION_DERIVATIVE": WORLD_MAX_ALLOWED_LINEARIZATION_DERIVATIVE,
+            "WORLD_FIELDING_FUNCTIONS": WORLD_FIELDING_FUNCTIONS[image_shape],
+            "WORLD_RADIOMETRIC_CALIBRATION": WORLD_RADIOMETRIC_CALIBRATION,
+            "WORLD_RGB_SCALARS": WORLD_RGB_SCALARS,
+            "WORLD_RADIOMETRIC_CORRECTION_MAP": WORLD_RADIOMETRIC_CORRECTION_MAP,
+            "WORLD_BAYER_CORRECTION_MATRICES": WORLD_BAYER_CORRECTION_MATRICES[
+                image_shape
+            ],
+            "WORLD_INTEGRATED_RADIANCE_CALIBRATION": WORLD_INTEGRATED_RADIANCE_CALIBRATION,
+            "WORLD_AGC_TO_RADIANCE_P": WORLD_AGC_TO_RADIANCE_P,
+            "WORLD_MEAN_SPATIAL_CORRECTIONS": WORLD_MEAN_SPATIAL_CORRECTIONS[
+                image_shape
+            ],
+            "WORLD_TRIANGULATION_SHEAR": WORLD_TRIANGULATION_SHEAR,
+            "agc_settings": agc_settings,
+            "image_shape": image_shape,
+            "bayer_pattern": "BGGR",
+            "original_bit_depth": camera_bit_depth,
+            "quantization_bias": quantization_correction,
+            "radiance_agc_target": radiance_agc_target,
+            "demosaic_ratio_epsilon": demosaic_ratio_epsilon,
+            "units": "W/m²/sr",
+        }
+    )
+    opponent: np.ndarray
+    cone_weights: np.ndarray
+    # Stage 8: recenter on gaze and convert RGB into opponent cone channels.
     opponent, cone_weights = compute_foveated_opponent_map(demosaiced, gaze_angles_xy)
-    calibration_metadata.update({
-        "units": "opponent cone integrated radiance",
-        "dimensions": "azimuth,elevation,post_receptoral_channel",
-        "channels": "Ach,RG,BY",
-        "azimuth": np.arange(-90, 90.25, 0.5),
-        "elevation": np.arange(-90, 90.25, 0.5),
-        "angle_units": "degrees",
-        "gaze_coordinates": "one-based camera pixels (X,Y)",
-        "balance_neutral": True,
-        "rgb2lmsMatrix": _opponent_calibration()[2].copy(),
-    })
-    return {"data": opponent, "metadata": calibration_metadata,
-            "cone_weights": cone_weights,
-            "average_rgb": demosaiced.mean(axis=(-3, -2))}
-
+    # Describe the final angular opponent output rather than the intermediate RGB map.
+    calibration_metadata.update(
+        {
+            "units": "opponent cone integrated radiance",
+            "dimensions": "azimuth,elevation,post_receptoral_channel",
+            "channels": "Ach,RG,BY",
+            "azimuth": np.arange(-90, 90.25, 0.5),
+            "elevation": np.arange(-90, 90.25, 0.5),
+            "angle_units": "degrees",
+            "gaze_coordinates": "one-based camera pixels (X,Y)",
+            "balance_neutral": True,
+            "rgb2lmsMatrix": _opponent_calibration()[2].copy(),
+        }
+    )
+    # Return opponent maps, calibration provenance, weights, and mean pre-opponent RGB.
+    return {
+        "data": opponent,
+        "metadata": calibration_metadata,
+        "cone_weights": cone_weights,
+        "average_rgb": demosaiced.mean(axis=(-3, -2)),
+    }
 
 
 def plot_reconstruction_stages(

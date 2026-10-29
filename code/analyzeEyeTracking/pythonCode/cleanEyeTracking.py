@@ -1,7 +1,6 @@
 """Geoff's eye-cleaning pipeline, with MATLAB reference plots and folder UI."""
 
 import pathlib
-import warnings
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
@@ -14,31 +13,13 @@ from scipy.ndimage import maximum_filter1d
 
 
 
-def _mean_available(values: np.ndarray) -> np.ndarray:
-    """Average each row while ignoring missing values.
-
-    Args:
-        values (np.ndarray):
-            Two-dimensional signal array.
-
-    Returns:
-        One mean per row, with NaN for rows containing only NaNs.
-
-    Notes:
-        Matches MATLAB mean(..., 2, 'omitnan').
-    """
-    # Count available channels in each row so all-missing rows can stay NaN.
-    counts: np.ndarray = np.sum(~np.isnan(values), axis=1)
-    return np.divide(
-        np.nansum(values, axis=1),
-        counts,
-        out=np.full(len(values), np.nan),
-        where=counts > 0,
-    )
-
-
 def _fill_missing(values: np.ndarray, method: str, max_gap: int) -> np.ndarray:
     """Fill eligible missing runs using sample-index interpolation.
+
+    Find consecutive missing samples, select gaps within the allowed size,
+    and fill those samples from the original observations. Physiology uses
+    a shape-preserving PCHIP curve; gaze uses the nearest observed sample.
+    Longer gaps stay missing, and the supplied array is not changed.
 
     Args:
         values (np.ndarray):
@@ -58,55 +39,89 @@ def _fill_missing(values: np.ndarray, method: str, max_gap: int) -> np.ndarray:
         Edge gaps use the distance to the nearest valid sample. PCHIP
         extrapolates at endpoints; nearest ties select the later sample.
     """
-    # Allocate a separate output so the supplied signal is preserved.
-    result: np.ndarray = values.copy()
-    # Locate observed samples that can anchor interpolation or endpoint filling.
-    valid: np.ndarray = np.flatnonzero(~np.isnan(values))
-    # Leave gaps untouched when there are too few observations to interpolate.
-    if valid.size == 0 or (method == "pchip" and valid.size < 2):
-        return result
-    # Mark the samples that need interpolation.
-    missing: np.ndarray = np.isnan(values)
-    # Pad the missing mask to detect runs touching either endpoint.
-    transitions: np.ndarray = np.diff(np.r_[False, missing, False].astype(np.int8))
-    # Find the first missing sample of each run.
-    starts: np.ndarray = np.flatnonzero(transitions == 1)
-    # Find the exclusive end of each missing run.
-    stops: np.ndarray = np.flatnonzero(transitions == -1)
-    # Measure how many samples each missing run contains.
-    lengths: np.ndarray = stops - starts
-    # Interior gap size is the distance between bounding valid samples;
-    # an edge gap is measured from the vector endpoint to its valid neighbor.
-    gap_sizes: np.ndarray = lengths + ((starts > 0) & (stops < len(values)))
-    # Select only missing samples whose run meets the maximum gap limit.
-    indices: np.ndarray = np.flatnonzero(missing)[
-        np.repeat(gap_sizes <= max_gap, lengths)
-    ]
-    # Return immediately when every gap exceeds the allowed size.
-    if not indices.size:
-        return result
-    # Select the requested interpolation rule for eligible gaps.
+    filled_values: np.ndarray = values.copy()
+    missing_sample_mask: np.ndarray = np.isnan(values)
+    valid_sample_indices: np.ndarray = np.where(~missing_sample_mask)[0]
+
+    # Nearest filling needs one observed sample; a PCHIP curve needs two.
+    minimum_valid_samples: int = 2 if method == "pchip" else 1
+    if len(valid_sample_indices) < minimum_valid_samples:
+        return filled_values
+
+    # A gap starts where a missing sample follows an observed sample, and ends
+    # where a missing sample precedes an observed sample. Treat positions just
+    # outside the recording as observed so edge gaps are detected too.
+    previous_sample_missing: np.ndarray = np.concatenate(([False], missing_sample_mask[:-1]))
+    next_sample_missing: np.ndarray = np.concatenate((missing_sample_mask[1:], [False]))
+    gap_start_indices: np.ndarray = np.where(
+        missing_sample_mask & ~previous_sample_missing
+    )[0]
+    gap_end_indices: np.ndarray = np.where(
+        missing_sample_mask & ~next_sample_missing
+    )[0]
+
+    # Decide which complete gaps are short enough to fill. For an interior
+    # gap, count the distance between its bounding observations: two missing
+    # samples have a gap distance of three. At an edge, use the missing count.
+    fill_sample_mask: np.ndarray = np.zeros(len(values), dtype=bool)
+    for gap_start, gap_end in zip(gap_start_indices, gap_end_indices):
+        gap_distance: int = int(gap_end - gap_start + 1)
+        has_observation_before: bool = gap_start > 0
+        has_observation_after: bool = gap_end < len(values) - 1
+
+        if has_observation_before and has_observation_after:
+            gap_distance += 1
+
+        if gap_distance <= max_gap:
+            fill_sample_mask[gap_start : gap_end + 1] = True
+
+    fill_sample_indices: np.ndarray = np.where(fill_sample_mask)[0]
+    if len(fill_sample_indices) == 0:
+        return filled_values
+
     if method == "pchip":
-        # Evaluate the shape-preserving interpolant at the eligible sample indices.
-        result[indices] = PchipInterpolator(valid, values[valid], extrapolate=True)(
-            indices
+        # Build one shape-preserving curve from the original observations.
+        # Evaluate it only inside eligible gaps. Edge gaps use extrapolation.
+        interpolator = PchipInterpolator(
+            valid_sample_indices, values[valid_sample_indices], extrapolate=True
         )
+        filled_values[fill_sample_indices] = interpolator(fill_sample_indices)
     else:
-        # A tie goes to the later sample, as in MATLAB nearest interpolation.
-        right: np.ndarray = np.minimum(np.searchsorted(valid, indices), len(valid) - 1)
-        # Find the candidate immediately before the right-hand neighbor.
-        left: np.ndarray = np.maximum(right - 1, 0)
-        # Choose the closer neighbor; equal distances select the later sample.
-        nearest: np.ndarray = np.where(
-            indices - valid[left] < valid[right] - indices, left, right
+        # Find the observed samples immediately before and after each missing
+        # sample. Clip to the first/last observation for gaps at either edge.
+        right_neighbor_positions: np.ndarray = np.searchsorted(
+            valid_sample_indices, fill_sample_indices
         )
-        # Copy the chosen observed values into the eligible missing positions.
-        result[indices] = values[valid[nearest]]
-    return result
+        left_neighbor_positions: np.ndarray = np.clip(
+            right_neighbor_positions - 1, 0, len(valid_sample_indices) - 1
+        )
+        right_neighbor_positions = np.clip(
+            right_neighbor_positions, 0, len(valid_sample_indices) - 1
+        )
+        left_sample_indices: np.ndarray = valid_sample_indices[left_neighbor_positions]
+        right_sample_indices: np.ndarray = valid_sample_indices[right_neighbor_positions]
+
+        # Use the closer observation. A tie uses the later sample, matching
+        # MATLAB nearest interpolation. New fills never become anchor samples.
+        distance_to_left: np.ndarray = np.abs(fill_sample_indices - left_sample_indices)
+        distance_to_right: np.ndarray = np.abs(right_sample_indices - fill_sample_indices)
+        use_left_sample: np.ndarray = distance_to_left < distance_to_right
+        nearest_sample_indices: np.ndarray = np.where(
+            use_left_sample, left_sample_indices, right_sample_indices
+        )
+        filled_values[fill_sample_indices] = values[nearest_sample_indices]
+
+    return filled_values
 
 
 def _smooth_signals(values: np.ndarray, smoothing_samples: int) -> np.ndarray:
     """Apply median smoothing to physiology and quadratic SG smoothing to gaze.
+
+    Build a neighborhood around each sample and ignore missing observations.
+    For pupil and aperture channels, take the neighborhood median. For gaze,
+    fit a local polynomial and estimate its value at the current sample.
+    Recalculate gaze endpoints with one-sided windows to match MATLAB.
+    Return a separate array, preserving the supplied measurements.
 
     Args:
         values (np.ndarray):
@@ -123,70 +138,122 @@ def _smooth_signals(values: np.ndarray, smoothing_samples: int) -> np.ndarray:
         when fewer than three valid samples are available. Endpoint gaze fits
         use one-sided windows, limited to the recording length.
     """
-    # Allocate a separate output so the supplied signal is preserved.
-    result: np.ndarray = np.full_like(values, np.nan)
-    # Use half the odd window width on each side of an interior sample.
-    half: int = smoothing_samples // 2
-    # Express window positions relative to the sample being estimated.
-    offsets: np.ndarray = np.arange(-half, half + 1, dtype=float)
-    for column in range(values.shape[1]):
-        # Process one physiology or gaze channel at a time.
-        samples: np.ndarray = values[:, column]
-        # Pad the recording with NaNs to form centered windows at every sample.
-        windows: np.ndarray = np.lib.stride_tricks.sliding_window_view(
-            np.pad(samples, (half, half), constant_values=np.nan), smoothing_samples
+    signal_columns: tuple[str, ...] = (
+        "pupil diameter [mm]",
+        "eyelid aperture left [mm]",
+        "eyelid aperture right [mm]",
+        "gaze x [px]",
+        "gaze y [px]",
+    )
+    gaze_columns: slice = slice(
+        signal_columns.index("gaze x [px]"),
+        signal_columns.index("gaze y [px]") + 1,
+    )
+    smoothed_signals: np.ndarray = np.full_like(values, np.nan)
+    half_window_size: int = smoothing_samples // 2
+
+    # For a five-sample window, offsets are [-2, -1, 0, 1, 2]. Zero is the
+    # sample being estimated; the other positions are its nearby samples.
+    window_offsets: np.ndarray = np.arange(
+        -half_window_size, half_window_size + 1, dtype=float
+    )
+
+    for column, column_name in enumerate(signal_columns):
+        channel_values: np.ndarray = values[:, column]
+
+        # Add missing values outside the recording, then take one centered
+        # window per sample. Each row contains that sample's neighborhood.
+        padded_channel_values: np.ndarray = np.pad(
+            channel_values, (half_window_size, half_window_size), constant_values=np.nan
         )
-        # The first three channels are physiology and use a NaN-aware median.
-        if column < 3:
-            with warnings.catch_warnings():
-                warnings.filterwarnings(
-                    "ignore",
-                    message="All-NaN slice encountered",
-                    category=RuntimeWarning,
-                )
-                result[:, column] = np.nanmedian(windows, axis=1)
-            continue
-        patterns: np.ndarray
-        groups: np.ndarray
-        # Group windows sharing the same valid positions to reuse polynomial fits.
-        patterns, groups = np.unique(~np.isnan(windows), axis=0, return_inverse=True)
-        for group, present in enumerate(patterns):
-            if not present.any():
-                continue
-            # Reduce the quadratic fit order when fewer valid samples are available.
-            degree: int = min(2, int(present.sum()) - 1)
-            # Build polynomial terms at the available sample positions.
-            design: np.ndarray = np.vander(
-                offsets[present], degree + 1, increasing=True
+        sample_windows: np.ndarray = np.lib.stride_tricks.sliding_window_view(
+            padded_channel_values, smoothing_samples
+        )
+        valid_window_samples: np.ndarray = ~np.isnan(sample_windows)
+
+        if column not in range(gaze_columns.start, gaze_columns.stop):
+            # Pupil and aperture channels use the median of available nearby
+            # values. Skip all-missing windows so they stay NaN without warnings.
+            has_valid_window_sample: np.ndarray = np.any(valid_window_samples, axis=1)
+            smoothed_signals[has_valid_window_sample, column] = np.nanmedian(
+                sample_windows[has_valid_window_sample], axis=1
             )
-            # Select the windows using this pattern of available samples.
-            rows: np.ndarray = np.flatnonzero(groups == group)
-            # Evaluate each fitted polynomial at zero offset, the window center.
-            result[rows, column] = windows[rows][:, present] @ np.linalg.pinv(design)[0]
-        # MATLAB uses a full one-sided window at the recording endpoints.
-        width: int = min(smoothing_samples, len(samples))
-        for index in sorted(
-            set(range(min(half, len(samples))))
-            | set(range(max(0, len(samples) - half), len(samples)))
-        ):
-            # Anchor an endpoint window to the beginning or end of the recording.
-            start: int = 0 if index < half else len(samples) - width
-            # Extract the one-sided window used for this endpoint estimate.
-            edge: np.ndarray = samples[start : start + width]
-            # Exclude missing samples from the local polynomial fit.
-            present: np.ndarray = ~np.isnan(edge)
-            if present.any():
-                # Reduce the quadratic fit order when fewer valid samples are available.
-                degree = min(2, int(present.sum()) - 1)
-                # Build polynomial terms at the available sample positions.
-                design = np.vander(
-                    (np.arange(start, start + width) - index)[present],
-                    degree + 1,
-                    increasing=True,
-                )
-                # Evaluate the one-sided fit at the current endpoint sample.
-                result[index, column] = np.linalg.pinv(design)[0] @ edge[present]
-    return result
+            continue
+
+        # Gaze uses a local quadratic fit (Savitzky-Golay smoothing). Windows
+        # with the same missing positions share the same fit weights, so group
+        # them to avoid solving an identical fitting problem for every sample.
+        valid_sample_patterns: np.ndarray
+        window_pattern_indices: np.ndarray
+        valid_sample_patterns, window_pattern_indices = np.unique(
+            valid_window_samples, axis=0, return_inverse=True
+        )
+
+        for pattern_index, valid_position_mask in enumerate(valid_sample_patterns):
+            valid_sample_count: int = int(np.sum(valid_position_mask))
+            if valid_sample_count == 0:
+                continue
+
+            # Three or more observations support a quadratic; two support a
+            # line, and one supports only a constant. Ignore missing samples.
+            polynomial_degree: int = min(2, valid_sample_count - 1)
+            valid_offsets: np.ndarray = window_offsets[valid_position_mask]
+            polynomial_terms: np.ndarray = np.vander(
+                valid_offsets, polynomial_degree + 1, increasing=True
+            )
+
+            # Each row of polynomial_terms is [1, offset, offset**2] for a
+            # quadratic. The pseudoinverse gives least-squares fit weights.
+            # At offset zero only the constant coefficient contributes, so
+            # its weights (row zero) directly estimate the center value.
+            center_value_weights: np.ndarray = np.linalg.pinv(polynomial_terms)[0]
+            matching_window_indices: np.ndarray = np.where(
+                window_pattern_indices == pattern_index
+            )[0]
+            matching_window_values: np.ndarray = sample_windows[matching_window_indices]
+            observed_window_values: np.ndarray = matching_window_values[:, valid_position_mask]
+            smoothed_signals[matching_window_indices, column] = (
+                observed_window_values @ center_value_weights
+            )
+
+        # MATLAB uses a full window at each gaze endpoint instead of a window
+        # shortened by padding. Recalculate those samples using the first or
+        # last window of the recording, capped by the recording length.
+        sample_count: int = len(channel_values)
+        endpoint_window_size: int = min(smoothing_samples, sample_count)
+        sample_indices: np.ndarray = np.arange(sample_count)
+        endpoint_sample_mask: np.ndarray = (
+            (sample_indices < half_window_size)
+            | (sample_indices >= sample_count - half_window_size)
+        )
+        endpoint_sample_indices: np.ndarray = np.where(endpoint_sample_mask)[0]
+
+        for sample_index in endpoint_sample_indices:
+            if sample_index < half_window_size:
+                window_start: int = 0
+            else:
+                window_start = sample_count - endpoint_window_size
+
+            window_stop: int = window_start + endpoint_window_size
+            endpoint_values: np.ndarray = channel_values[window_start:window_stop]
+            valid_endpoint_mask: np.ndarray = ~np.isnan(endpoint_values)
+            valid_sample_count = int(np.sum(valid_endpoint_mask))
+            if valid_sample_count == 0:
+                continue
+
+            # Express positions relative to this endpoint sample so evaluating
+            # at zero again gives its estimate, even with a one-sided window.
+            endpoint_offsets: np.ndarray = np.arange(window_start, window_stop) - sample_index
+            polynomial_degree = min(2, valid_sample_count - 1)
+            polynomial_terms = np.vander(
+                endpoint_offsets[valid_endpoint_mask], polynomial_degree + 1, increasing=True
+            )
+            center_value_weights = np.linalg.pinv(polynomial_terms)[0]
+            smoothed_signals[sample_index, column] = (
+                center_value_weights @ endpoint_values[valid_endpoint_mask]
+            )
+
+    return smoothed_signals
 
 
 def clean_eye_data(
@@ -206,10 +273,7 @@ def clean_eye_data(
     general_max_gap: int = 25,
     blink_max_gap: int = 200,
     smoothing_samples: int = 3,
-    plot_label: str | None = None,
-    plot_id: str | None = None,
     plot_output_path: str | pathlib.Path | None = None,
-    diagnostics: dict[str, np.ndarray] | None = None,
 ) -> tuple[np.ndarray, dict[str, object]]:
     """Clean raw Neon eye measurements and mapped gaze into aligned signals.
 
@@ -219,7 +283,7 @@ def clean_eye_data(
     and smooth the resulting signals. Combine the cleaned eye channels into
     pupil diameter, mean eyelid aperture, and aperture difference, and return
     them alongside gaze, elapsed time, and the cleaning settings. Optionally
-    plot a raw-versus-cleaned comparison and collect diagnostic arrays.
+    plot a raw-versus-cleaned comparison.
 
     Args:
         raw_neon_path (str | pathlib.Path):
@@ -267,19 +331,9 @@ def clean_eye_data(
         smoothing_samples (int):
             Positive odd median and quadratic SG window size.
 
-        plot_label (str | None):
-            Recording label; defaults to the raw folder name.
-
-        plot_id (str | None):
-            Optional recording identifier for the figure title.
-
         plot_output_path (str | pathlib.Path | None):
             PDF destination; defaults to eye_cleaned_vs_raw.pdf in
             processing_neon_path. Used only when verbose is true.
-
-        diagnostics (dict[str, np.ndarray] | None):
-            Optional dictionary populated with intermediate gaze arrays and
-            masks for auditing.
 
     Returns:
         A tuple of the (N, 6) cleaned array and a dictionary of the effective
@@ -300,7 +354,7 @@ def clean_eye_data(
         quadratic Savitzky–Golay smoothing. Apertures stay separate until the
         final mean and difference. Interior fill gaps include their bounding
         valid-sample distance; edge gaps use the endpoint-to-valid distance.
-        Plotting and diagnostics do not change the returned data or metadata.
+        Plotting does not change the returned data or metadata.
     """
 
     # Dilation and smoothing windows count whole samples and must contain at
@@ -368,18 +422,16 @@ def clean_eye_data(
         usecols=list(blink_columns),
     ).loc[:, list(blink_columns)].to_numpy(dtype=float)
 
-    # Copy mapped gaze so bounds filtering does not overwrite diagnostic input.
+    # Extract a working copy of the mapped gaze coordinates for bounds filtering.
     bounded_gaze: np.ndarray = gaze_data[:, 1:].copy()
 
-    # Mark rows where either gaze coordinate falls outside the sensor.
+    # First, let's immediately set any weird gaze position to NaN. 
     invalid_gaze_pos_mask: np.ndarray = (
         (bounded_gaze[:, 0] < 0)
         | (bounded_gaze[:, 0] > gaze_x_upper_bound)
         | (bounded_gaze[:, 1] < 0)
         | (bounded_gaze[:, 1] > gaze_y_upper_bound)
     )
-
-    # Invalidate both gaze coordinates when either coordinate is outside bounds.
     bounded_gaze[invalid_gaze_pos_mask] = np.nan
 
     # Extract the sensor timelines after filtering gaze positions.
@@ -407,6 +459,8 @@ def clean_eye_data(
     eye_channel_names: tuple[str, ...] = eye_columns[1:]
     interpolated_eye_measurements: np.ndarray = np.empty((len(valid_gaze_timestamps_ns), len(eye_channel_names)), dtype=float)
 
+    # Let's iterate now over the eye states and ensure they are interpolated along the gaze 
+    # timestamps
     for idx, column_name in enumerate(eye_channel_names):
         # raw_eye_measurements has the same channel order as eye_channel_names, so idx
         # selects the measurements for column_name (e.g. left pupil diameter).
@@ -417,13 +471,20 @@ def clean_eye_data(
         # just use that, otherwise, interpolation based on the surrounding eye times t0 and t1 
         interpolated_eye_measurements[:, idx] = np.interp(valid_gaze_timestamps_ns, eye_timestamps_ns, channel_values)
 
-    # Keep the original mapped gaze for diagnostics before bounds filtering.
-    overlapping_gaze: np.ndarray = gaze_data[valid_gaze_timestamp_mask, 1:]
+    # Look up the adjacent pupil channels by name. A slice keeps this as a
+    # view, so bounds filtering also updates the interpolated measurements.
+    pupil_columns: slice = slice(
+        eye_channel_names.index("pupil diameter left [mm]"),
+        eye_channel_names.index("pupil diameter right [mm]") + 1,
+    )
+    pupils: np.ndarray = interpolated_eye_measurements[:, pupil_columns]
 
-    # Retain the same rows in filtered gaze and its position mask so they
-    # remain aligned with the output timeline and diagnostic arrays.
+    # Remove pupil values outside the configured physiological range.
+    invalid_pupil_diamater_mask: np.ndarray = (pupils < pupil_diameter_thresholds[0]) | (pupils > pupil_diameter_thresholds[1])
+    pupils[invalid_pupil_diamater_mask] = np.nan
+
+    # Keep filtered gaze aligned with the retained output timestamps.
     bounded_gaze = bounded_gaze[valid_gaze_timestamp_mask]
-    invalid_gaze_pos_mask = invalid_gaze_pos_mask[valid_gaze_timestamp_mask]
 
     # Extract the start of each unpadded blink event.
     blink_start_timestamps_ns: np.ndarray = blink_data[:, 0]
@@ -433,59 +494,110 @@ def clean_eye_data(
     if np.any(blink_end_timestamps_ns < blink_start_timestamps_ns):
         raise ValueError("Blink end timestamps must not precede their starts.")
 
-    # Allocate interval-boundary counters, including a terminal sentinel.
-    padded_changes: np.ndarray = np.zeros(len(valid_gaze_timestamps_ns) + 1, dtype=np.int64)
+    # Extend each blink interval to include the configured time before and
+    # after the event. All interval boundaries remain in nanoseconds.
+    padded_blink_starts_ns: np.ndarray = blink_start_timestamps_ns - blink_pre_ns
+    padded_blink_ends_ns: np.ndarray = blink_end_timestamps_ns + blink_post_ns
 
-    # Enter blink intervals at their first included sample.
-    np.add.at(
-        padded_changes,
-        np.searchsorted(valid_gaze_timestamps_ns, blink_start_timestamps_ns - blink_pre_ns, side="left"),
-        1,
-    )
+    # Allocate an array that will represent a mask of gaze measurements that are during blinks
+    padded_blinks: np.ndarray = np.zeros(len(valid_gaze_timestamps_ns), dtype=bool)
 
-    # Leave blink intervals immediately after their last included sample.
-    np.add.at(
-        padded_changes,
-        np.searchsorted(valid_gaze_timestamps_ns, blink_end_timestamps_ns + blink_post_ns, side="right"),
-        -1,
-    )
+    # Iterate over each blink 
+    for start_ns, end_ns in zip(padded_blink_starts_ns, padded_blink_ends_ns):
 
-    # Convert accumulated interval counts into the padded blink mask.
-    padded_blinks: np.ndarray = np.cumsum(padded_changes[:-1]) > 0
+        # Find the gaze_timestamps idxs that are 
+        # within this blink timestamp. Update the padded blink mask 
+        # with this infrmation
+        padded_blinks |= (
+            (valid_gaze_timestamps_ns >= start_ns)
+            & (valid_gaze_timestamps_ns <= end_ns)
+        )
 
-    # Take a view of the two pupil channels for physiological bounds filtering.
-    pupils: np.ndarray = interpolated_eye_measurements[:, :2]
+    # Leave the combined diameter as NaN when both eyes are missing.
+    combined_pupil: np.ndarray = np.full(len(pupils), np.nan)
+    has_valid_pupil: np.ndarray = np.any(~np.isnan(pupils), axis=1)
 
-    # Remove pupil values outside the configured physiological range.
-    pupils[
-        (pupils < pupil_diameter_thresholds[0])
-        | (pupils > pupil_diameter_thresholds[1])
-    ] = np.nan
-
-    # Combine available left and right pupil diameters at each timestamp.
-    pupil: np.ndarray = _mean_available(pupils)
+    # Average left and right diameters, ignoring a missing eye. If only one
+    # eye is available, use its diameter. Skip rows with both eyes missing
+    # to avoid an empty-mean warning.
+    combined_pupil[has_valid_pupil] = np.nanmean(pupils[has_valid_pupil], axis=1)
 
     # Average apertures temporarily to detect abrupt physiological changes.
-    aperture_temp: np.ndarray = _mean_available(interpolated_eye_measurements[:, 2:])
+    aperture_columns: slice = slice(
+        eye_channel_names.index("eyelid aperture left [mm]"),
+        eye_channel_names.index("eyelid aperture right [mm]") + 1,
+    )
+    apertures: np.ndarray = interpolated_eye_measurements[:, aperture_columns]
+    combined_aperture: np.ndarray = np.full(len(apertures), np.nan)
+    has_valid_aperture: np.ndarray = np.any(~np.isnan(apertures), axis=1)
+
+    # Average left and right apertures, using the available eye if one is
+    # missing. Leave rows with both eyes missing as NaN and skip their mean
+    # calculation to avoid an empty-mean warning.
+    combined_aperture[has_valid_aperture] = np.nanmean(
+        apertures[has_valid_aperture], axis=1
+    )
 
     # The working columns retain each aperture separately through smoothing.
-    signals: np.ndarray = np.column_stack((pupil, interpolated_eye_measurements[:, 2:], bounded_gaze))
+    signal_columns: tuple[str, ...] = (
+        "pupil diameter [mm]",
+        "eyelid aperture left [mm]",
+        "eyelid aperture right [mm]",
+        "gaze x [px]",
+        "gaze y [px]",
+    )
+    signals: np.ndarray = np.column_stack((combined_pupil, apertures, bounded_gaze))
+
+    # The combined signals have a different column order from the eye CSV.
+    # Resolve their indices from their own names for masking and summaries.
+    pupil_column: int = signal_columns.index("pupil diameter [mm]")
+    left_aperture_column: int = signal_columns.index("eyelid aperture left [mm]")
+    right_aperture_column: int = signal_columns.index("eyelid aperture right [mm]")
+    signal_aperture_columns: slice = slice(left_aperture_column, right_aperture_column + 1)
+    physiology_columns: slice = slice(pupil_column, right_aperture_column + 1)
+    signal_gaze_columns: slice = slice(
+        signal_columns.index("gaze x [px]"),
+        signal_columns.index("gaze y [px]") + 1,
+    )
 
     # Preserve the pre-mask signals only when a comparison plot is requested.
     before_masking: np.ndarray | None = signals.copy() if verbose else None
 
-    # Flag abrupt pupil or mean-aperture changes relative to the prior sample.
-    physio_spike: np.ndarray = (
-        np.r_[0.0, np.abs(np.diff(pupil))] > pupil_change_threshold
-    ) | (np.r_[0.0, np.abs(np.diff(aperture_temp))] > aperture_change_threshold)
+    # Measure each sample's absolute change from the previous sample.
+    # The first sample has no predecessor, so its change is set to zero.
+    absolute_pupil_changes: np.ndarray = np.zeros_like(combined_pupil)
+    absolute_pupil_changes[1:] = np.abs(np.diff(combined_pupil))
 
-    # Compute horizontal and vertical changes; give the first sample zero change.
-    gaze_changes: np.ndarray = np.vstack((np.zeros(2), np.abs(np.diff(bounded_gaze, axis=0))))
+    absolute_aperture_changes: np.ndarray = np.zeros_like(combined_aperture)
+    absolute_aperture_changes[1:] = np.abs(np.diff(combined_aperture))
 
-    # Compare the Euclidean gaze displacement with the spike threshold.
-    gaze_spike: np.ndarray = (
-        np.sqrt(np.sum(gaze_changes**2, axis=1)) > gaze_spike_threshold
+    # Flag a physiological spike when either measurement exceeds its limit.
+    pupil_spike: np.ndarray = absolute_pupil_changes > pupil_change_threshold
+    aperture_spike: np.ndarray = absolute_aperture_changes > aperture_change_threshold
+    physio_spike: np.ndarray = pupil_spike | aperture_spike
+
+    # Measure absolute horizontal and vertical gaze changes separately, again
+    # leaving the first sample's changes at zero.
+    absolute_gaze_changes: np.ndarray = np.zeros_like(bounded_gaze)
+    absolute_gaze_changes[1:] = np.abs(np.diff(bounded_gaze, axis=0))
+
+    # Combine the horizontal and vertical changes into the straight-line
+    # distance moved since the previous sample: sqrt(dx**2 + dy**2).
+    # Summing across axis=1 combines x and y for each sample, giving one
+    # displacement in pixels. Flag a spike only when this distance exceeds
+    # gaze_spike_threshold; this measures movement per sample, not velocity.
+    gaze_spikes: np.ndarray = (
+        np.sqrt(np.sum(absolute_gaze_changes**2, axis=1)) > gaze_spike_threshold
     )
+
+    # For each Boolean mask below, maximum_filter1d examines a moving window
+    # of dilation_samples entries and returns its maximum at each position.
+    # For booleans, that means True whenever any entry in the window is True,
+    # expanding flagged events to include nearby samples. With a width of 5,
+    # an isolated True also flags the two samples before and after it.
+    # mode="constant", cval=0 treats positions outside the recording as False,
+    # so events do not wrap around or reflect at the recording boundaries.
+    # This adds padding in samples, on top of the blink padding in nanoseconds.
 
     # Expand the padded blink mask across the configured sample window.
     blink_dilated: np.ndarray = maximum_filter1d(
@@ -499,44 +611,51 @@ def clean_eye_data(
 
     # Expand gaze spikes before intersecting them with blink periods.
     gaze_spike_dilated: np.ndarray = maximum_filter1d(
-        gaze_spike, dilation_samples, mode="constant", cval=0
+        gaze_spikes, dilation_samples, mode="constant", cval=0
     )
 
     # Exclude physiology when either a blink or physiological spike is present.
-    physio_mask: np.ndarray = blink_dilated | physio_spike_dilated
+    invalid_physio_mask: np.ndarray = blink_dilated | physio_spike_dilated
 
     # Exclude gaze only where a blink and gaze spike coincide.
-    gaze_mask: np.ndarray = blink_dilated & gaze_spike_dilated
+    invalid_gaze_mask: np.ndarray = blink_dilated & gaze_spike_dilated
 
     # Mask pupil and both apertures using the physiological exclusion rule.
-    signals[physio_mask, :3] = np.nan
+    signals[invalid_physio_mask, physiology_columns] = np.nan
 
     # Apply the stricter blink-and-spike exclusion rule to the two gaze columns.
-    signals[gaze_mask, 3:] = np.nan
+    signals[invalid_gaze_mask, signal_gaze_columns] = np.nan
 
-    # Match Geoff's endpoint protection before PCHIP: carry the last valid
-    # physiology value forward, then the first valid value backward. Both
-    # carries are uncapped; all-missing columns remain missing. This prevents
-    # extrapolation at either recording edge without changing interior gaps.
-    for column in range(3):
-        # Locate observed samples that can anchor interpolation or endpoint filling.
-        valid: np.ndarray = np.flatnonzero(~np.isnan(signals[:, column]))
-        if valid.size:
-            # Carry the last valid physiology value through the trailing gap.
-            signals[valid[-1] + 1 :, column] = signals[valid[-1], column]
+    # Fill missing values at the beginning and end of each physiology channel
+    # with its nearest observed value, matching Geoff's endpoint protection.
+    # This avoids PCHIP extrapolation at the recording edges. Interior gaps
+    # stay unchanged, and these endpoint fills have no gap-length limit.
+    for column in range(physiology_columns.start, physiology_columns.stop):
+        # This view lets us update the channel directly in signals.
+        channel_values: np.ndarray = signals[:, column]
+        valid_sample_mask: np.ndarray = ~np.isnan(channel_values)
+        # np.where returns the indices where the mask is True. Take the first
+        # result because this channel has only one dimension.
+        valid_sample_indices: np.ndarray = np.where(valid_sample_mask)[0]
 
-    for column in range(3):
-        # Locate observed samples that can anchor interpolation or endpoint filling.
-        valid = np.flatnonzero(~np.isnan(signals[:, column]))
-        if valid.size:
-            # Carry the first valid physiology value through the leading gap.
-            signals[: valid[0], column] = signals[valid[0], column]
+        # A channel with no observations has no value to carry to its edges.
+        if valid_sample_indices.size == 0:
+            continue
+
+        first_valid_index: int = int(valid_sample_indices[0])
+        last_valid_index: int = int(valid_sample_indices[-1])
+
+        # Fill everything after the last observation with that observation.
+        channel_values[last_valid_index + 1 :] = channel_values[last_valid_index]
+
+        # Fill everything before the first observation with that observation.
+        channel_values[:first_valid_index] = channel_values[first_valid_index]
 
     # Start with masked signals and replace only eligible missing samples.
     imputed: np.ndarray = signals.copy()
-    for column in range(5):
+    for column in range(len(signal_columns)):
         # Use shape-preserving interpolation for physiology and nearest samples for gaze.
-        method: str = "pchip" if column < 3 else "nearest"
+        method: str = "nearest" if column in range(signal_gaze_columns.start, signal_gaze_columns.stop) else "pchip"
 
         # Compute candidate fills using the more permissive blink gap limit.
         longer_fill: np.ndarray = _fill_missing(
@@ -547,49 +666,60 @@ def clean_eye_data(
         imputed[:, column] = _fill_missing(signals[:, column], method, general_max_gap)
 
         # Select the blink-related positions allowed to use the longer fill limit.
-        overwrite: np.ndarray = blink_dilated if column < 3 else gaze_mask
+        overwrite: np.ndarray = blink_dilated if column < signal_gaze_columns.start else invalid_gaze_mask
 
         # Replace only blink-related positions with the longer-gap candidates.
         imputed[overwrite, column] = longer_fill[overwrite]
 
     # Smooth physiology and gaze with their respective filters.
-    smoothed: np.ndarray = _smooth_signals(imputed, smoothing_samples)
+    smoothed_aperture_still_separate: np.ndarray = _smooth_signals(imputed, smoothing_samples)
 
-    # Combine the independently cleaned left and right apertures.
-    aperture_mean: np.ndarray = _mean_available(smoothed[:, 1:3])
+    # Calculate mean aperture and left-minus-right from the separate eye channels.
+    smoothed_apertures: np.ndarray = smoothed_aperture_still_separate[:, signal_aperture_columns]
+    has_valid_smoothed_aperture: np.ndarray = np.any(
+        ~np.isnan(smoothed_apertures), axis=1
+    )
+    combined_aperture: np.ndarray = np.full(len(smoothed_aperture_still_separate), np.nan)
 
-    # Retain aperture asymmetry as left minus right.
-    aperture_difference: np.ndarray = smoothed[:, 1] - smoothed[:, 2]
-
-    # Assemble the five cleaned output signals in the documented column order.
-    cleaned: np.ndarray = np.column_stack(
-        (smoothed[:, 0], aperture_mean, aperture_difference, smoothed[:, 3:])
+    # Average the available eyes. One missing eye uses the other eye's value;
+    # two missing eyes stay NaN without an empty-mean warning.
+    combined_aperture[has_valid_smoothed_aperture] = np.nanmean(
+        smoothed_apertures[has_valid_smoothed_aperture], axis=1
+    )
+    aperture_difference: np.ndarray = (
+        smoothed_aperture_still_separate[:, left_aperture_column] - smoothed_aperture_still_separate[:, right_aperture_column]
     )
 
-    # Copy intermediate arrays so later inspection cannot mutate working values.
-    if diagnostics is not None:
-        diagnostics.update(
-            time=relative_timestamps_s.copy(),
-            mapped_gaze=overlapping_gaze.copy(),
-            bounded_gaze=bounded_gaze.copy(),
-            masked_gaze=signals[:, 3:].copy(),
-            filled_gaze=imputed[:, 3:].copy(),
-            cleaned_gaze=cleaned[:, 3:].copy(),
-            out_of_bounds=invalid_gaze_pos_mask.copy(),
-            blink_mask=blink_dilated.copy(),
-            gaze_spike_mask=gaze_spike_dilated.copy(),
-            gaze_mask=gaze_mask.copy(),
+    # Build a separate output matrix with pupil, mean aperture, aperture
+    # difference, and gaze x/y. Keep the independently smoothed eyes intact.
+    smoothed_final_data: np.ndarray = np.column_stack(
+        (
+            smoothed_aperture_still_separate[:, pupil_column],
+            combined_aperture,
+            aperture_difference,
+            smoothed_aperture_still_separate[:, signal_gaze_columns],
+        )
+    )
+
+    # The plotting code in the block below is AI-generated and has not been reviewed.
+    if verbose:
+        # Count observed channels so rows with no observations remain NaN.
+        valid_raw_aperture_counts: np.ndarray = np.sum(~np.isnan(before_masking[:, signal_aperture_columns]), axis=1)
+        raw_aperture_mean: np.ndarray = np.divide(
+            np.nansum(before_masking[:, signal_aperture_columns], axis=1),
+            valid_raw_aperture_counts,
+            out=np.full(len(before_masking[:, signal_aperture_columns]), np.nan),
+            where=valid_raw_aperture_counts > 0,
         )
 
-    if verbose:
         # Match MATLAB's pupil_raw/aperture_*_raw/gaze_*_raw snapshots. These
         # are the aligned, bounded signals before blink/spike censoring.
         plot_raw: np.ndarray = np.column_stack(
             (
-                before_masking[:, 0],
-                _mean_available(before_masking[:, 1:3]),
-                before_masking[:, 1] - before_masking[:, 2],
-                before_masking[:, 3:],
+                before_masking[:, pupil_column],
+                raw_aperture_mean,
+                before_masking[:, left_aperture_column] - before_masking[:, right_aperture_column],
+                before_masking[:, signal_gaze_columns],
             )
         )
 
@@ -612,10 +742,8 @@ def clean_eye_data(
         _plot_matlab_summary(
             relative_timestamps_s,
             plot_raw,
-            cleaned,
+            smoothed_final_data,
             raw_blinks,
-            plot_label or pathlib.Path(raw_neon_path).name,
-            plot_id,
             (
                 pathlib.Path(plot_output_path)
                 if plot_output_path is not None
@@ -640,7 +768,7 @@ def clean_eye_data(
     }
 
     # Prepend elapsed time and return the settings that produced these signals.
-    return np.column_stack((relative_timestamps_s, cleaned)), metadata
+    return np.column_stack((relative_timestamps_s, smoothed_final_data)), metadata
 
 
 def _plot_matlab_summary(
@@ -648,8 +776,6 @@ def _plot_matlab_summary(
     raw: np.ndarray,
     cleaned: np.ndarray,
     raw_blinks: np.ndarray,
-    recording_label: str,
-    recording_id: str | None,
     output_path: pathlib.Path,
 ) -> Figure:
     """Save and display the six-panel MATLAB-style raw/cleaned figure.
@@ -667,12 +793,6 @@ def _plot_matlab_summary(
         raw_blinks (np.ndarray):
             Boolean mask of unpadded blink events.
 
-        recording_label (str):
-            Human-readable recording label.
-
-        recording_id (str | None):
-            Optional identifier prepended to the figure title.
-
         output_path (pathlib.Path):
             Destination for the vector PDF.
 
@@ -681,8 +801,7 @@ def _plot_matlab_summary(
 
     Notes:
         Panels show pupil diameter, mean aperture, aperture difference, gaze x,
-        gaze y, and raw blinks. Values are not clipped for display. Custom figure
-        attributes preserve the existing notebook caption interface.
+        gaze y, and raw blinks. Values are not clipped for display.
     """
     # Label each panel with the physical signal it displays.
     titles: tuple[str, ...] = (
@@ -708,9 +827,7 @@ def _plot_matlab_summary(
     figure, axes = plt.subplots(
         6, 1, figsize=(18, 11), sharex=True, constrained_layout=True
     )
-    # Build a stable figure identifier for notebook captions.
-    figure_id: str = f"{recording_id}-F1" if recording_id else "F1"
-    figure.suptitle(f"{figure_id} | {recording_label}", fontsize=12, fontweight="bold")
+    figure.suptitle("Eye Data Processing: Raw vs Cleaned", fontsize=12, fontweight="bold")
     for column, axis in enumerate(axes[:5]):
         axis.plot(time, raw[:, column], "k.", markersize=3, label="Raw")
         axis.plot(time, cleaned[:, column], "r-", linewidth=1, label="Cleaned")
@@ -726,10 +843,6 @@ def _plot_matlab_summary(
         axis.tick_params(axis="y", direction="in")
         axis.spines[["top", "right"]].set_visible(False)
         axis.margins(x=0)
-    # Keep the notebook's existing figure-caption interface.
-    figure.eye_cleaning_title = f"{figure_id} | {recording_label}"
-    figure.eye_cleaning_figure_id = figure_id
-    figure.eye_cleaning_review = []
     figure.set_label("Eye Data Processing: Raw vs Cleaned")
     # Create the PDF destination folder if this is its first output.
     output_path.parent.mkdir(parents=True, exist_ok=True)
