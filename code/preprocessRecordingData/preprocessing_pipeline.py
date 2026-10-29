@@ -770,7 +770,7 @@ def clean_eye_data(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideo
                     )
 
                 # Clean the data 
-                cleaned_data: np.ndarray = cleanEyeTracking.clean_eye_data(
+                cleaned_data, cleaning_metadata = cleanEyeTracking.clean_eye_data(
                     raw_neon_path, mapper_dir,
                     verbose=verbose,
                     plot_label=f"{subject_id}/{activity_name}/Neon/{recording_number}",
