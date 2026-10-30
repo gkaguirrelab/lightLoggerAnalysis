@@ -22,6 +22,7 @@
 # when calling a function directly.
 #
 import os
+import pickle
 import shutil
 from natsort import natsorted
 import re
@@ -667,15 +668,17 @@ def clean_eye_data(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideo
                    activities_to_process: Iterable[str]=(),
                    verbose: bool=True
                    ) -> None:
-    """Save cleaned_eye_data.csv in Neon/<attempt>/egocentric_mapper_results.
+    """Save cleaned eye data and settings in Neon/<attempt>/egocentric_mapper_results.
 
     The cleaned pixel gaze and eye measurements sit beside the mapper CSVs
-    and egocentric_mapper_metadata.pkl from the mapping stage.
+    and egocentric_mapper_metadata.pkl from the mapping stage. The cleaner's
+    returned settings are saved separately as eye_cleaning_metadata.pkl.
 
-    Explicit process filters override skip filters. Existing files are skipped
-    unless overwrite_existing=True. verbose defaults to True and shows progress
+    Explicit process filters override skip filters. Complete outputs are skipped
+    unless overwrite_existing=True; incomplete outputs are regenerated together.
+    verbose defaults to True and shows progress
     plus Geoff's six-panel comparison, saved as eye_cleaned_vs_raw.pdf beside
-    the CSV. show_plots optionally overrides plotting independently of progress. Raw exports may be directly in an attempt or a nested folder.
+    the CSV. Raw CSVs are located beneath timeseries_and_video_export.
     """
     # Select subjects using the same filters and ordering as the mapper stage.
     subjects_to_process = set(subjects_to_process)
@@ -742,9 +745,16 @@ def clean_eye_data(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideo
                 # Keep cleaned gaze beside this recording's mapper metadata/CSVs.
                 mapper_dir: str = os.path.join(output_dir, "egocentric_mapper_results")
                 output_path: str = os.path.join(mapper_dir, "cleaned_eye_data.csv")
+                metadata_path: str = os.path.join(mapper_dir, "eye_cleaning_metadata.pkl")
+                plot_path: str = os.path.join(mapper_dir, "eye_cleaned_vs_raw.pdf")
 
-                # Only overwrite if desired 
-                if not overwrite_existing and os.path.isfile(output_path):
+                # Skip only when all requested outputs exist. Older recordings
+                # with a CSV but no saved settings need to be cleaned again.
+                required_output_paths: list[str] = [output_path, metadata_path]
+                if verbose:
+                    required_output_paths.append(plot_path)
+
+                if not overwrite_existing and all(os.path.isfile(path) for path in required_output_paths):
                     continue
 
                 # Find the path to the raw recording and the single directory underneat it
@@ -773,15 +783,28 @@ def clean_eye_data(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideo
                 cleaned_data, cleaning_metadata = cleanEyeTracking.clean_eye_data(
                     raw_neon_path, mapper_dir,
                     verbose=verbose,
+                    plot_output_path=plot_path,
                 )
                 
                 # Write inside the recording loop so every attempt gets its own CSV.
+                output_columns: tuple[str, ...] = (
+                    "time [s]",
+                    "pupil diameter [mm]",
+                    "eyelid aperture [mm]",
+                    "eyelid aperture difference [mm]",
+                    "gaze x [px]",
+                    "gaze y [px]",
+                )
                 cleaned_df: pd.DataFrame = pd.DataFrame(
                     cleaned_data,
-                    columns=cleanEyeTracking.OUTPUT_COLUMNS,
+                    columns=output_columns,
                 )
                 os.makedirs(mapper_dir, exist_ok=True)
                 cleaned_df.to_csv(output_path, index=False)
+
+                # Save the settings returned by this cleaning run beside its data.
+                with open(metadata_path, "wb") as metadata_file:
+                    pickle.dump(cleaning_metadata, metadata_file)
     return
 
 
