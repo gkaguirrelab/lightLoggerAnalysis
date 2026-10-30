@@ -10,6 +10,7 @@ from multiprocessing.shared_memory import SharedMemory
 
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.image import AxesImage
 import cv2
 import os 
 import sys
@@ -4492,10 +4493,11 @@ def world_transformation_pipeline(
             for serial execution.
 
         stagewise_output (list[np.ndarray] | None):
-            Optional empty list that receives eight independent float64
+            Optional empty list that receives nine independent float64
             snapshots: raw counts, quantization correction, linearization,
             imputation, fielding, RGB correction, Bayer radiance, and demosaiced
-            RGB radiance. The final snapshot adds a trailing RGB dimension. Omit
+            RGB radiance, then foveated Ach/RG/BY responses. RGB has a trailing
+            color dimension; opponent maps use azimuth/elevation/channel axes. Omit
             this argument to avoid the snapshot copies.
 
         demosaic_pool (Pool | None):
@@ -4691,6 +4693,8 @@ def world_transformation_pipeline(
     cone_weights: np.ndarray
     # Stage 8: recenter on gaze and convert RGB into opponent cone channels.
     opponent, cone_weights = compute_foveated_opponent_map(demosaiced, gaze_angles_xy)
+    if store_stagewise_output is True:
+        stagewise_output.append(opponent.copy())
     # Describe the final angular opponent output rather than the intermediate RGB map.
     calibration_metadata.update(
         {
@@ -4718,7 +4722,7 @@ def plot_reconstruction_stages(
     stagewise_output: list[np.ndarray],
     title: str = "World-camera reconstruction",
 ) -> tuple[plt.Figure, np.ndarray]:
-    """Display the saved Bayer and RGB stages using Geoff's MATLAB figure layout.
+    """Display saved Bayer, RGB, and opponent stages.
 
     Each column shows one stage above its RGB-channel histogram. Images use
     their finite 85th percentile as a display scale, with ceiling samples in
@@ -4727,29 +4731,35 @@ def plot_reconstruction_stages(
     Hover coordinates report the original values rather than display-scaled ones.
 
     Args:
-        stagewise_output: Eight snapshots (seven Bayer planes and one RGB image) collected by
+        stagewise_output: Nine snapshots (seven Bayer planes, one RGB image, and
+            one azimuth-by-elevation-by-channel opponent map) collected by
             world_transformation_pipeline for a single frame. For a buffer,
             select the same frame index from each snapshot before plotting.
         title: Title for the complete figure.
 
     Returns:
-        The displayed figure and its (2, 8) axes array. Saved stages are not
+        The displayed figure and its (2, 11) axes array. The final three columns
+        show Ach, RG, and BY with signed scales and finite-value histograms.
+        Saved stages are not
         modified; display scaling operates on separate arrays.
 
     Raises:
-        ValueError: If the seven Bayer planes and final RGB image have incompatible shapes.
+        ValueError: If the Bayer/RGB shapes disagree or the opponent map lacks three channels.
     """
     stage_names: tuple[str, ...] = (
         "Raw", "Quantization", "Linearization", "Imputation",
         "Flat field", "RGB correction", "Radiance", "Demosaiced",
     )
-    if len(stagewise_output) != len(stage_names):
-        raise ValueError("Provide all eight snapshots from world_transformation_pipeline.")
+    if len(stagewise_output) != 9:
+        raise ValueError("Provide all nine snapshots from world_transformation_pipeline.")
     image_shape: tuple[int, ...] = stagewise_output[0].shape
     if (len(image_shape) != 2
-        or any(stage.shape != image_shape for stage in stagewise_output[:-1])
-        or stagewise_output[-1].shape != (*image_shape, 3)):
+        or any(stage.shape != image_shape for stage in stagewise_output[:7])
+        or stagewise_output[7].shape != (*image_shape, 3)):
         raise ValueError("Provide seven same-shaped Bayer planes followed by their RGB image.")
+    opponent: np.ndarray = stagewise_output[8]
+    if opponent.ndim != 3 or opponent.shape[-1] != 3:
+        raise ValueError("The ninth snapshot must be an azimuth-by-elevation-by-3 opponent map.")
 
     def original_pixel_coordinates(x: float, y: float, stage: np.ndarray) -> str:
         """Format the unscaled stage value under the mouse pointer.
@@ -4774,7 +4784,7 @@ def plot_reconstruction_stages(
 
     figure: plt.Figure
     axes: np.ndarray
-    figure, axes = plt.subplots(2, len(stage_names), figsize=(25, 7), constrained_layout=True)
+    figure, axes = plt.subplots(2, 11, figsize=(34, 7), constrained_layout=True)
     figure.suptitle(title, fontsize=15, fontweight="bold")
     edges: np.ndarray = np.linspace(0, 1, 256)
 
@@ -4847,6 +4857,36 @@ def plot_reconstruction_stages(
         if stage_index == 0:
             histogram_axis.set_ylabel("% of channel pixels", fontsize=9)
             histogram_axis.legend(loc="lower right", fontsize=8)
+
+    # Opponent responses can be negative; the RGB floor/ceiling display rules
+    # would hide their sign. Give each channel its own zero-centered scale.
+    channel_index: int
+    channel_name: str
+    for channel_index, channel_name in enumerate(("Ach", "RG", "BY")):
+        channel_map: np.ndarray = opponent[:, :, channel_index].T
+        finite_channel: np.ndarray = channel_map[np.isfinite(channel_map)]
+        limit: float = float(np.max(np.abs(finite_channel))) if finite_channel.size else 1.0
+        limit = limit if limit > 0 else 1.0
+        image_axis: plt.Axes = axes[0, 8 + channel_index]
+        image: AxesImage = image_axis.imshow(
+            np.ma.masked_invalid(channel_map),
+            cmap=plt.get_cmap("RdBu_r").with_extremes(bad="magenta"),
+            vmin=-limit, vmax=limit,
+        )
+        image_axis.set_title(f"8. Opponent {channel_name}", fontsize=11)
+        image_axis.axis("off")
+        image_axis.format_coord = partial(original_pixel_coordinates, stage=channel_map)
+        figure.colorbar(image, ax=image_axis, shrink=0.6)
+        histogram_axis: plt.Axes = axes[1, 8 + channel_index]
+        if finite_channel.size:
+            histogram_axis.hist(
+                finite_channel, bins=100,
+                weights=np.full(finite_channel.size, 100.0 / finite_channel.size),
+            )
+        histogram_axis.set_xlabel("Opponent response", fontsize=9)
+        histogram_axis.set_ylabel("% of finite samples", fontsize=9)
+        histogram_axis.set_title(f"Invalid: {channel_map.size - finite_channel.size:,}", fontsize=9)
+        histogram_axis.axvline(0, color="black", linewidth=0.5)
 
     plt.show()
     return figure, axes

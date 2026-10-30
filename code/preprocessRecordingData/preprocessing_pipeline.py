@@ -116,9 +116,13 @@ def get_subject_ids(FLIC_subject_dir: str="/Users/zacharykelly/Library/CloudStor
             if pd.isna(subject_name) or str(subject_name).strip().lower() == "nan":
                 break
 
-            # Get the subject name and ID
-            subject_id: int = _extract_num_from_id(str(subject_name).strip().strip("*"))    
-            numeric_age: int = int(age)
+            # Get the subject name and ID        
+            try:   
+                subject_id: int = _extract_num_from_id(str(subject_name).strip().strip("*"))    
+                numeric_age: int = int(age)
+            except:
+                warnings.warn(f"Entry: {subject_name} did not fit the format: FLIC_ID, skipping")
+                continue
 
             # Repeated IDs are fine only when their validated ages agree.
             if subject_id in subject_ids and subject_ids[subject_id] != int(numeric_age):
@@ -539,6 +543,86 @@ def generate_egocentric_mapper_results(src_dir: str="/Volumes/FLIC_raw/NEWscript
 
     return 
 
+def _align_gaze_to_raw_world_frames(
+    recording_path: str, mapper_dir: str, raw_neon_dir: str | None = None,
+) -> np.ndarray:
+    """Return nearest cleaned gaze for each observed world frame, in raw order.
+
+    Anchor the first raw frame to the first alternative-camera timestamp.
+    Raw elapsed nanoseconds retain dropped-frame gaps, so dummy video frames
+    never acquire rows here. This assumes the mapper video starts at the first
+    raw frame and the clocks differ by a constant offset (no clock drift).
+    Ties select the earlier gaze sample; samples marked NaN remain invalid.
+    Frames outside cleaned gaze coverage receive NaN rather than extrapolation.
+    """
+    world_files = sensors_utility.group_sensors_files(recording_path)["W"]
+    timestamp_chunks = []
+    for metadata_path, data_path in world_files:
+        metadata = np.load(metadata_path, mmap_mode="r")
+        frames = np.load(data_path, mmap_mode="r")
+        if metadata.ndim != 2 or metadata.shape[1] not in (4, 6):
+            raise ValueError(f"Invalid world metadata shape: {metadata_path}")
+        if len(metadata) != len(frames):
+            raise ValueError(f"Frame/metadata length mismatch: {data_path}")
+        timestamp_chunks.append(np.asarray(metadata[:, 0]))
+    if not timestamp_chunks or not any(len(t) for t in timestamp_chunks):
+        raise ValueError(f"No raw world frames: {recording_path}")
+    raw_ns = np.concatenate(timestamp_chunks)
+
+    camera_ns = pd.read_csv(
+        os.path.join(mapper_dir, "alternative_camera_timestamps.csv"),
+        usecols=["timestamp [ns]"],
+    )["timestamp [ns]"].to_numpy()
+    gaze = pd.read_csv(os.path.join(mapper_dir, "cleaned_eye_data.csv"))
+    if "timestamp [ns]" in gaze:
+        gaze_ns = gaze["timestamp [ns]"].to_numpy()
+    else:
+        # The cleaner exports elapsed seconds from the first mapped gaze sample
+        # within eye-state coverage, not from the first camera or gaze sample.
+        # Reproduce its overlap mask to recover the original row timestamps.
+        if "time [s]" not in gaze or raw_neon_dir is None:
+            raise ValueError("Cleaned gaze needs timestamp [ns], or time [s] and raw_neon_dir")
+        eye_paths = [os.path.join(root, "3d_eye_states.csv")
+                     for root, _, names in os.walk(raw_neon_dir)
+                     if "3d_eye_states.csv" in names]
+        if len(eye_paths) != 1:
+            raise ValueError(f"Expected one 3d_eye_states.csv beneath {raw_neon_dir}; found {len(eye_paths)}")
+        eye_ns = pd.read_csv(eye_paths[0], usecols=["timestamp [ns]"])["timestamp [ns]"].to_numpy(dtype=float)
+        mapped_ns = pd.read_csv(
+            os.path.join(mapper_dir, "alternative_camera_gaze.csv"),
+            usecols=["timestamp [ns]"],
+        )["timestamp [ns]"].to_numpy(dtype=float)
+        if not len(eye_ns) or not len(mapped_ns):
+            raise ValueError("Cannot recover cleaned gaze timestamps from empty source timelines")
+        gaze_ns = mapped_ns[(mapped_ns >= max(mapped_ns[0], eye_ns[0]))
+                            & (mapped_ns <= min(mapped_ns[-1], eye_ns[-1]))]
+        if (not len(gaze_ns) or len(gaze_ns) != len(gaze)
+                or not np.allclose(gaze["time [s]"].to_numpy(dtype=float),
+                                   (gaze_ns - gaze_ns[0]) / 1e9, rtol=0, atol=1e-9)):
+            raise ValueError("Cleaned gaze time [s] does not match the mapped gaze/eye-state overlap; regenerate cleaned_eye_data.csv")
+    for name, times in (("Raw world", raw_ns), ("Alternative camera", camera_ns),
+                        ("Cleaned gaze", gaze_ns)):
+        if not len(times) or not np.all(np.isfinite(times)) or np.any(times[1:] <= times[:-1]):
+            raise ValueError(f"{name} timestamps must be nonempty, finite, and strictly increasing")
+
+    # Subtract origins before conversion to float to retain integer-nanosecond
+    # precision even when the CSV timestamps are large Unix epoch values.
+    frame_elapsed_ns = (raw_ns - raw_ns[0]).astype(np.float64)
+    gaze_elapsed_ns = (gaze_ns - camera_ns[0]).astype(np.float64)
+    right = np.searchsorted(gaze_elapsed_ns, frame_elapsed_ns)
+    left = np.clip(right - 1, 0, len(gaze_ns) - 1)
+    right = np.clip(right, 0, len(gaze_ns) - 1)
+    nearest = np.where(
+        np.abs(frame_elapsed_ns - gaze_elapsed_ns[left])
+        <= np.abs(gaze_elapsed_ns[right] - frame_elapsed_ns), left, right,
+    )
+    aligned = gaze[["gaze x [px]", "gaze y [px]"]].to_numpy(dtype=np.float64)[nearest]
+    outside = ((frame_elapsed_ns < gaze_elapsed_ns[0])
+               | (frame_elapsed_ns > gaze_elapsed_ns[-1]))
+    aligned[outside] = np.nan
+    return aligned
+
+
 def run_transformation_pipeline(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026",
                                 dst_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoorVideos2026",
                                 overwrite_existing: bool=False,
@@ -636,15 +720,18 @@ def run_transformation_pipeline(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoo
                     print(f"Input: {world_recording_in}")
                     print(f"Output: {recording_output_path}")
 
-                # Load this recording's cleaned mapped gaze (x/y are in pixels).
-                # The transformation currently accepts this array but does not yet use it.
-                cleaned_gaze_path: str = os.path.join(
+                # Align high-rate gaze to observed raw frames using elapsed time,
+                # retaining gaps that were filled with blanks in the mapper video.
+                mapper_dir: str = os.path.join(
                     dst_dir, subject_id, activity_name, "Neon", recording_number,
-                    "egocentric_mapper_results", "cleaned_eye_data.csv",
+                    "egocentric_mapper_results",
                 )
-                gaze_angles_xy: np.ndarray = pd.read_csv(
-                    cleaned_gaze_path, usecols=["gaze x [px]", "gaze y [px]"]
-                )[["gaze x [px]", "gaze y [px]"]].to_numpy(dtype=np.float64)
+                raw_neon_dir = os.path.join(
+                    activity_path, "Neon", recording_number, "timeseries_and_video_export",
+                )
+                gaze_angles_xy = _align_gaze_to_raw_world_frames(
+                    world_recording_in, mapper_dir, raw_neon_dir,
+                )
 
                 # Process world data first, then MS spectra using the saved RGB averages.
                 sensors_utility.process_raw_recording(
