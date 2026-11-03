@@ -9,6 +9,8 @@ from multiprocessing.pool import Pool
 from multiprocessing.shared_memory import SharedMemory
 
 import numpy as np
+import h5py
+from numpy.typing import NDArray
 import matplotlib.pyplot as plt
 from matplotlib.image import AxesImage
 import cv2
@@ -3761,15 +3763,12 @@ def world_camera_field_of_view_steradians(matlab_engine: object | None=None) -> 
 
 
 # Given a recording path, return all frame metadata.
-def world_metadata_from_chunks(raw_chunks_path: str,
+def world_metadata_from_chunks(raw_chunks_path: str | dict[str, np.ndarray],
                                  convert_to_seconds: bool=True,
                                  verbose: bool=False,
                                  fill_missing_frames: bool=True
                                 ) -> pd.DataFrame:
-    # Find the config file 
-    # of the recording. This will tell us about the FPS 
-    # and how to interpolate between chunks 
-    """Assemble timestamps and AGC metadata across all world chunks.
+    """Assemble world timestamps and AGC settings from chunks or saved data.
 
     The function reads ``config.pkl`` to recover the nominal world-camera
     frame rate, loads each naturally sorted metadata chunk, and concatenates
@@ -3781,21 +3780,63 @@ def world_metadata_from_chunks(raw_chunks_path: str,
     physical frame indices even when recorded camera settings contain NaNs.
 
     Args:
-        raw_chunks_path: Directory containing ``config.pkl`` and the world
-            metadata chunk files.
+        raw_chunks_path: Directory containing ``config.pkl`` and world
+            metadata chunks, a path to a world ``.hdf5`` file written by
+            ``sensors_utility``, or a dictionary requiring both ``data`` and
+            ``metadata``. Dictionary ``data`` is a frame-first NumPy array.
+            Its ``metadata`` must be an (N, 4) legacy or (N, 6) modern NumPy
+            matrix with timestamps in the first column. Both arrays must
+            contain the same number of frames. All input timestamps are
+            in nanoseconds.
         convert_to_seconds: Whether to convert timestamps from nanoseconds
             since boot into seconds.
         verbose: Whether to show progress while loading the metadata chunks.
         fill_missing_frames: Whether to insert timestamped NaN rows for gaps
             between chunks. Defaults to True to preserve compatibility with
             existing callers that relied on gaps always being filled.
+            Applies only to directory input; HDF5 and dictionary inputs
+            preserve their stored rows because chunk boundaries are absent.
 
     Returns:
         ``pandas.DataFrame`` in frame order with a zero-based index and a
         timestamp column followed by legacy ``Again``, ``Dgain``, ``exposure``
         or the modern ``WORLD_AGC_METADATA_COLS`` camera settings.
     """
+    def metadata_frame(values: np.ndarray, frame_count: int) -> pd.DataFrame:
+        """Validate aligned metadata and return an independently owned table."""
+        if not isinstance(values, np.ndarray):
+            raise TypeError("Metadata must be a NumPy matrix.")
+        array: np.ndarray = np.array(values, dtype=np.float64, copy=True)
+        if array.ndim != 2 or array.shape[1] not in (4, 6):
+            raise ValueError("Metadata must have shape (nframes, 4) or (nframes, 6).")
+        if len(array) != frame_count:
+            raise ValueError("Data and metadata must contain the same number of frames.")
+        if convert_to_seconds:
+            array[:, 0] /= 10 ** 9
+        names = list(WORLD_AGC_METADATA_COLS) if array.shape[1] == 6 else ["Again", "Dgain", "exposure"]
+        return pd.DataFrame(array, columns=["timestamp", *names])
+
+    if isinstance(raw_chunks_path, dict):
+        if not {"data", "metadata"}.issubset(raw_chunks_path):
+            raise ValueError("Dictionary input requires both data and metadata keys.")
+        data = raw_chunks_path["data"]
+        if not isinstance(data, np.ndarray) or data.ndim < 1:
+            raise TypeError("Dictionary data must be a frame-first NumPy array.")
+        return metadata_frame(raw_chunks_path["metadata"], len(data))
+
+    if not isinstance(raw_chunks_path, str):
+        raise TypeError("Input must be a directory path, .hdf5 path, or dictionary.")
     chunks_path: str = os.path.abspath(os.path.expanduser(raw_chunks_path))
+    if chunks_path.endswith(".hdf5"):
+        with h5py.File(chunks_path, "r") as saved:
+            columns = [
+                saved[f"agcSettings/{name}"][:]
+                for name in ("timestamps", "Again", "Dgain", "exposure")
+            ]
+            frame_count: int = saved["data/frames"].shape[0]
+            if any(column.ndim != 1 or len(column) != frame_count for column in columns):
+                raise ValueError("HDF5 metadata fields must have one value per frame.")
+            return metadata_frame(np.column_stack(columns), frame_count)
     if(not os.path.isdir(chunks_path)):
         raise FileNotFoundError(f"Raw chunks path does not exist: {chunks_path}")
 
@@ -4969,6 +5010,25 @@ def visualize_pipeline(
         figures.append(plot_reconstruction_stages(stagewise_output, title=title))
 
     return figures
+
+
+def opponentmap_to_videoframe(opponentmaps: np.ndarray) -> NDArray[np.uint8]:
+    """Convert an opponent map or buffer into displayable video frames.
+
+    Args:
+        opponentmaps: A single image with shape ``(azi, ele, channel)`` or
+            a buffer with shape ``(nframes, azi, ele, channel)``, where
+            ``azi`` and ``ele`` denote azimuth and elevation samples.
+
+    Returns:
+        frame: A uint8 NumPy array containing the converted image or
+            frame buffer, retaining a leading frame axis for buffer input.
+
+    Notes:
+        This is an unimplemented stub and currently returns ``None``.
+        The return annotation describes the intended conversion result.
+    """
+    pass
 
 
 def main() -> None:

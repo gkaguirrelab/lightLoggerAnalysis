@@ -570,7 +570,8 @@ def _process_raw_ms_helper(
         Spatial RGB means are averaged with equal weight per camera frame,
         including frames spanning world chunk boundaries. World timestamps span
         the recording; MS timestamps and readings are loaded chunkwise.
-        Missing/invalid measurements cause errors; fits are not silently skipped.
+        Windows without world frames retain their rows with NaN spectra and fit
+        diagnostics. Invalid measurements in covered windows still cause errors.
         Per-reading arrays use extendible chunks, gzip level 4, and shuffle.
         S and constant fit metadata are written once. completed=True is set only
         after all selected chunks have been appended; failed ms_files require overwrite.
@@ -806,27 +807,34 @@ def _process_raw_ms_helper(
             # 3b. Average each range of saved RGB rows. For world_frame_index_bounds [0, 10],
             # average_frames[0:10] includes rows 0 through 9 (ten camera frames).
             frame_counts: np.ndarray = world_frame_index_bounds[:, 1] - world_frame_index_bounds[:, 0]
-            # Every MS reading must have camera coverage; do not skip empty windows.
-            assert np.all(frame_counts > 0), (
-                f"MS chunk {file_num} has readings without world frames: "
-                f"{np.flatnonzero(frame_counts <= 0).tolist()}"
-            )
+            has_world_frames: np.ndarray = frame_counts > 0
 
-            rgb: np.ndarray = np.empty((len(timestamps), 3), dtype=float)
-            for reading_index, (first, stop) in enumerate(world_frame_index_bounds):
+            # Preserve missing windows as NaN without averaging an empty slice.
+            rgb: np.ndarray = np.full((len(timestamps), 3), np.nan, dtype=float)
+            for reading_index in np.flatnonzero(has_world_frames):
+                first, stop = world_frame_index_bounds[reading_index]
                 rgb[reading_index] = average_frames[first:stop].mean(axis=0)
 
-            assert np.all(np.isfinite(rgb)), "Nonfinite camera RGB averages in MS windows"
+            assert np.all(np.isfinite(rgb[has_world_frames])), "Nonfinite camera RGB averages in MS windows"
 
-            # 3c. Fit every reading now that all averaging windows have been checked.
-            radiance: np.ndarray
-            sampling: np.ndarray
-            fit_value: np.ndarray
-            fit_errors: np.ndarray
-            radiance, sampling, fit_value, fit_errors = ms_util.estimate_joint_radiance_spectrum(
-                reading_buffer, rgb, base_alpha=base_alpha,
-                reference_intensity=reference_intensity, beta=beta,
+            # 3c. Fit only covered readings, retaining every original output row.
+            # Initialize explicitly so even an entirely uncovered chunk can be saved.
+            sampling: np.ndarray = ms_util.MS_SPECTRAL_SAMPLING.copy()
+            radiance: np.ndarray = np.full(
+                (len(timestamps), ms_util.MS_SPECTRAL_WAVELENGTHS.size), np.nan,
             )
+            fit_value: np.ndarray = np.full(len(timestamps), np.nan)
+            fit_errors: np.ndarray = np.full(
+                (len(timestamps), ms_util.MS_JOINT_CHANNEL_COUNT + 3), np.nan,
+            )
+            if np.any(has_world_frames):
+                fitted_radiance, sampling, fitted_value, fitted_errors = ms_util.estimate_joint_radiance_spectrum(
+                    reading_buffer[has_world_frames], rgb[has_world_frames],
+                    base_alpha=base_alpha, reference_intensity=reference_intensity, beta=beta,
+                )
+                radiance[has_world_frames] = fitted_radiance
+                fit_value[has_world_frames] = fitted_value
+                fit_errors[has_world_frames] = fitted_errors
 
             # 5. Keep fixed run settings separate from arrays that grow with each chunk.
             # These settings describe the actual fit above; calibration coefficients
@@ -999,6 +1007,90 @@ def process_raw_recording(
         chunk_range=chunk_ranges["M"], overwrite_existing=overwrite_existing,
         verbose=verbose,
     )
+
+
+def _plot_raw_world_helper(path_to_raw: str) -> None:
+    """Plot raw world-camera data from a recording directory (stub).
+
+    Args:
+        path_to_raw: Directory containing raw sensor chunk files.
+    """
+    pass
+
+
+def _plot_raw_ms_helper(path_to_raw: str) -> None:
+    """Plot raw minispectrometer data from a recording directory (stub).
+
+    Args:
+        path_to_raw: Directory containing raw sensor chunk files.
+    """
+    pass
+
+
+def plot_raw_recording(
+    path_to_raw: str,
+    output_path: str,
+    age: int,
+    gaze_angles_xy: np.ndarray,
+    overwrite_existing: bool = False,
+    verbose: bool = False,
+    chunk_ranges: dict[Literal["W", "M"], tuple[int | None]] = {sensor_name: (0, None) for sensor_name in "WM"},
+    n_workers: int = world_util.WORLD_IMPUTATION_WORKERS,
+    demosaic_n_workers: int = world_util.WORLD_DEMOSAIC_WORKERS,
+) -> None:
+    """Call raw world and MS plotting stubs with a recording directory.
+
+    Args:
+        path_to_raw: Directory containing raw sensor chunk files.
+        output_path: Reserved output directory.
+        age: Reserved participant age.
+        gaze_angles_xy: Reserved one-based camera pixel X/Y gaze coordinates.
+        overwrite_existing: Reserved output replacement flag.
+        verbose: Reserved progress display flag.
+        chunk_ranges: Reserved W and M zero-based (start, stop) chunk ranges.
+        n_workers: Reserved world imputation worker count.
+        demosaic_n_workers: Reserved world demosaicing worker count.
+
+    Returns:
+        None. Only calls the two helper stubs; no data are read or plotted.
+
+    Notes:
+        The signature matches ``process_raw_recording``. Parameters other
+        than ``path_to_raw`` are reserved for future implementation.
+    """
+    _plot_raw_world_helper(path_to_raw)
+    _plot_raw_ms_helper(path_to_raw)
+
+
+def _plot_processed_world_helper(path_to_hdf5: str) -> None:
+    """Plot processed world-camera data from an HDF5 file (stub).
+
+    Args:
+        path_to_hdf5: Path to the processed recording HDF5 file.
+    """
+    pass
+
+
+def _plot_processed_ms_helper(path_to_hdf5: str) -> None:
+    """Plot processed minispectrometer data from an HDF5 file (stub).
+
+    Args:
+        path_to_hdf5: Path to the processed recording HDF5 file.
+    """
+    pass
+
+
+def plot_processed_recording(path_to_hdf5: str) -> None:
+    """Call processed world and MS plotting stubs with an HDF5 path.
+
+    Args:
+        path_to_hdf5: String path to the processed recording HDF5 file.
+
+    Returns:
+        None. Only calls the two helper stubs; no data are read or plotted.
+    """
+    _plot_processed_world_helper(path_to_hdf5)
+    _plot_processed_ms_helper(path_to_hdf5)
 
 
 def main() -> None:

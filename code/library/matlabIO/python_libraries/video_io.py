@@ -2141,6 +2141,78 @@ def convert_avi_to_mp4(input_path: str, output_path: str) -> None:
     subprocess.run(cmd, check=True)
 
 
+def opponentmaps_to_video(opponentmaps: str | dict[str, np.ndarray], output_path: str,
+                          fill_missing_frames: bool=False) -> None:
+    """Write opponent-map buffers to a playable AVI video.
+
+    Args:
+        opponentmaps: String path ending in ``.hdf5`` containing opponent-map
+            buffers, or a dictionary with a required ``data`` key and an
+            optional ``metadata`` key. ``data`` is a four-dimensional NumPy
+            array with shape ``(nframes, azi, ele, channel)``, where the
+            spatial axes represent azimuth and elevation samples. ``metadata``
+            is required when ``fill_missing_frames=True`` and must be a
+            NumPy matrix accepted by ``world_metadata_from_chunks``.
+        output_path: Destination path as a string ending in ``.avi``.
+        fill_missing_frames: Whether to synthesize black frames when
+            timestamp gaps imply dropped frames. Currently only retrieves
+            the timestamp/metadata DataFrame; gap insertion remains
+            unimplemented. Defaults to ``False``.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If the input is neither a string nor a dictionary,
+            the input string does not end in ``.hdf5``, the dictionary lacks
+            a four-dimensional NumPy ``data`` array, or the output is not
+            a string ending in ``.avi``.
+
+    Notes:
+        Validates inputs, creates the output directory and an unopened video
+        writer, optionally retrieves metadata, and calls the conversion stub
+        on the NumPy buffer or HDF5 batches of up to 1,000 frames. Configuring
+        the writer, filling missing frames, and writing frames remain
+        unimplemented, as does the conversion helper itself.
+    """
+    assert isinstance(opponentmaps, (str, dict)), (
+        "opponentmaps must be a .hdf5 path string or a dictionary."
+    )
+    if isinstance(opponentmaps, str):
+        assert opponentmaps.endswith(".hdf5"), "opponentmaps path must end in .hdf5."
+    else:
+        assert "data" in opponentmaps, "opponentmaps must contain a data key."
+        assert isinstance(opponentmaps["data"], np.ndarray) and opponentmaps["data"].ndim == 4, (
+            "opponentmaps data must be a NumPy array with shape (nframes, azi, ele, channel)."
+        )
+    assert isinstance(output_path, str) and output_path.endswith(".avi"), (
+        "output_path must be a string ending in .avi."
+    )
+
+    # Make the directories to the output path if they do not exist already.
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+
+    # Configure and open the writer once frame geometry and FPS are available.
+    video_writer: cv2.VideoWriter = cv2.VideoWriter()
+
+    if fill_missing_frames:
+        filled_timestamps_metadata: pd.DataFrame = world_util.world_metadata_from_chunks(
+            opponentmaps, fill_missing_frames=True
+        )
+
+    if isinstance(opponentmaps, dict):
+        frame: np.ndarray = world_util.opponentmap_to_videoframe(opponentmaps["data"])
+        # TODO: Write the converted buffer, handling missing frames if requested.
+    else:
+        with h5py.File(opponentmaps, "r") as saved:
+            frames: h5py.Dataset = saved["data/frames"]
+            chunk_size: int = 1000
+            for start in range(0, frames.shape[0], chunk_size):
+                buffer: np.ndarray = frames[start:start + chunk_size]
+                frame = world_util.opponentmap_to_videoframe(buffer)
+                # TODO: Write the converted buffer, handling missing frames if requested.
+
+
 def main():
     """Run the command-line entry point."""
     return 
