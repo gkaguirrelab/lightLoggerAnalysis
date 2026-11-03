@@ -2142,7 +2142,7 @@ def convert_avi_to_mp4(input_path: str, output_path: str) -> None:
 
 
 def opponentmaps_to_video(opponentmaps: str | dict[str, np.ndarray], output_path: str,
-                          fill_missing_frames: bool=False) -> None:
+                          fill_missing_frames: bool=False, fps: float=30) -> None:
     """Write opponent-map buffers to a playable AVI video.
 
     Args:
@@ -2159,6 +2159,8 @@ def opponentmaps_to_video(opponentmaps: str | dict[str, np.ndarray], output_path
             the timestamp/metadata DataFrame; gap insertion remains
             unimplemented. Defaults to ``False``.
 
+        fps: Output frame rate, defaulting to 30 like ``dir_to_video``.
+
     Returns:
         None.
 
@@ -2169,48 +2171,111 @@ def opponentmaps_to_video(opponentmaps: str | dict[str, np.ndarray], output_path
             a string ending in ``.avi``.
 
     Notes:
-        Validates inputs, creates the output directory and an unopened video
-        writer, optionally retrieves metadata, and calls the conversion stub
-        on the NumPy buffer or HDF5 batches of up to 1,000 frames. Configuring
-        the writer, filling missing frames, and writing frames remain
-        unimplemented, as does the conversion helper itself.
+        Converts NumPy input as a whole or reads and converts HDF5 batches of
+        up to 1,000 frames, then writes each converted frame using FFV1.
+        Conversion must preserve spatial dimensions and return uint8 BGR
+        frames. The conversion helper and missing-frame insertion remain
+        unimplemented.
     """
+
+    # The input must either be in the form of a str path
+    # to an hdf5 file or a dictionary with fields that contain
+    # the data to write
     assert isinstance(opponentmaps, (str, dict)), (
         "opponentmaps must be a .hdf5 path string or a dictionary."
     )
+
+    # If the input is a str, it must be a valid path to an hdf5 file
     if isinstance(opponentmaps, str):
         assert opponentmaps.endswith(".hdf5"), "opponentmaps path must end in .hdf5."
+        assert os.path.exists(opponentmaps), f"Path: {opponentmaps} does not exist"
+
+    # Otherwise, if it is dictionary format
     else:
+        # It must have a data field
         assert "data" in opponentmaps, "opponentmaps must contain a data key."
+
+        # The data field must be a numpy array of opponent map
+        # frames
         assert isinstance(opponentmaps["data"], np.ndarray) and opponentmaps["data"].ndim == 4, (
             "opponentmaps data must be a NumPy array with shape (nframes, azi, ele, channel)."
         )
+
+    # The output path must be .avi format
     assert isinstance(output_path, str) and output_path.endswith(".avi"), (
         "output_path must be a string ending in .avi."
     )
 
     # Make the directories to the output path if they do not exist already.
+    # A bare filename has dirname "". Use the current directory (".")
+    # because makedirs cannot create an empty path.
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
-    # Configure and open the writer once frame geometry and FPS are available.
-    video_writer: cv2.VideoWriter = cv2.VideoWriter()
-
+    # Retrieve the metadata for the future missing-frame insertion step.
+    # This currently preserves the stored rows for dict and HDF5 inputs;
+    # inserting black frames into the video is still unimplemented.
     if fill_missing_frames:
         filled_timestamps_metadata: pd.DataFrame = world_util.world_metadata_from_chunks(
             opponentmaps, fill_missing_frames=True
         )
 
-    if isinstance(opponentmaps, dict):
-        frame: np.ndarray = world_util.opponentmap_to_videoframe(opponentmaps["data"])
-        # TODO: Write the converted buffer, handling missing frames if requested.
-    else:
-        with h5py.File(opponentmaps, "r") as saved:
-            frames: h5py.Dataset = saved["data/frames"]
+    # Both input cases will give us a frame buffer or a dataset we can slice.
+    raw_frames: np.ndarray | h5py.Dataset
+    # Keep the file and writer available for cleanup, even if setup fails.
+    dataset_pointer: h5py.File | None = None
+    video_writer: cv2.VideoWriter | None = None
+
+    # Keep the HDF5 file open while reading, and close it even if setup fails.
+    try:
+        # If the input is a dictionary, its data is already loaded in memory.
+        if isinstance(opponentmaps, dict):
+            raw_frames = opponentmaps["data"]
+        # Otherwise, open the file and keep a reference to its frame dataset.
+        # This does not load the full recording into memory.
+        else:
+            dataset_pointer = h5py.File(opponentmaps, "r")
+            raw_frames = dataset_pointer["data/frames"]
+
+        # Read the spatial dimensions without loading any additional frames.
+        # The conversion helper must preserve this size and return uint8 BGR frames.
+        frame_height, frame_width = raw_frames.shape[1:3]
+        # Use the same lossless FFV1 codec as the other AVI writers.
+        # OpenCV expects the frame size in width, height order.
+        fourcc: int = cv2.VideoWriter_fourcc(*"FFV1")
+        video_writer = cv2.VideoWriter(output_path, fourcc, float(fps),
+                                       (frame_width, frame_height), isColor=True)
+        # Stop here if the writer could not open the output file.
+        if not video_writer.isOpened():
+            raise RuntimeError(f"Failed to open VideoWriter for {output_path}")
+
+        # For an in-memory buffer, convert all of the frames at once.
+        if isinstance(raw_frames, np.ndarray):
+            converted_frames: np.ndarray = world_util.opponentmap_to_videoframe(raw_frames)
+            # The conversion helper is still a stub, so fail clearly until it returns frames.
+            if converted_frames is None:
+                raise NotImplementedError("opponentmap_to_videoframe must return converted frames.")
+            # Write each converted frame in its original order.
+            for frame in tqdm(converted_frames, desc="Writing frames", unit="frame"):
+                video_writer.write(frame)
+        # For a dataset, read and convert smaller batches to limit memory use.
+        else:
             chunk_size: int = 1000
-            for start in range(0, frames.shape[0], chunk_size):
-                buffer: np.ndarray = frames[start:start + chunk_size]
-                frame = world_util.opponentmap_to_videoframe(buffer)
-                # TODO: Write the converted buffer, handling missing frames if requested.
+            for start in tqdm(range(0, raw_frames.shape[0], chunk_size),
+                              desc="Writing frame chunks", unit="chunk"):
+                # Read only this batch; the final slice may contain fewer than 1,000 frames.
+                buffer: np.ndarray = raw_frames[start:start + chunk_size]
+                converted_frames = world_util.opponentmap_to_videoframe(buffer)
+                if converted_frames is None:
+                    raise NotImplementedError("opponentmap_to_videoframe must return converted frames.")
+                # Finish writing this batch before loading the next one.
+                for frame in converted_frames:
+                    video_writer.write(frame)
+    # On success or failure, finalize the video and close the input file.
+    finally:
+        if video_writer is not None:
+            video_writer.release()
+        if dataset_pointer is not None:
+            dataset_pointer.close()
 
 
 def main():

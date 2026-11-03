@@ -652,7 +652,7 @@ def generate_accelerometer_t(t: np.ndarray | list | tuple) -> np.ndarray:
 
 
 def plot_chunk_readings(t_vector: np.ndarray, readings_buffer: np.ndarray,
-                        axes: plt.Axes=None
+                        axes: np.ndarray | None=None, verbose: bool=False
                        ) -> None | tuple:
     """Plot a single recording buffer of MS readings.
 
@@ -665,6 +665,8 @@ def plot_chunk_readings(t_vector: np.ndarray, readings_buffer: np.ndarray,
             ``(nSeconds, MS_SUNGLASSES_FRAME_SHAPE)``.
         axes: Optional matplotlib axes array to plot onto. If None, a new
             2x2 figure and axes are created.
+
+        verbose: Show tqdm progress bars for sensor and channel loops.
 
     Returns:
         None if axes were provided, otherwise a tuple of ``(fig, axes)``.
@@ -685,7 +687,7 @@ def plot_chunk_readings(t_vector: np.ndarray, readings_buffer: np.ndarray,
                                                 }
 
     # Next, we will plot all of the different chips onto the axes 
-    for chip_num, (chip_name, chip_channels_df) in enumerate(chips_and_channels.items()):
+    for chip_num, (chip_name, chip_channels_df) in enumerate(tqdm(chips_and_channels.items(), desc="Plotting MS sensors", disable=not verbose)):
         # Convert the channels to a numpy array for simplicity, but also retrieve the column names 
         chip_channels: np.ndarray = chip_channels_df.to_numpy()
         channel_labels: list = chip_channels_df.columns
@@ -702,21 +704,21 @@ def plot_chunk_readings(t_vector: np.ndarray, readings_buffer: np.ndarray,
         t: np.ndarray = t_vector if chip_name != "LS" else generate_accelerometer_t(t_vector)
 
         # Next, plot the channels of the chip onto the graph 
-        for channel_num in range(chip_channels.shape[1]):
+        for channel_num in tqdm(range(chip_channels.shape[1]), desc="Plotting MS channels", disable=not verbose):
             # Plot the channel with its associated label
             ax.plot(t, chip_channels[:, channel_num], label=channel_labels[channel_num])
 
 
         # Display a legend for the plot 
-        ax.legend()
+        ax.legend(loc="upper right")
 
-        # Display the plot 
-        plt.show() 
+
 
     # If we passed in axes, no need to return. 
     if(not fig): return None 
 
     # Otherwise, return the axes and figure 
+    plt.show()
     return fig, axes
 
 def parse_packet(packet: bytes) -> tuple:
