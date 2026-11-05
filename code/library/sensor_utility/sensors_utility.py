@@ -466,26 +466,26 @@ def _mean_camera_rgb_by_ms_window(
             continue
         hdf5_path: str = os.path.join(world_output_path, "transformed.hdf5")
         if os.path.isfile(hdf5_path):
-            with h5py.File(hdf5_path, "r") as saved:
-                if not saved.attrs.get("completed", False):
+            with h5py.File(hdf5_path, "r") as hdf5_filepointer:
+                if not hdf5_filepointer.attrs.get("completed", False):
                     raise ValueError(f"Incomplete world output: {hdf5_path}")
-                saved_t: np.ndarray = saved["agcSettings/timestamps"][:]
+                saved_t: np.ndarray = hdf5_filepointer["agcSettings/timestamps"][:]
                 # Locate raw timestamps so selected chunk ranges remain supported.
                 positions: np.ndarray = np.searchsorted(saved_t, world_t)
                 if np.any(positions >= len(saved_t)) or not np.array_equal(saved_t[positions], world_t):
                     raise ValueError(f"World output timestamps do not match raw metadata: {hdf5_path}")
                 rgb = np.zeros((len(world_t), 3))
                 # Prefer the current path, retaining support for earlier cached files.
-                averages_path: str = "data/average_frames" if "data/average_frames" in saved else "averages/mean_camera_rgb"
-                if averages_path in saved:
+                averages_path: str = "data/average_frames" if "data/average_frames" in hdf5_filepointer else "averages/mean_camera_rgb"
+                if averages_path in hdf5_filepointer:
                     # Read only the small precomputed RGB rows needed by MS windows.
-                    averages: h5py.Dataset = saved[averages_path]
+                    averages: h5py.Dataset = hdf5_filepointer[averages_path]
                     if averages.shape != (len(saved_t), 3):
                         raise ValueError(f"Camera averages/timestamps shape mismatch: {hdf5_path}")
                     rgb[wanted] = averages[positions[wanted]]
                 else:
                     # Older files remain usable, but need spatial means recomputed.
-                    frames: h5py.Dataset = saved["data/frames"] if isinstance(saved["data"], h5py.Group) else saved["data"]
+                    frames: h5py.Dataset = hdf5_filepointer["data/frames"] if isinstance(hdf5_filepointer["data"], h5py.Group) else hdf5_filepointer["data"]
                     for frame in np.flatnonzero(wanted):
                         rgb[frame] = frames[positions[frame]].mean(axis=(0, 1))
             path = hdf5_path
@@ -496,16 +496,16 @@ def _mean_camera_rgb_by_ms_window(
                     f"Joint spectra require the overlapping world chunk: {path}"
                 )
 
-            with h5py.File(path, "r") as saved:
-                saved_t = np.asarray(saved["metadata/timestamps"]).ravel()
+            with h5py.File(path, "r") as hdf5_filepointer:
+                saved_t = np.asarray(hdf5_filepointer["metadata/timestamps"]).ravel()
                 if not np.array_equal(world_t, saved_t):
                     raise ValueError(
                         f"World output timestamps do not match raw metadata: {path}"
                     )
-                if "mean_camera_rgb" in saved["metadata"]:
-                    rgb = np.asarray(saved["metadata/mean_camera_rgb"]).T
+                if "mean_camera_rgb" in hdf5_filepointer["metadata"]:
+                    rgb = np.asarray(hdf5_filepointer["metadata/mean_camera_rgb"]).T
                 else:
-                    data = saved["data"]
+                    data = hdf5_filepointer["data"]
                     if (
                         data.ndim != 4
                         or data.shape[0] != 3
@@ -566,6 +566,8 @@ def _process_raw_ms_helper(
 
     Returns:
         None. Writes transformed.hdf5 with these /data fields (NumPy shapes):
+            counts/readings: (N, channels) complete raw MS reading buffers.
+            illuminance/lux: (N,) calibrated AS-channel illuminance in lux.
             radiance: (N, L) spectral radiance in W/m²/sr/nm, L wavelengths.
             S: (3,) sampling descriptor [start_nm, step_nm, wavelength_count].
             fVal: (N,) Euclidean norms of the ten measurement residuals; these
@@ -618,6 +620,12 @@ def _process_raw_ms_helper(
         with h5py.File(output_filepath, "r") as existing:
             if not existing.attrs.get("completed", False):
                 raise ValueError(f"Incomplete MS HDF5 output; retry with overwrite_existing=True: {output_filepath}")
+            for required_path in ("data/counts/readings", "data/illuminance/lux"):
+                if required_path not in existing:
+                    raise ValueError(
+                        f"MS output lacks {required_path}; regenerate with "
+                        f"overwrite_existing=True: {output_filepath}"
+                    )
         return
 
     # Ensure the minispectrometer output directory exists.
@@ -652,6 +660,9 @@ def _process_raw_ms_helper(
         # and a metadata group 
         output.attrs["completed"] = False
         data_group: h5py.Group = output.create_group("data")
+        data_group.create_group("counts")
+        illuminance_group: h5py.Group = data_group.create_group("illuminance")
+        illuminance_group.attrs["units"] = "lux"
         metadata_group: h5py.Group = output.create_group("metadata")
 
         # Track the next output row as successive MS chunks are appended.
@@ -718,6 +729,22 @@ def _process_raw_ms_helper(
             # Ensure nothing weird is going on with the timestamps of the MS
             if not np.all(np.isfinite(timestamps)) or np.any(np.diff(timestamps) <= 0):
                 raise ValueError(f"MS timestamps must be finite and increasing: {metadata_path}")
+
+            # Preserve every raw channel and calibrate lux independently of camera coverage.
+            assert reading_buffer.ndim == 2, (
+                f"MS readings must be two-dimensional; got {reading_buffer.shape}: {data_path}"
+            )
+            assert reading_buffer.shape[1] >= ms_util.MS_AS_CHANNELS, (
+                f"MS readings require at least {ms_util.MS_AS_CHANNELS} AS channels; "
+                f"got {reading_buffer.shape[1]}: {data_path}"
+            )
+            illuminance_lux: np.ndarray = ms_util.ms_counts_to_illuminance(
+                reading_buffer[:, :ms_util.MS_AS_CHANNELS]
+            )
+            assert illuminance_lux.shape == timestamps.shape, (
+                f"MS illuminance must match timestamps {timestamps.shape}; "
+                f"got {illuminance_lux.shape}."
+            )
 
             # 3a. For each reading in this buffer, find its first world frame and the index just
             # after its last frame. world_frame_index_bounds is (N, 2), using global world row indices.
@@ -883,6 +910,8 @@ def _process_raw_ms_helper(
             # Append each per-reading array along its first axis, preserving float precision.
             chunk_arrays_by_path: dict[str, np.ndarray] = {
                 "timestamps": timestamps,
+                "data/counts/readings": reading_buffer,
+                "data/illuminance/lux": illuminance_lux,
                 "data/radiance": radiance,
                 "data/fVal": fit_value,
                 "data/fitErrors": fit_errors,
@@ -1077,16 +1106,19 @@ def _plot_raw_world_helper(
     # The world metadata reader expects a string rather than a Path object.
     path_to_raw = os.fspath(path_to_raw)
 
+    # Validate supplied axes before setting up the figure.
+    if axes is not None:
+        axes = np.asarray(axes, dtype=object).reshape(-1)
+        if axes.size != 2:
+            raise ValueError("Raw world plotting requires two axes.")
+
     # If we didn't receive axes to plot on, we will create our own figure now 
     figure: Figure
     if axes is None:
         figure, axes = plt.subplots(2, 1, figsize=(12, 9), constrained_layout=True)
 
-    # Otherwise, we need to ensure that we have the proper axes present to do the ploting 
+    # Otherwise, use the figure belonging to the supplied axes.
     else:
-        axes = np.asarray(axes, dtype=object).reshape(-1)
-        if axes.size != 2:
-            raise ValueError("Raw world plotting requires two axes.")
         figure = axes[0].figure
 
     # First, we get the world metadata from the chunks. This would include things 
@@ -1128,6 +1160,10 @@ def _plot_raw_ms_helper(
         ValueError: No nonempty chunks exist or readings and timestamps disagree.
         OSError: The directory or chunk files cannot be read.
     """
+    # If no ax provided, make a figure to plot on 
+    if ax is None:
+        _, ax = plt.subplots(figsize=(12, 5), constrained_layout=True)
+
     # Create arrays to hold the timestamp buffer and the readings buffer as 
     # we read them in 
     timestamp_buffer: list[np.ndarray] = []
@@ -1161,10 +1197,6 @@ def _plot_raw_ms_helper(
     timestamps = np.concatenate(timestamp_buffer)
     readings = np.concatenate(reading_buffer)
     
-    # If no ax provided, make a figure to plot on 
-    if ax is None:
-        _, ax = plt.subplots(figsize=(12, 5), constrained_layout=True)
-    
     # Only provide the AS panel so the shared plotter skips TS, LS, and TEMP.
     ms_util.plot_chunk_readings(
         timestamps, readings, axes={"AS_ax": ax}, verbose=verbose,
@@ -1197,7 +1229,7 @@ def plot_raw_recording(path_to_raw: str | Path, verbose: bool = False,
         OSError: The recording directory, chunks, or config.pkl cannot be read.
     """
     path_to_raw = os.path.abspath(os.path.expanduser(path_to_raw))
-    
+
     # Reserve the first two panels for world data and the third for AS counts.
     figure: Figure
     axes: np.ndarray
@@ -1220,6 +1252,31 @@ def plot_raw_recording(path_to_raw: str | Path, verbose: bool = False,
     return figure, axes
 
 
+def _interpolate(values: np.ndarray, source: np.ndarray, target: np.ndarray) -> np.ndarray:
+    """Interpolate coordinates and extend endpoint slopes into plot margins.
+
+    Args:
+        values: Coordinates to transform.
+        source: Increasing source coordinates with at least two samples.
+        target: Corresponding target coordinates, the same length as source.
+
+    Returns:
+        Array with the shape of values, linearly interpolated inside source
+        bounds and linearly extrapolated using the endpoint slopes outside.
+    """
+    result: np.ndarray = np.interp(values, source, target)
+    result = np.where(
+        values < source[0],
+        target[0] + (values - source[0]) * (target[1] - target[0]) / (source[1] - source[0]),
+        result,
+    )
+    return np.where(
+        values > source[-1],
+        target[-1] + (values - source[-1]) * (target[-1] - target[-2]) / (source[-1] - source[-2]),
+        result,
+    )
+
+
 def _plot_processed_world_helper(
     world_directory: str | Path,
     axes: np.ndarray | None = None,
@@ -1230,7 +1287,7 @@ def _plot_processed_world_helper(
     Args:
         world_directory: String or Path to W, containing transformed.hdf5.
         axes: Two primary axes in panel order, or None to create a 2-by-1 figure.
-        verbose: Show loading, averaging, and formatting progress bars.
+        verbose: Show loading and averaging progress bars.
 
     Returns:
         Figure and primary axes array of shape (2,). Tile 0 shows spatial
@@ -1242,53 +1299,17 @@ def _plot_processed_world_helper(
         Does not show or save the figure.
 
     Raises:
-        ValueError: Axes count, timestamps, or frame/metadata shapes are invalid.
+        AssertionError: Timestamp, frame, or settings shapes do not match the
+            expected dimensions or frame counts.
+        ValueError: Axes count or timestamp values are invalid.
         OSError: The HDF5 file or camera calibration cannot be read.
         KeyError: A required dataset is missing.
     """
-    # Read camera metadata; reduce opponent images in small batches.
-    with h5py.File(os.path.join(world_directory, "transformed.hdf5"), "r") as saved:
-        time: np.ndarray = saved["agcSettings/timestamps"][:] * WORLD_NANOSECONDS_TO_SECONDS
-        frames: h5py.Dataset = saved["data/frames"]
-        settings: np.ndarray = np.column_stack([
-            saved[f"agcSettings/{name}"][:] for name in ("Again", "Dgain", "exposure")
-        ])
-
-        # Each saved row must describe the same world frame.
-        if (
-            time.ndim != 1
-            or frames.ndim != 4
-            or frames.shape[0] != len(time)
-            or frames.shape[-1] != 3
-            or settings.shape != (len(time), 3)
-        ):
-            raise ValueError("World frames, settings, and timestamps must align.")
-
-        # Count the batches first, including a final partially filled chunk.
-        chunk_size: int = 1000
-        num_chunks: int = (len(time) + chunk_size - 1) // chunk_size
-        opponent: np.ndarray = np.full((len(time), 3), np.nan)
-
-        for chunk_index in tqdm(
-            range(num_chunks), desc="Loading world chunks", disable=not verbose,
-        ):
-            start: int = chunk_index * chunk_size
-            stop: int = min(start + chunk_size, len(time))
-            buffer: np.ndarray = frames[start:stop]
-
-            # Reduce each frame separately so the inner bar reports frame progress.
-            # Frames without finite coverage retain their initialized NaN values.
-            for frame_index in tqdm(
-                range(len(buffer)), desc="Averaging opponent frames",
-                disable=not verbose, leave=False,
-            ):
-                frame: np.ndarray = buffer[frame_index]
-                finite: np.ndarray = np.isfinite(frame)
-                counts: np.ndarray = finite.sum(axis=(0, 1))
-                totals: np.ndarray = np.where(finite, frame, 0).sum(axis=(0, 1))
-                np.divide(
-                    totals, counts, out=opponent[start + frame_index], where=counts > 0,
-                )
+    # Validate supplied axes before setting up the figure.
+    if axes is not None:
+        axes = np.asarray(axes, dtype=object).reshape(-1)
+        if len(axes) != 2:
+            raise ValueError("World plotting requires two axes.")
 
     # Create a local figure only when the caller has not supplied axes.
     figure: Figure
@@ -1297,22 +1318,103 @@ def _plot_processed_world_helper(
             2, 1, figsize=(12, 7), sharex=True, constrained_layout=True
         )
     else:
-        axes = np.asarray(axes, dtype=object).reshape(-1)
-        if len(axes) != 2:
-            raise ValueError("World plotting requires two axes.")
         figure = axes[0].figure
 
+    # First, let's open the hdf5 file 
+    with h5py.File(os.path.join(world_directory, "transformed.hdf5"), "r") as hdf5_filepointer:
+        # Let's first get the sensor timestamps, which are stored as nanoseconds. 
+        # These are all read into memory 
+        time: np.ndarray = hdf5_filepointer["agcSettings/timestamps"][:] * WORLD_NANOSECONDS_TO_SECONDS
+
+        # Then, let's get the frames datagroup. These are not yet read into memory 
+        frames: h5py.Dataset = hdf5_filepointer["data/frames"]
+
+        # Let's get a matrix of the settings for each frame as well. These are all loaded into memory
+        settings: np.ndarray = np.column_stack([
+            hdf5_filepointer[f"agcSettings/{name}"][:] for name in ("Again", "Dgain", "exposure")
+        ])
+
+        # Validate dimensions before indexing shapes or comparing frame counts.
+        assert time.ndim == 1, (
+            "agcSettings/timestamps must have shape (nFrames,); "
+            f"got shape {time.shape} with {time.ndim} dimensions."
+        )
+        assert frames.ndim == 4, (
+            "data/frames must have shape (nFrames, azimuth, elevation, channel); "
+            f"got shape {frames.shape} with {frames.ndim} dimensions."
+        )
+
+        # Each image must have one timestamp and the three opponent channels.
+        assert frames.shape[0] == len(time), (
+            "data/frames and agcSettings/timestamps must have matching frame counts; "
+            f"got {frames.shape[0]} frames and {len(time)} timestamps."
+        )
+        assert frames.shape[-1] == 3, (
+            "data/frames must contain 3 channels (L+M, L-M, S-(L+M)); "
+            f"got {frames.shape[-1]} channels in shape {frames.shape}."
+        )
+
+        # Settings rows must align with timestamps, with one column per setting.
+        assert settings.shape == (len(time), 3), (
+            "Camera settings must have shape (nFrames, 3), with columns "
+            "Again, Dgain, and exposure; "
+            f"expected {(len(time), 3)}, got {settings.shape}."
+        )
+
+        
+
+        # Define the size of chunks of frames we will read into memory 
+        chunk_size: int = 1000
+
+        # Calculate the number of chunks the dataset contains 
+        num_chunks: int = (len(time) + chunk_size - 1) // chunk_size
+
+
+        opponent_channel_means: np.ndarray = np.full((len(time), 3), np.nan)
+
+        # Iterate over the chunks in the dataset
+        for chunk_index in tqdm(
+            range(num_chunks), desc="Loading world chunks", disable=not verbose,
+        ):
+            # Get the start stop of this chunk in the dataset, then load it into a 
+            # buffer in memory
+            start: int = chunk_index * chunk_size
+            stop: int = min(start + chunk_size, len(time))
+            buffer: np.ndarray = frames[start:stop]
+
+            # We are interested in storing the average opponent channel and plotting these 
+            # so average the finite locations in this frame and save it into the buffer
+            for frame_index in tqdm(
+                range(len(buffer)), desc="Averaging opponent frames",
+                disable=not verbose, leave=False,
+            ):
+                frame: np.ndarray = buffer[frame_index]
+                output_frame_index: int = start + frame_index
+
+                # Average L+M, L-M, and S-(L+M) separately over their valid pixels.
+                for channel_index in range(frame.shape[-1]):
+                    channel: np.ndarray = frame[:, :, channel_index]
+                    valid_pixels: np.ndarray = channel[np.isfinite(channel)]
+
+                    # Leave the initialized NaN when this channel has no valid pixels.
+                    if valid_pixels.size == 0:
+                        continue
+
+                    opponent_channel_means[output_frame_index, channel_index] = valid_pixels.mean()
+
+    # Top panel: spatial means of the three opponent radiance channels over time.
     # Give the S opponent channel its own scale while retaining a shared time axis.
     right_axis: Axes = axes[0].twinx()
-    axes[0].plot(time, opponent[:, 0], color="black", label="L+M")
-    axes[0].plot(time, opponent[:, 1], color="darkorange", label="L-M")
-    right_axis.plot(time, opponent[:, 2], color="purple", label="S-(L+M)")
+    axes[0].plot(time, opponent_channel_means[:, 0], color="black", label="L+M")
+    axes[0].plot(time, opponent_channel_means[:, 1], color="darkorange", label="L-M")
+    right_axis.plot(time, opponent_channel_means[:, 2], color="purple", label="S-(L+M)")
     axes[0].set_title("Average opponent radiance")
     axes[0].set_ylabel("Mean L+M and L-M")
     right_axis.set_ylabel("Mean S-(L+M)", color="purple")
     right_axis.tick_params(axis="y", colors="purple")
     axes[0].legend(handles=[*axes[0].lines, *right_axis.lines], loc="upper right")
 
+    # Bottom panel: estimated world-camera illuminance over time.
     # Gain times exposure maps through the empirical calibration to estimated lux.
     camera_scores: np.ndarray = np.prod(settings, axis=1, dtype=np.float64)
     axes[1].plot(time, world_util.camera_scores_to_illuminance(camera_scores), label="World camera")
@@ -1320,13 +1422,13 @@ def _plot_processed_world_helper(
     axes[1].set_ylabel("Illuminance [lux]")
 
     # Add stored-frame coordinates above both world panels.
-    for axis in tqdm(axes, desc="Formatting world panels", disable=not verbose):
+    for axis in axes:
         axis.set_xlabel("time [s]")
         axis.grid(True, alpha=0.25)
         frame_timestamps: np.ndarray = np.asarray(time, dtype=float)
         if (frame_timestamps.ndim != 1 or frame_timestamps.size == 0
                 or not np.all(np.isfinite(frame_timestamps)) or np.any(np.diff(frame_timestamps) <= 0)):
-            raise ValueError("Frame frame_timestamps must be finite, nonempty, and increasing.")
+            raise ValueError("Frame timestamps must be finite, nonempty, and increasing.")
 
         # Interpolate frame positions so dropped frames do not distort the time scale.
         frame_indices: np.ndarray = np.arange(len(frame_timestamps), dtype=float)
@@ -1334,34 +1436,10 @@ def _plot_processed_world_helper(
             frame_timestamps = np.array([frame_timestamps[0], frame_timestamps[0] + 1])
             frame_indices = np.array([0., 1.])
 
-        def interpolate(values: np.ndarray, source: np.ndarray, target: np.ndarray) -> np.ndarray:
-            """Interpolate coordinates and extend endpoint slopes into plot margins.
-
-            Args:
-                values: Coordinates to transform.
-                source: Increasing source coordinates with at least two samples.
-                target: Corresponding target coordinates, the same length as source.
-
-            Returns:
-                Array with the shape of values, linearly interpolated inside source
-                bounds and linearly extrapolated using the endpoint slopes outside.
-            """
-            result: np.ndarray = np.interp(values, source, target)
-            result = np.where(
-                values < source[0],
-                target[0] + (values - source[0]) * (target[1] - target[0]) / (source[1] - source[0]),
-                result,
-            )
-            return np.where(
-                values > source[-1],
-                target[-1] + (values - source[-1]) * (target[-1] - target[-2]) / (source[-1] - source[-2]),
-                result,
-            )
-
         frame_axis: SecondaryAxis = axis.secondary_xaxis(
             "top", functions=(
-                lambda times: interpolate(times, frame_timestamps, frame_indices),
-                lambda frames: interpolate(frames, frame_indices, frame_timestamps),
+                lambda times: _interpolate(times, frame_timestamps, frame_indices),
+                lambda frames: _interpolate(frames, frame_indices, frame_timestamps),
             ),
         )
         frame_axis.set_xlabel("Frame number")
@@ -1380,7 +1458,7 @@ def _plot_processed_ms_helper(
     Args:
         ms_directory: String or Path to M, containing transformed.hdf5.
         axes: Two primary axes in panel order, or None to create a 2-by-1 figure.
-        verbose: Show labeling and formatting progress bars.
+        verbose: Reserved for consistency with the other plotting helpers.
 
     Returns:
         Figure and primary axes array of shape (2,). Tile 0 is a spectral
@@ -1391,36 +1469,18 @@ def _plot_processed_ms_helper(
         from the returned array. Does not show or save the figure.
 
     Raises:
-        ValueError: Axes count, timestamps, or dataset shapes are incompatible.
+        AssertionError: Axes count, timestamps, wavelength sampling, or dataset
+            shapes are incompatible.
         OSError: The HDF5 file cannot be opened.
         KeyError: A required dataset is missing.
     """
-    # Load the spectral estimates and their per-reading fit diagnostics.
-    with h5py.File(os.path.join(ms_directory, "transformed.hdf5"), "r") as saved:
-        time: np.ndarray = saved["timestamps"][:]
-        radiance: np.ndarray = saved["data/radiance"][:]
-        sampling: np.ndarray = saved["data/S"][:].reshape(-1)
-        fit_value: np.ndarray = saved["data/fVal"][:]
-
-    # The heatmap requires ordered times and one spectrum per timestamp.
-    if (
-        time.ndim != 1
-        or len(time) == 0
-        or not np.all(np.isfinite(time))
-        or np.any(np.diff(time) <= 0)
-    ):
-        raise ValueError("MS timestamps must be nonempty, finite, and increasing.")
-
-    if (
-        sampling.size != 3
-        or sampling[1] <= 0
-        or radiance.shape != (len(time), int(sampling[2]))
-        or fit_value.shape != (len(time),)
-    ):
-        raise ValueError("MS radiance, wavelength sampling, and fit values must align.")
-
-    # S stores the starting wavelength, step size, and sample count.
-    wavelengths: np.ndarray = sampling[0] + sampling[1] * np.arange(int(sampling[2]))
+    # Validate supplied axes before setting up the figure.
+    if axes is not None:
+        axes = np.asarray(axes, dtype=object).reshape(-1)
+        assert len(axes) == 2, (
+            "MS plotting requires two axes; "
+            f"got {len(axes)} axes after flattening."
+        )
 
     # Create a local figure only when the caller has not supplied axes.
     figure: Figure
@@ -1429,38 +1489,113 @@ def _plot_processed_ms_helper(
             2, 1, figsize=(12, 7), sharex=True, constrained_layout=True
         )
     else:
-        axes = np.asarray(axes, dtype=object).reshape(-1)
-        if len(axes) != 2:
-            raise ValueError("MS plotting requires two axes.")
         figure = axes[0].figure
 
-    # Transpose spectra so rows represent wavelength and columns represent time.
-    mesh: QuadMesh = axes[0].pcolormesh(
-        time, wavelengths, np.ma.masked_invalid(radiance.T),
-        shading="auto", cmap="viridis",
+    # Open the processed MS file and load one spectrum and fit value per reading.
+    with h5py.File(
+        os.path.join(ms_directory, "transformed.hdf5"), "r"
+    ) as hdf5_file:
+        # MS timestamps are already stored in seconds.
+        timestamps: np.ndarray = hdf5_file["timestamps"][:]
+
+        # Each radiance row contains the wavelength samples for one timestamp.
+        spectral_radiance: np.ndarray = hdf5_file["data/radiance"][:]
+
+        # S defines the wavelength grid; fVal stores the fit residual norms.
+        wavelength_sampling: np.ndarray = hdf5_file["data/S"][:].reshape(-1)
+        fit_residual_norms: np.ndarray = hdf5_file["data/fVal"][:]
+
+    # Validate timestamps before computing intervals or checking aligned shapes.
+    assert timestamps.ndim == 1, (
+        "MS timestamps must have shape (nReadings,); "
+        f"got shape {timestamps.shape} with {timestamps.ndim} dimensions."
     )
-    figure.colorbar(mesh, ax=axes[0], label="Spectral radiance")
+    assert timestamps.size > 0, (
+        f"MS timestamps must be nonempty; got shape {timestamps.shape}."
+    )
+    assert np.all(np.isfinite(timestamps)), (
+        "MS timestamps must be finite; "
+        f"nonfinite values at indices {np.flatnonzero(~np.isfinite(timestamps))[:10]}."
+    )
+
+    timestamp_intervals: np.ndarray = np.diff(timestamps)
+    assert np.all(timestamp_intervals > 0), (
+        "MS timestamps must be strictly increasing; "
+        f"nonpositive intervals start at indices "
+        f"{np.flatnonzero(timestamp_intervals <= 0)[:10]}, with differences "
+        f"{timestamp_intervals[timestamp_intervals <= 0][:10]}."
+    )
+
+    # Validate the wavelength grid before indexing it or converting its count.
+    assert wavelength_sampling.size == 3, (
+        "MS wavelength sampling must contain [start, step, count]; "
+        f"got {wavelength_sampling.size} values: {wavelength_sampling}."
+    )
+    assert np.all(np.isfinite(wavelength_sampling)), (
+        "MS wavelength sampling must be finite; "
+        f"got {wavelength_sampling}."
+    )
+    assert wavelength_sampling[1] > 0, (
+        "MS wavelength step must be positive; "
+        f"got {wavelength_sampling[1]} nm."
+    )
+    assert wavelength_sampling[2] > 0, (
+        "MS wavelength sample count must be positive; "
+        f"got {wavelength_sampling[2]}."
+    )
+    assert wavelength_sampling[2] == int(wavelength_sampling[2]), (
+        "MS wavelength sample count must be an integer; "
+        f"got {wavelength_sampling[2]}."
+    )
+
+    # Require one spectrum and one fit residual norm per timestamp.
+    assert spectral_radiance.shape == (len(timestamps), int(wavelength_sampling[2])), (
+        "MS spectral radiance must have shape (nReadings, nWavelengths); "
+        f"expected {(len(timestamps), int(wavelength_sampling[2]))}, "
+        f"got {spectral_radiance.shape}."
+    )
+    assert fit_residual_norms.shape == (len(timestamps),), (
+        "MS fit residual norms must have shape (nReadings,); "
+        f"expected {(len(timestamps),)}, got {fit_residual_norms.shape}."
+    )
+
+    # S stores the starting wavelength, step size, and sample count.
+    wavelengths: np.ndarray = (
+        wavelength_sampling[0]
+        + wavelength_sampling[1] * np.arange(int(wavelength_sampling[2]))
+    )
+
+    # Top panel: spectral radiance across wavelength and time.
+    # Transpose spectra so rows represent wavelength and columns represent time.
+    radiance_mesh: QuadMesh = axes[0].pcolormesh(
+        timestamps,
+        wavelengths,
+        np.ma.masked_invalid(spectral_radiance.T),
+        shading="auto",
+        cmap="viridis",
+    )
+    figure.colorbar(radiance_mesh, ax=axes[0], label="Spectral radiance")
     axes[0].set_title("Spectral radiance over time")
     axes[0].set_ylabel("Wavelength [nm]")
-
     axes[0].set_ylim(400, 900)
 
-    # Keep the per-spectrum fit diagnostic on its own scale below the heatmap.
-    axes[1].plot(time, fit_value, color="tab:blue")
+    # Bottom panel: per-spectrum fit residual norm over time.
+    axes[1].plot(timestamps, fit_residual_norms, color="tab:blue")
     axes[1].set_title("Fit value")
     axes[1].set_ylabel("Fit Value")
 
-    # Apply common time labels and panel formatting.
-    for axis in tqdm(axes, desc="Labeling MS panels", disable=not verbose):
+    # Label both time axes without reporting progress for routine formatting.
+    axis: Axes
+    for axis in axes:
         axis.set_xlabel("time [s]")
-    for axis in tqdm(axes[1:], desc="Formatting MS panels", disable=not verbose):
-        axis.grid(True, alpha=0.25)
+
+    # Add a grid to the fit panel; the heatmap already fills the spectral panel.
+    axes[1].grid(True, alpha=0.25)
 
     return figure, axes
 
 
 def plot_processed_recording(recording_directory: str | Path, verbose: bool = False, *,
-                             raw_directory: str | Path | None = None,
                              plot_title: str | None = None) -> tuple[Figure, np.ndarray]:
     """Plot processed world and MS data together in a 2-by-2 figure.
 
@@ -1468,15 +1603,13 @@ def plot_processed_recording(recording_directory: str | Path, verbose: bool = Fa
         recording_directory: String or Path to the parent directory containing
             W/transformed.hdf5 and M/transformed.hdf5.
         verbose: Show loading and plotting progress bars.
-        raw_directory: Optional string or Path to raw MS chunks. When supplied,
-            add calibrated MS illuminance over the camera recording interval.
         plot_title: Figure title; None uses the recording directory basename.
 
     Returns:
         Figure and primary axes array of shape (2, 2). Top-left [0, 0]: mean
         L+M and L-M on the left scale and S-(L+M) on a separate right scale,
         with different colors for all three. Bottom-left [1, 0]: estimated
-        camera illuminance and, when raw_directory is supplied, calibrated
+        camera illuminance and calibrated
         MS illuminance on the same lux scale. Top-right [0, 1]: spectral
         radiance heatmap spanning 400-900 nm, with a colorbar. Bottom-right
         [1, 1]: MS overall fit value (residual norm). All tiles use each
@@ -1487,49 +1620,52 @@ def plot_processed_recording(recording_directory: str | Path, verbose: bool = Fa
     Raises:
         OSError: A sensor file or calibration cannot be read.
         KeyError: A required dataset is missing.
-        ValueError: Dataset shapes or timestamps are incompatible, or the
-            requested raw MS data are empty.
+        AssertionError: Dataset shapes or timestamps are incompatible.
     """
-    # Place world and MS panels side by side with independent time axes.
+    # First, we will get the recording directory that was input
+    recording_directory = os.path.abspath(os.path.expanduser(recording_directory))
+
+    # Create a figure 
+    # to place world and MS panels side by side with independent time axes.
     figure: Figure
     axes: np.ndarray
-    recording_directory = os.path.abspath(os.path.expanduser(recording_directory))
     figure, axes = plt.subplots(
         2, 2, figsize=(18, 8), constrained_layout=True
     )
 
     # Each helper plots its sensor's own time vector on the supplied axes.
     try:
+        # First, let's plot the world plots along the first column
         _plot_processed_world_helper(os.path.join(recording_directory, "W"), axes[:, 0], verbose=verbose)
+        
+        # NExt, let's plot the MS plots along the second column
         _plot_processed_ms_helper(os.path.join(recording_directory, "M"), axes[:, 1], verbose=verbose)
-        # Compare calibrated MS lux only over the processed camera time interval.
-        if raw_directory is not None:
-            timestamp_buffer: list[np.ndarray] = []
-            reading_buffer: list[np.ndarray] = []
+        
+        
+        # Bottom-left panel: compare saved MS lux with camera illuminance.
+        with h5py.File(
+            os.path.join(recording_directory, "M", "transformed.hdf5"), "r"
+        ) as hdf5_file:
+            timestamps: np.ndarray = hdf5_file["timestamps"][:]
+            illuminance_lux: np.ndarray = hdf5_file["data/illuminance/lux"][:]
 
-            # Use the MS timestamps directly; they are already in seconds.
-            for metadata_path, data_path in tqdm(group_sensors_files(raw_directory)["M"], desc="Loading raw MS chunks", disable=not verbose):
-                timestamps: np.ndarray = np.load(metadata_path).reshape(-1)
-                readings: np.ndarray = np.load(data_path)
-                if readings.ndim != 2 or len(readings) != len(timestamps):
-                    raise ValueError(f"MS readings and timestamps disagree: {data_path}")
-                if len(readings):
-                    timestamp_buffer.append(timestamps)
-                    reading_buffer.append(readings[:, :ms_util.MS_AS_CHANNELS].copy())
+        assert illuminance_lux.shape == timestamps.shape, (
+            "MS illuminance must have one value per timestamp; "
+            f"expected {timestamps.shape}, got {illuminance_lux.shape}."
+        )
 
-            if not reading_buffer:
-                raise ValueError(f"No nonempty MS chunks found: {raw_directory}")
-            # Join nonempty chunks in recording order, keeping counts aligned with time.
-            timestamps = np.concatenate(timestamp_buffer)
-            readings = np.concatenate(reading_buffer)
+        # Compare the sensors over the processed camera interval using recorded time.
+        camera_time: np.ndarray = axes[1, 0].lines[0].get_xdata()
+        within_recording: np.ndarray = (
+            (timestamps >= camera_time[0]) & (timestamps <= camera_time[-1])
+        )
+        axes[1, 0].plot(
+            timestamps[within_recording], illuminance_lux[within_recording],
+            color="darkorange", label="Minispectrometer",
+        )
+        axes[1, 0].legend(loc="upper right")
 
-            counts: np.ndarray = readings
-            camera_time: np.ndarray = axes[1, 0].lines[0].get_xdata()
-            within_recording: np.ndarray = (timestamps >= camera_time[0]) & (timestamps <= camera_time[-1])
-            axes[1, 0].plot(timestamps[within_recording],
-                            ms_util.ms_counts_to_illuminance(counts[within_recording]),
-                            color="darkorange", label="Minispectrometer")
-            axes[1, 0].legend(loc="upper right")
+    # If any error occurs, we need to close the figure
     except Exception:
         # Avoid leaving a partially populated figure open if loading fails.
         plt.close(figure)

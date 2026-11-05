@@ -4246,28 +4246,61 @@ def camera_scores_to_illuminance(camera_scores: np.ndarray) -> np.ndarray:
     Use median lux in 0.1-decade score bins to reduce scatter, then interpolate
     in log space. Use the nearest bin median at the measured range boundaries
     and return NaN outside the measured range.
+
+    Args:
+        camera_scores: Array of analog gain times digital gain times exposure.
+
+    Returns:
+        One-dimensional illuminance array in lux, in flattened input order.
+        Invalid scores and scores outside the measured range produce NaN.
+
+    Raises:
+        ValueError: The calibration contains no finite, positive score/lux pairs.
+        OSError: The calibration file cannot be read.
+        KeyError: A required calibration field is missing.
     """
-    calibration = scipy.io.loadmat(
-        _PROJECT_ROOT / "data" / "empircalAGCAndIlluminance.mat", simplify_cells=True
+    # Load paired camera gain-times-exposure scores and measured illuminance.
+    calibration: dict[str, np.ndarray] = scipy.io.loadmat(
+        _PROJECT_ROOT / "data" / "empircalAGCAndIlluminance.mat",
+        simplify_cells=True,
     )["empiralAGC"]
-    scores = np.asarray(calibration["cameraScoreLinear"]).reshape(-1)
-    lux = np.asarray(calibration["msIlluminance"]).reshape(-1)
-    valid = np.isfinite(scores) & (scores > 0) & np.isfinite(lux) & (lux > 0)
+    scores: np.ndarray = np.asarray(calibration["cameraScoreLinear"]).reshape(-1)
+    lux: np.ndarray = np.asarray(calibration["msIlluminance"]).reshape(-1)
+
+    # Logarithms require finite, positive values in both calibration channels.
+    valid: np.ndarray = (
+        np.isfinite(scores) & (scores > 0)
+        & np.isfinite(lux) & (lux > 0)
+    )
     if not valid.any():
         raise ValueError("No valid camera-score and illuminance pairs.")
-    log_scores = np.log10(scores[valid])
-    log_lux = np.log10(lux[valid])
-    bins = np.floor(log_scores * 10)
-    centers, medians = [], []
-    for bin_id in np.unique(bins):
-        members = bins == bin_id
-        centers.append(np.median(log_scores[members]))
-        medians.append(np.median(log_lux[members]))
 
-    requested = np.asarray(camera_scores, dtype=float).reshape(-1)
-    result = np.full(requested.shape, np.nan)
-    measured = (requested >= scores[valid].min()) & (requested <= scores[valid].max())
-    result[measured] = 10 ** np.interp(np.log10(requested[measured]), centers, medians)
+    # Group scores into 0.1-decade bins and use medians to reduce scatter.
+    log_scores: np.ndarray = np.log10(scores[valid])
+    log_lux: np.ndarray = np.log10(lux[valid])
+    bins: np.ndarray = np.floor(log_scores * 10)
+    centers: list[float] = []
+    medians: list[float] = []
+
+    bin_id: np.floating
+    for bin_id in np.unique(bins):
+        members: np.ndarray = bins == bin_id
+        centers.append(float(np.median(log_scores[members])))
+        medians.append(float(np.median(log_lux[members])))
+
+    # Preserve NaN for requests outside the measured calibration range.
+    requested: np.ndarray = np.asarray(camera_scores, dtype=float).reshape(-1)
+    result: np.ndarray = np.full(requested.shape, np.nan)
+    measured: np.ndarray = (
+        (requested >= scores[valid].min())
+        & (requested <= scores[valid].max())
+    )
+
+    # Interpolate log illuminance, then convert back to lux. Near the measured
+    # boundaries, np.interp uses the nearest bin median without extrapolating.
+    result[measured] = 10 ** np.interp(
+        np.log10(requested[measured]), centers, medians,
+    )
     return result
 
 
