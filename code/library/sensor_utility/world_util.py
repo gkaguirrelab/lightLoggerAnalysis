@@ -13,6 +13,7 @@ import h5py
 from numpy.typing import NDArray
 import matplotlib.pyplot as plt
 from matplotlib.image import AxesImage
+from matplotlib.lines import Line2D
 import cv2
 import os 
 import sys
@@ -3763,7 +3764,7 @@ def world_camera_field_of_view_steradians(matlab_engine: object | None=None) -> 
 
 
 # Given a recording directory, HDF5 file, or dictionary, return all frame metadata.
-def world_metadata_from_chunks(recording_source: str | dict[str, np.ndarray],
+def world_metadata_from_chunks(recording_source: str | dict[str, np.ndarray | float],
                                  convert_to_seconds: bool=True,
                                  verbose: bool=False,
                                  fill_missing_frames: bool=True
@@ -3782,20 +3783,19 @@ def world_metadata_from_chunks(recording_source: str | dict[str, np.ndarray],
     Args:
         recording_source: Directory containing ``config.pkl`` and world
             metadata chunks, a path to a world ``.hdf5`` file written by
-            ``sensors_utility``, or a dictionary requiring both ``data`` and
-            ``metadata``. Dictionary ``data`` is a frame-first NumPy array.
+            ``sensors_utility``, or a dictionary requiring ``data``, ``metadata``, and ``fps``. Dictionary ``data`` is a frame-first NumPy array.
             Its ``metadata`` must be an (N, 4) legacy or (N, 6) modern NumPy
             matrix with timestamps in the first column. Both arrays must
             contain the same number of frames. All input timestamps are
-            in nanoseconds.
+            in nanoseconds. FPS is required in the dictionary's ``fps`` field,
+            HDF5 ``metadata/fps`` dataset, or raw config's
+            ``sensors["W"]["sensor_mode"]["fps"]`` field.
         convert_to_seconds: Whether to convert timestamps from nanoseconds
             since boot into seconds.
         verbose: Whether to show progress while loading the metadata chunks.
         fill_missing_frames: Whether to insert timestamped NaN rows for gaps
             between chunks. Defaults to True to preserve compatibility with
             existing callers that relied on gaps always being filled.
-            Applies only to directory input; HDF5 and dictionary inputs
-            preserve their stored rows because chunk boundaries are absent.
 
     Returns:
         ``pandas.DataFrame`` in frame order with a zero-based index and a
@@ -3804,40 +3804,216 @@ def world_metadata_from_chunks(recording_source: str | dict[str, np.ndarray],
     """
     # Each input case will produce the same frame-by-column metadata matrix.
     metadata: np.ndarray
+    
     # Saved inputs have a known frame count for checking metadata alignment.
     frame_count: int | None = None
+    
     if not isinstance(recording_source, (str, dict)):
         raise TypeError("Input must be a directory path, .hdf5 path, or dictionary.")
+    
     # Expand paths once so both file and directory inputs accept "~".
     if isinstance(recording_source, str):
         recording_source = os.path.abspath(os.path.expanduser(recording_source))
 
-    # Dictionary metadata is already a NumPy matrix.
+    # If the input is a dictionary, it must have certain fields, 
+    # data, metadata,
     if isinstance(recording_source, dict):
-        if not {"data", "metadata"}.issubset(recording_source):
-            raise ValueError("Dictionary input requires both data and metadata keys.")
+        # If we don't have the required fields, throw an error
+        if not {"data", "metadata", "fps"}.issubset(recording_source):
+            raise ValueError("Dictionary input requires data, metadata, and fps keys.")
+
+        # Grab the FPS of the recording
+        # and ensure that is valid
+        recording_fps: float = float(recording_source["fps"])
+        if not np.isfinite(recording_fps) or recording_fps <= 0:
+            raise ValueError("recording_fps must be finite and positive.")
+               
+        
         # Check the data buffer so we can verify one metadata row per frame.
         data: np.ndarray = recording_source["data"]
-        if not isinstance(data, np.ndarray) or data.ndim < 1:
-            raise TypeError("Dictionary data must be a frame-first NumPy array.")
+        if not isinstance(data, np.ndarray) or data.ndim not in (3, 4):
+            raise TypeError(
+                "Dictionary data must be a NumPy array with shape "
+                "(nframes, y, x) or (nframes, y, x, channel)."
+            )
+            
+        # Recordings must contain at least one frame before we assemble metadata.
+        if len(data) == 0:
+            raise ValueError("Dictionary data must contain at least one frame.")
+
         # Take the metadata field directly; copy it before changing timestamps below.
         metadata = recording_source["metadata"]
         frame_count = len(data)
 
-    # Read the HDF5 metadata columns into the same NumPy layout.
+        # Metadata must be an numpy array 
+        if not isinstance(metadata, np.ndarray):
+            raise TypeError("Metadata must be a NumPy matrix.")
+
+        # Metadata must be of the shape (nFrames, 4) or (nFrames, 6) depending on 
+        # if old or new metadata column setup 
+        if metadata.ndim != 2 or metadata.shape[1] not in (4, 6):
+            raise ValueError("Metadata must have shape (nframes, 4) or (nframes, 6).")
+
+        # Metadata must have the same number of entries as there are frames 
+        if len(metadata) != frame_count:
+            raise ValueError("Data and metadata must contain the same number of frames.")
+
+        # make a copy of the metadata so we don't edit the original in the input dictionary 
+        metadata = np.array(metadata, dtype=np.float64, copy=True)
+
+        # Get how long each frame lasts in ns
+        frame_period_ns: float = 1e9 / recording_fps
+
+        # Allocate an array to store chunks of metadata that we will later 
+        # flatten into a continuous matrix 
+        metadata_parts: list[np.ndarray] = []
+
+        # Append each recorded row, filling any timestamp gap before it.
+        for frame_index in range(frame_count):
+            # If we want to fill missing frames, 
+            # we should skip the first frame
+            if fill_missing_frames and frame_index > 0:
+                # Find the current and previosu timestamps 
+                current_timestamp: float = metadata[frame_index, 0]
+                previous_timestamp: float = metadata[frame_index - 1, 0]
+
+                # Get the gap between this current timestamp 
+                gap_ns: float =  current_timestamp - previous_timestamp
+                
+                # Find the number of missing frames
+                num_missing_frames: int = (
+                    max(0, int(gap_ns // frame_period_ns) - 1)
+                    if np.isfinite(gap_ns) else 0
+                )
+
+                # If there were missing frames, add the number of missing entries 
+                # between the previous and the current timestamp before 
+                # appending the current timestamp
+                if num_missing_frames > 0:
+                    # Insert expected timestamps while leaving camera settings unknown.
+                    downtime_timestamps: np.ndarray = (
+                        previous_timestamp
+                        + frame_period_ns * np.arange(1, num_missing_frames + 1)
+                    )
+                    
+                    downtime_metadata: np.ndarray = np.full(
+                        (num_missing_frames, metadata.shape[1]), np.nan
+                    )
+                    
+                    downtime_metadata[:, 0] = downtime_timestamps
+                    metadata_parts.append(downtime_metadata)
+
+            # Append the recorded row after any inserted downtime rows.
+            metadata_parts.append(metadata[frame_index:frame_index + 1])
+
+        # Concatenate the metadata back together into a 1 matrix
+        metadata = np.concatenate(metadata_parts)
+
+    # If the input is an HDF5 file, read the saved recording settings
+    # and metadata without loading the image buffers.
     elif recording_source.endswith(".hdf5"):
-        # Load only the small metadata arrays, not the image buffers.
+        # First, we load in the hdf5 file that contains the recording data
         dataset_pointer: h5py.File
         with h5py.File(recording_source, "r") as dataset_pointer:
-            columns: list[np.ndarray] = [dataset_pointer[f"agcSettings/{name}"][:]
-                       for name in ("timestamps", "Again", "Dgain", "exposure")]
-            # The dataset shape gives the frame count without loading its contents.
-            frame_count = dataset_pointer["data/frames"].shape[0]
-            # Each column must be a vector with one entry for each recorded frame.
+            
+            # Grab the FPS of the recording and ensure that it is valid.
+            # The empty tuple reads the scalar value stored in the dataset.
+            fps_dataset: h5py.Dataset = dataset_pointer["metadata/fps"]
+            recording_fps = float(fps_dataset[()])
+            
+            if not np.isfinite(recording_fps) or recording_fps <= 0:
+                raise ValueError("recording_fps must be finite and positive.")
+
+            # Check the frame dimensions so we can verify one metadata row per frame.
+            # Inspecting the dataset shape does not load the image data into memory.
+            frames_dataset: h5py.Dataset = dataset_pointer["data/frames"]
+            if frames_dataset.ndim not in (3, 4):
+                raise ValueError(
+                    "HDF5 frames must have shape "
+                    "(nframes, y, x) or (nframes, y, x, channel)."
+                )
+
+            # Ensure there are some frames in this dataset
+            frame_count = frames_dataset.shape[0]
+            if frame_count == 0:
+                raise ValueError("HDF5 data/frames must contain at least one frame.")
+
+            # Load the timestamp and camera settings columns in their expected order.
+            columns: list[np.ndarray] = [
+                dataset_pointer[f"agcSettings/{name}"][:]
+                for name in ("timestamps", "Again", "Dgain", "exposure")
+            ]
+
+            # Each metadata column must have one entry per recorded frame.
             if any(column.ndim != 1 or len(column) != frame_count for column in columns):
                 raise ValueError("HDF5 metadata fields must have one value per frame.")
-            # Put timestamps first, followed by gain and exposure, matching dict input.
+
+            # Combine the columns into the same matrix layout as dictionary metadata.
             metadata = np.column_stack(columns)
+
+        # Metadata must be an numpy array 
+        if not isinstance(metadata, np.ndarray):
+            raise TypeError("Metadata must be a NumPy matrix.")
+
+        # Metadata must be of the shape (nFrames, 4) or (nFrames, 6) depending on 
+        # if old or new metadata column setup 
+        if metadata.ndim != 2 or metadata.shape[1] not in (4, 6):
+            raise ValueError("Metadata must have shape (nframes, 4) or (nframes, 6).")
+
+        # Metadata must have the same number of entries as there are frames 
+        if len(metadata) != frame_count:
+            raise ValueError("Data and metadata must contain the same number of frames.")
+
+        # Make a floating-point copy so inserted downtime rows can contain NaNs. 
+        metadata = np.array(metadata, dtype=np.float64, copy=True)
+
+        # Get how long each frame lasts in ns
+        frame_period_ns: float = 1e9 / recording_fps
+
+        # Allocate an array to store chunks of metadata that we will later 
+        # flatten into a continuous matrix 
+        metadata_parts: list[np.ndarray] = []
+
+        # Append each recorded row, filling any timestamp gap before it.
+        for frame_index in range(frame_count):
+            # If we want to fill missing frames, 
+            # we should skip the first frame
+            if fill_missing_frames and frame_index > 0:
+                # Find the current and previosu timestamps 
+                current_timestamp: float = metadata[frame_index, 0]
+                previous_timestamp: float = metadata[frame_index - 1, 0]
+
+                # Get the gap between this current timestamp 
+                gap_ns: float =  current_timestamp - previous_timestamp
+                
+                # Find the number of missing frames
+                num_missing_frames: int = (
+                    max(0, int(gap_ns // frame_period_ns) - 1)
+                    if np.isfinite(gap_ns) else 0
+                )
+
+                # If there were missing frames, add the number of missing entries 
+                # between the previous and the current timestamp before 
+                # appending the current timestamp
+                if num_missing_frames > 0:
+                    # Insert expected timestamps while leaving camera settings unknown.
+                    downtime_timestamps: np.ndarray = (
+                        previous_timestamp
+                        + frame_period_ns * np.arange(1, num_missing_frames + 1)
+                    )
+                    
+                    downtime_metadata: np.ndarray = np.full(
+                        (num_missing_frames, metadata.shape[1]), np.nan
+                    )
+                    
+                    downtime_metadata[:, 0] = downtime_timestamps
+                    metadata_parts.append(downtime_metadata)
+
+            # Append the recorded row after any inserted downtime rows.
+            metadata_parts.append(metadata[frame_index:frame_index + 1])
+
+        # Concatenate the metadata back together into one matrix.
+        metadata = np.concatenate(metadata_parts)
 
     # For a raw directory, assemble the chunks as before.
     else:
@@ -3845,20 +4021,14 @@ def world_metadata_from_chunks(recording_source: str | dict[str, np.ndarray],
         if(not os.path.isdir(chunks_path)):
             raise FileNotFoundError(f"Raw chunks path does not exist: {chunks_path}")
 
-        # Only gap filling needs the configured frame rate.
-        if fill_missing_frames:
-            # Read the configured frame rate, or use the standard 120 FPS fallback when the config file is unavailable.
-            config_filepath: str = os.path.join(chunks_path, "config.pkl")
-            if(os.path.exists(config_filepath)):
-                with open(config_filepath, 'rb') as config_file:
-                    config_data: dict = dill.load(config_file)
-                recording_fps: float = config_data['sensors']['W']['sensor_mode']['fps']
-            else:
-                warnings.warn(f"Config filepath does not exist: {config_filepath}. Assuming world-camera FPS is {WORLD_CAM_FPS}.", RuntimeWarning)
-                recording_fps = WORLD_CAM_FPS
-
-            assert recording_fps > 0, f"World camera FPS must be positive. Got: {recording_fps}"
-            frame_period_ns: float = (10 ** 9) / recording_fps
+        # Raw recordings must provide their camera rate in config.pkl.
+        config_filepath: str = os.path.join(chunks_path, "config.pkl")
+        with open(config_filepath, "rb") as config_file:
+            config_data: dict = dill.load(config_file)
+        recording_fps = float(config_data["sensors"]["W"]["sensor_mode"]["fps"])
+        if not np.isfinite(recording_fps) or recording_fps <= 0:
+            raise ValueError("recording_fps must be finite and positive.")
+        frame_period_ns: float = 1e9 / recording_fps
 
         # First, let's find the world metadata chunks
         world_metadata_chunks: list[str] = natsorted([os.path.join(chunks_path, filename)
@@ -3882,7 +4052,7 @@ def world_metadata_from_chunks(recording_source: str | dict[str, np.ndarray],
             metadata_chunk_path: str = world_metadata_chunks[chunk_num]
 
             # Load in the metadata
-            world_metadata: np.ndarray = np.load(metadata_chunk_path)
+            world_metadata: np.ndarray = np.asarray(np.load(metadata_chunk_path), dtype=np.float64)
             # Sometimes the last chunk is empty. If this is true, skip it
             if(len(world_metadata) == 0):
                 break
@@ -3930,17 +4100,25 @@ def world_metadata_from_chunks(recording_source: str | dict[str, np.ndarray],
         raise TypeError("Metadata must be a NumPy matrix.")
     if metadata.ndim != 2 or metadata.shape[1] not in (4, 6):
         raise ValueError("Metadata must have shape (nframes, 4) or (nframes, 6).")
-    if frame_count is not None and len(metadata) != frame_count:
-        raise ValueError("Data and metadata must contain the same number of frames.")
-
-    # Copy to float so timestamp conversion does not modify dictionary input.
+    
+    # Copy before converting timestamps so input arrays retain their original units.
     metadata = np.array(metadata, dtype=np.float64, copy=True)
+
+    # Keep the gap calculations in nanoseconds, then convert the completed
+    # timestamp column to seconds if requested.
     if convert_to_seconds:
         metadata[:, 0] /= 10 ** 9
 
-    # Label legacy or modern metadata columns once, after loading all inputs.
-    column_names: list[str] = list(WORLD_AGC_METADATA_COLS) if metadata.shape[1] == 6 else ["Again", "Dgain", "exposure"]
-    return pd.DataFrame(metadata, columns=["timestamp", *column_names])
+    # Choose the settings column names from the legacy or modern metadata layout.
+    # Both layouts put the timestamp in the first column.
+    column_names: list[str] = (
+        list(WORLD_AGC_METADATA_COLS)
+        if metadata.shape[1] == 6
+        else ["Again", "Dgain", "exposure"]
+    )
+    table: pd.DataFrame = pd.DataFrame(metadata, columns=["timestamp", *column_names])
+
+    return table
 
 
 def plot_world_camera_channels(
@@ -4055,6 +4233,43 @@ def plot_world_camera_channels(
     frame_axis.set_xlabel("Frame number")
     frame_axis.xaxis.set_major_locator(plt.MaxNLocator(nbins=6, integer=True))
     return figure, ax
+
+
+def camera_scores_to_mean_luminance(camera_scores: np.ndarray) -> np.ndarray:
+    """Estimate mean scene luminance in cd/m² from empirical illuminance."""
+    return camera_scores_to_illuminance(camera_scores) / np.pi
+
+
+def camera_scores_to_illuminance(camera_scores: np.ndarray) -> np.ndarray:
+    """Estimate lux from paired camera scores and minispectrometer measurements.
+
+    Use median lux in 0.1-decade score bins to reduce scatter, then interpolate
+    in log space. Use the nearest bin median at the measured range boundaries
+    and return NaN outside the measured range.
+    """
+    calibration = scipy.io.loadmat(
+        _PROJECT_ROOT / "data" / "empircalAGCAndIlluminance.mat", simplify_cells=True
+    )["empiralAGC"]
+    scores = np.asarray(calibration["cameraScoreLinear"]).reshape(-1)
+    lux = np.asarray(calibration["msIlluminance"]).reshape(-1)
+    valid = np.isfinite(scores) & (scores > 0) & np.isfinite(lux) & (lux > 0)
+    if not valid.any():
+        raise ValueError("No valid camera-score and illuminance pairs.")
+    log_scores = np.log10(scores[valid])
+    log_lux = np.log10(lux[valid])
+    bins = np.floor(log_scores * 10)
+    centers, medians = [], []
+    for bin_id in np.unique(bins):
+        members = bins == bin_id
+        centers.append(np.median(log_scores[members]))
+        medians.append(np.median(log_lux[members]))
+
+    requested = np.asarray(camera_scores, dtype=float).reshape(-1)
+    result = np.full(requested.shape, np.nan)
+    measured = (requested >= scores[valid].min()) & (requested <= scores[valid].max())
+    result[measured] = 10 ** np.interp(np.log10(requested[measured]), centers, medians)
+    return result
+
 
 
 def plot_world_camera_settings(
@@ -4178,7 +4393,7 @@ def plot_world_camera_settings(
     exposure_axis: plt.Axes = gain_axis.twinx()
 
     # Collect lines from both axes so they can appear in one combined legend.
-    lines: list = []
+    lines: list[Line2D] = []
 
     # Draw gain values against the left-hand scale.
     for column_name in tqdm(gain_columns, desc="Plotting gains", disable=not verbose):
@@ -4264,11 +4479,11 @@ def plot_world_camera_settings(
 
     # Match each Y axis's labels, ticks, and visible spine to its line family.
     # This reinforces which scale belongs to which group of traces.
-    gain_axis.set_xlabel("Elapsed time (s)")
+    gain_axis.set_xlabel("time [s]")
     gain_axis.set_ylabel("Gain", color="#08306b")
     exposure_axis.set_ylabel("Exposure", color="#d94801")
-    gain_axis.set_ylim(bottom=1)
-    exposure_axis.set_ylim(bottom=0)
+    gain_axis.set_ylim(0, 11)
+    exposure_axis.set_ylim(0, 8333)
     gain_axis.tick_params(axis="y", colors="#08306b")
     exposure_axis.tick_params(axis="y", colors="#d94801")
     gain_axis.spines["left"].set_color("#08306b")
@@ -4280,7 +4495,7 @@ def plot_world_camera_settings(
     # Matplotlib otherwise creates one legend per axis, so explicitly pass all
     # lines to the left axis to produce a single complete legend.
     gain_axis.legend(lines, [line.get_label() for line in lines],
-                     loc="upper left", bbox_to_anchor=(1.14, 1.0), borderaxespad=0)
+                     loc="upper right")
     if ax is None:
         figure.tight_layout()
 
@@ -5180,12 +5395,13 @@ def opponentmap_to_videoframe(opponentmaps: np.ndarray, fps: float=WORLD_CAM_FPS
             (nframes, azi, ele, channel) buffer. Input values are not changed.
         fps: Input sampling rate, used to convert the window duration to frames.
         window_seconds: Duration of the normalization window, default one second.
-        verbose: Show a Before/After subplot of the first (LM) channel.
+        verbose: Show a Before/After subplot for each opponent channel.
             For a buffer, display its middle frame. The figure is shown,
             not returned. Empty inputs do not create a plot.
 
     Returns:
-        frame: uint8 array with the same shape and channel order as the input.
+        frame: uint8 video image (height, width, channel) or batch of images.
+            Columns follow increasing azimuth and row zero is the highest elevation.
             Each channel's spatial/temporal mean maps to 127, mean minus two
             population SDs to 0, and mean plus two SDs to 255. Values outside
             this range are clipped. These are display-scaled opponent channels,
@@ -5204,7 +5420,9 @@ def opponentmap_to_videoframe(opponentmaps: np.ndarray, fps: float=WORLD_CAM_FPS
 
     # Give a single image a frame axis so both inputs follow the same steps.
     maps: np.ndarray = opponentmaps[None] if opponentmaps.ndim == 3 else opponentmaps
-    frame: np.ndarray = np.zeros(maps.shape, dtype=np.uint8)
+    # Video rows run from highest to lowest elevation.
+    video_maps = maps.swapaxes(1, 2)[:, ::-1]
+    frame: np.ndarray = np.zeros(video_maps.shape, dtype=np.uint8)
     if maps.size == 0:
         return frame[0] if opponentmaps.ndim == 3 else frame
     window_frames: int = min(len(maps), max(1, int(round(fps * window_seconds))))
@@ -5236,7 +5454,7 @@ def opponentmap_to_videoframe(opponentmaps: np.ndarray, fps: float=WORLD_CAM_FPS
             )))
 
             # Use separate half-ranges to map the mean exactly to 127.
-            values = maps[index, ..., channel].astype(np.float64)
+            values = video_maps[index, ..., channel].astype(np.float64)
             valid: np.ndarray = np.isfinite(values)
             scaled: np.ndarray = np.full(values.shape, 127.0)
             if sd > 0:
@@ -5246,32 +5464,50 @@ def opponentmap_to_videoframe(opponentmaps: np.ndarray, fps: float=WORLD_CAM_FPS
             frame[index, ..., channel] = np.rint(np.clip(scaled, 0, 255)).astype(np.uint8)
 
     if verbose:
-        # Compare the same frame and channel without treating opponent data as RGB.
+        # Show the middle frame with its original coverage and converted values.
         display_index: int = len(maps) // 2
-        figure, axes = plt.subplots(1, 2, figsize=(12, 5), constrained_layout=True)
+        before: np.ndarray = maps[display_index]
+        after: np.ndarray = frame[display_index]
+        names = ("L+M", "L−M", "S−(L+M)")
+        n_channels = before.shape[-1]
+        n_rows = n_channels + int(n_channels == 3)
+        figure = plt.figure(figsize=(10, 4 * n_rows), constrained_layout=True)
+        rows = figure.subfigures(n_rows, 1, squeeze=False)[:, 0]
+        figure.suptitle("Opponent Map to Video Frame Conversion")
+        figure.supxlabel("Blue = no finite sample", fontsize=10)
+        gray = plt.get_cmap("gray").with_extremes(bad="lightsteelblue")
 
-        # Transpose spatial axes to put azimuth horizontally and elevation vertically.
-        before = axes[0].imshow(
-            np.ma.masked_invalid(maps[display_index, ..., 0].T),
-            origin="lower", cmap="gray",
-        )
-        axes[0].set_title("Before")
-        figure.colorbar(before, ax=axes[0], label="LM radiance")
+        for channel, row in enumerate(rows[:n_channels]):
+            row.suptitle(names[channel] if channel < len(names) else f"Channel {channel + 1}")
+            left, right = row.subplots(1, 2, sharex=True, sharey=True)
 
-        after = axes[1].imshow(
-            frame[display_index, ..., 0].T,
-            origin="lower", cmap="gray", vmin=0, vmax=255,
-        )
-        axes[1].set_title("After")
-        figure.colorbar(after, ax=axes[1], label="Display value (uint8)")
+            # Use the input coverage for both panels so missing samples stay blue.
+            raw = np.ma.masked_invalid(before[..., channel].T)
+            display = np.ma.array(after[::-1, :, channel], mask=np.ma.getmaskarray(raw))
+            raw_image = left.imshow(raw, origin="lower", cmap=gray)
+            byte_image = right.imshow(display, origin="lower", cmap=gray, vmin=0, vmax=255)
+            left.set_title("Before")
+            right.set_title("After")
+            left.set_ylabel("Elevation sample")
+            for axis in (left, right):
+                axis.set_xlabel("Azimuth sample")
+            row.colorbar(raw_image, ax=left, label="Opponent radiance")
+            row.colorbar(byte_image, ax=right, label="Display value (uint8)")
 
-        for axis in axes:
+        if n_channels == 3:
+            # Display all three scaled channels together in the same spatial orientation.
+            rgb = after[::-1].copy()
+            rgb[~np.isfinite(before).all(axis=-1).T] = (176, 196, 222)  # lightsteelblue
+            axis = rows[-1].subplots()
+            axis.imshow(rgb, origin="lower")
+            axis.set_title("Final image")
             axis.set_xlabel("Azimuth sample")
             axis.set_ylabel("Elevation sample")
 
         plt.show()
 
     return frame[0] if opponentmaps.ndim == 3 else frame
+
 
 
 def main() -> None:

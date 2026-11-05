@@ -42,6 +42,7 @@ for path in (light_logger_analysis_dir_path, world_util_path, pi_utility_path):
 
 # Import world camera utility library
 import world_util
+from world_util import camera_scores_to_mean_luminance, camera_scores_to_illuminance
 from ms_util import ms_counts_to_illuminance
 
 
@@ -1479,77 +1480,6 @@ def world_chunks_to_video(recording_path: str,
 
     return 
 
-def camera_scores_to_mean_luminance(camera_scores: np.ndarray) -> np.ndarray:
-    """Map camera scores to mean scene luminance using the saved lookup."""
-
-    calibration_path: str = os.path.join(
-        light_logger_analysis_dir_path,
-        "derived",
-        "cameraScoreToAverageLuminance.mat",
-    )
-    if(not os.path.isfile(calibration_path)):
-        raise FileNotFoundError(
-            "Run defineAGCToMeanLuminance.m to generate the calibration: "
-            f"{calibration_path}"
-        )
-
-    calibration_file: dict = loadmat(calibration_path, simplify_cells=True)
-    readme: object = calibration_file.get("README")
-    if(not isinstance(readme, str) or len(readme.strip()) < 20):
-        raise ValueError(
-            "Camera-score calibration must contain a descriptive README: "
-            f"{calibration_path}"
-        )
-    calibration_scores: np.ndarray = np.asarray(
-        calibration_file.get("cameraScore"),
-        dtype=np.float64,
-    ).reshape(-1)
-    calibration_luminance: np.ndarray = np.asarray(
-        calibration_file.get("avgSceneLuminance"),
-        dtype=np.float64,
-    ).reshape(-1)
-    if(
-        calibration_scores.size < 2
-        or calibration_scores.shape != calibration_luminance.shape
-        or not np.all(np.isfinite(calibration_scores))
-        or not np.all(np.isfinite(calibration_luminance))
-        or not np.all(calibration_scores > 0)
-        or not np.all(calibration_luminance > 0)
-        or not np.all(np.diff(calibration_scores) > 0)
-    ):
-        raise ValueError(
-            "cameraScore and avgSceneLuminance must be matching positive, "
-            "finite lookup vectors with increasing camera scores."
-        )
-
-    camera_scores = np.asarray(camera_scores, dtype=np.float64).reshape(-1)
-    predicted_luminance: np.ndarray = np.full(
-        camera_scores.shape,
-        np.nan,
-        dtype=np.float64,
-    )
-    valid: np.ndarray = (
-        np.isfinite(camera_scores)
-        & (camera_scores >= calibration_scores[0])
-        & (camera_scores <= calibration_scores[-1])
-    )
-    predicted_luminance[valid] = np.power(
-        10.0,
-        np.interp(
-            np.log10(camera_scores[valid]),
-            np.log10(calibration_scores),
-            np.log10(calibration_luminance),
-        ),
-    )
-    return predicted_luminance
-
-
-def camera_scores_to_illuminance(camera_scores: np.ndarray) -> np.ndarray:
-    """Convert the calibrated mean scene luminance to illuminance in lux."""
-
-    return np.pi * camera_scores_to_mean_luminance(camera_scores)
-
-
 def _load_ms_counts_and_timestamps(recording_path: str) -> tuple[np.ndarray, np.ndarray]:
     """Load and flatten minispect AS values and timestamps from raw chunks."""
     # Import the chunk parser only when minispect data are requested.
@@ -2141,25 +2071,30 @@ def convert_avi_to_mp4(input_path: str, output_path: str) -> None:
     subprocess.run(cmd, check=True)
 
 
-def opponentmaps_to_video(opponentmaps: str | dict[str, np.ndarray], output_path: str,
-                          fill_missing_frames: bool=False, fps: float=30) -> None:
-    """Write opponent-map buffers to a playable AVI video.
+def opponentmaps_to_video(
+    opponentmaps: str | os.PathLike[str] | dict[str, np.ndarray | float],
+    output_path: str | os.PathLike[str],
+    fill_missing_frames: bool = False,
+    verbose: bool = False,
+    overlay: bool = False,
+) -> None:
+    """Write the L+M channel (channel 0) to a grayscale AVI video.
 
     Args:
-        opponentmaps: String path ending in ``.hdf5`` containing opponent-map
-            buffers, or a dictionary with a required ``data`` key and an
-            optional ``metadata`` key. ``data`` is a four-dimensional NumPy
+        opponentmaps: String or Path-like path ending in ``.hdf5`` containing opponent-map
+            buffers, or a dictionary with required ``data``, ``metadata``, and ``fps`` keys. ``data`` is a four-dimensional NumPy
             array with shape ``(nframes, azi, ele, channel)``, where the
             spatial axes represent azimuth and elevation samples. ``metadata``
-            is required when ``fill_missing_frames=True`` and must be a
-            NumPy matrix accepted by ``world_metadata_from_chunks``.
-        output_path: Destination path as a string ending in ``.avi``.
+            must be a NumPy matrix accepted by ``world_metadata_from_chunks``,
+            with one row per frame. The recording rate is read from the dictionary's
+            ``fps`` field or the HDF5 dataset ``metadata/fps``, and is used for
+            gap detection, display scaling, and playback.
+        output_path: Destination string or Path-like path ending in ``.avi``.
         fill_missing_frames: Whether to synthesize black frames when
-            timestamp gaps imply dropped frames. Currently only retrieves
-            the timestamp/metadata DataFrame; gap insertion remains
-            unimplemented. Defaults to ``False``.
-
-        fps: Output frame rate, defaulting to 30 like ``dir_to_video``.
+            timestamp gaps imply dropped frames. Defaults to ``False``.
+        verbose: Show tqdm progress over output frames.
+        overlay: Draw a white cross with a black outline at the image center
+            immediately before writing each frame, including timestamp gaps.
 
     Returns:
         None.
@@ -2167,41 +2102,53 @@ def opponentmaps_to_video(opponentmaps: str | dict[str, np.ndarray], output_path
     Raises:
         AssertionError: If the input is neither a string nor a dictionary,
             the input string does not end in ``.hdf5``, the dictionary lacks
-            a four-dimensional NumPy ``data`` array, or the output is not
+            a four-dimensional NumPy ``data`` array or matching metadata rows, or the output is not
             a string ending in ``.avi``.
 
     Notes:
-        Converts NumPy input as a whole or reads and converts HDF5 batches of
+        Converts both NumPy and HDF5 inputs in batches of
         up to 1,000 frames, then writes each converted frame using FFV1.
-        Conversion must preserve spatial dimensions and return uint8 BGR
-        frames. The conversion helper and missing-frame insertion remain
-        unimplemented.
+        The L+M channel uses the existing opponent-map display scaling.
     """
 
-    # The input must either be in the form of a str path
-    # to an hdf5 file or a dictionary with fields that contain
-    # the data to write
+    # Normalize filesystem paths once so the existing readers accept Path inputs.
+    if isinstance(opponentmaps, os.PathLike):
+        opponentmaps = os.fspath(opponentmaps)
+    if isinstance(output_path, os.PathLike):
+        output_path = os.fspath(output_path)
+
+    # Opponent maps must either be a str path to an .hdf5 file or a dict containing 
+    # a data and metadata key 
     assert isinstance(opponentmaps, (str, dict)), (
         "opponentmaps must be a .hdf5 path string or a dictionary."
     )
 
-    # If the input is a str, it must be a valid path to an hdf5 file
+    # If it's a str, ensure that it ends with .hdf5 and the path actually exists 
     if isinstance(opponentmaps, str):
         assert opponentmaps.endswith(".hdf5"), "opponentmaps path must end in .hdf5."
         assert os.path.exists(opponentmaps), f"Path: {opponentmaps} does not exist"
 
-    # Otherwise, if it is dictionary format
+    # Otherwise, if it's a dict 
     else:
-        # It must have a data field
+        # Assert it has a data key
         assert "data" in opponentmaps, "opponentmaps must contain a data key."
 
-        # The data field must be a numpy array of opponent map
-        # frames
+        # Assert that it is an np.ndarray and it is of the form (nFrames, y, x, channel)
         assert isinstance(opponentmaps["data"], np.ndarray) and opponentmaps["data"].ndim == 4, (
             "opponentmaps data must be a NumPy array with shape (nframes, azi, ele, channel)."
         )
 
-    # The output path must be .avi format
+        # Assert that there is a metdata key and that it is also 
+        assert "metadata" in opponentmaps, "opponentmaps must contain a metadata key."
+        assert isinstance(opponentmaps["metadata"], np.ndarray) and opponentmaps["metadata"].ndim == 2, (
+            "opponentmaps metadata must be a NumPy array with shape (nframes, metadata_fields), "
+            "where each row contains a timestamp followed by camera settings."
+        )
+        assert len(opponentmaps["metadata"]) == len(opponentmaps["data"]), (
+            "opponentmaps metadata must have one row per data frame."
+        )
+
+    # Assert that the output path is a string and that it is a path to a .avi
     assert isinstance(output_path, str) and output_path.endswith(".avi"), (
         "output_path must be a string ending in .avi."
     )
@@ -2211,72 +2158,129 @@ def opponentmaps_to_video(opponentmaps: str | dict[str, np.ndarray], output_path
     # because makedirs cannot create an empty path.
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
-    # Retrieve the metadata for the future missing-frame insertion step.
-    # This currently preserves the stored rows for dict and HDF5 inputs;
-    # inserting black frames into the video is still unimplemented.
-    if fill_missing_frames:
-        filled_timestamps_metadata: pd.DataFrame = world_util.world_metadata_from_chunks(
-            opponentmaps, fill_missing_frames=True
-        )
+    # Use the recording's saved rate consistently for timing and display scaling.
+    fps: float
+    if isinstance(opponentmaps, dict):
+        assert "fps" in opponentmaps, "opponentmaps must contain an fps key."
+        fps = float(opponentmaps["fps"])
+    else:
+        with h5py.File(opponentmaps, "r") as saved:
+            if "metadata/fps" not in saved:
+                raise ValueError("Input HDF5 is missing metadata/fps; reprocess it to save the recording FPS.")
+            fps_dataset: h5py.Dataset = saved["metadata/fps"]
+            # HDF5 uses an empty index tuple to read a scalar dataset's value.
+            saved_fps: np.ndarray | np.floating = fps_dataset[()]
+            fps = float(saved_fps)
 
-    # Both input cases will give us a frame buffer or a dataset we can slice.
+    if not np.isfinite(fps) or fps <= 0:
+        raise ValueError("fps must be finite and positive.")
+
+
+    # Normalize dictionary or HDF5 metadata to the same timeline DataFrame.
+    # The helper retains source frame indices and inserts gap rows when requested.
+    filled_timestamp_metadata: pd.DataFrame = world_util.world_metadata_from_chunks(
+        opponentmaps, fill_missing_frames=fill_missing_frames
+    )
+
+    # Modern dictionary metadata calls the analog-gain field cameraAgain.
+    # Normalize the name locally so both supported layouts use the same check.
+    filled_timestamp_metadata = filled_timestamp_metadata.rename(
+        columns={"cameraAgain": "Again"}
+    )
+
     raw_frames: np.ndarray | h5py.Dataset
-    # Keep the file and writer available for cleanup, even if setup fails.
     dataset_pointer: h5py.File | None = None
     video_writer: cv2.VideoWriter | None = None
 
     # Keep the HDF5 file open while reading, and close it even if setup fails.
     try:
-        # If the input is a dictionary, its data is already loaded in memory.
+        # If we are accepting input in dict form, just read the raw frames in 
         if isinstance(opponentmaps, dict):
             raw_frames = opponentmaps["data"]
-        # Otherwise, open the file and keep a reference to its frame dataset.
-        # This does not load the full recording into memory.
+
+        # If in HDF5 form, we need to save a file pointer to the 
+        # file and then read in a pointer to the frames dataset 
         else:
             dataset_pointer = h5py.File(opponentmaps, "r")
             raw_frames = dataset_pointer["data/frames"]
 
         # Read the spatial dimensions without loading any additional frames.
-        # The conversion helper must preserve this size and return uint8 BGR frames.
-        frame_height, frame_width = raw_frames.shape[1:3]
+        frame_width, frame_height = raw_frames.shape[1:3]
+
         # Use the same lossless FFV1 codec as the other AVI writers.
         # OpenCV expects the frame size in width, height order.
         fourcc: int = cv2.VideoWriter_fourcc(*"FFV1")
         video_writer = cv2.VideoWriter(output_path, fourcc, float(fps),
-                                       (frame_width, frame_height), isColor=True)
-        # Stop here if the writer could not open the output file.
+                                       (frame_width, frame_height), isColor=False)
         if not video_writer.isOpened():
             raise RuntimeError(f"Failed to open VideoWriter for {output_path}")
 
-        # For an in-memory buffer, convert all of the frames at once.
-        if isinstance(raw_frames, np.ndarray):
-            converted_frames: np.ndarray = world_util.opponentmap_to_videoframe(raw_frames)
-            # The conversion helper is still a stub, so fail clearly until it returns frames.
-            if converted_frames is None:
-                raise NotImplementedError("opponentmap_to_videoframe must return converted frames.")
-            # Write each converted frame in its original order.
-            for frame in tqdm(converted_frames, desc="Writing frames", unit="frame"):
-                video_writer.write(frame)
-        # For a dataset, read and convert smaller batches to limit memory use.
-        else:
-            chunk_size: int = 1000
-            for start in tqdm(range(0, raw_frames.shape[0], chunk_size),
-                              desc="Writing frame chunks", unit="chunk"):
-                # Read only this batch; the final slice may contain fewer than 1,000 frames.
-                buffer: np.ndarray = raw_frames[start:start + chunk_size]
-                converted_frames = world_util.opponentmap_to_videoframe(buffer)
-                if converted_frames is None:
-                    raise NotImplementedError("opponentmap_to_videoframe must return converted frames.")
-                # Finish writing this batch before loading the next one.
-                for frame in converted_frames:
-                    video_writer.write(frame)
-    # On success or failure, finalize the video and close the input file.
+        # Dummy frame if we are filling gaps
+        dummy_frame: np.ndarray = np.zeros((frame_height, frame_width), dtype=np.uint8)
+
+        # Define a position of where we are in the buffer of 
+        # frames we have in memory to write 
+        # and how big it should be 
+        buffer_idx: int = 0
+        buffer_size: int = min(1000, len(raw_frames))
+
+        # This then allows us to process the first buffer before we begin writing
+        buffer: np.ndarray = world_util.opponentmap_to_videoframe(
+            raw_frames[:buffer_size, ..., :1], fps=fps
+        )
+
+        # Track recorded frames separately because inserted rows have no source image.
+        source_frame_index: int = 0
+
+        # Walk the output timeline, including any inserted frames.
+        for global_video_idx in tqdm(filled_timestamp_metadata.index, desc="Writing frames",
+                                     unit="frame", disable=not verbose):
+
+            # Recorded rows have valid Again values. Only inserted gap rows have
+            # NaN gain, so they write black frames without consuming source data.
+            analog_gain: float = float(filled_timestamp_metadata.at[global_video_idx, "Again"])
+            frame: np.ndarray
+            if pd.isna(analog_gain):
+                frame = dummy_frame.copy()
+            else:
+                # Refill only when a real frame consumes the previous batch.
+                if buffer_idx == len(buffer):
+                    start: int = source_frame_index
+                    buffer_raw: np.ndarray = raw_frames[start:start + buffer_size, ..., :1]
+                    buffer = world_util.opponentmap_to_videoframe(buffer_raw, fps=fps)
+                    buffer_idx = 0
+
+                # OpenCV drawing requires a contiguous image, so let's conver
+                frame = np.ascontiguousarray(buffer[buffer_idx, ..., 0])
+                buffer_idx += 1
+                source_frame_index += 1
+
+            # We provide an optional overlay to clearly mark the center of the output image 
+            # with a cross at the center 
+            # TODO: 30 degree and 60 degree rings around the center.
+            if overlay:
+                height: int = frame.shape[0]
+                width: int = frame.shape[1]
+                center: tuple[int, int] = (width // 2, height // 2)
+                cv2.drawMarker(frame, center, 0, markerType=cv2.MARKER_CROSS,
+                               markerSize=11, thickness=3)
+                cv2.drawMarker(frame, center, 255, markerType=cv2.MARKER_CROSS,
+                               markerSize=11, thickness=1)
+
+            # Write either the real or dummy frame to the video
+            video_writer.write(frame)
+
+    # Close the the video writer and dataset pointer in any 
+    # case if they exist 
     finally:
         if video_writer is not None:
             video_writer.release()
+        
         if dataset_pointer is not None:
             dataset_pointer.close()
 
+
+    return
 
 def main():
     """Run the command-line entry point."""

@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Any, Iterable
 
 import matplotlib.pyplot as plt
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 import numpy as np
 import pandas as pd
 import scipy.io
@@ -651,75 +653,66 @@ def generate_accelerometer_t(t: np.ndarray | list | tuple) -> np.ndarray:
     return LS_t
 
 
-def plot_chunk_readings(t_vector: np.ndarray, readings_buffer: np.ndarray,
-                        axes: np.ndarray | None=None, verbose: bool=False
-                       ) -> None | tuple:
-    """Plot a single recording buffer of MS readings.
-
-    Plots the MS data shaped ``(nSeconds, MS_SUNGLASSES_FRAME_SHAPE)`` onto
-    matplotlib axes, with one subplot per sensor chip (AS, TS, LS, TEMP).
+def plot_chunk_readings(
+    t_vector: np.ndarray,
+    readings_buffer: np.ndarray,
+    axes: dict[str, Axes] | np.ndarray | None = None,
+    verbose: bool = False,
+) -> tuple[Figure, np.ndarray] | None:
+    """Plot MS readings on the supplied sensor axes.
 
     Args:
-        t_vector: Time vector corresponding to the readings.
-        readings_buffer: Array of MS readings with shape
-            ``(nSeconds, MS_SUNGLASSES_FRAME_SHAPE)``.
-        axes: Optional matplotlib axes array to plot onto. If None, a new
-            2x2 figure and axes are created.
-
-        verbose: Show tqdm progress bars for sensor and channel loops.
+        t_vector: One timestamp per reading, in seconds.
+        readings_buffer: Combined MS readings, or AS-only counts when only AS is plotted.
+        axes: Dictionary with any of AS_ax, TS_ax, LS_ax, and TEMP_ax.
+            Omitted sensors are skipped. A legacy (2, 2) axes array is also
+            accepted. None creates and displays all four panels.
+        verbose: Show progress while plotting sensors and channels.
 
     Returns:
-        None if axes were provided, otherwise a tuple of ``(fig, axes)``.
+        Figure and axes array when creating a figure, otherwise None.
     """
-    # First, we will generate a figure + associated axis to plot
-    # if this has not been passed in
-    fig: None | plt.figure = None
-    if(axes is None):
-        fig, axes = plt.subplots(2, 2, figsize=(10,10)) # Size is 2,2 because we have 4 sensors 
+    fig: Figure | None = None
+    panel_axes: np.ndarray
+    sensor_names: tuple[str, ...] = ("AS", "TS", "LS", "TEMP")
 
-    # Next, we will parse the value (v) array into the appropriate chips 
-    # and channels 
-    chips_and_channels: dict[str, np.ndarray] = {chip_name: channels_df
-                                                 for chip_name, channels_df 
-                                                 in zip(("AS", "TS", "LS", "TEMP"),
-                                                        parse_readings(readings_buffer)
-                                                       ) 
-                                                }
+    # Create all panels by default, or map the legacy array to named axes.
+    if axes is None:
+        fig, panel_axes = plt.subplots(2, 2, figsize=(10, 10))
+        axes = panel_axes
+    if isinstance(axes, np.ndarray):
+        axes = {
+            f"{name}_ax": axes[index % 2, index // 2]
+            for index, name in enumerate(sensor_names)
+        }
 
-    # Next, we will plot all of the different chips onto the axes 
-    for chip_num, (chip_name, chip_channels_df) in enumerate(tqdm(chips_and_channels.items(), desc="Plotting MS sensors", disable=not verbose)):
-        # Convert the channels to a numpy array for simplicity, but also retrieve the column names 
-        chip_channels: np.ndarray = chip_channels_df.to_numpy()
-        channel_labels: list = chip_channels_df.columns
+    # Split the packed columns once. Only requested sensors are unpacked and labeled.
+    sensor_readings: tuple = parse_SERIAL(readings_buffer)
+    sensor_types: tuple = (MS_AS_DTYPE, MS_TS_DTYPE, MS_LS_DTYPE, MS_TEMP_DTYPE)
+    prefixes: tuple[str, ...] = ("A", "T", "L", "c")
 
-        # Retrieve the axes to plot on 
-        ax = axes[chip_num % 2, chip_num // 2]
+    for index, name in enumerate(tqdm(sensor_names, desc="Plotting MS sensors", disable=not verbose)):
+        if f"{name}_ax" not in axes:
+            continue
 
-        # Label the graph 
-        ax.set_title(chip_name, fontweight="bold")
-        ax.set_ylabel("Count")
-        ax.set_xlabel("Time [s]")
+        ax: Axes = axes[f"{name}_ax"]
+        channels: pd.DataFrame = reading_to_df(
+            sensor_readings[index], sensor_types[index], sensor_name=prefixes[index],
+        )
 
-        # Unpack the t vector if needed 
-        t: np.ndarray = t_vector if chip_name != "LS" else generate_accelerometer_t(t_vector)
+        # Accelerometer packets contain multiple samples per reading timestamp.
+        time: np.ndarray = generate_accelerometer_t(t_vector) if name == "LS" else t_vector
+        for label in tqdm(channels.columns, desc="Plotting MS channels", disable=not verbose):
+            ax.plot(time, channels[label].to_numpy(), label=label)
 
-        # Next, plot the channels of the chip onto the graph 
-        for channel_num in tqdm(range(chip_channels.shape[1]), desc="Plotting MS channels", disable=not verbose):
-            # Plot the channel with its associated label
-            ax.plot(t, chip_channels[:, channel_num], label=channel_labels[channel_num])
-
-
-        # Display a legend for the plot 
+        ax.set(title=name, xlabel="Time [s]", ylabel="Count")
         ax.legend(loc="upper right")
 
+    if fig is not None:
+        plt.show()
+        return fig, panel_axes
+    return None
 
-
-    # If we passed in axes, no need to return. 
-    if(not fig): return None 
-
-    # Otherwise, return the axes and figure 
-    plt.show()
-    return fig, axes
 
 def parse_packet(packet: bytes) -> tuple:
     """Parse a serial packet from the MS into raw sensor buffers.
