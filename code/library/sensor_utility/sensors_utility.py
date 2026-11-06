@@ -1,26 +1,39 @@
 """Utilities that operate on complete light-logger recordings."""
 
 import os
+import shutil
 import sys
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Literal
 from collections.abc import Iterable
 
 import dill
+import scipy.io
 import pandas as pd
 import h5py
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.backends.backend_agg import FigureCanvasAgg
+from matplotlib.lines import Line2D
 from matplotlib.axes import Axes
 from matplotlib.axes._secondary_axes import SecondaryAxis
 from matplotlib.collections import QuadMesh
 from matplotlib.figure import Figure
+from PIL import Image
 from natsort import natsorted
 from tqdm.auto import tqdm
 
 sys.path.append(os.path.dirname(__file__))
 import ms_util
 import world_util
+
+# Resolve the video helpers independently of the caller's working directory.
+video_library: Path = Path(__file__).resolve().parents[1] / "matlabIO" / "python_libraries"
+if str(video_library) not in sys.path:
+    sys.path.append(str(video_library))
+
+import video_io
 
 # Raw world timestamps use nanoseconds; MS timestamps use seconds.
 WORLD_NANOSECONDS_TO_SECONDS: float = 1e-9
@@ -115,6 +128,8 @@ def _process_raw_world_helper(
         excluding AGC settings, which vary by frame and are stored separately.
         /data/cone_weights stores per-frame cone weights (N, 3).
         /metadata/fps stores the world camera rate from config.pkl.
+        /data/num_dark_and_saturated_pixels stores raw counts (N, 2): pixels
+        <= the calibrated dark signal, then pixels >= 255, before transformation.
 
     Raises:
         AssertionError: World metadata has neither 4 legacy nor 6 modern columns.
@@ -135,6 +150,12 @@ def _process_raw_world_helper(
     world_fps: float = float(recording_metadata["sensors"]["W"]["sensor_mode"]["fps"])
     if not np.isfinite(world_fps) or world_fps <= 0:
         raise ValueError("World camera FPS in config.pkl must be finite and positive.")
+
+    # Load the calibrated raw-count floor before processing any images.
+    dark_threshold: float = float(scipy.io.loadmat(
+        Path(__file__).resolve().parents[3] / "derived" / "darkSignal.mat"
+    )["darkSignal"].item())
+    assert np.isfinite(dark_threshold), f"Dark threshold must be finite; got {dark_threshold}."
 
     def _write_hdf5_metadata(group: h5py.Group, values: dict[str, object]) -> None:
         """Recursively store this run's calibration metadata beneath an HDF5 group.
@@ -317,6 +338,16 @@ def _process_raw_world_helper(
                 "exposure": metadata_buffer[:, exposure_idx],
             }
 
+            # Count raw Bayer pixels before the pipeline can modify their values.
+            assert frame_buffer.ndim == 3, (
+                f"Raw Bayer frames must have shape (N, height, width); got {frame_buffer.shape}."
+            )
+            pixel_counts: np.ndarray = np.zeros((len(frame_buffer), 2), dtype=np.int64)
+            for frame_index, frame in enumerate(frame_buffer):
+                # One coordinate entry per matching raw pixel: dark first, saturated second.
+                pixel_counts[frame_index, 0] = len(np.where(frame <= dark_threshold)[0])
+                pixel_counts[frame_index, 1] = len(np.where(frame >= 255)[0])
+
             # Run the transformation pipeline
             data_and_processing_metadata: dict[str, object] = world_util.world_transformation_pipeline(
                 frame_buffer, agc_settings, chunk_gaze, age, n_workers=n_workers, demosaic_pool=demosaic_pool,
@@ -378,7 +409,21 @@ def _process_raw_world_helper(
             averages_dataset.resize(end_frame, axis=0)
             averages_dataset[frames_written:end_frame] = mean_rgb
 
-            # Append this AGC buffer 
+            # Append dark then saturated counts in the same frame order as the maps.
+            if "num_dark_and_saturated_pixels" not in data_group:
+                counts_dataset: h5py.Dataset = data_group.create_dataset(
+                    "num_dark_and_saturated_pixels", shape=(0, 2), maxshape=(None, 2),
+                    chunks=True, dtype=np.int64,
+                    compression="gzip", compression_opts=4, shuffle=True,
+                )
+                counts_dataset.attrs["columns"] = ["dark", "saturated"]
+                counts_dataset.attrs["dark_threshold"] = dark_threshold
+                counts_dataset.attrs["saturation_threshold"] = 255
+            counts_dataset = data_group["num_dark_and_saturated_pixels"]
+            counts_dataset.resize(end_frame, axis=0)
+            counts_dataset[frames_written:end_frame] = pixel_counts
+
+            # Append this AGC buffer
             for name, values in {**agc_settings, "timestamps": metadata_buffer[:, 0]}.items():
                 # If this dataset does not already exist, create it 
                 if name not in agc_group:
@@ -1083,20 +1128,21 @@ def _plot_raw_world_helper(
     axes: np.ndarray | None = None,
     verbose: bool = False,
 ) -> tuple[Figure, np.ndarray]:
-    """Plot raw world channels and camera settings in a 2-by-1 layout.
+    """Plot raw world channels and camera settings in a 3-by-1 layout.
 
     Args:
         path_to_raw: String or Path to raw world chunks and config.pkl.
-        axes: Two primary axes in panel order, or None to create a 2-by-1 figure.
+        axes: Three primary axes in panel order, or None to create a 3-by-1 figure.
         verbose: Show loading and plotting progress bars.
 
+
     Returns:
-        Figure and primary axes array of shape (2,). Tile 0 shows raw Bayer
+        Figure and primary axes array of shape (3,). Tile 0 shows raw Bayer
         R, G, B and whole-frame means. Tile 1 shows analog/digital gains on
-        the left (0-11) and exposure on the right (0-8333 microseconds), with
-        a combined legend. Both tiles use time in seconds and frame numbers
+        the left (0-11) and exposure on the right (0-10000 microseconds), with
+        a combined legend. All world tiles use time in seconds and frame numbers
         above. The exposure twin axis is not included in the returned array.
-        Does not show or save the figure.
+        Tile 2 shows raw dark/saturated pixel counts. Does not show or save the figure.
 
     Raises:
         ValueError: The axes count, frame data, or metadata are incompatible.
@@ -1109,17 +1155,22 @@ def _plot_raw_world_helper(
     # Validate supplied axes before setting up the figure.
     if axes is not None:
         axes = np.asarray(axes, dtype=object).reshape(-1)
-        if axes.size != 2:
-            raise ValueError("Raw world plotting requires two axes.")
+        assert axes.size == 3, f"Raw world plotting requires three axes; got {axes.size}."
 
     # If we didn't receive axes to plot on, we will create our own figure now 
     figure: Figure
     if axes is None:
-        figure, axes = plt.subplots(2, 1, figsize=(12, 9), constrained_layout=True)
+        figure, axes = plt.subplots(3, 1, figsize=(12, 12), constrained_layout=True)
 
     # Otherwise, use the figure belonging to the supplied axes.
     else:
         figure = axes[0].figure
+
+    # # Load the same raw-count threshold used during world processing.
+    # dark_threshold: float = float(scipy.io.loadmat(
+    #     Path(__file__).resolve().parents[3] / "derived" / "darkSignal.mat"
+    # )["darkSignal"].item())
+    # assert np.isfinite(dark_threshold), f"Dark threshold must be finite; got {dark_threshold}."
 
     # First, we get the world metadata from the chunks. This would include things 
     # such as the timestamp and AGC settings. We do not fill missing frames here
@@ -1136,6 +1187,53 @@ def _plot_raw_world_helper(
     world_util.plot_world_camera_settings(
         metadata, ax=axes[1], time_origin=0, verbose=verbose,
     )
+    # # Third panel: dark and saturated counts from the unmodified raw Bayer frames.
+    # count_chunks: list[np.ndarray] = []
+    # for metadata_path, data_path in tqdm(group_sensors_files(path_to_raw)["W"],
+    #                          desc="Counting raw world pixels", disable=not verbose):
+    #     frames: np.ndarray = np.load(data_path, mmap_mode="r")
+    #     if len(frames):
+    #         assert frames.ndim == 3, f"Raw Bayer frames must have shape (N, height, width); got {frames.shape}."
+    #         chunk_counts: np.ndarray = np.zeros((len(frames), 2), dtype=np.int64)
+    #         for frame_index, frame in enumerate(frames):
+    #             # One coordinate entry per matching raw pixel: dark first, saturated second.
+    #             chunk_counts[frame_index, 0] = len(np.where(frame <= dark_threshold)[0])
+    #             chunk_counts[frame_index, 1] = len(np.where(frame >= 255)[0])
+    #         count_chunks.append(chunk_counts)
+    # assert count_chunks, f"No nonempty world chunks found: {path_to_raw}"
+    # time: np.ndarray = metadata["timestamp"].to_numpy()
+    # pixel_counts: np.ndarray = np.concatenate(count_chunks)
+    # assert time.ndim == 1, f"World timestamps must be one-dimensional; got {time.shape}."
+    # assert time.size > 0, "Pixel counts require at least one world timestamp."
+    # assert np.all(np.isfinite(time)), "Pixel-count timestamps contain nonfinite values."
+    # assert np.all(np.diff(time) > 0), "Pixel-count timestamps must be strictly increasing."
+    # assert pixel_counts.shape == (len(time), 2), (
+    #     f"Dark/saturated counts must have shape {(len(time), 2)}; got {pixel_counts.shape}."
+    # )
+
+    # # Both raw-pixel counts share a scale so their magnitudes can be compared.
+    # axes[2].plot(time, pixel_counts[:, 0], color="black", label="Dark")
+    # axes[2].plot(time, pixel_counts[:, 1], color="tab:red", label="Saturated")
+    # axes[2].set_title("Dark and Saturated PixelCount")
+    # axes[2].set_ylabel("Pixel count")
+    # axes[2].set_xlabel("time [s]")
+    # axes[2].legend(loc="upper right")
+    # axes[2].grid(True, alpha=0.25)
+
+    # # Use actual timestamps so gaps do not shift the frame-number labels.
+    # frame_times: np.ndarray = time
+    # frame_indices: np.ndarray = np.arange(len(time), dtype=float)
+    # if len(time) == 1:
+    #     frame_times = np.array([time[0], time[0] + 1])
+    #     frame_indices = np.array([0., 1.])
+    # frame_axis: SecondaryAxis = axes[2].secondary_xaxis("top", functions=(
+    #     lambda times: _interpolate(times, frame_times, frame_indices),
+    #     lambda frames: _interpolate(frames, frame_indices, frame_times),
+    # ))
+    # frame_axis.set_xlabel("Frame number")
+    # frame_axis.xaxis.set_major_locator(plt.MaxNLocator(nbins=6, integer=True))
+    # Keep the panel reserved while pixel-count plotting is disabled.
+    axes[2].set_visible(False)
     return figure, axes
 
 
@@ -1206,19 +1304,23 @@ def _plot_raw_ms_helper(
 
 
 def plot_raw_recording(path_to_raw: str | Path, verbose: bool = False,
-                       plot_title: str | None = None) -> tuple[Figure, np.ndarray]:
-    """Plot a raw recording in a 3-by-1 figure.
+                       plot_title: str | None = None,
+                       time_range: tuple[int | float, int | float] | None = None) -> tuple[Figure, np.ndarray]:
+    """Plot a raw recording in a 4-by-1 figure.
 
     Args:
         path_to_raw: String or Path to raw world/MS chunks and config.pkl.
         verbose: Show loading and plotting progress bars.
         plot_title: Figure title; None uses the recording directory basename.
+        time_range: (start, end) in recording-clock seconds, including start
+            and excluding end. None plots the whole recording. Frame numbers
+            retain their original positions in the recording.
 
     Returns:
-        Figure and primary axes array of shape (3,). Top: raw Bayer R, G, B
+        Figure and primary axes array of shape (4,). Top: raw Bayer R, G, B
         and whole-frame means. Middle: analog/digital gains on the left and
         exposure in microseconds on the right, with a combined legend.
-        Bottom: AS spectral channel counts with a channel legend. All tiles
+        Third: dark/saturated pixel counts. Bottom: AS spectral channel counts with a channel legend. All tiles
         use time in seconds; world tiles also show frame numbers above.
         The exposure twin axis is excluded from the array. The figure is
         neither shown nor saved, and is closed if plotting fails.
@@ -1228,17 +1330,26 @@ def plot_raw_recording(path_to_raw: str | Path, verbose: bool = False,
         KeyError: Required recording configuration fields are missing.
         OSError: The recording directory, chunks, or config.pkl cannot be read.
     """
+    # Time bounds use the same recording-clock seconds shown on the plots.
+    if time_range is not None:
+        assert len(time_range) == 2, f"time_range must contain (start, end); got {time_range}."
+        assert all(isinstance(value, (int, float, np.integer, np.floating)) for value in time_range), (
+            f"time_range bounds must be numbers; got {time_range}."
+        )
+        assert np.all(np.isfinite(time_range)), f"time_range bounds must be finite; got {time_range}."
+        assert time_range[0] < time_range[1], f"time_range requires start < end; got {time_range}."
+
     path_to_raw = os.path.abspath(os.path.expanduser(path_to_raw))
 
-    # Reserve the first two panels for world data and the third for AS counts.
+    # Reserve the first three panels for world data and the fourth for AS counts.
     figure: Figure
     axes: np.ndarray
-    figure, axes = plt.subplots(3, 1, figsize=(14, 12), constrained_layout=True)
+    figure, axes = plt.subplots(4, 1, figsize=(14, 16), constrained_layout=True)
 
     # Try to plot the recording 
     try:
-        _plot_raw_world_helper(path_to_raw, axes[:2], verbose=verbose)
-        _plot_raw_ms_helper(path_to_raw, axes[2], verbose=verbose)
+        _plot_raw_world_helper(path_to_raw, axes[:3], verbose=verbose)
+        _plot_raw_ms_helper(path_to_raw, axes[3], verbose=verbose)
 
     # If an error happens, close the figure
     except Exception:
@@ -1249,6 +1360,53 @@ def plot_raw_recording(path_to_raw: str | Path, verbose: bool = False,
     if plot_title is None:
         plot_title = os.path.basename(path_to_raw)
     figure.suptitle(plot_title)
+
+    # Apply the selected time display window after all panels and labels exist.
+    # This changes the plotted data only; the raw sensor files remain unchanged.
+    if time_range is not None:
+        # Include samples at the start time, but exclude samples at the end time.
+        start_time: int | float = time_range[0]
+        end_time: int | float = time_range[1]
+
+        # `axes` contains the primary time-series panels. `figure.axes` also
+        # contains the exposure twin axis created by the camera-settings helper.
+        # Include primary panels and any twin axes sharing their time coordinates
+        # so exposure is masked along with the gain and raw sensor traces.
+        time_axes: list[Axes] = [
+            axis for axis in figure.axes
+            if any(
+                axis is primary or axis.get_shared_x_axes().joined(axis, primary)
+                for primary in axes.flat
+            )
+        ]
+
+        axis: Axes
+        line: Line2D
+        for axis in time_axes:
+            # A panel may contain multiple lines, each with its own sensor timestamps.
+            # For example, world-camera frames and MS readings have different sampling rates.
+            for line in axis.lines:
+                line_time: np.ndarray = np.asarray(line.get_xdata(), dtype=float)
+
+                # Copy into floating-point storage so NaNs can be assigned safely,
+                # even when the original plotted values were integer counts.
+                line_values: np.ndarray = np.asarray(line.get_ydata(), dtype=float).copy()
+                outside_range: np.ndarray = (line_time < start_time) | (line_time >= end_time)
+
+                # Hide values outside the window without deleting their timestamps.
+                # Keeping the time coordinates preserves the existing frame-number mapping.
+                line_values[outside_range] = np.nan
+                line.set_ydata(line_values)
+
+            # Recalculate data limits from the modified lines. Autoscaled value axes
+            # then fit the remaining finite samples; explicitly fixed scales stay fixed.
+            axis.relim()
+            axis.autoscale_view()
+
+            # Set the requested horizontal window explicitly, including intervals
+            # near the boundaries that contain no recorded samples.
+            axis.set_xlim(start_time, end_time)
+
     return figure, axes
 
 
@@ -1282,21 +1440,19 @@ def _plot_processed_world_helper(
     axes: np.ndarray | None = None,
     verbose: bool = False,
 ) -> tuple[Figure, np.ndarray]:
-    """Plot processed world data in a 2-by-1 layout.
+    """Plot processed world data in a 6-by-1 layout.
 
     Args:
         world_directory: String or Path to W, containing transformed.hdf5.
-        axes: Two primary axes in panel order, or None to create a 2-by-1 figure.
+        axes: Six primary axes in panel order, or None to create a 6-by-1 figure.
         verbose: Show loading and averaging progress bars.
 
+
     Returns:
-        Figure and primary axes array of shape (2,). Tile 0 shows spatial
-        opponent means: L+M (black) and L-M (orange) on the left, S-(L+M)
-        (purple) on a separate right scale. Tile 1 shows camera illuminance
-        in lux estimated from gain times exposure using the empirical camera
-        calibration. Both tiles use recorded time in seconds and stored-frame
-        numbers above. The opponent twin axis is excluded from the array.
-        Does not show or save the figure.
+        Figure and six primary axes: L+M, L-M, S-(L+M), camera settings,
+        illuminance, and raw dark/saturated pixel counts. Each opponent channel has its own scale. Channel
+        means are computed together in one pass and stored in an (N, 3)
+        matrix before plotting. Twin axes are excluded. Does not show or save.
 
     Raises:
         AssertionError: Timestamp, frame, or settings shapes do not match the
@@ -1308,14 +1464,13 @@ def _plot_processed_world_helper(
     # Validate supplied axes before setting up the figure.
     if axes is not None:
         axes = np.asarray(axes, dtype=object).reshape(-1)
-        if len(axes) != 2:
-            raise ValueError("World plotting requires two axes.")
+        assert len(axes) == 6, f"World plotting requires six axes; got {len(axes)}."
 
     # Create a local figure only when the caller has not supplied axes.
     figure: Figure
     if axes is None:
         figure, axes = plt.subplots(
-            2, 1, figsize=(12, 7), sharex=True, constrained_layout=True
+            6, 1, figsize=(12, 19), sharex=True, constrained_layout=True
         )
     else:
         figure = axes[0].figure
@@ -1363,6 +1518,14 @@ def _plot_processed_world_helper(
 
         
 
+        # assert "data/num_dark_and_saturated_pixels" in hdf5_filepointer, (
+        #     "World file is missing raw pixel counts; regenerate it with overwrite_existing=True."
+        # )
+        # pixel_counts: np.ndarray = hdf5_filepointer["data/num_dark_and_saturated_pixels"][:]
+        # assert pixel_counts.shape == (len(time), 2), (
+        #     f"Expected dark/saturated counts shaped {(len(time), 2)}; got {pixel_counts.shape}."
+        # )
+
         # Define the size of chunks of frames we will read into memory 
         chunk_size: int = 1000
 
@@ -1402,29 +1565,51 @@ def _plot_processed_world_helper(
 
                     opponent_channel_means[output_frame_index, channel_index] = valid_pixels.mean()
 
-    # Top panel: spatial means of the three opponent radiance channels over time.
-    # Give the S opponent channel its own scale while retaining a shared time axis.
-    right_axis: Axes = axes[0].twinx()
-    axes[0].plot(time, opponent_channel_means[:, 0], color="black", label="L+M")
-    axes[0].plot(time, opponent_channel_means[:, 1], color="darkorange", label="L-M")
-    right_axis.plot(time, opponent_channel_means[:, 2], color="purple", label="S-(L+M)")
-    axes[0].set_title("Average opponent radiance")
-    axes[0].set_ylabel("Mean L+M and L-M")
-    right_axis.set_ylabel("Mean S-(L+M)", color="purple")
-    right_axis.tick_params(axis="y", colors="purple")
-    axes[0].legend(handles=[*axes[0].lines, *right_axis.lines], loc="upper right")
+    # First three panels: separate spatial means of each opponent channel.
+    channel_labels: tuple[str, ...] = ("L+M", "L-M", "S-(L+M)")
+    channel_colors: tuple[str, ...] = ("black", "darkorange", "purple")
+    for channel_index, (label, color) in enumerate(zip(channel_labels, channel_colors)):
+        axes[channel_index].plot(
+            time, opponent_channel_means[:, channel_index], color=color,
+        )
+        axes[channel_index].set_title(f"Average {label} radiance")
+        axes[channel_index].set_ylabel(f"Mean {label}")
 
-    # Bottom panel: estimated world-camera illuminance over time.
-    # Gain times exposure maps through the empirical calibration to estimated lux.
+    # Fourth panel: camera analog/digital gain and exposure on separate scales.
+    settings_metadata: pd.DataFrame = pd.DataFrame({
+        "timestamp": time, "Again": settings[:, 0],
+        "Dgain": settings[:, 1], "exposure": settings[:, 2],
+    })
+    world_util.plot_world_camera_settings(
+        settings_metadata, ax=axes[3], time_origin=0, verbose=False,
+    )
+
+    # Fifth panel: world-camera illuminance estimated from gain times exposure.
     camera_scores: np.ndarray = np.prod(settings, axis=1, dtype=np.float64)
-    axes[1].plot(time, world_util.camera_scores_to_illuminance(camera_scores), label="World camera")
-    axes[1].set_title("Illuminance")
-    axes[1].set_ylabel("Illuminance [lux]")
+    axes[4].plot(
+        time, world_util.camera_scores_to_illuminance(camera_scores), label="World camera",
+    )
+    axes[4].set_title("Illuminance")
+    axes[4].set_ylabel("Illuminance [lux]")
 
-    # Add stored-frame coordinates above both world panels.
+    # # Sixth panel: raw dark/saturated pixel counts saved during processing.
+    # axes[5].plot(time, pixel_counts[:, 0], color="black", label="Dark")
+    # axes[5].plot(time, pixel_counts[:, 1], color="tab:red", label="Saturated")
+    # axes[5].set_title("Dark and Saturated PixelCount")
+    # axes[5].set_ylabel("Pixel count")
+    # axes[5].legend(loc="upper right")
+
+    axes[5].set_visible(False)
+
+    # Add stored-frame coordinates above the world panels.
     for axis in axes:
+        if not axis.get_visible():
+            continue
         axis.set_xlabel("time [s]")
         axis.grid(True, alpha=0.25)
+        # The settings helper already adds its own frame-number axis.
+        if axis is axes[3]:
+            continue
         frame_timestamps: np.ndarray = np.asarray(time, dtype=float)
         if (frame_timestamps.ndim != 1 or frame_timestamps.size == 0
                 or not np.all(np.isfinite(frame_timestamps)) or np.any(np.diff(frame_timestamps) <= 0)):
@@ -1464,7 +1649,8 @@ def _plot_processed_ms_helper(
         Figure and primary axes array of shape (2,). Tile 0 is a spectral
         radiance heatmap with time horizontally, wavelength vertically
         (400-900 nm), and a radiance colorbar. Tile 1 shows the overall fit
-        value (residual norm) over time. Both tiles use saved MS timestamps
+        value divided by the per-reading mean calibrated MS measurement over
+        time. Both tiles use saved MS timestamps
         in seconds without a world-time offset. The colorbar axis is excluded
         from the returned array. Does not show or save the figure.
 
@@ -1504,6 +1690,10 @@ def _plot_processed_ms_helper(
         # S defines the wavelength grid; fVal stores the fit residual norms.
         wavelength_sampling: np.ndarray = hdf5_file["data/S"][:].reshape(-1)
         fit_residual_norms: np.ndarray = hdf5_file["data/fVal"][:]
+
+        # Use the original counts and calibration saved with this fit.
+        raw_counts: np.ndarray = hdf5_file["data/counts/readings"][:]
+        radiance_weights: np.ndarray = hdf5_file["metadata/minispect_radiance_weights"][:]
 
     # Validate timestamps before computing intervals or checking aligned shapes.
     assert timestamps.ndim == 1, (
@@ -1559,6 +1749,40 @@ def _plot_processed_ms_helper(
         f"expected {(len(timestamps),)}, got {fit_residual_norms.shape}."
     )
 
+    # The joint fit uses seven MS channels, calibrated into radiance units.
+    assert raw_counts.ndim == 2, (
+        f"MS counts must have shape (nReadings, channels); got {raw_counts.shape}."
+    )
+    assert raw_counts.shape[0] == len(timestamps), (
+        f"MS counts must have {len(timestamps)} rows; got {raw_counts.shape[0]}."
+    )
+    assert radiance_weights.shape == (7,), (
+        f"Expected seven saved MS calibration weights; got {radiance_weights.shape}."
+    )
+    assert raw_counts.shape[1] >= len(radiance_weights), (
+        f"MS counts need at least {len(radiance_weights)} channels; got {raw_counts.shape[1]}."
+    )
+    assert np.all(np.isfinite(radiance_weights)), (
+        f"MS calibration weights must be finite; got {radiance_weights}."
+    )
+
+    # Match the count-to-radiance conversion used by the joint estimator.
+    calibrated_ms_measurements: np.ndarray = (
+        raw_counts[:, :len(radiance_weights)] / 10 ** radiance_weights
+    )
+    mean_ms_measurements: np.ndarray = calibrated_ms_measurements.mean(axis=1)
+
+    # Normalize each residual independently; undefined ratios remain missing.
+    valid_readings: np.ndarray = (
+        np.isfinite(mean_ms_measurements)
+        & (mean_ms_measurements > 0)
+        & np.isfinite(fit_residual_norms)
+    )
+    normalized_fit_values: np.ndarray = np.full(fit_residual_norms.shape, np.nan)
+    normalized_fit_values[valid_readings] = (
+        fit_residual_norms[valid_readings] / mean_ms_measurements[valid_readings]
+    )
+
     # S stores the starting wavelength, step size, and sample count.
     wavelengths: np.ndarray = (
         wavelength_sampling[0]
@@ -1579,10 +1803,10 @@ def _plot_processed_ms_helper(
     axes[0].set_ylabel("Wavelength [nm]")
     axes[0].set_ylim(400, 900)
 
-    # Bottom panel: per-spectrum fit residual norm over time.
-    axes[1].plot(timestamps, fit_residual_norms, color="tab:blue")
-    axes[1].set_title("Fit value")
-    axes[1].set_ylabel("Fit Value")
+    # Bottom panel: fit residual relative to mean calibrated MS signal over time.
+    axes[1].plot(timestamps, normalized_fit_values, color="tab:blue")
+    axes[1].set_title("Normalized fit value")
+    axes[1].set_ylabel("Residual norm / mean MS measurement")
 
     # Label both time axes without reporting progress for routine formatting.
     axis: Axes
@@ -1596,32 +1820,43 @@ def _plot_processed_ms_helper(
 
 
 def plot_processed_recording(recording_directory: str | Path, verbose: bool = False, *,
-                             plot_title: str | None = None) -> tuple[Figure, np.ndarray]:
-    """Plot processed world and MS data together in a 2-by-2 figure.
+                             plot_title: str | None = None,
+                             time_range: tuple[int | float, int | float] | None = None) -> tuple[Figure, np.ndarray]:
+    """Plot processed world/MS time series with a camera illuminance histogram.
 
     Args:
         recording_directory: String or Path to the parent directory containing
             W/transformed.hdf5 and M/transformed.hdf5.
         verbose: Show loading and plotting progress bars.
         plot_title: Figure title; None uses the recording directory basename.
+        time_range: (start, end) in recording-clock seconds, including start
+            and excluding end. None plots the whole recording. The histogram
+            includes only selected camera frames; frame numbers are not reset.
 
     Returns:
-        Figure and primary axes array of shape (2, 2). Top-left [0, 0]: mean
-        L+M and L-M on the left scale and S-(L+M) on a separate right scale,
-        with different colors for all three. Bottom-left [1, 0]: estimated
-        camera illuminance and calibrated
-        MS illuminance on the same lux scale. Top-right [0, 1]: spectral
-        radiance heatmap spanning 400-900 nm, with a colorbar. Bottom-right
-        [1, 1]: MS overall fit value (residual norm). All tiles use each
-        sensor's recorded time in seconds; world tiles show frame numbers
-        above. Twin and colorbar axes are excluded from the returned array.
-        Does not show or save the figure; closes it if plotting fails.
+        Figure and primary axes array of shape (4, 2). Left column: L+M,
+        L-M, S-(L+M), and camera AGC settings. Right column: MS spectral
+        radiance, normalized fit value, and camera/MS illuminance comparison.
+        The fourth-row right tile shows dark/saturated pixel counts. A full-width
+        fifth row shows a histogram of finite camera illuminance estimates,
+        with one observation per stored frame. The returned (4, 2) array contains
+        only the time-series panels; histogram, twin and colorbar axes are excluded.
+        Does not show or save; closes the figure on failure.
 
     Raises:
         OSError: A sensor file or calibration cannot be read.
         KeyError: A required dataset is missing.
         AssertionError: Dataset shapes or timestamps are incompatible.
     """
+    # Time bounds use the same recording-clock seconds shown on the plots.
+    if time_range is not None:
+        assert len(time_range) == 2, f"time_range must contain (start, end); got {time_range}."
+        assert all(isinstance(value, (int, float, np.integer, np.floating)) for value in time_range), (
+            f"time_range bounds must be numbers; got {time_range}."
+        )
+        assert np.all(np.isfinite(time_range)), f"time_range bounds must be finite; got {time_range}."
+        assert time_range[0] < time_range[1], f"time_range requires start < end; got {time_range}."
+
     # First, we will get the recording directory that was input
     recording_directory = os.path.abspath(os.path.expanduser(recording_directory))
 
@@ -1629,20 +1864,32 @@ def plot_processed_recording(recording_directory: str | Path, verbose: bool = Fa
     # to place world and MS panels side by side with independent time axes.
     figure: Figure
     axes: np.ndarray
-    figure, axes = plt.subplots(
-        2, 2, figsize=(18, 8), constrained_layout=True
-    )
+    figure = plt.figure(figsize=(18, 20), constrained_layout=True)
+    layout = figure.add_gridspec(5, 2)
+    axes = np.array([
+        [figure.add_subplot(layout[row, column]) for column in range(2)]
+        for row in range(4)
+    ], dtype=object)
+    histogram_axis: Axes = figure.add_subplot(layout[4, :])
+
 
     # Each helper plots its sensor's own time vector on the supplied axes.
     try:
         # First, let's plot the world plots along the first column
-        _plot_processed_world_helper(os.path.join(recording_directory, "W"), axes[:, 0], verbose=verbose)
+        _plot_processed_world_helper(
+            os.path.join(recording_directory, "W"),
+            np.array([*axes[:, 0], axes[2, 1], axes[3, 1]], dtype=object),
+            verbose=verbose,
+        )
         
-        # NExt, let's plot the MS plots along the second column
-        _plot_processed_ms_helper(os.path.join(recording_directory, "M"), axes[:, 1], verbose=verbose)
+        # Next, let's plot the MS plots along the second column
+        _plot_processed_ms_helper(
+            os.path.join(recording_directory, "M"), axes[:2, 1],
+            verbose=verbose,
+        )
         
-        
-        # Bottom-left panel: compare saved MS lux with camera illuminance.
+        # Third right panel: compare saved MS lux with camera illuminance.
+        # Retain each sensor's own recorded timestamps and full time span.
         with h5py.File(
             os.path.join(recording_directory, "M", "transformed.hdf5"), "r"
         ) as hdf5_file:
@@ -1654,16 +1901,23 @@ def plot_processed_recording(recording_directory: str | Path, verbose: bool = Fa
             f"expected {timestamps.shape}, got {illuminance_lux.shape}."
         )
 
-        # Compare the sensors over the processed camera interval using recorded time.
-        camera_time: np.ndarray = axes[1, 0].lines[0].get_xdata()
-        within_recording: np.ndarray = (
-            (timestamps >= camera_time[0]) & (timestamps <= camera_time[-1])
-        )
-        axes[1, 0].plot(
-            timestamps[within_recording], illuminance_lux[within_recording],
+        # Grab the plot of the camera illuminance and put the MS onto there
+        axes[2, 1].plot(
+            timestamps, illuminance_lux,
             color="darkorange", label="Minispectrometer",
         )
-        axes[1, 0].legend(loc="upper right")
+        axes[2, 1].legend(loc="upper right")
+
+        # Bottom panel: distribution of the camera lux estimates, one per frame.
+        camera_illuminance: np.ndarray = np.asarray(axes[2, 1].lines[0].get_ydata())
+        finite_illuminance: np.ndarray = camera_illuminance[np.isfinite(camera_illuminance)]
+        _, histogram_edges, histogram_bars = histogram_axis.hist(
+            finite_illuminance, bins=30, color="tab:blue", edgecolor="white",
+        )
+        histogram_axis.set_title("Camera illuminance distribution")
+        histogram_axis.set_xlabel("Camera illuminance [lux]")
+        histogram_axis.set_ylabel("Frame count")
+        histogram_axis.grid(axis="y", alpha=0.25)
 
     # If any error occurs, we need to close the figure
     except Exception:
@@ -1676,7 +1930,365 @@ def plot_processed_recording(recording_directory: str | Path, verbose: bool = Fa
         plot_title = os.path.basename(recording_directory)
     figure.suptitle(plot_title)
 
+    # Apply the selected time display window after all panels and labels exist.
+    # This changes the plotted data only; the saved sensor datasets remain unchanged.
+    if time_range is not None:
+        # Include samples at the start time, but exclude samples at the end time.
+        start_time: int | float = time_range[0]
+        end_time: int | float = time_range[1]
+
+        # `axes` contains the primary time-series panels. `figure.axes` also
+        # contains the exposure twin axis, histogram, and spectral colorbar.
+        # Include primary panels and any twin axes sharing their time coordinates.
+        # Exclude the histogram and colorbar because their axes do not represent time.
+        time_axes: list[Axes] = [
+            axis for axis in figure.axes
+            if any(
+                axis is primary or axis.get_shared_x_axes().joined(axis, primary)
+                for primary in axes.flat
+            )
+        ]
+
+        axis: Axes
+        line: Line2D
+        for axis in time_axes:
+            # A panel may contain multiple lines, each with its own sensor timestamps.
+            # For example, camera and MS illuminance have different sampling rates.
+            for line in axis.lines:
+                line_time: np.ndarray = np.asarray(line.get_xdata(), dtype=float)
+
+                # Copy into floating-point storage so NaNs can be assigned safely,
+                # even when the original plotted values were integer counts.
+                line_values: np.ndarray = np.asarray(line.get_ydata(), dtype=float).copy()
+                outside_range: np.ndarray = (line_time < start_time) | (line_time >= end_time)
+
+                # Hide values outside the window without deleting their timestamps.
+                # Keeping the time coordinates preserves the existing frame-number mapping.
+                line_values[outside_range] = np.nan
+                line.set_ydata(line_values)
+
+            # Recalculate data limits from the modified lines. Autoscaled value axes
+            # then fit the remaining finite samples; explicitly fixed scales stay fixed.
+            axis.relim()
+            axis.autoscale_view()
+
+            # Set the requested horizontal window explicitly, including intervals
+            # near the boundaries that contain no recorded samples.
+            axis.set_xlim(start_time, end_time)
+
+        # The spectral heatmap is a QuadMesh, not a line, so the loop above did not
+        # mask its values. Each heatmap column corresponds to one MS reading.
+        # The fit-value line retains the same complete MS timestamp array.
+        ms_time: np.ndarray = np.asarray(axes[1, 1].lines[0].get_xdata(), dtype=float)
+        outside_ms_range: np.ndarray = (ms_time < start_time) | (ms_time >= end_time)
+        spectral_mesh: QuadMesh = axes[0, 1].collections[0]
+
+        # Preserve existing missing spectra as NaNs and work on a separate copy.
+        # Restore wavelength-by-time shape if Matplotlib exposes a flattened array.
+        spectral_values: np.ndarray = np.asarray(spectral_mesh.get_array().filled(np.nan)).copy()
+        spectral_values = spectral_values.reshape(-1, len(ms_time))
+
+        # Hide every wavelength for excluded readings, using their timestamps rather
+        # than the inferred left/right edges of the heatmap cells. The color scale stays unchanged.
+        spectral_values[:, outside_ms_range] = np.nan
+        spectral_mesh.set_array(np.ma.masked_invalid(spectral_values))
+
+        # The histogram was initially drawn for the whole recording. Read the camera
+        # illuminance line AFTER the masking above: its out-of-window values are now NaN.
+        selected_lux: np.ndarray = np.asarray(axes[2, 1].lines[0].get_ydata(), dtype=float)
+
+        # Removing nonfinite values leaves only valid camera samples in [start, end).
+        # This also excludes any camera estimates that were already missing.
+        selected_lux = selected_lux[np.isfinite(selected_lux)]
+
+        # Recount those samples using the original lux bin edges. Keeping the edges
+        # fixed lets the selected-period distribution be compared with the full recording.
+        bin_counts: np.ndarray = np.histogram(selected_lux, bins=histogram_edges)[0]
+
+        # Replace each existing bar's height with its selected-period count.
+        # No new bars are added, and no out-of-window samples contribute to these heights.
+        for bar, count in zip(histogram_bars, bin_counts):
+            bar.set_height(int(count))
+
+        # Refresh the histogram limits after changing the bar heights. Its horizontal
+        # axis remains illuminance in lux, so it must not receive the time limits above.
+        histogram_axis.relim()
+        histogram_axis.autoscale_view()
+
     return figure, axes
+
+
+def animate_processed_recording(
+    recording_directory: str | Path,
+    verbose: bool = False,
+    *,
+    plot_title: str | None = None,
+    time_range: tuple[int | float, int | float] | None = None,
+    output_path: str | Path,
+    gif_fps: float = 5.0,
+    dpi: int = 60,
+    overwrite_existing: bool = False,
+) -> Path:
+    """Save an L+M camera video above the processed plots as a lossless AVI.
+
+    Reuse plot_processed_recording to draw the selected interval, then move red
+    time bars across its panels alongside the corresponding camera frames.
+
+    Args:
+        recording_directory: String or Path to the parent directory containing
+            W/transformed.hdf5 and M/transformed.hdf5.
+        verbose: Show loading, plotting, and animation-rendering progress bars.
+        plot_title: Figure title; None uses the recording directory basename.
+        time_range: (start, end) in recording-clock seconds, including start
+            and excluding end. None animates the complete camera recording.
+        output_path: Required destination string or Path ending in .avi.
+            Parent directories are created if needed.
+        gif_fps: Positive output sampling and playback rate in frames per second.
+            Defaults to 5.0; playback preserves recording time.
+        dpi: Positive integer resolution for rendering the processed plot.
+            Defaults to 60 dots per inch.
+        overwrite_existing: Allow replacing an existing output video.
+            Defaults to False.
+
+    Returns:
+        Absolute Path to the saved AVI video.
+
+    Raises:
+        AssertionError: Animation settings, time bounds, or camera data are invalid.
+        FileExistsError: The destination exists and overwrite_existing is False.
+        OSError: Input data cannot be read or output files cannot be written.
+        KeyError: A required sensor dataset is missing.
+        RuntimeError: The video encoder cannot open its output file.
+
+    Notes:
+        The histogram describes the entire selected interval and remains fixed
+        while the red time bars move. Camera timestamp gaps appear black instead
+        of holding an outdated frame. L+M display scaling uses a one-second
+        source window, including neighboring frames outside the selected interval.
+
+        Rendered PNGs are staged in a temporary directory and encoded through
+        video_io.dir_to_video. Memory use does not grow with animation duration,
+        but temporary disk usage does. The figure and temporary frames are cleaned
+        up on completion or failure. The finished video is moved to the requested
+        destination after encoding.
+    """
+    assert np.isfinite(gif_fps), f"Animation gif_fps must be finite; got {gif_fps}."
+    assert gif_fps > 0, f"Animation gif_fps must be positive; got {gif_fps}."
+    assert isinstance(dpi, int), f"dpi must be an integer; got {dpi}."
+    assert dpi > 0, f"dpi must be positive; got {dpi}."
+
+    # Resolve paths once so later file operations do not depend on the working directory.
+    recording_directory = Path(recording_directory).expanduser().resolve()
+    output_path = Path(output_path).expanduser().resolve()
+
+    # Ensure that the output path is correctly a .avi path and that if it exists, 
+    # we will not overwrite it unless we intended to 
+    assert output_path.suffix.lower() == ".avi", f"Output must be an AVI file; got {output_path}."
+    if output_path.exists() and not overwrite_existing:
+        raise FileExistsError(f"Animation already exists: {output_path}")
+
+    # Build the figure once without the video component for this time range
+    figure: Figure
+    axes: np.ndarray
+    figure, axes = plot_processed_recording(
+        recording_directory, verbose=verbose, plot_title=plot_title, time_range=time_range,
+    )
+
+    # Next, we will generate the animation on top of this plotted basis
+    try:
+
+        # Next, we will set the DPI of the figure, this lowers quality but increases speed
+        figure.set_dpi(dpi)
+
+        # Render directly to pixels without opening an interactive plotting window.
+        canvas: FigureCanvasAgg = FigureCanvasAgg(figure)
+
+        # Camera plot timestamps correspond directly to saved opponent-map frames.
+        camera_time: np.ndarray = np.asarray(axes[2, 1].lines[0].get_xdata(), dtype=float)
+        assert camera_time.size > 0, "Animation requires at least one camera frame."
+        assert np.all(np.isfinite(camera_time)), "Camera timestamps contain nonfinite values."
+        assert np.all(np.diff(camera_time) > 0), "Camera timestamps must be strictly increasing."
+
+        # Open up the saved processed world camera information
+        with h5py.File(recording_directory / "W" / "transformed.hdf5", "r") as saved:
+            # Get the frames dataset and the saved FPS
+            frames: h5py.Dataset = saved["data/frames"]
+            camera_fps: float = float(saved["metadata/fps"][()])
+            assert np.isfinite(camera_fps), f"Saved camera FPS must be finite; got {camera_fps}."
+            assert camera_fps > 0, f"Saved camera FPS must be positive; got {camera_fps}."
+            assert len(frames) == len(camera_time), "Camera timestamps and saved frames must have equal lengths."
+
+            # Include the final stored frame for its nominal duration by default.
+            start_time: float
+            end_time: float
+
+            # Define the range of the video to illustrate. The above plot already 
+            # took care of this, we just also need to do this for the video part 
+            # If if no specific time range, just take the first adn last timestamp 
+            if time_range is None:
+                start_time = float(camera_time[0])
+
+                # The end is exlusive, so need to add 1/camera_fps at the end 
+                end_time = float(camera_time[-1] + 1 / camera_fps)
+
+            # Otherwise, use the specified time range
+            else:
+                start_time = float(time_range[0])
+                end_time = float(time_range[1])
+
+            # Each timestamp below becomes one output video frame. For example,
+            # gif_fps=5 samples the recording every 0.2 seconds. Encoding those
+            # images at 5 frames per second keeps playback at the recorded speed.
+            # Stop before end_time to match the plotter's [start, end) selection.
+            animation_times: np.ndarray = np.arange(start_time, end_time, 1 / gif_fps)
+
+            # Add one red vertical line to each visible time-series panel.
+            # Keep the line objects so we can move them instead of rebuilding plots.
+            # The returned axes array excludes the histogram and colorbar; hidden
+            # panels, such as the disabled pixel-count plot, are skipped too.
+            cursors: list[Line2D] = [
+                axis.axvline(start_time, color="red", linewidth=1.5)
+                for axis in axes.flat if axis.get_visible()
+            ]
+
+            # Render the figure before reading its pixel dimensions. These dimensions
+            # determine the width of the video and the space reserved for the plot.
+            canvas.draw()
+
+            plot_width: int
+            plot_height: int
+            plot_width, plot_height = canvas.get_width_height()
+            # Reserve a camera area above the plot, half as tall as the plot is wide.
+            # The camera image will be resized and centered within this area.
+            camera_height: int = plot_width // 2
+
+            # Stack the camera area above the plot to get the total video height.
+            # Adding dimension % 2 adds one pixel only when that dimension is odd.
+            # Even dimensions avoid encoder cropping, and all frames use this same size.
+            video_width: int = plot_width + plot_width % 2
+            video_height: int = plot_height + camera_height
+            video_height += video_height % 2
+
+            # The display converter uses neighboring source frames to calculate
+            # the mean and standard deviation used to scale L+M into display values.
+            # Use one second at camera_fps, not gif_fps: these are camera frames,
+            # not output video frames. A shorter recording uses all available frames.
+            # The actual window position is chosen separately for each frame below.
+            window_frames: int = min(len(frames), max(1, int(round(camera_fps))))
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Save rendered images on disk so we do not keep the entire video in RAM.
+            # This directory and its PNGs are removed automatically when the block exits.
+            with TemporaryDirectory(prefix="processed_animation_") as temporary_directory:
+                image_directory: Path = Path(temporary_directory) / "frames"
+                image_directory.mkdir()
+
+                frame_number: int
+                timestamp: np.floating
+                cursor: Line2D
+
+                # frame_number names the output PNG; timestamp selects the camera
+                # image and positions every red time bar for that same instant.
+                for frame_number, timestamp in enumerate(tqdm(
+                    animation_times, desc="Rendering processed animation", disable=not verbose,
+                )):
+                    # Move both endpoints of each vertical line to the current time.
+                    # The sensor curves and histogram still describe the full selected
+                    # interval; only the red markers change from one frame to the next.
+                    for cursor in cursors:
+                        cursor.set_xdata([timestamp, timestamp])
+
+                    canvas.draw()
+
+                    # Capture the newly rendered plot as an image. Copy the pixel
+                    # buffer because Matplotlib reuses it on the next canvas.draw().
+                    # Convert RGBA to RGB so it matches the camera image and video.
+                    plot_image: Image.Image = Image.fromarray(
+                        np.asarray(canvas.buffer_rgba()).copy(),
+                    ).convert("RGB")
+
+                    # searchsorted(..., side="right") finds the first camera time
+                    # strictly after this output time. Subtracting one selects the
+                    # most recent camera frame at or before it, including exact matches.
+                    # A result of -1 means the output time precedes the first camera frame.
+                    source_index: int = int(np.searchsorted(camera_time, timestamp, side="right") - 1)
+                    camera_image: Image.Image = Image.new("RGB", (plot_width, camera_height), "black")
+
+                    # Start with a black camera area and replace it only if a recent
+                    # source frame exists. One nominal camera frame lasts 1/camera_fps
+                    # seconds; the 1.5 multiplier allows modest timestamp jitter.
+                    # If the latest frame is older than that, leave the area black
+                    # instead of holding an old image across a missing-frame gap.
+                    if source_index >= 0 and timestamp - camera_time[source_index] < 1.5 / camera_fps:
+                        # Center the normalization window on the selected source frame.
+                        # max(..., 0) prevents starting before the recording; the outer
+                        # min keeps the full window inside the end of the dataset.
+                        # Near either end, shift the window inward without shortening it.
+                        # This window may include frames outside the requested time range
+                        # because those neighbors are used for display scaling only.
+                        window_start: int = min(
+                            max(source_index - window_frames // 2, 0),
+                            len(frames) - window_frames,
+                        )
+                        opponent_frames: np.ndarray = frames[window_start:window_start + window_frames]
+                        display_frames: np.ndarray = world_util.opponentmap_to_videoframe(
+                            opponent_frames, fps=camera_fps, window_seconds=1.0,
+                        )
+
+                        # source_index refers to the full recording; subtract window_start
+                        # to locate that frame within the small buffer we just converted.
+                        # Select channel zero (L+M) and represent its grayscale values
+                        # as RGB. The converter already handles the image orientation.
+                        local_index: int = source_index - window_start
+                        lm_image: Image.Image = Image.fromarray(
+                            display_frames[local_index, ..., 0],
+                        ).convert("RGB")
+
+                        # Calculate the scale needed to fit each dimension, then choose
+                        # the smaller scale so neither width nor height exceeds the area.
+                        # Apply that same scale to both dimensions to preserve proportions.
+                        # LANCZOS smooths the resized image; max(1, ...) avoids zero pixels.
+                        image_scale: float = min(plot_width / lm_image.width, camera_height / lm_image.height)
+                        lm_image = lm_image.resize(
+                            (max(1, int(lm_image.width * image_scale)),
+                             max(1, int(lm_image.height * image_scale))),
+                            Image.Resampling.LANCZOS,
+                        )
+
+                        # Split the unused width and height equally on both sides.
+                        # These offsets center the image within the black camera area.
+                        camera_position: tuple[int, int] = (
+                            (plot_width - lm_image.width) // 2,
+                            (camera_height - lm_image.height) // 2,
+                        )
+                        camera_image.paste(lm_image, camera_position)
+
+                    # Compose the final frame: camera at the top, plot directly below.
+                    # PIL positions are (left, top), so the plot starts at camera_height.
+                    # The white background also fills any one-pixel padding added above.
+                    combined_image: Image.Image = Image.new(
+                        "RGB", (video_width, video_height), "white",
+                    )
+                    combined_image.paste(camera_image, (0, 0))
+                    combined_image.paste(plot_image, (0, camera_height))
+
+                    # Save one PNG per output timestamp. Eight-digit numbering gives
+                    # each frame a unique name in playback order (00000000.png, etc.).
+                    # dir_to_video reads these images after the rendering loop finishes.
+                    combined_image.save(image_directory / f"{frame_number:08d}.png")
+
+                # Let's turn this directory of frames into a video, output at a temporary location for now
+                temporary_video: Path = Path(temporary_directory) / "animation.avi"
+                video_io.dir_to_video(str(image_directory), str(temporary_video), fps=gif_fps)
+
+                # Move the finished video to the requested output location.
+                shutil.move(str(temporary_video), str(output_path))
+
+        return output_path
+
+    finally:
+        # Release the plot even if reading, rendering, or video encoding fails.
+        plt.close(figure)
 
 
 def main() -> None:

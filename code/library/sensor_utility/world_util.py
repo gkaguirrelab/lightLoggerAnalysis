@@ -4516,7 +4516,7 @@ def plot_world_camera_settings(
     gain_axis.set_ylabel("Gain", color="#08306b")
     exposure_axis.set_ylabel("Exposure", color="#d94801")
     gain_axis.set_ylim(0, 11)
-    exposure_axis.set_ylim(0, 8333)
+    exposure_axis.set_ylim(0, 10000)
     gain_axis.tick_params(axis="y", colors="#08306b")
     exposure_axis.tick_params(axis="y", colors="#d94801")
     gain_axis.spines["left"].set_color("#08306b")
