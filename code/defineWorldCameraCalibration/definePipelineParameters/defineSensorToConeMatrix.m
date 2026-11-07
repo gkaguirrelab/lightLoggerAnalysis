@@ -1,9 +1,11 @@
 % defineSensorToConeMatrix.m
 %
-% This script derives the 3x3 transformation matrix to convert IMX219 
-% camera RGB sensor values into LMS cone isomerization rates. It bases the 
-% cone sensitivities on 2-degree foveal fundamentals for a standard observer 
-% and saves the resulting matrix to the "derived" directory.
+% This script derives the 3x3 transformation matrix to convert IMX219
+% camera RGB sensor values into LMS cone isomerization rates. It bases the
+% cone sensitivities on 2-degree foveal fundamentals for a standard
+% observer. It also derives a 1x3 vector to convert RGB to photopic
+% luminance (V_lambda). It saves the resulting matrices to the "derived"
+% directory.
 
 clear all
 close all
@@ -39,6 +41,21 @@ T_receptors = GetHumanPhotoreceptorSS(commonS, ...
 % T_receptors is 3xN, sensorSensitivities is Nx3 (so its transpose is 3xN)
 rgb2lmsMatrix = T_receptors * pinv(sensorSensitivities');
 
+% Load the CIE 1931 XYZ color matching functions to get the luminance
+% function (V_lambda)
+load T_xyz1931
+
+% T_xyz1931(2,:) corresponds to the y-bar (V_lambda) function
+T_vLambda_common = SplineCmf(S_xyz1931, T_xyz1931(2,:), commonS);
+
+% Define peak luminous efficacy (Km) in lumens per watt
+Km = 683;
+
+% Calculate the 1x3 transformation vector to convert RGB to absolute
+% Luminance (Scaled by Km to yield photometric units rather than a
+% normalized response)
+rgb2lumVector = Km * (T_vLambda_common * pinv(sensorSensitivities'));
+
 % Save the resulting matrix to the derived directory
 saveFileName = fullfile(...
     tbLocateProjectSilent('lightLoggerAnalysis'),...
@@ -46,8 +63,9 @@ saveFileName = fullfile(...
     'sensorToConeMatrix.mat');
 
 readme = ['Created by defineSensorToConeMatrix.\n'...
-    'rgb2lmsMatrix -- 3x3 matrix to project IMX219 RGB radiance to LMS cone fundamentals.\n'];
+    'rgb2lmsMatrix -- 3x3 matrix to project IMX219 RGB radiance to LMS cone fundamentals.\n' ...
+    'rgb2lumVector -- 1x3 vector to project IMX219 RGB radiance to photopic luminance (V_lambda).\n'];
 
-save(saveFileName, 'readme', 'rgb2lmsMatrix');
+save(saveFileName, 'readme', 'rgb2lmsMatrix', 'rgb2lumVector');
 
-fprintf('\nTransformation matrix derived and saved to:\n%s\n\n', saveFileName);
+fprintf('\nTransformation matrices derived and saved to:\n%s\n\n', saveFileName);

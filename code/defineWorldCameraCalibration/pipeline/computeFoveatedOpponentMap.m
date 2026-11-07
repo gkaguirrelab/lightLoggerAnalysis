@@ -1,7 +1,7 @@
-function [postRecepMap, coneWeights, AzGrid, ElGrid] = computeFoveatedOpponentMap(integratedRadianceMap, options)
+function [postRecepMap, coneWeights, AzGrid, ElGrid, cameraIlluminanceLux] = computeFoveatedOpponentMap(integratedRadianceMap, options)
 % COMPUTEFOVEATEDOPPONENTMAP Converts an integrated RGB radiance map into a 
 % foveated, post-receptoral opponent channel map using a uniform RGB-to-LMS 
-% conversion based on 2-degree cone fundamentals.
+% conversion based on 2-degree cone fundamentals. Also computes mean scene luminance.
 %
 % Inputs:
 %   integratedRadianceMap - H x W x 3 matrix of RGB radiance
@@ -12,6 +12,12 @@ function [postRecepMap, coneWeights, AzGrid, ElGrid] = computeFoveatedOpponentMa
 %   elevationGrid    - Grid spacing for elevation (default: -90:0.5:90)
 %   balanceNeutral   - Dynamically adapt weights to the scene mean (default: false)
 %   wL_eff, wM_eff, wS_eff - Fixed cone weights when not balancing neutral
+%
+% Outputs:
+%   postRecepMap        - Resampled post-receptoral opponent channels (Ach, RG, BY)
+%   coneWeights         - The effective [wL, wM, wS] weights used
+%   AzGrid, ElGrid      - The visual angle coordinate grids
+%   sceneIlluminanceLux - The illuminance
 
 arguments
     integratedRadianceMap (:,:,3) double
@@ -25,15 +31,15 @@ arguments
     options.wS_eff (1,1) double = 5
 end
 
-persistent nativeAzimuthMap nativeElevationMap F_interp rgb2lmsMatrix
+persistent nativeAzimuthMap nativeElevationMap F_interp rgb2lmsMatrix rgb2lumVector
 
-% Load the uniform transformation matrix from the derived directory
-if isempty(rgb2lmsMatrix)
+% Load the uniform transformation matrices from the derived directory
+if isempty(rgb2lmsMatrix) || isempty(rgb2lumVector)
     matrixFileName = fullfile(...
         tbLocateProjectSilent('lightLoggerAnalysis'),...
         'derived',...
         'sensorToConeMatrix.mat');
-    load(matrixFileName, 'rgb2lmsMatrix');
+    load(matrixFileName, 'rgb2lmsMatrix', 'rgb2lumVector');
 end
 
 % Load mapping grids if not already in memory
@@ -47,6 +53,12 @@ if isempty(nativeAzimuthMap)
     F_interp = scatteredInterpolant(nativeAzimuthMap(:), nativeElevationMap(:), ...
         zeros(numel(nativeAzimuthMap), 1), 'linear', 'none');
 end
+
+% Compute scene illuminance
+fullRadianceFlat = reshape(integratedRadianceMap, [], 3);
+validFullMask = ~isnan(fullRadianceFlat(:,1));
+fullLuminanceFlat = (rgb2lumVector * fullRadianceFlat(validFullMask, :)')';
+cameraIlluminanceLux = mean(fullLuminanceFlat,'omitnan')*pi;
 
 % Get the image dimensions and handle default gaze
 [H_native, W_native, ~] = size(integratedRadianceMap);
