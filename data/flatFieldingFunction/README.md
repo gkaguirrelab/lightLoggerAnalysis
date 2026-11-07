@@ -79,6 +79,7 @@ of the initial image) obtained at ~20° elevation from the horizon (so, 70° ecc
 This is an average change of 3 cd/m2 over 70°. I unfortunately did not obtain a measurement in between, so we will have to assume 
 a linear fall-off of intensity with eccentricity of about 0.0428 cd/m2/deg as we move away from the zenith.
 
+I took a picture of the PR670 screen for the measurement of the zenith. This image is saved here as "screenPhotoPR670". I used a gemini AI process to extract the values in the image and save these as the matlab file "planetariumSPD.mat".
 
 *Generation of the Average Flat-Field Image* 
 
