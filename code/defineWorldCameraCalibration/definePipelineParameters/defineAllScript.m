@@ -13,10 +13,8 @@ defineRadiometricWeights
 defineCameraToVisualAngles
 defineAGCToIntegratedRadianceViaMacbeth
 defineSensorToConeMapping
-
-% Not strictly part of the IMX219 camera calibration pathway, but
-% nonetheless lives here.
 defineMinispectRadianceWeights
+defineSensorToPhotoreceptorMatrix
 
 % We can define the AGC -> integrated radiance conversion using either:
 %{

@@ -1,13 +1,14 @@
-function [meanSceneRadiance, S, fVal, fitErrors] = estimateJointRadianceSpectrum(minispectValues, radianceMap)
+function [meanSceneRadiance, S, fVal, fitErrors, sceneIlluminanceLux, sceneMelanopicLux] = estimateJointRadianceSpectrum(minispectValues, radianceMap)
 % Spectral Reconstruction combining 7 of the AS7341 Channels and 3 IMX219
 % Channels. Uses joint Tikhonov Regularization to estimate mean
-% environmental radiance.
+% environmental radiance
 
 showPlots = false;
 
-%% 1. Load and Format ASM7341 Sensitivities
-persistent miniSpectT miniSpectWls miniSpectKVals
+%% Load and Format ASM7341 Sensitivities and Illuminance CMFs
+persistent miniSpectT miniSpectWls miniSpectKVals T_xyz_minispect T_mel_minispect Km_photo Km_mel
 if isempty(miniSpectT)
+    % Load ASM7341 Sensitivities
     paramFileName = fullfile(...
         tbLocateProjectSilent('lightLoggerAnalysis'), 'data', 'ASM7341_spectralSensitivity.mat');
     load(paramFileName,'T');
@@ -15,6 +16,15 @@ if isempty(miniSpectT)
     miniSpectT = table2array(T(:,["F1" "F2" "F3","F4","F5","F6","F7"]))';
     % Sensitivity is max-normalized
     miniSpectT = miniSpectT ./ max(miniSpectT')';
+
+    % Load Derived Illuminance Matrices and Constants
+    derivedFileName = fullfile(...
+        tbLocateProjectSilent('lightLoggerAnalysis'), 'derived', 'sensorToPhotoreceptorMatrix.mat');
+    derivedData = load(derivedFileName, 'T_xyz_minispect', 'T_mel_minispect', 'Km_photo', 'Km_mel');
+    T_xyz_minispect = derivedData.T_xyz_minispect;
+    T_mel_minispect = derivedData.T_mel_minispect;
+    Km_photo = derivedData.Km_photo;
+    Km_mel = derivedData.Km_mel;
 end
 
 if isempty(miniSpectKVals)
@@ -25,7 +35,7 @@ if isempty(miniSpectKVals)
     miniSpectKVals = fitObj.coeff(1:nChannelsAS,2);
 end
 
-%% 2. Load and Format IMX219 Sensitivities
+%% Load and Format IMX219 Sensitivities
 persistent cameraT
 if isempty(cameraT)
     paramFileNameCam = fullfile(...
@@ -49,7 +59,7 @@ for cc = 1:3
 end
 
 
-%% 3. Construct the Unified Forward Model
+%% Construct the Unified Forward Model
 N = length(miniSpectWls);
 
 % AS7341 calibrated integrated radiance
@@ -65,7 +75,7 @@ A_joint = [miniSpectT; cameraT];
 y_joint = [y_as; y_cam];
 
 
-%% 4. Setup Joint Tikhonov Regularization (with Shrinkage)
+%% Setup Joint Tikhonov Regularization (with Shrinkage)
 % Create the second-derivative matrix D to enforce smoothness
 D = diff(eye(N), 2);
 
@@ -90,7 +100,7 @@ C = [A_joint; sqrt(alpha) * D; sqrt(beta) * I_mat];
 d = [y_joint; zeros(N-2, 1); zeros(N, 1)];
 
 
-%% 5. Solve using Constrained Linear Least Squares
+%% Solve using Constrained Linear Least Squares
 lb = zeros(N, 1);
 
 % Initialize upper bounds to infinity
@@ -109,32 +119,44 @@ y_predicted = A_joint * x_est;
 fitErrors = y_joint - y_predicted;
 fVal = norm(fitErrors);
 
+% Prepare variables to return
+meanSceneRadiance = x_est;
+S = WlsToS(miniSpectWls);
 
-%% 6. Visualization
+
+%% Derived Illuminance & Melanopic Equivalent Daylight Illuminance
+
+% Photopic Scene Illuminance (Lux) and Melanopic Equivalent Daylight
+% Illuminance (mEDI)
+sceneIlluminanceLux = Km_photo * (T_xyz_minispect(2, :) * meanSceneRadiance * pi);
+sceneMelanopicLux = Km_mel * (T_mel_minispect * meanSceneRadiance * pi);
+
+
+%% Visualization
 if showPlots
     % --- DIAGNOSTIC PLOT ---
     figure('Name', 'Estimated Spectrum and Scaled Sensitivities');
     hold on; grid on;
-    
+
     % Plot the estimated continuous mean radiance spectrum
     plot(miniSpectWls, x_est, 'k-', 'LineWidth', 2.5, 'DisplayName', 'Estimated Spectrum');
-    
+
     numChannels = length(y_predicted);
-    
+
     for i = 1:numChannels
         % Identify lambda max for color mapping
         sensitivitySpectrum = A_joint(i, :);
         [~, maxIdx] = max(sensitivitySpectrum);
         lambdaMax = miniSpectWls(maxIdx);
-        
+
         % Obtain RGB color corresponding to lambda max
         lineColor = wavelength2color(lambdaMax);
-        
+
         % Convert integrated radiance back to an effective mean spectral radiance
         % so it plots on the same scale as x_est
         effectiveMeanRadiance = y_predicted(i) / sum(sensitivitySpectrum);
         scaledSensitivity = sensitivitySpectrum * effectiveMeanRadiance;
-        
+
         % Format line thickness and labels based on the sensor chip
         if i <= size(miniSpectT, 1)
             chName = sprintf('ASM7341 Ch %d (\\lambda_{max}=%d)', i, round(lambdaMax));
@@ -144,14 +166,14 @@ if showPlots
             chName = sprintf('%s (\\lambda_{max}=%d)', rgbNames{i - size(miniSpectT, 1)}, round(lambdaMax));
             lineWidth = 3.0; % Thick solid line for IMX chip
         end
-        
+
         plot(miniSpectWls, scaledSensitivity, '-', 'Color', lineColor, ...
             'LineWidth', lineWidth, 'DisplayName', chName);
     end
-    
+
     % Restrict the X axis to the relevant visible/NIR domain
     xlim([400 800]);
-    
+
     xlabel('Wavelength (nm)');
     ylabel('Radiance (W/m^2/sr/nm)');
     title('Estimated Radiance Spectrum & Scaled Sensor Sensitivities');
@@ -168,9 +190,11 @@ if showPlots
     legend('Measured (y)', 'Predicted (A*x_{est})', 'Location', 'northwest');
 end
 
-meanSceneRadiance = x_est;
-S = WlsToS(miniSpectWls);
+
+
 end
+
+
 
 %% LOCAL FUNCTIONS
 

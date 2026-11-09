@@ -2,8 +2,8 @@
 clear
 
 % Pick a measurement
-measurementName = 'planetarium_AGCandMS_01.mat';
-%measurementName = 'outdoor_AGCandMS_02.mat';
+%measurementName = 'planetarium_AGCandMS_01.mat';
+measurementName = 'outdoor_AGCandMS_02.mat';
 %measurementName = 'indoor_AGCandMS_01.mat';
 %measurementName = 'macbeth_AGCandMS_02.mat';
 
@@ -23,29 +23,22 @@ radianceMapDemosaiced = demosaicRadianceMap(imageStages{end});
 
 % Obtain the mean environmental radiance from the  minispect and
 % radianceMap
-[meanSceneRadiance, S, fVal] = ...
+[meanSceneRadiance, S, fVal, fitErrors, sceneIlluminanceLux, sceneMelanopicLux] = ...
     estimateJointRadianceSpectrum(minispectValue.AS, radianceMapDemosaiced);
-
-% Obtain the minispect scene illuminance. Load the CIE 1931 XYZ color
-% matching functions. Spline the CMFs to the wavelength support of our
-% radiance spectrum Multiplying by 683 scales the functions to the maximum
-% luminous efficacy (lm/W).
-load('T_xyz1931.mat', 'T_xyz1931', 'S_xyz1931');
-T_xyz = SplineCmf(S_xyz1931, 683 * T_xyz1931, S);
-minispectIlluminanceLux = T_xyz(2, :) * meanSceneRadiance * pi;
 
 % Obtain the foveated integrated cone radiance, further converted into
 % post-receptoral channels.
 gazeX = 320;
 gazeY = 240;
 
-[opponentConeRadianceMap,coneWeights, AzGrid,ElGrid, cameraIlluminanceLux] = computeFoveatedOpponentMap(radianceMapDemosaiced, ...
+[opponentConeRadianceMap,coneWeights, AzGrid,ElGrid, cameraIlluminanceLux] = ...
+    computeFoveatedOpponentMap(radianceMapDemosaiced, ...
     'gazeX', gazeX, ...
     'gazeY', gazeY,...
     'balanceNeutral', true);
 
 % Report the illuminance values
-fprintf('minispect illuminance: %2.1f lux; camera illuminance: %2.1f lux\n',minispectIlluminanceLux,cameraIlluminanceLux);
+fprintf('minispect mEDI: %2.1f lux; minispect illuminance: %2.1f lux; camera illuminance: %2.1f lux\n',sceneMelanopicLux,sceneIlluminanceLux,cameraIlluminanceLux);
 
 % Display the reconstruction
 plotReconstructionStages(imageStages)
