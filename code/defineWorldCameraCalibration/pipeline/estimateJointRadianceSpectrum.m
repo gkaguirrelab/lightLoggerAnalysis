@@ -1,4 +1,4 @@
-function [meanSceneRadiance, S, fVal, fitErrors, sceneIlluminanceLux, sceneMelanopicLux] = estimateJointRadianceSpectrum(minispectValues, radianceMap)
+function [meanSceneRadiance, S, minispectIllumLux, minispecteMelEDI, fVal, fitErrors] = estimateJointRadianceSpectrum(minispectValues, radianceMap)
 % Spectral Reconstruction combining 7 of the AS7341 Channels and 3 IMX219
 % Channels. Uses joint Tikhonov Regularization to estimate mean
 % environmental radiance
@@ -128,8 +128,8 @@ S = WlsToS(miniSpectWls);
 
 % Photopic Scene Illuminance (Lux) and Melanopic Equivalent Daylight
 % Illuminance (mEDI)
-sceneIlluminanceLux = Km_photo * (T_xyz_minispect(2, :) * meanSceneRadiance * pi);
-sceneMelanopicLux = Km_mel * (T_mel_minispect * meanSceneRadiance * pi);
+minispectIllumLux = Km_photo * (T_xyz_minispect(2, :) * meanSceneRadiance * pi);
+minispecteMelEDI = Km_mel * (T_mel_minispect * meanSceneRadiance * pi);
 
 
 %% Visualization

@@ -1,4 +1,4 @@
-function [postRecepMap, coneWeights, AzGrid, ElGrid, cameraIlluminanceLux] = computeFoveatedOpponentMap(integratedRadianceMap, options)
+function [postRecepMap, coneWeights, AzGrid, ElGrid, cameraIllumLux] = computeFoveatedOpponentMap(integratedRadianceMap, options)
 % COMPUTEFOVEATEDOPPONENTMAP Converts an integrated RGB radiance map into a 
 % foveated, post-receptoral opponent channel map using a uniform RGB-to-LMS 
 % conversion based on 2-degree cone fundamentals. Also computes mean scene luminance.
@@ -38,7 +38,7 @@ if isempty(rgb2lmsMatrix) || isempty(rgb2lumVector)
     matrixFileName = fullfile(...
         tbLocateProjectSilent('lightLoggerAnalysis'),...
         'derived',...
-        'sensorToConeMatrix.mat');
+        'sensorToPhotoreceptorMatrix.mat');
     load(matrixFileName, 'rgb2lmsMatrix', 'rgb2lumVector');
 end
 
@@ -58,7 +58,7 @@ end
 fullRadianceFlat = reshape(integratedRadianceMap, [], 3);
 validFullMask = ~isnan(fullRadianceFlat(:,1));
 fullLuminanceFlat = (rgb2lumVector * fullRadianceFlat(validFullMask, :)')';
-cameraIlluminanceLux = mean(fullLuminanceFlat,'omitnan')*pi;
+cameraIllumLux = mean(fullLuminanceFlat,'omitnan')*pi;
 
 % Get the image dimensions and handle default gaze
 [H_native, W_native, ~] = size(integratedRadianceMap);

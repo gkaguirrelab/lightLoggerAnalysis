@@ -23,7 +23,7 @@ radianceMapDemosaiced = demosaicRadianceMap(imageStages{end});
 
 % Obtain the mean environmental radiance from the  minispect and
 % radianceMap
-[meanSceneRadiance, S, fVal, fitErrors, sceneIlluminanceLux, sceneMelanopicLux] = ...
+[meanSceneRadiance, S, minispectIllumLux, minispecteMelEDI] = ...
     estimateJointRadianceSpectrum(minispectValue.AS, radianceMapDemosaiced);
 
 % Obtain the foveated integrated cone radiance, further converted into
@@ -31,14 +31,14 @@ radianceMapDemosaiced = demosaicRadianceMap(imageStages{end});
 gazeX = 320;
 gazeY = 240;
 
-[opponentConeRadianceMap,coneWeights, AzGrid,ElGrid, cameraIlluminanceLux] = ...
+[opponentConeRadianceMap,coneWeights, AzGrid,ElGrid, cameraIllumLux] = ...
     computeFoveatedOpponentMap(radianceMapDemosaiced, ...
     'gazeX', gazeX, ...
     'gazeY', gazeY,...
     'balanceNeutral', true);
 
 % Report the illuminance values
-fprintf('minispect mEDI: %2.1f lux; minispect illuminance: %2.1f lux; camera illuminance: %2.1f lux\n',sceneMelanopicLux,sceneIlluminanceLux,cameraIlluminanceLux);
+fprintf('minispect mEDI: %2.1f lux; minispect illuminance: %2.1f lux; camera illuminance: %2.1f lux\n',minispecteMelEDI,minispectIllumLux,cameraIllumLux);
 
 % Display the reconstruction
 plotReconstructionStages(imageStages)
