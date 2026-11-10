@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Eye recording plots</title>
+    <link rel="stylesheet" href="{{ prefix }}/_static/css/mpl.css">
+    <script src="{{ prefix }}/_static/js/mpl_tornado.js"></script>
+    <script src="{{ prefix }}/js/mpl.js"></script>
+    <style>
+        body { margin: 0; background: white; font-family: sans-serif; }
+        #figure { margin: 2.8px; }
+    </style>
+</head>
+<body>
+    <div id="mpl-warnings" class="mpl-warnings" role="status"></div>
+    <div id="figure"></div>
+    <script>
+        // Keep Matplotlib's own canvas, toolbar, and event handling. Only the
+        // surrounding page and available figure width differ from its default UI.
+        const socket = new (mpl.get_websocket_type())("{{ ws_uri }}{{ fig_id }}/ws");
+        const figure = new mpl.figure({{ fig_id }}, socket, mpl_ondownload,
+            document.getElementById("figure"));
+
+        // The page provides the recording title; hide WebAgg's duplicate bar.
+        figure.header.parentElement.hidden = true;
+
+        function fitFigureWidth() {
+            if (socket.readyState === WebSocket.OPEN) {
+                // WebAgg's ResizeObserver reports this size back to Python.
+                figure.canvas_div.style.width = `${Math.max(224, document.documentElement.clientWidth - 8)}px`;
+                figure.canvas_div.style.height = "595px";
+            }
+        }
+        socket.addEventListener("open", fitFigureWidth);
+        // The initial server handshake supplies the original PDF dimensions.
+        // Apply the available width after that message has been handled too.
+        socket.addEventListener("message", event => {
+            if (typeof event.data === "string" && JSON.parse(event.data).type === "resize") {
+                fitFigureWidth();
+            }
+        });
+        window.addEventListener("resize", fitFigureWidth);
+
+        // WebAgg focuses its canvas after loading. Preserve keyboard navigation
+        // without scrolling the parent page away from the recording controls.
+        for (const element of [figure.canvas, figure.canvas_div]) {
+            element.focus = () => HTMLElement.prototype.focus.call(element, { preventScroll: true });
+        }
+    </script>
+</body>
+</html>

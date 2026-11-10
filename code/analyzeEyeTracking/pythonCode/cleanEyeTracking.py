@@ -293,7 +293,8 @@ def clean_eye_data(
             Folder containing alternative_camera_gaze.csv.
 
         verbose (bool):
-            Save and display the six-panel raw/cleaned comparison figure.
+            Display the six-panel raw/cleaned comparison figure when True.
+            False still creates the figure in memory for a browser or caller.
 
         pupil_diameter_thresholds (tuple[float, float]):
             Inclusive pupil diameter bounds in millimeters.
@@ -332,8 +333,8 @@ def clean_eye_data(
             Positive odd median and quadratic SG window size.
 
         plot_output_path (str | pathlib.Path | None):
-            PDF destination; defaults to eye_cleaned_vs_raw.pdf in
-            processing_neon_path. Used only when verbose is true.
+            Save the comparison PDF here when provided. None does not save a
+            plot. Saving is independent of verbose.
 
     Returns:
         A tuple of the (N, 6) cleaned array and a dictionary of the effective
@@ -354,7 +355,9 @@ def clean_eye_data(
         quadratic Savitzky–Golay smoothing. Apertures stay separate until the
         final mean and difference. Interior fill gaps include their bounding
         valid-sample distance; edge gaps use the endpoint-to-valid distance.
-        Plotting does not change the returned data or metadata.
+        Plotting does not change the returned data or metadata. The comparison
+        is created even with verbose=False; callers can access it with plt.gcf()
+        and should close it after use when processing recordings in a loop.
     """
 
     # Dilation and smoothing windows count whole samples and must contain at
@@ -561,7 +564,7 @@ def clean_eye_data(
     )
 
     # Preserve the pre-mask signals only when a comparison plot is requested.
-    before_masking: np.ndarray | None = signals.copy() if verbose else None
+    before_masking: np.ndarray = signals.copy()
 
     # Measure each sample's absolute change from the previous sample.
     # The first sample has no predecessor, so its change is set to zero.
@@ -701,55 +704,53 @@ def clean_eye_data(
         )
     )
 
+    # Always create the comparison in memory. Display and saving are independent:
+    # verbose controls display, while a non-None output path requests a PDF.
     # The plotting code in the block below is AI-generated and has not been reviewed.
-    if verbose:
-        # Count observed channels so rows with no observations remain NaN.
-        valid_raw_aperture_counts: np.ndarray = np.sum(~np.isnan(before_masking[:, signal_aperture_columns]), axis=1)
-        raw_aperture_mean: np.ndarray = np.divide(
-            np.nansum(before_masking[:, signal_aperture_columns], axis=1),
-            valid_raw_aperture_counts,
-            out=np.full(len(before_masking[:, signal_aperture_columns]), np.nan),
-            where=valid_raw_aperture_counts > 0,
-        )
+    # Count observed channels so rows with no observations remain NaN.
+    valid_raw_aperture_counts: np.ndarray = np.sum(~np.isnan(before_masking[:, signal_aperture_columns]), axis=1)
+    raw_aperture_mean: np.ndarray = np.divide(
+        np.nansum(before_masking[:, signal_aperture_columns], axis=1),
+        valid_raw_aperture_counts,
+        out=np.full(len(before_masking[:, signal_aperture_columns]), np.nan),
+        where=valid_raw_aperture_counts > 0,
+    )
 
-        # Match MATLAB's pupil_raw/aperture_*_raw/gaze_*_raw snapshots. These
-        # are the aligned, bounded signals before blink/spike censoring.
-        plot_raw: np.ndarray = np.column_stack(
-            (
-                before_masking[:, pupil_column],
-                raw_aperture_mean,
-                before_masking[:, left_aperture_column] - before_masking[:, right_aperture_column],
-                before_masking[:, signal_gaze_columns],
-            )
+    # Match MATLAB's pupil_raw/aperture_*_raw/gaze_*_raw snapshots. These
+    # are the aligned, bounded signals before blink/spike censoring.
+    plot_raw: np.ndarray = np.column_stack(
+        (
+            before_masking[:, pupil_column],
+            raw_aperture_mean,
+            before_masking[:, left_aperture_column] - before_masking[:, right_aperture_column],
+            before_masking[:, signal_gaze_columns],
         )
+    )
 
-        # MATLAB's last panel shows original blink intervals, without the
-        # asymmetric padding or dilation used by the cleaning algorithm.
-        raw_blink_changes: np.ndarray = np.zeros(len(valid_gaze_timestamps_ns) + 1, dtype=np.int64)
+    # MATLAB's last panel shows original blink intervals, without the
+    # asymmetric padding or dilation used by the cleaning algorithm.
+    raw_blink_changes: np.ndarray = np.zeros(len(valid_gaze_timestamps_ns) + 1, dtype=np.int64)
 
-        # Enter blink intervals at their first included sample.
-        np.add.at(
-            raw_blink_changes, np.searchsorted(valid_gaze_timestamps_ns, blink_start_timestamps_ns, side="left"), 1
-        )
+    # Enter blink intervals at their first included sample.
+    np.add.at(
+        raw_blink_changes, np.searchsorted(valid_gaze_timestamps_ns, blink_start_timestamps_ns, side="left"), 1
+    )
 
-        # Leave blink intervals immediately after their last included sample.
-        np.add.at(
-            raw_blink_changes, np.searchsorted(valid_gaze_timestamps_ns, blink_end_timestamps_ns, side="right"), -1
-        )
+    # Leave blink intervals immediately after their last included sample.
+    np.add.at(
+        raw_blink_changes, np.searchsorted(valid_gaze_timestamps_ns, blink_end_timestamps_ns, side="right"), -1
+    )
 
-        # Convert original interval counts into the blink trace shown in the plot.
-        raw_blinks: np.ndarray = np.cumsum(raw_blink_changes[:-1]) > 0
-        _plot_matlab_summary(
-            relative_timestamps_s,
-            plot_raw,
-            smoothed_final_data,
-            raw_blinks,
-            (
-                pathlib.Path(plot_output_path)
-                if plot_output_path is not None
-                else pathlib.Path(processing_neon_path) / "eye_cleaned_vs_raw.pdf"
-            ),
-        )
+    # Convert original interval counts into the blink trace shown in the plot.
+    raw_blinks: np.ndarray = np.cumsum(raw_blink_changes[:-1]) > 0
+    _plot_matlab_summary(
+        relative_timestamps_s,
+        plot_raw,
+        smoothed_final_data,
+        raw_blinks,
+        plot_output_path=plot_output_path,
+        verbose=verbose,
+    )
 
     # Record the effective cleaning settings alongside the returned data.
     metadata: dict[str, object] = {
@@ -776,9 +777,11 @@ def _plot_matlab_summary(
     raw: np.ndarray,
     cleaned: np.ndarray,
     raw_blinks: np.ndarray,
-    output_path: pathlib.Path,
+    plot_output_path: str | pathlib.Path | None = None,
+    *,
+    verbose: bool = True,
 ) -> Figure:
-    """Save and display the six-panel MATLAB-style raw/cleaned figure.
+    """Build the six-panel MATLAB-style figure, optionally saving/displaying it.
 
     Args:
         time (np.ndarray):
@@ -793,11 +796,14 @@ def _plot_matlab_summary(
         raw_blinks (np.ndarray):
             Boolean mask of unpadded blink events.
 
-        output_path (pathlib.Path):
-            Destination for the vector PDF.
+        plot_output_path (str | pathlib.Path | None):
+            Destination for the vector PDF. None leaves the figure unsaved.
+
+        verbose (bool):
+            Display the figure when True; browser previews display it themselves.
 
     Returns:
-        The saved Matplotlib figure, displayed without blocking.
+        The Matplotlib figure, optionally saved and displayed without blocking.
 
     Notes:
         Panels show pupil diameter, mean aperture, aperture difference, gaze x,
@@ -845,11 +851,14 @@ def _plot_matlab_summary(
         axis.margins(x=0)
     figure.set_label("Eye Data Processing: Raw vs Cleaned")
     # Create the PDF destination folder if this is its first output.
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    # Preserve line and text quality by saving the comparison as a vector PDF.
-    figure.savefig(output_path, format="pdf")
+    if plot_output_path is not None:
+        output_path: pathlib.Path = pathlib.Path(plot_output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        # Preserve line and text quality by saving the comparison as a vector PDF.
+        figure.savefig(output_path, format="pdf")
     # Display the figure without stopping a notebook or batch run.
-    plt.show(block=False)
+    if verbose:
+        plt.show(block=False)
     return figure
 
 

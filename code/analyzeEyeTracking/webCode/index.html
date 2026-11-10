@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Eye Cleaning Explorer</title>
+    <link rel="stylesheet" href="/style.css">
+    <script src="/app.js" defer></script>
+</head>
+<body>
+    <header>
+        <div><h1>Eye Cleaning Explorer</h1></div>
+    </header>
+    <main>
+        <section class="directory-panel" aria-label="Data directory">
+            <div class="directory-description">
+                <h2>Data directory</h2>
+                <p class="hint">Select your FLIC_data folder.</p>
+                <p id="selected-directory" class="selected-directory" hidden></p>
+            </div>
+            <button id="choose-directory" type="button">Choose folder…</button>
+        </section>
+        <div class="workspace">
+            <aside>
+                <section aria-label="Recording selection">
+                    <p class="eyebrow">1. Select Recording</p>
+                    <label for="subject">Subject</label><select id="subject" disabled></select>
+                    <label for="activity">Activity</label><select id="activity" disabled></select>
+                    <label for="recording">Recording number</label><select id="recording" disabled></select>
+                </section>
+                <section aria-label="Cleaning parameters">
+                    <p class="eyebrow">2. Examine or Set Settings</p>
+                    <p class="hint">The initial settings are those used to generate this recording’s cleaned data. Edit them, then apply to update the plots.</p>
+                    <form id="parameter-form">
+                        <fieldset id="parameter-fields" disabled></fieldset>
+                        <button id="apply-button" type="submit" disabled>Apply &amp; replot</button>
+                        <button id="reset-button" type="button" class="secondary" disabled>Restore saved settings</button>
+                    </form>
+                </section>
+            </aside>
+            <section class="plot-panel" aria-label="Raw versus cleaned comparison">
+                <div class="plot-heading">
+                    <div><p class="eyebrow">3. Visualize Plots</p><h2 id="recording-title">Select a recording to begin</h2></div>
+                    <span id="preview-state" class="badge" hidden></span>
+                </div>
+                <p id="status" role="status" aria-live="polite" hidden></p>
+                <div id="empty-state">The original six-panel Python figure will appear here.</div>
+                <iframe id="plot-frame" title="Interactive six-panel raw versus cleaned eye data" hidden></iframe>
+            </section>
+        </div>
+    </main>
+</body>
+</html>

@@ -1,0 +1,56 @@
+/* Fixed dimensions are reduced to 70% of the previous interface scale. */
+:root { color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #263449; background: #f3f5f8; }
+* { box-sizing: border-box; }
+body { margin: 0; font-size: 9.1px; }
+header { padding: 8.4px 12.6px; background: #fff; border-bottom: 0.7px solid #e0e5ed; display: flex; align-items: center; justify-content: space-between; gap: 11.2px; }
+h1 { font-size: 14.7px; letter-spacing: -.6px; margin: 2.8px 0; font-weight: 650; }
+h2 { font-size: 11.2px; margin: 4.2px 0; }
+.eyebrow { font-size: 9.1px; font-weight: 650; letter-spacing: -.1px; color: #33445f; margin: 0 0 7px; }
+.badge { padding: 4.9px 7px; background: #edf2fa; border: 0.7px solid #dce5f2; border-radius: 3.5px; font-size: 8.4px; white-space: nowrap; }
+main { padding: 8.4px 12.6px; }
+.directory-panel { background: white; border: 0.7px solid #e0e5ed; padding: 8.4px 11.2px; border-radius: 7px; margin-bottom: 8.4px; display: flex; align-items: center; justify-content: space-between; gap: 14px; box-shadow: 0 1.4px 4.2px #26344904; }
+.directory-description { min-width: 0; }
+.directory-description h2 { font-size: 9.8px; margin: 0; }
+.directory-description .hint { margin-top: 3.5px; }
+.selected-directory { font-size: 7.7px; color: #68758b; margin: 5.6px 0 0; overflow-wrap: anywhere; }
+#choose-directory { flex-shrink: 0; }
+label { display: block; font-weight: 600; font-size: 9.1px; margin: 0 0 4.9px; }
+input, select, button { font: inherit; border-radius: 3.5px; padding: 4.9px 7px; border: 0.7px solid #d3dae5; }
+input, select { background: white; color: #243a42; }
+input:focus, select:focus, button:focus-visible { outline: 1.4px solid #496f9f; outline-offset: 1.4px; }
+button { background: #284b7c; color: white; border-color: #284b7c; font-weight: 600; cursor: pointer; }
+button:hover { background: #1c365b; }
+button.secondary { color: #284b7c; background: white; }
+button:disabled, select:disabled, fieldset:disabled { opacity: .55; cursor: default; }
+.hint { font-size: 8.4px; line-height: 1.6; color: #6b7789; margin: 7px 0 0; }
+.workspace { display: grid; grid-template-columns: 196px minmax(0, 1fr); align-items: start; gap: 8.4px; }
+aside { background: white; border: 0.7px solid #e0e5ed; border-radius: 7px; box-shadow: 0 1.4px 4.2px #26344904; position: sticky; top: 11.2px; max-height: calc(100vh - 22.4px); overflow-y: auto; scrollbar-gutter: stable; }
+aside section { padding: 7.7px; }
+aside section + section { border-top: 0.7px solid #e0e5ed; }
+select { width: 100%; margin-bottom: 4.9px; padding: 3.5px 5.6px; font-size: 9.1px; }
+fieldset { margin: 5.6px 0; padding: 0; border: none; min-width: 0; }
+.parameter-group { padding: 5.6px 0; border-bottom: 0.7px solid #edf0f5; }
+.parameter-group:first-child { padding-top: 0; }
+.parameter-group h3 { font-size: 8.4px; line-height: 1.4; margin: 0 0 4.9px; color: #33445f; }
+.parameter-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 5.6px; }
+.parameter-group label { font-size: 7.7px; font-weight: 500; margin-bottom: 2.8px; color: #637188; }
+.parameter-group input { width: 100%; min-width: 0; padding: 2.8px 4.2px; font-size: 8.4px; height: 19.6px; }
+.parameter-note { font-size: 7px; line-height: 1.5; color: #6b7789; margin: 3.5px 0 0; }
+#parameter-form button { width: 100%; margin-bottom: 5.6px; }
+.plot-panel { background: white; border: 0.7px solid #e0e5ed; border-radius: 7px; box-shadow: 0 1.4px 4.2px #26344904; padding: 8.4px; overflow: hidden; }
+.plot-heading { display: flex; align-items: center; justify-content: space-between; gap: 8.4px; }
+#status { border-left: 2.1px solid #496f9f; padding: 5.6px 8.4px; background: #f1f4f9; font-size: 9.1px; line-height: 1.5; overflow-wrap: anywhere; }
+#status.error { border-color: #b74434; color: #8c2d20; background: #fff3ef; }
+#empty-state { margin-top: 14px; min-height: 252px; display: grid; place-items: center; border: 0.7px dashed #d3dae5; color: #6b7789; text-align: center; padding: 14px; }
+#empty-state[hidden] { display: none; }
+iframe { width: 100%; height: 658px; border: 0; margin-top: 8.4px; background: white; }
+@media (max-width: 700px) {
+    header { padding: 11.2px; }
+    main { padding: 8.4px; }
+    .workspace { grid-template-columns: 171.5px minmax(0, 1fr); gap: 8.4px; }
+    .plot-heading { flex-wrap: wrap; }
+}
+@media (max-width: 420px) {
+    main { min-width: 518px; }
+    .directory-panel { align-items: flex-start; }
+}

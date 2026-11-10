@@ -1360,58 +1360,52 @@ def _plot_processed_eye_helper(
         if axes.size != 5:
             raise ValueError(f"Cleaned eye plotting requires 5 axes; got {axes.size}." f" Recording: {recording_path}")
 
-    # Let's get the paths to all of the Neon files
     recording_path = Path(recording_path)
 
-    # We can get the egocentric mapper output path 
-    # directly from the input recording path, 
-    # as it lives in FLIC_processing. We just go up to the 
-    # GKA / Neon level, append Neon, this recording number, and 
-    # then the egocentric video mapper results 
+    # Processed GKA and Neon attempts are siblings under the same activity.
+    # Their raw inputs follow the same layout on the FLIC_raw volume.
     mapper_path: Path = (
-            recording_path.parent.parent / "Neon" / recording_path.name / "egocentric_mapper_results"
+        recording_path.parent.parent / "Neon" / recording_path.name / "egocentric_mapper_results"
     )
-
-    # The raw recording is located in the same directory structure as the processed, 
-    # so to get the raw path, just replace processing with raw 
     raw_recording_path: Path = Path(
         str(recording_path).replace("/FLIC_processing/", "/FLIC_raw/")
     )
-
-    # We can get the raw neon by going up to the level in the directory 
-    # structure which contains the GKA and Neon folders, going down into Neon 
-    # then using this recording number as the directory name
     raw_neon_path: Path = (
         raw_recording_path.parent.parent / "Neon" / raw_recording_path.name
     )
-    
-    # After we have all of those paths, let's read in the dataframe that lists 
-    # the timestamps of the GKA camera in Neon time. Each row is a frame @ GKA capture time
-    # and has an associated Neon timestsamp
-    GKA_camera_mapped_df: pd.DataFrame = pd.read_csv(mapper_path / "alternative_camera_timestamps.csv")
-    GKA_camera_mapped_timestamps_ns: np.ndarray = GKA_camera_mapped_df["timestamp [ns]"].to_numpy()
+
+    # Each mapper row pairs a world-video frame with its Neon timestamp.
+    mapped_world_timestamp_table: pd.DataFrame = pd.read_csv(mapper_path / "alternative_camera_timestamps.csv")
+    # Subtract the shared epoch before converting to float seconds, preserving
+    # precision. Every Neon timeline below uses this same world-frame origin.
+    if mapped_world_timestamp_table.empty:
+        raise ValueError(f"Mapper video timestamps are empty. Recording: {recording_path}")
+    first_world_frame_neon_ns = mapped_world_timestamp_table["timestamp [ns]"].iloc[0]
+    mapped_world_time_s: np.ndarray = (
+        mapped_world_timestamp_table["timestamp [ns]"].to_numpy() - first_world_frame_neon_ns
+    ).astype(float) * 1e-9
 
     # Include missing-frame rows so the metadata follows the mapper video layout.
     # Inserted rows have timestamps but NaN gain settings.
-    GKA_camera_raw_df: pd.DataFrame = world_util.world_metadata_from_chunks(
+    raw_world_metadata: pd.DataFrame = world_util.world_metadata_from_chunks(
         os.fspath(raw_recording_path),
         convert_to_seconds=True,
         verbose=verbose,
         fill_missing_frames=True,
     )
 
-    # Both the results from mapping and the above metadata include the inserted frames 
-    # Therefore, they should be the same length. If they are not, a problem has occured 
-    assert len(GKA_camera_raw_df) == len(GKA_camera_mapped_timestamps_ns), (
+    # A one-to-one frame pairing is required to translate world/MS times into
+    # Neon time. Keep inserted frames in both arrays to prevent clock shifts.
+    assert len(raw_world_metadata) == len(mapped_world_time_s), (
         f"Filled world metadata does not match the mapper video frame layout "
         f"for recording: {recording_path}"
     )
-    GKA_timestamps_raw_s: np.ndarray = GKA_camera_raw_df["timestamp"].to_numpy()
+    raw_world_time_s: np.ndarray = raw_world_metadata["timestamp"].to_numpy()
 
-    # Let's do some validation that there are no invalid items in our timestamps
+    # Interpolation requires finite, strictly increasing source and target clocks.
     for clock_name, timestamps in (
-        ("World", GKA_timestamps_raw_s),
-        ("Mapper video", GKA_camera_mapped_timestamps_ns),
+        ("World", raw_world_time_s),
+        ("Mapper video", mapped_world_time_s),
     ):
         if (len(timestamps) < 2 or not np.all(np.isfinite(timestamps))
                 or np.any(np.diff(timestamps) <= 0)):
@@ -1422,52 +1416,56 @@ def _plot_processed_eye_helper(
 
     # Keep every timestamp pair, including inserted frames. Zero is the first
     # mapped world frame in Neon time, shared by eyes, world, and MS.
-    neon_clock_s: np.ndarray = (
-        GKA_camera_mapped_timestamps_ns - GKA_camera_mapped_timestamps_ns[0]
-    ).astype(float) * 1e-9
+    neon_clock_s: np.ndarray = mapped_world_time_s
 
     cleaned_eye_table: pd.DataFrame = pd.read_csv(mapper_path / "cleaned_eye_data.csv")
 
-    if "timestamp [ns]" in cleaned_eye_table:
-        cleaned_timestamps_ns: np.ndarray = cleaned_eye_table["timestamp [ns]"].to_numpy()
-    else:
-        # Older cleaned files store seconds from the first overlapping gaze
-        # sample. Recover that origin using the same overlap as the cleaner.
-        eye_state_paths: list[Path] = list(raw_neon_path.rglob("3d_eye_states.csv"))
-        if len(eye_state_paths) != 1:
-            raise ValueError(f"Expected one eye-state export in {raw_neon_path}; found {len(eye_state_paths)}.")
+    # The current cleaner writes time [s] from the first overlapping gaze
+    # sample, without absolute timestamps. Recover its samples from the
+    # source overlap and express them relative to the shared world origin.
+    eye_state_export_paths: list[Path] = list(raw_neon_path.rglob("3d_eye_states.csv"))
+    if len(eye_state_export_paths) != 1:
+        raise ValueError(f"Expected one eye-state export in {raw_neon_path}; found {len(eye_state_export_paths)}.")
 
-        eye_table: pd.DataFrame = pd.read_csv(eye_state_paths[0])
-        eye_timestamps_ns: np.ndarray = eye_table["timestamp [ns]"].to_numpy()
-        gaze_table: pd.DataFrame = pd.read_csv(mapper_path / "alternative_camera_gaze.csv")
-        gaze_timestamps_ns: np.ndarray = gaze_table["timestamp [ns]"].to_numpy()
-
-        # Validate the timelines before aligning their clocks.
-        for name, timestamps in (("Eye state", eye_timestamps_ns), ("Mapped gaze", gaze_timestamps_ns)):
-            if (not len(timestamps) or not np.all(np.isfinite(timestamps))
-                    or np.any(timestamps[1:] <= timestamps[:-1])):
-                raise ValueError(f"{name} timestamps must be finite and strictly increasing." f" Recording: {recording_path}")
-
-        cleaned_timestamps_ns = gaze_timestamps_ns[
-            (gaze_timestamps_ns >= max(gaze_timestamps_ns[0], eye_timestamps_ns[0]))
-            & (gaze_timestamps_ns <= min(gaze_timestamps_ns[-1], eye_timestamps_ns[-1]))
-        ]
-        if (not len(cleaned_timestamps_ns) or len(cleaned_timestamps_ns) != len(cleaned_eye_table)
-                or not np.allclose(cleaned_eye_table["time [s]"],
-                                   (cleaned_timestamps_ns - cleaned_timestamps_ns[0]) * 1e-9,
-                                   rtol=0, atol=1e-9)):
-            raise ValueError("Cleaned eye time does not match the source gaze/eye overlap." f" Recording: {recording_path}")
+    eye_state_table: pd.DataFrame = pd.read_csv(eye_state_export_paths[0])
+    eye_state_time_s: np.ndarray = (
+        eye_state_table["timestamp [ns]"].to_numpy() - first_world_frame_neon_ns
+    ).astype(float) * 1e-9
+    mapped_gaze_table: pd.DataFrame = pd.read_csv(mapper_path / "alternative_camera_gaze.csv")
+    mapped_gaze_time_s: np.ndarray = (
+        mapped_gaze_table["timestamp [ns]"].to_numpy() - first_world_frame_neon_ns
+    ).astype(float) * 1e-9
 
     # Validate the timelines before aligning their clocks.
-    for name, timestamps in (("Alternative camera", GKA_camera_mapped_timestamps_ns), ("Cleaned eye", cleaned_timestamps_ns)):
+    for name, timestamps in (("Eye state", eye_state_time_s), ("Mapped gaze", mapped_gaze_time_s)):
         if (not len(timestamps) or not np.all(np.isfinite(timestamps))
                 or np.any(timestamps[1:] <= timestamps[:-1])):
             raise ValueError(f"{name} timestamps must be finite and strictly increasing." f" Recording: {recording_path}")
 
-    # The first mapped world frame defines zero for every processed panel.
-    # Cleaned files may start later; preserve that delay rather than zeroing
-    # each sensor separately. Subtract epochs before float conversion.
-    cleaned_time_s: np.ndarray = (cleaned_timestamps_ns - GKA_camera_mapped_timestamps_ns[0]).astype(float) * 1e-9
+    # Reproduce the cleaner's sample selection to verify that this CSV belongs
+    # to these source exports before recovering its absolute position in time.
+    overlapping_gaze_time_s: np.ndarray = mapped_gaze_time_s[
+        (mapped_gaze_time_s >= max(mapped_gaze_time_s[0], eye_state_time_s[0]))
+        & (mapped_gaze_time_s <= min(mapped_gaze_time_s[-1], eye_state_time_s[-1]))
+    ]
+    # The cleaner converts epoch nanoseconds to float before subtraction;
+    # allow sub-microsecond rounding when comparing its elapsed seconds.
+    if (not len(overlapping_gaze_time_s) or len(overlapping_gaze_time_s) != len(cleaned_eye_table)
+            or not np.allclose(cleaned_eye_table["time [s]"],
+                               (overlapping_gaze_time_s - overlapping_gaze_time_s[0]),
+                               rtol=0, atol=1e-6)):
+        raise ValueError("Cleaned eye time does not match the source gaze/eye overlap." f" Recording: {recording_path}")
+
+    # Plot every saved cleaned row. The overlap above identifies the CSV's
+    # time origin; it does not trim the saved signals or zero each sensor
+    # independently. Preserve the delay relative to the first world frame.
+    # Do not clip to the world-video interval: negative times and eye samples
+    # after the last world frame remain visible on the shared time axis.
+    cleaned_time_s: np.ndarray = (
+        cleaned_eye_table["time [s]"].to_numpy() + overlapping_gaze_time_s[0]
+    )
+    if not np.all(np.isfinite(cleaned_time_s)) or np.any(np.diff(cleaned_time_s) <= 0):
+        raise ValueError(f"Cleaned eye times must be finite and strictly increasing. Recording: {recording_path}")
     panel_times_s: list[np.ndarray] = [cleaned_time_s] * 5
     panel_values: list[np.ndarray] = [cleaned_eye_table[column].to_numpy() for column in (
         "pupil diameter [mm]", "eyelid aperture [mm]",
@@ -1497,7 +1495,7 @@ def _plot_processed_eye_helper(
         axis.grid(True, alpha=0.3)
         axis.margins(x=0)
 
-    return figure, axes, GKA_timestamps_raw_s, neon_clock_s
+    return figure, axes, raw_world_time_s, neon_clock_s
 
 
 def plot_raw_recording(
@@ -1513,7 +1511,8 @@ def plot_raw_recording(
         verbose: Show loading and plotting progress bars.
         plot_title: Figure title; None uses the recording directory basename.
         time_range: (start, end) in each panel's displayed seconds, including start
-            and excluding end. None plots the whole recording. Frame numbers
+            and excluding end. None plots all saved samples, including cleaned
+            eye samples outside the world-video interval. Frame numbers
             retain their original positions in the recording. Raw eyes use seconds
             since the first raw gaze sample, independently of the GKA clock.
 
@@ -2084,7 +2083,8 @@ def plot_processed_recording(
         plot_title: Figure title; None uses the recording directory basename.
         time_range: (start, end) in Neon seconds since the first mapped world
             frame, including start
-            and excluding end. None plots the whole recording. Frame numbers
+            and excluding end. None plots all saved samples, including cleaned
+            eye samples outside the world-video interval. Frame numbers
             retain their original positions in the recording.
 
 

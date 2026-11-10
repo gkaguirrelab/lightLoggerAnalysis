@@ -75,6 +75,9 @@ def get_subject_ids(FLIC_subject_dir: str="/Users/zacharykelly/Library/CloudStor
     nonnegative whole-number age.
     """
 
+    # Assert that the top-level directories actually exist
+    assert os.path.exists(FLIC_subject_dir), f"FLIC subject dir path: {FLIC_subject_dir} does not exist"
+
     # Collect the expected subjects from both session workbooks.
     session_filepaths: tuple[str, str] = (
         os.path.join(FLIC_subject_dir, "FLIC_SubjectSummaryMigraine_LL.xlsx"),
@@ -156,6 +159,9 @@ def get_activity_names(FLIC_subject_dir: str="/Users/zacharykelly/Library/CloudS
         ``["Activity Name"]``, or a dict mapping group tuples to lists
         of activity name strings otherwise.
     """
+
+    # Assert that the top-level directories actually exist
+    assert os.path.exists(FLIC_subject_dir), f"FLIC subject dir path: {FLIC_subject_dir} does not exist"
     # Use the current activity workbook name exactly.
     # First, let's read the activity definitions for this experiment.
     # The default gives us just the names. Grouping by another column lets us
@@ -219,6 +225,177 @@ def get_pupil_cloud_apikey() -> str:
     with open(api_key_path, "r") as f:
         return f.readline().strip()
 
+def populate_FLIC_data(raw_dir_path: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026",
+                       data_dir_path: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_data/lightLogger/scriptedIndoorOutdoor_2026_photophobia",
+                       subjects_to_skip: Iterable[int]=(),
+                       subjects_to_process: Iterable[int]=(),
+                       activities_to_skip: Iterable[str]=(),
+                       activities_to_process: Iterable[str]=(),
+                       overwrite_existing: bool=False,
+                       verbose: bool=False
+                       ) -> None:
+    """Collect eye data for every recording in the selected subjects and activities.
+
+    Args:
+        raw_dir_path: Experiment directory containing raw FLIC subject folders.
+            The processing path is obtained by replacing FLIC_raw with
+            FLIC_processing in this path.
+        data_dir_path: Destination experiment directory. Files are saved under
+            FLIC_<four-digit ID>/<activity>/<recording number>/eyeData.
+        subjects_to_skip: Numeric subject IDs to exclude.
+        subjects_to_process: Numeric subject IDs to include; empty selects all.
+        activities_to_skip: Activity names to exclude.
+        activities_to_process: Activity names to include; empty selects all.
+        overwrite_existing: Replace existing destination files when True.
+        verbose: Show subject/activity progress and copied file paths.
+
+    Returns:
+        None.
+
+    Notes:
+        Raw, processing, and data experiment directories must already exist.
+        Subject, activity, recording, and eyeData directories are created as needed.
+        Explicit process lists override their corresponding skip lists.
+        All raw measurements, mapped gaze, cleaned data, the comparison PDF,
+        and cleaning/mapper metadata must exist before any files are copied
+        for a recording. Missing files raise AssertionError; ambiguous raw
+        exports raise ValueError.
+        Files retain their names and timestamps. Existing files are skipped
+        individually unless overwrite_existing=True. This only copies data;
+        it does not run gaze mapping or eye cleaning.
+    """
+    # Assert that the raw and data directories actually exist
+    assert os.path.exists(raw_dir_path), f"Raw dir path: {raw_dir_path} does not exist"
+    assert os.path.exists(data_dir_path), f"Data dir path: {data_dir_path} does not exist"
+
+
+    # Derive the matching processing directory from the raw experiment path.
+    processing_dir_path: str = raw_dir_path.replace("FLIC_raw", "FLIC_processing")
+
+    # Assert that the matching processing directory exists too
+    assert os.path.exists(processing_dir_path), f"Processing dir path: {processing_dir_path} does not exist"
+
+    # Materialize filters once so generators work across subjects and activities.
+    subjects_to_skip = set(subjects_to_skip)
+    subjects_to_process = set(subjects_to_process)
+    activities_to_skip = set(activities_to_skip)
+    activities_to_process = set(activities_to_process)
+
+    # Get the subject paths for the subjects we want to process
+    subject_paths: list[str] = natsorted([
+        subject_path
+        for subject_name in os.listdir(raw_dir_path)
+        if re.fullmatch(r"FLIC_\d+", subject_name)
+        and os.path.isdir(subject_path := os.path.join(raw_dir_path, subject_name))
+        and _is_desired_item(_extract_num_from_id(subject_name), subjects_to_process, subjects_to_skip)
+    ])
+    # Show subject progress when verbose is enabled
+    subject_iterator: Iterable[str] = (
+        subject_paths if not verbose else
+        tqdm(subject_paths, desc="Processing Subjects", leave=True)
+    )
+
+    # Iterate over the selected subjects and their desired activities.
+    for subject_path in subject_iterator:
+        # Use the original folder name to locate raw and processed inputs.
+        # Standardize only the destination name (e.g. FLIC_21 -> FLIC_0021).
+        subject_id: str = os.path.basename(subject_path)
+        destination_subject_id: str = f"FLIC_{_extract_num_from_id(subject_id):04d}"
+
+        # Get the desired activity paths for this subject
+        activity_paths: list[str] = [
+            activity_path
+            for filename in natsorted(os.listdir(subject_path))
+            if os.path.isdir(activity_path := os.path.join(subject_path, filename))
+            and _is_desired_item(filename, activities_to_process, activities_to_skip)
+        ]
+        # Show activity progress within the current subject
+        activities_iterator: Iterable[str] = (
+            activity_paths if not verbose else
+            tqdm(activity_paths, desc="Processing Activities", leave=False)
+        )
+        # Iterate over the selected activities
+        for activity_path in activities_iterator:
+            # Retrieve the activity name from its directory
+            activity_name: str = os.path.basename(activity_path)
+
+            # Get every numbered Neon recording directory for this activity.
+            neon_dir: str = os.path.join(activity_path, "Neon")
+            recording_numbers: list[str] = natsorted([
+                filename
+                for filename in os.listdir(neon_dir)
+                if filename.isdigit()
+                and os.path.isdir(os.path.join(neon_dir, filename))
+            ])
+            
+            # Iterate over all recording numbers
+            for recording_number in recording_numbers:
+                # Construct the raw export and processing paths for this recording
+                raw_recording: str = os.path.join(
+                    neon_dir, recording_number, "timeseries_and_video_export"
+                )
+                mapper_dir: str = os.path.join(
+                    processing_dir_path, subject_id, activity_name, "Neon",
+                    recording_number, "egocentric_mapper_results"
+                )
+
+                # Exports can be nested inside a downloaded recording folder.
+                # Require one source so duplicate exports cannot overwrite data.
+                export_directories: list[str] = [
+                    root for root, _, filenames in os.walk(raw_recording)
+                    if "3d_eye_states.csv" in filenames
+                ]
+                if len(export_directories) != 1:
+                    raise ValueError(
+                        f"Expected exactly one 3d_eye_states.csv beneath {raw_recording}; "
+                        f"found {export_directories}"
+                    )
+
+                # Collect the original measurements and mapped gaze needed to
+                # run the cleaner with eyeData as both of its input directories.
+                eye_data_paths: list[str] = [
+                    os.path.join(export_directories[0], filename)
+                    for filename in ("3d_eye_states.csv", "gaze.csv", "blinks.csv")
+                ]
+                
+                # Include mapped gaze, cleaned measurements, the comparison plot,
+                # and both metadata files for this recording.
+                eye_data_paths.extend(
+                    os.path.join(mapper_dir, filename)
+                    for filename in (
+                        "alternative_camera_gaze.csv", "cleaned_eye_data.csv",
+                        "eye_cleaned_vs_raw.pdf", "eye_cleaning_metadata.pkl",
+                        "egocentric_mapper_metadata.pkl",
+                    )
+                )
+
+                # Assert that every eye-data file exists before transferring any
+                # files for this recording, including when outputs already exist.
+                for eye_data_path in eye_data_paths:
+                    assert os.path.isfile(eye_data_path), f"Eye data path: {eye_data_path} does not exist"
+
+                # Create one destination per attempt and fill missing files on
+                # repeat calls. Copy metadata along with each file's contents.
+                eye_data_dir: str = os.path.join(
+                    data_dir_path, destination_subject_id, activity_name, recording_number, "eyeData"
+                )
+                os.makedirs(eye_data_dir, exist_ok=True)
+                
+                # Copy each file into eyeData, keeping its original filename
+                for eye_data_path in eye_data_paths:
+                    # Create the destination path where this output will go (eye data dir location with same filename)
+                    destination_path: str = os.path.join(eye_data_dir, os.path.basename(eye_data_path))
+                    
+                    # Preserve existing files unless we have requested an overwrite
+                    if os.path.exists(destination_path) and not overwrite_existing:
+                        continue
+
+                    # Copy the file
+                    shutil.copy2(eye_data_path, destination_path)
+                
+    return
+
+
 def generate_world_videos(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026", 
                           dst_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoorVideos2026", 
                           subjects_to_skip: Iterable=set(), 
@@ -252,6 +429,10 @@ def generate_world_videos(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
       fill_missing_frames interpolate missing frames
       verbose            print progress information
     """
+
+    # Assert that the top-level directories actually exist
+    assert os.path.exists(src_dir), f"Source dir path: {src_dir} does not exist"
+    assert os.path.exists(dst_dir), f"Destination dir path: {dst_dir} does not exist"
 
     # First, let's find all of the subjects in this experiment
     # First, let's select the raw recordings we want to convert. We keep the
@@ -385,6 +566,10 @@ def generate_egocentric_mapper_results(src_dir: str="/Volumes/FLIC_raw/NEWscript
       overwrite_existing         overwrite existing results
       verbose                    print progress
     """
+
+    # Assert that the top-level directories actually exist
+    assert os.path.exists(src_dir), f"Source dir path: {src_dir} does not exist"
+    assert os.path.exists(dst_dir), f"Destination dir path: {dst_dir} does not exist"
     # First, let's find all of the subjects in this experiment
     # Here, we need two inputs for the SAME recording attempt: the raw Neon
     # timeseries and the world video we already generated. We find both before
@@ -645,6 +830,10 @@ def run_transformation_pipeline(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoo
     overwrite_existing=True. Set both worker counts to 1 for serial processing.
     """
 
+    # Assert that the top-level directories actually exist
+    assert os.path.exists(src_dir), f"Source dir path: {src_dir} does not exist"
+    assert os.path.exists(dst_dir), f"Destination dir path: {dst_dir} does not exist"
+
     # Retrieve the ages of all subjects. We will need this for the transformation 
     # pipeline 
     subject_ages: dict[int, int] = get_subject_ids()
@@ -767,6 +956,10 @@ def clean_eye_data(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideo
     plus Geoff's six-panel comparison, saved as eye_cleaned_vs_raw.pdf beside
     the CSV. Raw CSVs are located beneath timeseries_and_video_export.
     """
+
+    # Assert that the top-level directories actually exist
+    assert os.path.exists(src_dir), f"Source dir path: {src_dir} does not exist"
+    assert os.path.exists(dst_dir), f"Destination dir path: {dst_dir} does not exist"
     # Select subjects using the same filters and ordering as the mapper stage.
     subjects_to_process = set(subjects_to_process)
     subjects_to_skip = set(subjects_to_skip)
@@ -870,8 +1063,12 @@ def clean_eye_data(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideo
                 cleaned_data, cleaning_metadata = cleanEyeTracking.clean_eye_data(
                     raw_neon_path, mapper_dir,
                     verbose=verbose,
-                    plot_output_path=plot_path,
+                    plot_output_path=plot_path if verbose else None,
                 )
+                # Silent batch runs do not retain the in-memory comparison.
+                # The browser keeps its own figure alive for interactive use.
+                if not verbose:
+                    plt.close(plt.gcf())
                 
                 # Write inside the recording loop so every attempt gets its own CSV.
                 output_columns: tuple[str, ...] = (
@@ -919,6 +1116,10 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/NEWscript
       overwrite_existing regenerate existing outputs
       verbose            print progress
     """
+
+    # Assert that the top-level directories actually exist
+    assert os.path.exists(src_dir), f"Source dir path: {src_dir} does not exist"
+    assert os.path.exists(dst_dir), f"Destination dir path: {dst_dir} does not exist"
     
     # Here, Python selects the subject/activity and the requested video types.
     # MATLAB does the projection and virtual foveation. We start one MATLAB
@@ -1058,6 +1259,10 @@ def generate_spds(src_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoo
       activities_to_skip  set of activity names to ignore
       verbose             print progress
     """
+
+    # Assert that the top-level directories actually exist
+    assert os.path.exists(src_dir), f"Source dir path: {src_dir} does not exist"
+    assert os.path.exists(dst_dir), f"Destination dir path: {dst_dir} does not exist"
     
     # Now, we will calculate SPDs from the processed videos. Python handles
     # selection and temporary copies; processSPDs in MATLAB does the analysis.
@@ -1209,6 +1414,10 @@ def group_spds_per_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brainard La
     Returns:
         Return value produced by group spds per subject.
     """
+
+    # Assert that the top-level directories actually exist
+    assert os.path.exists(src_dir), f"Source dir path: {src_dir} does not exist"
+    assert os.path.exists(dst_dir), f"Destination dir path: {dst_dir} does not exist"
     # Here, we collect existing SPD file paths into the requested activity groups
     # for ONE subject at a time. We are assembling inputs for groupSPDs, rather
     # than recalculating spectra from videos. The bounds come from the selected
@@ -1368,6 +1577,10 @@ def group_spds_across_subjects(src_dir: str="/Users/zacharykelly/Aguirre-Brainar
     Returns:
         Return value produced by group spds across subjects.
     """
+
+    # Assert that the top-level directories actually exist
+    assert os.path.exists(src_dir), f"Source dir path: {src_dir} does not exist"
+    assert os.path.exists(dst_dir), f"Destination dir path: {dst_dir} does not exist"
     # This version starts from the already averaged acrossSubjects results.
     # We collect those activity files into groups, then send the grouped paths
     # to MATLAB. The original subject directories are used to establish plot
@@ -1493,6 +1706,10 @@ def adjust_spd_axes_copy(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab 
     Returns:
         Return value produced by adjust spd axes copy.
     """
+
+    # Assert that the top-level directories actually exist
+    assert os.path.exists(src_dir), f"Source dir path: {src_dir} does not exist"
+    assert os.path.exists(dst_dir), f"Destination dir path: {dst_dir} does not exist"
     # Here, we redraw existing SPD results using the plotSPDs_copy routine.
     # The map color limits are found per subject, while frequency and spectral
     # power limits are shared across subjects. No video processing is repeated.
@@ -1655,6 +1872,10 @@ def adjust_spd_axes(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropb
     Returns:
         Return value produced by adjust spd axes.
     """
+
+    # Assert that the top-level directories actually exist
+    assert os.path.exists(src_dir), f"Source dir path: {src_dir} does not exist"
+    assert os.path.exists(dst_dir), f"Destination dir path: {dst_dir} does not exist"
     # Here, we redraw existing SPD results using the plotSPDs routine.
     # The map color limits are found per subject, while frequency and spectral
     # power limits are shared across subjects. combine_figures chooses whether
@@ -1856,6 +2077,8 @@ def _find_spd_axes_across_all(subject_paths: list[str],
     Returns:
         Return value produced by find spd axes across all.
     """
+
+    subject_paths = sorted(subject_paths, key=lambda path: _extract_num_from_id(os.path.basename(path)))
     # Here, we keep one set of bounds for every selected subject and activity.
     # Each graph stores [minimum, maximum] plus the source file for each bound.
     # Starting at [+inf, -inf] lets the first usable graph set both values.
@@ -1981,6 +2204,8 @@ def _find_spd_axes_per_subject(subject_paths: list[str],
     Returns:
         Return value produced by find spd axes per subject.
     """
+
+    subject_paths = sorted(subject_paths, key=lambda path: _extract_num_from_id(os.path.basename(path)))
     # Here, each subject gets a separate set of graph bounds. We combine that
     # subject's selected activities and projection types, without mixing in
     # other subjects. The source path records which file supplied each bound.
@@ -2074,7 +2299,7 @@ def _find_spd_axes_per_subject(subject_paths: list[str],
                         min_maxes[subject_id_number][graph_type]["src"][1] = spd_results_filepath
                    
     # convert min maxes to np.ndarray
-    for subject_id_number in min_maxes:
+    for subject_id_number in sorted(min_maxes):
         for graph_type in min_maxes[subject_id_number]:
             min_maxes[subject_id_number][graph_type]["bounds"] = np.array( min_maxes[subject_id_number][graph_type]["bounds"], dtype=np.float64)
 
@@ -2107,6 +2332,8 @@ def _find_spd_axes_per_activity(subject_paths: list[str],
     Returns:
         Return value produced by find spd axes per activity.
     """
+
+    subject_paths = sorted(subject_paths, key=lambda path: _extract_num_from_id(os.path.basename(path)))
     # Here, each activity gets a separate set of graph bounds. We combine
     # subjects within that activity, then move on to the next activity.
     # This lets figures for the same activity share scales across subjects.
@@ -2239,6 +2466,10 @@ def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brain
     Returns:
         Return value produced by generate spds across subject.
     """
+
+    # Assert that the top-level directories actually exist
+    assert os.path.exists(src_dir), f"Source dir path: {src_dir} does not exist"
+    assert os.path.exists(dst_dir), f"Destination dir path: {dst_dir} does not exist"
     # Now, we will combine subjects while keeping activities separate.
     # For each activity, we gather the contributing subject IDs and let MATLAB
     # process the existing SPD results. The older output convention here is
@@ -2401,6 +2632,10 @@ def generate_spds_across_groups(src_dir: str="/Users/zacharykelly/Aguirre-Braina
     Returns:
         Return value produced by generate spds across groups.
     """
+
+    # Assert that the top-level directories actually exist
+    assert os.path.exists(src_dir), f"Source dir path: {src_dir} does not exist"
+    assert os.path.exists(dst_dir), f"Destination dir path: {dst_dir} does not exist"
     # Here, we start from the already averaged acrossSubjects activity files.
     # For each group and projection type, MATLAB combines the group's activities.
     # This is a second averaging stage, after the across-subject results exist.
@@ -2519,6 +2754,10 @@ def generate_spds_across_all(src_dir: str="/Users/zacharykelly/Aguirre-Brainard 
     Returns:
         Return value produced by generate spds across all.
     """
+
+    # Assert that the top-level directories actually exist
+    assert os.path.exists(src_dir), f"Source dir path: {src_dir} does not exist"
+    assert os.path.exists(dst_dir), f"Destination dir path: {dst_dir} does not exist"
     # Here, we combine all selected activities from the acrossSubjects folder.
     # MATLAB receives those existing results and writes an acrossAll output
     # for each projection type. The raw videos are not needed for this stage.
@@ -2619,6 +2858,10 @@ def generate_mean_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dr
     Returns:
         Return value produced by generate mean spds.
     """
+
+    # Assert that the top-level directories actually exist
+    assert os.path.exists(src_dir), f"Source dir path: {src_dir} does not exist"
+    assert os.path.exists(dst_dir), f"Destination dir path: {dst_dir} does not exist"
     # First, let's gather the existing SPD paths, keeping color modes separate.
     # The dimension selects which level we collapse: subject gives one mean
     # per activity, and activity gives one mean per subject. The combined
@@ -2664,7 +2907,7 @@ def generate_mean_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dr
             # per activity in the end
 
             # First, let's gather the activities
-            subjects: list[str] = list(color_mode_dict.keys())
+            subjects: list[str] = sorted(color_mode_dict, key=_extract_num_from_id)
 
             activities: list[str] = list(color_mode_dict[subjects[0]].keys()) 
             activities_iterator: Iterable = range(len(activities)) if verbose is False else tqdm(range(len(activities)), desc="Meaning across subjects dimension", leave=False)
@@ -2692,7 +2935,7 @@ def generate_mean_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dr
             # that means that each subject should have a single "activity" in the end
 
             # Let's iterate over the subjects
-            subjects: list[str] = list(color_mode_dict.keys()) 
+            subjects: list[str] = sorted(color_mode_dict, key=_extract_num_from_id) 
             subject_iterator: Iterable = range(len(subjects)) if verbose is False else tqdm(range(len(subjects)), desc='Meaning across activity dimension', leave=False)
             for subject_num in subject_iterator:
                 # Retrieve the subject name
@@ -2719,7 +2962,7 @@ def generate_mean_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dr
             # If we want to mean over all, that means we
             # end up with 1 SPD for this color mode
             # First, let's gather the activities
-            subjects: list[str] = list(color_mode_dict.keys())
+            subjects: list[str] = sorted(color_mode_dict, key=_extract_num_from_id)
             activities: list[str] = list(color_mode_dict[subjects[0]].keys()) 
             
             # First, average all activities for a given subject
@@ -2773,6 +3016,10 @@ def combine_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/
        generate a plot for each subject/activity
        with them all on it
     """
+
+    # Assert that the top-level directories actually exist
+    assert os.path.exists(src_dir), f"Source dir path: {src_dir} does not exist"
+    assert os.path.exists(dst_dir), f"Destination dir path: {dst_dir} does not exist"
     # Here, we put multiple color modes into comparison figures. Before handing
     # anything to MATLAB, we require the selected modes to have matching subjects,
     # activities, and projection files. This prevents a comparison from silently
@@ -2814,7 +3061,7 @@ def combine_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/
                                   and subject_id.startswith("FLIC")
                                   and _is_desired_item(_extract_num_from_id(subject_id), subjects_to_process, subjects_to_skip)
                                  )
-    subject_ids_list: list[str] = list(subject_ids)
+    subject_ids_list: list[str] = sorted(subject_ids, key=_extract_num_from_id)
 
     # Assert that the very first color mode has all of the subjects we want to process
     # if we have specified them
@@ -2859,7 +3106,7 @@ def combine_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/
         assert color_mode_subjects == subject_ids, f"Colormode: {color_mode} has subjects: {color_mode_subjects} but {subject_ids} were requested"
 
         # Now, per subject, we need to make sure it has all of the activities we want
-        for subject_id in color_mode_subjects:
+        for subject_id in sorted(color_mode_subjects, key=_extract_num_from_id):
             # Create the path to this subject folder
             subject_path: str = os.path.join(color_mode_path, subject_id)
             assert os.path.exists(subject_path), f"Subject path: {subject_path} does not exist"
@@ -2976,6 +3223,10 @@ def plot_mean_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbo
     Returns:
         Return value produced by plot mean spds.
     """
+
+    # Assert that the top-level directories actually exist
+    assert os.path.exists(src_dir), f"Source dir path: {src_dir} does not exist"
+    assert os.path.exists(dst_dir), f"Destination dir path: {dst_dir} does not exist"
     # Here, we plot means that generate_mean_spds has already saved.
     # Only acrossSubject is implemented below; the other named dimensions
     # raise NotImplementedError. The nested dictionary carries file paths
@@ -3120,6 +3371,9 @@ def rename_world_recordings(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOut
       overwrite_existing rename even if destination exists
       verbose            print progress
     """
+
+    # Assert that the top-level directories actually exist
+    assert os.path.exists(src_dir), f"Source dir path: {src_dir} does not exist"
     
     # First, let's find all of the subjects in this experiment
     # This is a layout conversion for older recordings. We rename the matching
@@ -3367,6 +3621,9 @@ def verify_data_integrity(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
       with each activity storing meta_problems, GKA problems, and Neon problems.
       Recording-specific messages include the numbered recording directory.
     """
+
+    # Assert that the top-level directories actually exist
+    assert os.path.exists(src_dir), f"Source dir path: {src_dir} does not exist"
 
     # First, let's check the expected folder structure, then each recording.
     # We collect problems instead of stopping at the first bad recording.
@@ -3770,6 +4027,9 @@ def verify_neon_integrity(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
       src_dir   raw dataset directory
       verbose   print additional diagnostics
     """
+
+    # Assert that the top-level directories actually exist
+    assert os.path.exists(src_dir), f"Source dir path: {src_dir} does not exist"
     
     # First, let's find all of the subjects in this experiment
     # Check the timeseries export of each numbered Neon attempt, including
@@ -3860,6 +4120,10 @@ def verify_world_neon_pairing(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorO
     Returns:
         Return value produced by verify world neon pairing.
     """
+
+    # Assert that the top-level directories actually exist
+    assert os.path.exists(raw_dir), f"Raw dir path: {raw_dir} does not exist"
+    assert os.path.exists(processing_dir), f"Processing dir path: {processing_dir} does not exist"
     # Here, we show the opening scene from both cameras for visual inspection.
     # The returned True values mark visited activities; there is no automatic
     # image comparison or pass/fail decision. This helper still expects the
@@ -4004,6 +4268,10 @@ def generate_tag_task_start_ends(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndo
     Returns:
         Return value produced by generate tag task start ends.
     """
+
+    # Assert that the top-level directories actually exist
+    assert os.path.exists(src_dir), f"Source dir path: {src_dir} does not exist"
+    assert os.path.exists(dst_dir), f"Destination dir path: {dst_dir} does not exist"
     # Here, we assume the task occupies the LAST task_length_seconds of the
     # world video, and the preceding frames belong to the tag period.
     # All saved frame numbers are one-based and inclusive for MATLAB.
@@ -4130,6 +4398,9 @@ def verify_virtually_foveated_video_integrity(src_dir: str="/Volumes/FLIC_proces
     Returns:
         Return value produced by verify virtually foveated video integrity.
     """
+
+    # Assert that the top-level directories actually exist
+    assert os.path.exists(src_dir), f"Source dir path: {src_dir} does not exist"
     # First, let's check that the expected output videos are present, then
     # inspect the task videos. These are assertions, so the first failed
     # check stops this function instead of producing a complete issues report.
@@ -4222,6 +4493,10 @@ def transfer_light_logger_recordings(src_dir: str="/Volumes/T7 Shield",
     Returns:
         Return value produced by transfer light logger recordings.
     """
+
+    # Assert that the top-level directories actually exist
+    assert os.path.exists(src_dir), f"Source dir path: {src_dir} does not exist"
+    assert os.path.exists(dst_dir), f"Destination dir path: {dst_dir} does not exist"
     # First, let's turn the SSD folder names into subject/activity/attempt keys.
     # We then apply the requested filters and copy every selected attempt.
     # The source data stay on the SSD; overwriting affects only the matching
@@ -4268,9 +4543,9 @@ def transfer_light_logger_recordings(src_dir: str="/Volumes/T7 Shield",
         activity_recordings[recording_number] = recording_name
 
     # Now, let's iterate over all the subject paths
-    subjects_to_download: list[int] = [subject for subject in parsed_recording_map 
+    subjects_to_download: list[int] = sorted([subject for subject in parsed_recording_map 
                                        if _is_desired_item(subject, subjects_to_transfer, subjects_to_skip)
-                                      ]
+                                      ])
     assert len(subjects_to_download) > 0, f"No subjects to transfer found on the SSD after filtering skip/process"
     subject_iterator: Iterable = range(len(subjects_to_download)) if verbose is False else tqdm(range(len(subjects_to_download)), desc="Processing Subjects", leave=True)
     for subject_num in subject_iterator:
@@ -4599,6 +4874,9 @@ def download_pupil_cloud_recordings(api_key: str,
     Returns:
         Return value produced by download pupil cloud recordings.
     """
+
+    # Assert that the top-level directories actually exist
+    assert os.path.exists(dst_dir), f"Destination dir path: {dst_dir} does not exist"
     # First, let's index the cloud recordings by subject, activity, and attempt.
     # After applying the filters, we stream each export to its numbered folder,
     # extract it there, and remove the ZIP after successful extraction.
@@ -4664,9 +4942,9 @@ def download_pupil_cloud_recordings(api_key: str,
         }
 
     # Now, let's iterate over all the subject paths
-    subjects_to_transfer: list[int] = [subject for subject in parsed_recording_map 
+    subjects_to_transfer: list[int] = sorted([subject for subject in parsed_recording_map 
                                        if _is_desired_item(subject, subjects_to_download, subjects_to_skip)
-                                      ]
+                                      ])
     subject_iterator: Iterable = range(len(subjects_to_transfer)) if verbose is False else tqdm(range(len(subjects_to_transfer)), desc="Processing Subjects", leave=True)
     for subject_num in subject_iterator:
         # Retrieve the subject path and subject name
@@ -4819,6 +5097,11 @@ def generate_actigraphy_graphs(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoor
     Returns:
         Return value produced by generate actigraphy graphs.
     """
+
+    # Assert that the top-level directories actually exist
+    assert os.path.exists(raw_dir), f"Raw dir path: {raw_dir} does not exist"
+    assert os.path.exists(processing_dir), f"Processing dir path: {processing_dir} does not exist"
+    assert os.path.exists(dst_dir), f"Destination dir path: {dst_dir} does not exist"
     # Here, we gather Neon motion and eye data together with the processed
     # recording paths, then pass them to MATLAB's participant-state plotting
     # routine. This helper requires one numbered RAW Neon attempt and reads
@@ -4834,7 +5117,6 @@ def generate_actigraphy_graphs(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoor
 
 
     # Construct the paths to the raw and processing dirs
-    assert all(os.path.exists(x) for x in (raw_dir, processing_dir))
 
      # First, let's find all of the subjects in this experiment
     subject_paths: list[str] = natsorted([
