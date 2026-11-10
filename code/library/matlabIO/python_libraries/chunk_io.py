@@ -145,7 +145,8 @@ def minispect_and_sunglasses_chunk_parser(chunk_paths: tuple[str],
             seconds.
         use_mean_frame: Unused because these values are not image frames.
         convert_to_float: Whether to convert values to float64.
-        apply_phase_offset: Whether to apply the MS time offset correction.
+        apply_phase_offset: Whether to add the MS millisecond calibration offset,
+            converted to seconds, to all MS and sunglasses timestamps.
         apply_RGB_correction: Unused for this non-image sensor family.
         apply_fielding_function: Unused for this non-image sensor family.
         debayer_images: Unused for this non-image sensor family.
@@ -187,6 +188,11 @@ def minispect_and_sunglasses_chunk_parser(chunk_paths: tuple[str],
     t: np.ndarray = np.load(t_path) 
     v: np.ndarray = np.load(v_path) 
 
+    # Correct the common MS clock before deriving accelerometer timestamps so
+    # every MS channel receives the same offset exactly once.
+    if apply_phase_offset:
+        t = t + ms_util.MS_TIME_OFFSET / 1000.0
+
     # Next, generate the accelerometer specific t vector from this t vector 
     accelerometer_t: np.ndarray = ms_util.generate_accelerometer_t(t)
 
@@ -205,9 +211,6 @@ def minispect_and_sunglasses_chunk_parser(chunk_paths: tuple[str],
         # MS/Sunglasses timestamps are already in seconds, no need to convert 
         pass  
     
-    # Apply the time offset correction if desired 
-    if(apply_phase_offset is True):
-        t += ms_util.MS_TIME_OFFSET
 
     # No use for converting mean frame as these data are not in the shape of frames 
     # but individual sensor readings 

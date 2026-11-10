@@ -313,7 +313,7 @@ for vv = 1:length(plotOrder)
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     %% MEAN SCENE RADIANCE
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    [meanSceneRadiance,meanSceneS,fVal,fitErrors] = estimateJointRadianceSpectrum(minispectValue.AS, radianceMap);
+    [meanSceneRadiance,meanSceneS,minispectIllumLux,minispecteMelEDI,fVal,fitErrors] = estimateJointRadianceSpectrum(minispectValue.AS, radianceMap);
     meanSceneRadiance = SplineSpd(SToWls(meanSceneS), meanSceneRadiance, SToWls(commonS));
 
 

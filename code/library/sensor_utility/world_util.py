@@ -12,6 +12,8 @@ import numpy as np
 import h5py
 from numpy.typing import NDArray
 import matplotlib.pyplot as plt
+from matplotlib.colors import Colormap
+from matplotlib.figure import SubFigure
 from matplotlib.image import AxesImage
 from matplotlib.lines import Line2D
 import cv2
@@ -324,6 +326,10 @@ WORLD_CONTRAST_LEVEL_NDF_SETTINGS: dict[float, dict[int | float, dict[float, tup
 # calibration pipeline. The 0.5 contrast table is the legacy baseline.
 WORLD_NDF_LEVEL_SETTINGS: dict[float, tuple[float, float, float]] = WORLD_NDF_LEVEL_SETTINGS_CONTRAST_0x5[WORLD_AGC_DEFAULT_TARGET]
 WORLD_CAM_FPS: int = 120
+
+# Default gaze-centered output coordinates, shared by reconstruction and display metadata.
+# A tuple keeps the shared default immutable; each call creates its own numeric array.
+WORLD_OPPONENT_ANGLES: tuple[float, ...] = tuple(np.linspace(-90.0, 90.0, 361))
 WORLD_FRAME_SHAPE: np.ndarray = np.array([480, 640], dtype=np.uint16)
 WORLD_FRAME_DTYPE: object = np.uint8
 WORLD_METADATA_DTYPE: object = np.float64
@@ -4608,13 +4614,15 @@ def world_counts_to_radiance(
         broadcast to all frames; per-frame scales are reshaped for spatial
         broadcasting.
     """
+
     # Reserve the original image only when a comparison plot is requested.
     unmodified_image_or_video: np.ndarray | None = None
     if visualize_results is True:
         assert (
             image_or_video.ndim == 2
         ), "Radiance visualization only supports a single frame"
-        # Reserve the original image only when a comparison plot is requested.
+
+        # Preserve counts for the before/after figure before scaling them in place.
         unmodified_image_or_video = image_or_video.copy()
 
     # Accept both generations of world-camera metadata names.
@@ -4623,12 +4631,14 @@ def world_counts_to_radiance(
         if "exposure" in agc_settings
         else agc_settings["cameraExposure"]
     )
+
     # Accept either legacy or modern metadata naming for analog gain.
     analog_gain: float | np.ndarray = (
         agc_settings["Again"]
         if "Again" in agc_settings
         else agc_settings["cameraAgain"]
     )
+
     # Accept either legacy or modern metadata naming for digital gain.
     digital_gain: float | np.ndarray = (
         agc_settings["Dgain"] if "Dgain" in agc_settings else agc_settings["AGCDgain"]
@@ -4640,14 +4650,18 @@ def world_counts_to_radiance(
         radiance_agc_target / np.asarray(digital_gain, dtype=np.float64)
         - WORLD_DARK_SIGNAL
     )
+
     # Subtract the dark offset to obtain the usable sensor range.
-    smax: float = (2**camera_bit_depth - 1) - WORLD_DARK_SIGNAL
+    usable_count_range: float = (2**camera_bit_depth - 1) - WORLD_DARK_SIGNAL
+
     # Use the calibrated full-well exponent when inverting the AGC target.
     exponent: float = WORLD_FULL_WELL_CLIPPING_EXPONENT
+
     # Invert the sensor response at the dark-subtracted AGC target.
     linearized_set_point: np.ndarray = set_point / (
-        1 - (set_point / smax) ** exponent
+        1 - (set_point / usable_count_range) ** exponent
     ) ** (1 / exponent)
+
     # Apply the mean spatial correction to express the target in corrected counts.
     effective_set_point: np.ndarray = (
         linearized_set_point * WORLD_MEAN_SPATIAL_CORRECTIONS[image_or_video.shape[-2:]]
@@ -4655,28 +4669,33 @@ def world_counts_to_radiance(
 
     # Match MATLAB: 10.^polyval(agcToRadianceP, log10(cameraScore)).
     # The fitted coefficients directly predict mean integrated radiance.
-    this_camera_score: np.ndarray = np.asarray(
+    camera_score: np.ndarray = np.asarray(
         np.asarray(exposure) * np.asarray(analog_gain) / effective_set_point,
         dtype=np.float64,
     )
+
     # Evaluate the fitted log-polynomial and convert back to linear radiance.
     mean_integrated_radiance: np.ndarray = np.power(
-        10.0, np.polyval(WORLD_AGC_TO_RADIANCE_P, np.log10(this_camera_score))
+        10.0, np.polyval(WORLD_AGC_TO_RADIANCE_P, np.log10(camera_score))
     )
 
     # Give each buffered frame its own broadcastable radiance scale. Scalar
     # settings naturally apply the same scale to every frame.
     radiance_scale: np.ndarray = mean_integrated_radiance / effective_set_point
     if image_or_video.ndim == 3 and np.ndim(radiance_scale) > 0:
-        # Add singleton spatial axes so each frame receives its own radiance multiplier.
-        radiance_scale: np.ndarray = radiance_scale.reshape(-1, 1, 1)
 
-    # Scale corrected counts by the fitted mean integrated radiance.
+        # Add singleton spatial axes so each frame receives its own radiance multiplier.
+        radiance_scale = radiance_scale.reshape(-1, 1, 1)
+
+    # Apply one calibrated multiplier to all pixels in each frame. This preserves
+    # their relative intensities while expressing them on the radiance scale.
+    # The input must retain its floating-point storage; this operation is in place.
     image_or_video *= radiance_scale
 
     if visualize_results is True:
         fig: plt.Figure
         axes: np.ndarray
+
         # Create aligned before/after panels for visual inspection of this stage.
         fig, axes = plt.subplots(1, 2, figsize=(12, 4))
         fig.suptitle(
@@ -4695,43 +4714,11 @@ def world_counts_to_radiance(
     return None
 
 
-@lru_cache(maxsize=1)
-def _opponent_calibration() -> tuple[np.ndarray, np.ndarray, np.ndarray, Delaunay]:
-    """Load and cache the camera geometry and RGB-to-LMS calibration.
-
-    Args:
-        None.
-
-    Returns:
-        Azimuth and elevation maps in degrees, the RGB-to-LMS matrix, and the
-        Delaunay triangulation of the camera's angular sample positions.
-
-    Notes:
-        The cached arrays are shared between calls and must be treated as
-        read-only. Metadata receives a copy of the conversion matrix.
-    """
-    # Load the per-pixel angular calibration from the MATLAB calibration file.
-    maps: dict[str, object] = scipy.io.loadmat(
-        _DERIVED_CALIBRATION_DIR / "cameraToVisualAngles.mat"
-    )
-    # Convert the native azimuth map to double precision for interpolation.
-    az: np.ndarray = np.asarray(maps["nativeAzimuthMap"], dtype=np.float64)
-    # Convert the native elevation map using the same numerical precision.
-    el: np.ndarray = np.asarray(maps["nativeElevationMap"], dtype=np.float64)
-    # Load the calibrated linear transformation from camera RGB to cone LMS.
-    matrix: np.ndarray = scipy.io.loadmat(
-        _DERIVED_CALIBRATION_DIR / "sensorToConeMatrix.mat"
-    )["rgb2lmsMatrix"]
-    # Triangulate camera samples in angular coordinates for RGB interpolation.
-    triangulation: Delaunay = Delaunay(np.column_stack((az.ravel(), el.ravel())))
-    return az, el, matrix, triangulation
-
-
 def compute_foveated_opponent_map(
     radiance: np.ndarray,
     gaze_xy: np.ndarray | tuple[float, float] | None = None,
     *,
-    balance_neutral: bool = True,
+    balance_neutral: bool = False,
     azimuth: np.ndarray | None = None,
     elevation: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -4747,7 +4734,7 @@ def compute_foveated_opponent_map(
 
         balance_neutral (bool):
             Balance M and S weights using each frame's valid scene mean. False
-            retains the fixed LMS weights (1.0, 1.33, 5.0).
+            retains the fixed LMS weights (1.0, 1.33, 5.0), and is the default.
 
         azimuth (np.ndarray | None):
             Output azimuth coordinates in degrees; defaults to -90 to 90
@@ -4773,85 +4760,127 @@ def compute_foveated_opponent_map(
         (320, 240) convention for 640-by-480 frames. Scene balancing preserves
         MATLAB's NaN/Inf behavior for degenerate scenes.
     """
+
     # Normalize input values to double precision before geometric interpolation.
     radiance = np.asarray(radiance, dtype=np.float64)
+
     # Remember whether the caller supplied one frame or a frame buffer.
     single: bool = radiance.ndim == 3
+
     # Add a temporary frame axis so both input forms share the same loop.
     frames: np.ndarray = radiance[None] if single else radiance
-    az: np.ndarray
-    el: np.ndarray
-    matrix: np.ndarray
-    triangulation: Delaunay
-    # Reuse cached camera geometry and the RGB-to-LMS calibration.
-    az, el, matrix, triangulation = _opponent_calibration()
+    # Read the calibrated viewing angles associated with every native camera pixel.
+    angular_calibration: dict[str, object] = scipy.io.loadmat(
+        _DERIVED_CALIBRATION_DIR / "cameraToVisualAngles.mat"
+    )
+    az: np.ndarray = np.asarray(angular_calibration["nativeAzimuthMap"], dtype=np.float64)
+    el: np.ndarray = np.asarray(angular_calibration["nativeElevationMap"], dtype=np.float64)
+
+    # Each row of this matrix converts calibrated RGB into one cone response.
+    photoreceptor_calibration: dict[str, object] = scipy.io.loadmat(
+        _DERIVED_CALIBRATION_DIR / "sensorToPhotoreceptorMatrix.mat"
+    )
+    matrix: np.ndarray = np.asarray(photoreceptor_calibration["rgb2lmsMatrix"], dtype=np.float64)
+
+    # Triangulate the native angular locations once for this image or buffer.
+    # All frames in the loop reuse this geometry when resampling around gaze.
+    angular_positions: np.ndarray = np.column_stack((az.ravel(), el.ravel()))
+    triangulation: Delaunay = Delaunay(angular_positions)
+
     # Reject inputs that cannot be mapped using the calibrated RGB geometry.
     if frames.ndim != 4 or frames.shape[1:] != (*az.shape, 3):
         raise ValueError("RGB radiance must match the calibrated camera geometry")
+
     # Read the sensor dimensions from the calibrated angular maps.
     height: int
     width: int
     height, width = az.shape
+
     # Use center fixation by default, then normalize gaze to a numeric array.
     gaze: np.ndarray = np.asarray(
         (width / 2, height / 2) if gaze_xy is None else gaze_xy, dtype=float
     )
+
     # Accept either a shared fixation or one fixation per frame.
     if gaze.shape == (2,):
+
         # Repeat one fixation across every frame in the buffer.
         gaze = np.broadcast_to(gaze, (len(frames), 2))
+
     # Require one X/Y coordinate pair for every frame after broadcasting.
     if gaze.shape != (len(frames), 2):
         raise ValueError("Gaze must be an (X, Y) pair or one pixel pair per frame")
+
     # Construct the default horizontal angular grid when none was supplied.
-    azimuth = np.arange(-90, 90.25, 0.5) if azimuth is None else np.asarray(azimuth)
+    azimuth = np.asarray(WORLD_OPPONENT_ANGLES if azimuth is None else azimuth, dtype=float)
+
     # Construct the default vertical angular grid when none was supplied.
     elevation = (
-        np.arange(-90, 90.25, 0.5) if elevation is None else np.asarray(elevation)
+        np.asarray(WORLD_OPPONENT_ANGLES if elevation is None else elevation, dtype=float)
     )
+
     # Pair horizontal and vertical angles into the output sampling grid.
     query: np.ndarray = np.stack(
         np.meshgrid(azimuth, elevation, indexing="ij"), axis=-1
     )
+
     # Build one-based row and column coordinates matching MATLAB camera pixels.
     axes: tuple[np.ndarray, np.ndarray] = (
         np.arange(1, height + 1),
         np.arange(1, width + 1),
     )
+
     # Interpolate camera angles at a possibly fractional gaze pixel.
     angle_at_pixel: RegularGridInterpolator = RegularGridInterpolator(
         axes, np.stack((az, el), axis=-1)
     )
+
     # Initialize all output maps as missing until a valid frame is processed.
     result: np.ndarray = np.full((len(frames), len(azimuth), len(elevation), 3), np.nan)
+
     # Reserve one set of effective LMS weights for each frame.
     weights: np.ndarray = np.full((len(frames), 3), np.nan)
+    index: int
+    frame: np.ndarray
+    xy: np.ndarray
     for index, (frame, xy) in enumerate(zip(frames, gaze)):
+
         # Leave the preallocated NaN output for frames lacking finite gaze.
         if not np.all(np.isfinite(xy)):
             continue
+
         # Clamp finite gaze coordinates to the calibrated sensor bounds.
         gx: float
         gy: float
         gx, gy = np.clip(xy, (1, 1), (width, height))
+
         # Convert the gaze pixel to angles, passing row before column.
         offset: np.ndarray = angle_at_pixel([[gy, gx]])[0]
+
         # Sample RGB at camera angles shifted by the gaze direction.
         rgb: np.ndarray = LinearNDInterpolator(triangulation, frame.reshape(-1, 3))(
             query + offset
         )
+
         # MATLAB defines coverage from red before replacing individual NaNs.
         coverage: np.ndarray = ~np.isnan(rgb[..., 0])
+
         # Replace missing RGB components with zero while preserving the coverage mask.
         rgb = np.where(np.isnan(rgb), 0.0, rgb)
+
         # Transform interpolated RGB vectors into calibrated cone responses.
         lms: np.ndarray = rgb @ matrix.T
+
         # Keep only covered positions with finite values in all three cone channels.
         valid: np.ndarray = np.all(np.isfinite(lms), axis=-1) & coverage
+
         # Start with the fixed L, M, and S channel weights.
         w: np.ndarray = np.array([1.0, 1.33, 5.0])
-        # Adapt cone weights so the valid scene mean has neutral opponency.
+
+        # Optional balancing forces neutral scene means by changing weights per frame.
+        # Analysis leaves this disabled and retains the fixed weights above.
         if balance_neutral:
+
             # Estimate scene means over valid locations for neutral balancing.
             mean_l: float
             mean_m: float
@@ -4859,28 +4888,146 @@ def compute_foveated_opponent_map(
             mean_l, mean_m, mean_s = (
                 lms[valid].mean(axis=0) if np.any(valid) else np.full(3, np.nan)
             )
+
             # Preserve MATLAB's per-channel NaN/Inf behavior for degenerate scenes.
             with np.errstate(divide="ignore", invalid="ignore"):
+
                 # Scale M so its weighted mean equals the L mean.
                 w[1] = mean_l / mean_m
+
                 # Scale S so its weighted mean equals the combined L+M mean.
                 w[2] = (mean_l + w[1] * mean_m) / mean_s
         with np.errstate(invalid="ignore"):
+
             # Apply the effective weights and separate the three cone response planes.
             L: np.ndarray
             M: np.ndarray
             S: np.ndarray
             L, M, S = np.moveaxis(lms * w, -1, 0)
+
         # Form the achromatic channel by summing weighted L and M responses.
         ach: np.ndarray = L + M
+
         # Store achromatic, red-green, and blue-yellow responses in that order.
         result[index] = np.stack((ach, L - M, S - ach), axis=-1)
+
         # Restore missing values wherever the calibrated scene has no valid coverage.
         result[index][~valid] = np.nan
+
         # Retain the exact weights used for this frame for downstream interpretation.
         weights[index] = w
+
     # Remove the temporary frame axis only when the caller supplied a single image.
     return (result[0], weights[0]) if single else (result, weights)
+
+
+def compute_scene_illuminance(
+    image_or_video: np.ndarray,
+    verbose: bool = False,
+) -> np.ndarray:
+    """Compute camera scene illuminance from full-frame RGB radiance.
+
+    Args:
+        image_or_video: One demosaiced RGB image shaped (rows, columns, 3),
+            or a buffer shaped (frames, rows, columns, 3). The input is preserved.
+        verbose: Show a progress bar while calculating illuminance for the frames.
+            Defaults to False; does not change the calculation or display a figure.
+
+    Returns:
+        Float64 illuminance in lux, as a zero-dimensional array for one image
+        or an array shaped (frames,) for a buffer. An image without valid
+        luminance samples returns NaN.
+
+    Raises:
+        ValueError: Input is not an RGB image or buffer with three channels.
+
+    Notes:
+        Matches the fifth output of MATLAB computeFoveatedOpponentMap:
+        project each native RGB pixel with rgb2lumVector, omit NaN luminance
+        samples, and multiply their spatial mean by pi. NaN red-channel
+        pixels are excluded before projection. Infinities are not filtered.
+        This uses full camera coverage before gaze resampling or balancing.
+        Frames are processed separately to bound temporary memory usage.
+    """
+
+    # Normalize the numerical type without changing the caller's pixel values.
+    images: np.ndarray = np.asarray(image_or_video, dtype=np.float64)
+
+    if images.ndim not in (3, 4):
+        raise ValueError(
+            "image_or_video must be one RGB image shaped (rows, columns, 3) "
+            "or a buffer shaped (frames, rows, columns, 3). "
+            f"Received shape {images.shape} with {images.ndim} dimensions."
+        )
+
+    if images.shape[-1] != 3:
+        raise ValueError(
+            "image_or_video must have exactly three channels in its last dimension, "
+            "ordered R, G, B. "
+            f"Received shape {images.shape}, with {images.shape[-1]} channels."
+        )
+
+    # Remember the original input form so the return value can match it:
+    # one image produces one scalar array; a buffer produces one value per frame.
+    single_image: bool = images.ndim == 3
+    frames: np.ndarray
+
+    if single_image:
+        # Change (rows, columns, 3) to (1, rows, columns, 3). This adds a frame
+        # dimension without duplicating pixels, allowing the loop to process one frame.
+        frames = np.expand_dims(images, axis=0)
+    else:
+        # A buffer already has its frame dimension first, so use it directly.
+        frames = images
+
+    # Reserve one output value per frame. Leave it NaN if that frame has no
+    # usable luminance samples, rather than incorrectly reporting zero lux.
+    frame_count: int = len(frames)
+    illuminance: np.ndarray = np.full(frame_count, np.nan, dtype=np.float64)
+
+    # Load the three coefficients for converting each RGB pixel to luminance.
+    # The calibration already includes photopic efficacy; do not apply it again.
+    photoreceptor_calibration: dict[str, object] = scipy.io.loadmat(
+        _DERIVED_CALIBRATION_DIR / "sensorToPhotoreceptorMatrix.mat"
+    )
+    luminance_weights: np.ndarray = np.asarray(
+        photoreceptor_calibration["rgb2lumVector"], dtype=np.float64,
+    ).reshape(3)
+
+    frame_index: int
+    frame: np.ndarray
+
+    # The same loop supports one image or a buffer. Report progress only on request.
+    for frame_index, frame in enumerate(tqdm(
+        frames, total=len(frames), desc="Computing scene illuminance", disable=not verbose,
+    )):
+
+        # Put each RGB triplet in one row, following MATLAB's column-major pixel order.
+        pixels: np.ndarray = frame.reshape(-1, 3, order="F")
+
+        # Match MATLAB's initial coverage mask: exclude pixels with a missing red
+        # channel before projecting RGB radiance onto photopic luminance.
+        red_channel_present: np.ndarray = ~np.isnan(pixels[:, 0])
+
+        # Infinite input values can produce NaNs during projection. Suppress those
+        # arithmetic warnings here, then omit NaN results explicitly below.
+        with np.errstate(invalid="ignore"):
+            luminance: np.ndarray = pixels[red_channel_present] @ luminance_weights
+            non_nan_luminance: np.ndarray = luminance[~np.isnan(luminance)]
+
+            # The calibration already includes the photopic efficacy factor.
+            # Multiply mean luminance by pi to match MATLAB's scene-illuminance
+            # estimate in lux. Retain infinities, matching its NaN-only exclusion.
+            if non_nan_luminance.size > 0:
+                illuminance[frame_index] = non_nan_luminance.mean() * np.pi
+
+    # Restore the documented scalar-array result for a single input image.
+    # Buffered input keeps one illuminance value per frame.
+    if single_image:
+        return illuminance[0].reshape(())
+
+    return illuminance
+
 
 
 def world_transformation_pipeline(
@@ -4898,8 +5045,8 @@ def world_transformation_pipeline(
 ) -> dict[str, np.ndarray | dict[str, object]]:
     """Reconstruct RGB radiance and return foveated opponent cone radiance.
 
-    The result matches MATLAB ``computeFoveatedOpponentMap`` with scene-neutral
-    balancing, after reconstruction and demosaicing. Each processing stage calls its standalone
+    The result matches MATLAB ``computeFoveatedOpponentMap`` with fixed cone
+    weights (neutral balancing disabled), after reconstruction and demosaicing. Each processing stage calls its standalone
     helper, whose ``visualize_results`` option can be used independently.
 
     Raw input is preserved. After imputation, the fielding, color, and radiance
@@ -4940,10 +5087,11 @@ def world_transformation_pipeline(
             for serial execution.
 
         stagewise_output (list[np.ndarray] | None):
-            Optional empty list that receives nine independent float64
+            Optional empty list that receives ten independent float64
             snapshots: raw counts, quantization correction, linearization,
             imputation, fielding, RGB correction, Bayer radiance, and demosaiced
-            RGB radiance, then foveated Ach/RG/BY responses. RGB has a trailing
+            RGB radiance, foveated Ach/RG/BY responses, and camera illuminance
+            (scalar or one value per frame). RGB has a trailing
             color dimension; opponent maps use azimuth/elevation/channel axes. Omit
             this argument to avoid the snapshot copies.
 
@@ -4962,6 +5110,7 @@ def world_transformation_pipeline(
         "cone_weights" contains effective LMS weights, shaped (3,) or
         (frames, 3). "average_rgb" contains the spatial mean RGB radiance
         before opponent conversion, shaped (3,) or (frames, 3).
+        "scene_illuminance" is a float64 scalar array or (frames,) array.
 
     Raises:
         ValueError: Input dimensions or calibrated image geometry are unsupported,
@@ -4995,6 +5144,11 @@ def world_transformation_pipeline(
             "World reconstruction requires shape (rows, cols) or "
             f"(frames, rows, cols). Got {raw_frame_or_buffer.shape}."
         )
+
+    # Use the shared grid matching MATLAB's default -90:0.5:90 coordinates.
+    # Pass these same arrays to resampling and metadata so they cannot disagree.
+    azimuth: np.ndarray = np.asarray(WORLD_OPPONENT_ANGLES, dtype=float)
+    elevation: np.ndarray = np.asarray(WORLD_OPPONENT_ANGLES, dtype=float)
 
     # Read row and column dimensions independently of the optional frame axis.
     image_shape: tuple[int, int] = raw_frame_or_buffer.shape[-2:]
@@ -5106,8 +5260,30 @@ def world_transformation_pipeline(
     if store_stagewise_output is True:
         stagewise_output.append(demosaiced.copy())
 
-    # Record every processing calibration, including the source fit metadata.
-    # Store only the applied geometry's maps, once per buffer rather than per frame.
+    # Stage 8: recenter on gaze and convert RGB into opponent cone channels.
+    opponent: np.ndarray
+    cone_weights: np.ndarray
+    opponent, cone_weights = compute_foveated_opponent_map(
+        demosaiced, gaze_angles_xy, balance_neutral=False, azimuth=azimuth, elevation=elevation,
+    )
+    if store_stagewise_output is True:
+        stagewise_output.append(opponent.copy())
+
+    # Stage 9: measure illuminance from full native RGB coverage, before foveation.
+    scene_illuminance: np.ndarray = compute_scene_illuminance(demosaiced)
+    if store_stagewise_output is True:
+        stagewise_output.append(scene_illuminance.copy())
+
+    # Read the photoreceptor coefficients to retain them with the processed data.
+    photoreceptor_calibration: dict[str, object] = scipy.io.loadmat(
+        _DERIVED_CALIBRATION_DIR / "sensorToPhotoreceptorMatrix.mat"
+    )
+
+    # Assemble the complete metadata once, after all processing stages.
+    # Describe the final opponent-map output and retain the calibrations needed
+    # to interpret radiance and illuminance. Copy mutable calibration values so
+    # callers receive independent calibration arrays in this dictionary.
+    # Geometry-specific maps are stored once per buffer, not once per frame.
     calibration_metadata: dict[str, object] = deepcopy(
         {
             "WORLD_FULL_WELL_CLIPPING_EXPONENT": WORLD_FULL_WELL_CLIPPING_EXPONENT,
@@ -5133,32 +5309,23 @@ def world_transformation_pipeline(
             "quantization_bias": quantization_correction,
             "radiance_agc_target": radiance_agc_target,
             "demosaic_ratio_epsilon": demosaic_ratio_epsilon,
-            "units": "W/m²/sr",
-        }
-    )
-    opponent: np.ndarray
-    cone_weights: np.ndarray
-    # Stage 8: recenter on gaze and convert RGB into opponent cone channels.
-    opponent, cone_weights = compute_foveated_opponent_map(demosaiced, gaze_angles_xy)
-    if store_stagewise_output is True:
-        stagewise_output.append(opponent.copy())
-    # Describe the final angular opponent output rather than the intermediate RGB map.
-    calibration_metadata.update(
-        {
             "units": "opponent cone integrated radiance",
             "dimensions": "azimuth,elevation,post_receptoral_channel",
             "channels": "Ach,RG,BY",
-            "azimuth": np.arange(-90, 90.25, 0.5),
-            "elevation": np.arange(-90, 90.25, 0.5),
+            "azimuth": azimuth,
+            "elevation": elevation,
             "angle_units": "degrees",
             "gaze_coordinates": "one-based camera pixels (X,Y)",
-            "balance_neutral": True,
-            "rgb2lmsMatrix": _opponent_calibration()[2].copy(),
+            "balance_neutral": False,
+            "rgb2lmsMatrix": np.asarray(photoreceptor_calibration["rgb2lmsMatrix"], dtype=np.float64),
+            "rgb2lumVector": np.asarray(photoreceptor_calibration["rgb2lumVector"], dtype=np.float64).reshape(3),
         }
     )
-    # Return opponent maps, calibration provenance, weights, and mean pre-opponent RGB.
+
+    # Return opponent maps and aligned per-frame measurements.
     return {
         "data": opponent,
+        "scene_illuminance": scene_illuminance,
         "metadata": calibration_metadata,
         "cone_weights": cone_weights,
         "average_rgb": demosaiced.mean(axis=(-3, -2)),
@@ -5178,17 +5345,16 @@ def plot_reconstruction_stages(
     Hover coordinates report the original values rather than display-scaled ones.
 
     Args:
-        stagewise_output: Nine snapshots (seven Bayer planes, one RGB image, and
-            one azimuth-by-elevation-by-channel opponent map) collected by
+        stagewise_output: Ten snapshots (seven Bayer planes, one RGB image,
+            one azimuth-by-elevation-by-channel opponent map, and scalar lux) collected by
             world_transformation_pipeline for a single frame. For a buffer,
             select the same frame index from each snapshot before plotting.
         title: Title for the complete figure.
 
     Returns:
-        The displayed figure and its (2, 11) axes array. The final three columns
+        The displayed figure and its (2, 12) axes array. Three opponent columns
         show Ach, RG, and BY with signed scales and finite-value histograms.
-        Saved stages are not
-        modified; display scaling operates on separate arrays.
+        Saved stages are not modified; display scaling operates on separate arrays.
 
     Raises:
         ValueError: If the Bayer/RGB shapes disagree or the opponent map lacks three channels.
@@ -5197,16 +5363,38 @@ def plot_reconstruction_stages(
         "Raw", "Quantization", "Linearization", "Imputation",
         "Flat field", "RGB correction", "Radiance", "Demosaiced",
     )
-    if len(stagewise_output) != 9:
-        raise ValueError("Provide all nine snapshots from world_transformation_pipeline.")
+    if len(stagewise_output) != 10:
+        raise ValueError(
+            "Expected ten snapshots: seven Bayer planes, demosaiced RGB, opponent map, "
+            f"and scalar illuminance. Received {len(stagewise_output)} snapshots."
+        )
     image_shape: tuple[int, ...] = stagewise_output[0].shape
-    if (len(image_shape) != 2
-        or any(stage.shape != image_shape for stage in stagewise_output[:7])
-        or stagewise_output[7].shape != (*image_shape, 3)):
-        raise ValueError("Provide seven same-shaped Bayer planes followed by their RGB image.")
+    if len(image_shape) != 2:
+        raise ValueError(f"The raw snapshot must be a 2-D Bayer image; got {image_shape}.")
+
+    for stage_index, stage in enumerate(stagewise_output[:7]):
+        if stage.shape != image_shape:
+            raise ValueError(f"Bayer stage {stage_index} must have shape {image_shape}; got {stage.shape}.")
+
+    if stagewise_output[7].shape != (*image_shape, 3):
+        raise ValueError(f"Demosaiced RGB must have shape {(*image_shape, 3)}; got {stagewise_output[7].shape}.")
+
     opponent: np.ndarray = stagewise_output[8]
-    if opponent.ndim != 3 or opponent.shape[-1] != 3:
-        raise ValueError("The ninth snapshot must be an azimuth-by-elevation-by-3 opponent map.")
+    if opponent.ndim != 3:
+        raise ValueError(f"Opponent snapshot must have axes (azimuth, elevation, channels); got {opponent.shape}.")
+
+    if opponent.shape[-1] != 3:
+        raise ValueError(f"Opponent snapshot needs Ach, RG, and BY channels; got {opponent.shape[-1]} channels.")
+
+    illuminance: np.ndarray = np.asarray(stagewise_output[9])
+    if illuminance.ndim != 0:
+        raise ValueError(f"Expected scalar illuminance for one frame; got {illuminance.shape}. Select one frame before plotting.")
+
+    # Allocate the figure only after all snapshot shapes have been validated.
+    figure: plt.Figure
+    axes: np.ndarray
+    figure, axes = plt.subplots(2, 12, figsize=(37, 7), constrained_layout=True)
+    figure.suptitle(title, fontsize=15, fontweight="bold")
 
     def original_pixel_coordinates(x: float, y: float, stage: np.ndarray) -> str:
         """Format the unscaled stage value under the mouse pointer.
@@ -5229,25 +5417,32 @@ def plot_reconstruction_stages(
             return f"row={row}, col={col}, value={value}"
         return ""
 
-    figure: plt.Figure
-    axes: np.ndarray
-    figure, axes = plt.subplots(2, 11, figsize=(34, 7), constrained_layout=True)
-    figure.suptitle(title, fontsize=15, fontweight="bold")
+    # Histogram bins express intensity as a fraction of the stage's finite maximum.
     edges: np.ndarray = np.linspace(0, 1, 256)
 
+    stage_index: int
+    stage_name: str
+    stage: np.ndarray
     for stage_index, (stage_name, stage) in enumerate(zip(stage_names, stagewise_output)):
+
         # Display scaling never changes the saved numerical stage. Empty or
         # non-positive ranges use a scale of one so all-dark images still plot.
         finite_values: np.ndarray = stage[np.isfinite(stage)]
-        display_scale: float = float(np.percentile(finite_values, 85)) if finite_values.size else 1.0
+        display_scale: float = 1.0
+        if finite_values.size > 0:
+            display_scale = float(np.percentile(finite_values, 85))
         if display_scale <= 0:
             display_scale = 1.0
         normalized: np.ndarray = np.clip(
             np.nan_to_num(stage / display_scale, nan=0.0, posinf=1.0, neginf=0.0), 0, 1
         )
+
         # The final stage already has RGB channels; Bayer stages need replication.
-        display_rgb: np.ndarray = (np.repeat(normalized[..., None], 3, axis=-1)
-                                   if stage.ndim == 2 else normalized.copy())
+        display_rgb: np.ndarray
+        if stage.ndim == 2:
+            display_rgb = np.repeat(normalized[..., None], 3, axis=-1)
+        else:
+            display_rgb = normalized.copy()
         ceiling: np.ndarray = np.isinf(stage)
         floor: np.ndarray = stage <= 0
         if(stage.ndim == 3):
@@ -5260,6 +5455,7 @@ def plot_reconstruction_stages(
         image_axis.imshow(display_rgb)
         image_axis.set_title(f"{stage_index}. {stage_name}", fontsize=11)
         image_axis.axis("off")
+
         # Bind this stage now so every axes reports its own original values.
         image_axis.format_coord = partial(original_pixel_coordinates, stage=stage)
 
@@ -5276,10 +5472,14 @@ def plot_reconstruction_stages(
         minimum_labels: list[str] = []
         maximum_labels: list[str] = []
         histogram_axis: plt.Axes = axes[1, stage_index]
+        channel_name: str
+        color: str
+        values: np.ndarray
         for channel_name, color, values in zip("RGB", ("red", "green", "blue"), channel_values):
             finite_channel: np.ndarray = values[np.isfinite(values)]
             minimum_labels.append(f"{np.min(finite_channel):.3g}" if finite_channel.size else "n/a")
             maximum_labels.append(f"{np.max(finite_channel):.3g}" if finite_channel.size else "n/a")
+
             # MATLAB puts non-finite samples in the highest bin. Negative
             # finite samples fall outside [0, 1] but remain in the denominator.
             histogram_values: np.ndarray = np.where(np.isfinite(values), values, histogram_scale)
@@ -5335,8 +5535,17 @@ def plot_reconstruction_stages(
         histogram_axis.set_title(f"Invalid: {channel_map.size - finite_channel.size:,}", fontsize=9)
         histogram_axis.axvline(0, color="black", linewidth=0.5)
 
+    # Illuminance is a scalar summary, so display its value instead of an image
+    # or histogram. The unused lower tile is hidden to keep the layout clean.
+    axes[0, 11].set_title("9. Camera illuminance", fontsize=11)
+    axes[0, 11].text(0.5, 0.5, f"{float(illuminance):.6g} lux",
+                     ha="center", va="center", transform=axes[0, 11].transAxes)
+    axes[0, 11].axis("off")
+    axes[1, 11].axis("off")
     plt.show()
     return figure, axes
+
+
 
 
 def visualize_pipeline(
@@ -5418,9 +5627,12 @@ def visualize_pipeline(
     return figures
 
 
-def opponentmap_to_videoframe(opponentmaps: np.ndarray, fps: float=WORLD_CAM_FPS,
-                              window_seconds: float=1.0,
-                              verbose: bool=False) -> NDArray[np.uint8]:
+def opponentmap_to_videoframe(
+    opponentmaps: np.ndarray,
+    fps: float = WORLD_CAM_FPS,
+    window_seconds: float = 1.0,
+    verbose: bool = False,
+) -> NDArray[np.uint8]:
     """Scale each opponent channel using a centered rolling mean and SD.
 
     Args:
@@ -5440,6 +5652,10 @@ def opponentmap_to_videoframe(opponentmaps: np.ndarray, fps: float=WORLD_CAM_FPS
             this range are clipped. These are display-scaled opponent channels,
             not a conversion to RGB or BGR.
 
+    Raises:
+        AssertionError: Input is not an image/buffer array or timing parameters
+            are nonfinite or nonpositive.
+
     Notes:
         Windows at the ends use the first/last full window. Short buffers use
         all available frames; a single image uses only its spatial statistics.
@@ -5447,20 +5663,44 @@ def opponentmap_to_videoframe(opponentmaps: np.ndarray, fps: float=WORLD_CAM_FPS
         Constant finite channels map to 127. Separate calls do not share window
         history, so independently converted chunks can differ at their edges.
     """
-    assert isinstance(opponentmaps, np.ndarray) and opponentmaps.ndim in (3, 4)
-    assert np.isfinite(fps) and fps > 0, "fps must be finite and positive."
-    assert np.isfinite(window_seconds) and window_seconds > 0
+    assert isinstance(opponentmaps, np.ndarray), f"opponentmaps must be a NumPy array; got {type(opponentmaps).__name__}."
+    assert opponentmaps.ndim in (3, 4), (
+        "Expected (azimuth, elevation, channels) or (frames, azimuth, elevation, channels); "
+        f"got {opponentmaps.shape}."
+    )
+    assert np.isfinite(fps), f"fps must be finite; got {fps}."
+    assert fps > 0, f"fps must be positive; got {fps}."
+    assert np.isfinite(window_seconds), f"window_seconds must be finite; got {window_seconds}."
+    assert window_seconds > 0, f"window_seconds must be positive; got {window_seconds}."
 
-    # Give a single image a frame axis so both inputs follow the same steps.
-    maps: np.ndarray = opponentmaps[None] if opponentmaps.ndim == 3 else opponentmaps
-    # Video rows run from highest to lowest elevation.
-    video_maps = maps.swapaxes(1, 2)[:, ::-1]
-    frame: np.ndarray = np.zeros(video_maps.shape, dtype=np.uint8)
+    # Add a frame dimension for one image so the same loops handle both inputs.
+    # Remember the original form so we can remove this dimension before returning.
+    single_image: bool = opponentmaps.ndim == 3
+    maps: np.ndarray
+    if single_image:
+        maps = np.expand_dims(opponentmaps, axis=0)
+    else:
+        maps = opponentmaps
+
+    # Input axes are azimuth then elevation. Video axes are row then column,
+    # with the highest elevation at the top, so swap axes and reverse the rows.
+    video_maps: np.ndarray = maps.swapaxes(1, 2)[:, ::-1]
+    frame: NDArray[np.uint8] = np.zeros(video_maps.shape, dtype=np.uint8)
+
+    # Empty input has no statistics to calculate and no diagnostic image to show.
     if maps.size == 0:
-        return frame[0] if opponentmaps.ndim == 3 else frame
+        if single_image:
+            return frame[0]
+        return frame
+
+    # Convert seconds into source frames, requiring at least one frame and never
+    # requesting more frames than the supplied buffer contains.
     window_frames: int = min(len(maps), max(1, int(round(fps * window_seconds))))
 
+    channel: int
+    index: int
     for channel in range(maps.shape[-1]):
+
         # Spatial statistics let us pool the rolling window without repeatedly
         # scanning every pixel in its frames.
         counts: np.ndarray = np.zeros(len(maps))
@@ -5475,18 +5715,28 @@ def opponentmap_to_videoframe(opponentmaps: np.ndarray, fps: float=WORLD_CAM_FPS
                 variances[index] = np.var(values)
 
         for index in range(len(maps)):
-            # Clamp the entire window, retaining its width at both ends.
+
+            # Center the window on this frame. At either buffer edge, shift the
+            # whole window inward so it retains its intended number of frames.
             start: int = min(max(index - window_frames // 2, 0), len(maps) - window_frames)
             stop: int = start + window_frames
             weights: np.ndarray = counts[start:stop]
             if weights.sum() == 0:
                 continue
+
+            # Weight by valid pixel counts, so a partially missing frame contributes
+            # only its available samples to the pooled mean and variance.
             mean: float = float(np.average(means[start:stop], weights=weights))
+
+            # Pooled variance includes both within-frame variance and differences
+            # between each frame's mean and the overall window mean.
             sd: float = float(np.sqrt(np.average(
                 variances[start:stop] + (means[start:stop] - mean) ** 2, weights=weights
             )))
 
-            # Use separate half-ranges to map the mean exactly to 127.
+            # Map the window mean to gray (127), and two standard deviations
+            # below/above it to black/white. The two sides span 127 and 128 levels.
+            # Constant channels keep 127; missing pixels become black afterward.
             values = video_maps[index, ..., channel].astype(np.float64)
             valid: np.ndarray = np.isfinite(values)
             scaled: np.ndarray = np.full(values.shape, 127.0)
@@ -5497,28 +5747,33 @@ def opponentmap_to_videoframe(opponentmaps: np.ndarray, fps: float=WORLD_CAM_FPS
             frame[index, ..., channel] = np.rint(np.clip(scaled, 0, 255)).astype(np.uint8)
 
     if verbose:
+
         # Show the middle frame with its original coverage and converted values.
         display_index: int = len(maps) // 2
         before: np.ndarray = maps[display_index]
         after: np.ndarray = frame[display_index]
-        names = ("L+M", "L−M", "S−(L+M)")
-        n_channels = before.shape[-1]
-        n_rows = n_channels + int(n_channels == 3)
-        figure = plt.figure(figsize=(10, 4 * n_rows), constrained_layout=True)
-        rows = figure.subfigures(n_rows, 1, squeeze=False)[:, 0]
+        names: tuple[str, ...] = ("L+M", "L−M", "S−(L+M)")
+        n_channels: int = before.shape[-1]
+        n_rows: int = n_channels + int(n_channels == 3)
+        figure: plt.Figure = plt.figure(figsize=(10, 4 * n_rows), constrained_layout=True)
+        rows: np.ndarray = figure.subfigures(n_rows, 1, squeeze=False)[:, 0]
         figure.suptitle("Opponent Map to Video Frame Conversion")
         figure.supxlabel("Blue = no finite sample", fontsize=10)
-        gray = plt.get_cmap("gray").with_extremes(bad="lightsteelblue")
+        gray: Colormap = plt.get_cmap("gray").with_extremes(bad="lightsteelblue")
 
+        row: SubFigure
+        left: plt.Axes
+        right: plt.Axes
+        axis: plt.Axes
         for channel, row in enumerate(rows[:n_channels]):
             row.suptitle(names[channel] if channel < len(names) else f"Channel {channel + 1}")
             left, right = row.subplots(1, 2, sharex=True, sharey=True)
 
             # Use the input coverage for both panels so missing samples stay blue.
-            raw = np.ma.masked_invalid(before[..., channel].T)
-            display = np.ma.array(after[::-1, :, channel], mask=np.ma.getmaskarray(raw))
-            raw_image = left.imshow(raw, origin="lower", cmap=gray)
-            byte_image = right.imshow(display, origin="lower", cmap=gray, vmin=0, vmax=255)
+            raw: np.ma.MaskedArray = np.ma.masked_invalid(before[..., channel].T)
+            display: np.ma.MaskedArray = np.ma.array(after[::-1, :, channel], mask=np.ma.getmaskarray(raw))
+            raw_image: AxesImage = left.imshow(raw, origin="lower", cmap=gray)
+            byte_image: AxesImage = right.imshow(display, origin="lower", cmap=gray, vmin=0, vmax=255)
             left.set_title("Before")
             right.set_title("After")
             left.set_ylabel("Elevation sample")
@@ -5528,8 +5783,9 @@ def opponentmap_to_videoframe(opponentmaps: np.ndarray, fps: float=WORLD_CAM_FPS
             row.colorbar(byte_image, ax=right, label="Display value (uint8)")
 
         if n_channels == 3:
+
             # Display all three scaled channels together in the same spatial orientation.
-            rgb = after[::-1].copy()
+            rgb: NDArray[np.uint8] = after[::-1].copy()
             rgb[~np.isfinite(before).all(axis=-1).T] = (176, 196, 222)  # lightsteelblue
             axis = rows[-1].subplots()
             axis.imshow(rgb, origin="lower")
@@ -5539,7 +5795,13 @@ def opponentmap_to_videoframe(opponentmaps: np.ndarray, fps: float=WORLD_CAM_FPS
 
         plt.show()
 
-    return frame[0] if opponentmaps.ndim == 3 else frame
+    # Return one image for single-image input, or retain the frame axis for a buffer.
+    if single_image:
+        return frame[0]
+
+    return frame
+
+
 
 
 

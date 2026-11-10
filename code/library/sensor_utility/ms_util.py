@@ -20,7 +20,7 @@ import pandas as pd
 import scipy.io
 from natsort import natsorted
 from scipy.interpolate import CubicSpline
-from scipy.optimize import lsq_linear
+from scipy.optimize import OptimizeResult, lsq_linear
 from tqdm.auto import tqdm
 
 
@@ -52,9 +52,9 @@ MS_RADIANCE_REGULARIZATION_BASE_ALPHA: float = 1e6
 MS_RADIANCE_REGULARIZATION_REFERENCE_INTENSITY: float = 0.05
 
 
-# World temporal offset relative to other sensors. The world is the target and is 0 
-# (ms)
-MS_TIME_OFFSET: float = -139.354 
+# Add this offset to MS timestamps to align them with the world camera.
+# Units are milliseconds; divide by 1000 before adding to timestamps in seconds.
+MS_TIME_OFFSET: float = -139.354
 
 """Define Characteristics of the minispectrometer device"""
 MS_FPS: int = 2 # Capture at APPROXIMATELY 2 FPS. The MS is more variable than others and does not maintain as tight of an FPS
@@ -107,26 +107,49 @@ MS_JOINT_SOLVER_MAX_ITERATIONS: int = 5000
 def _joint_radiance_model() -> tuple[np.ndarray, np.ndarray]:
     """Return the joint sensitivity matrix and the fitted-wavelength mask.
 
-    Camera sensitivities are splined onto the minispect wavelength support,
-    zeroed outside their measured range, and max-normalized as in MATLAB.
+    Args:
+        None.
+
+    Returns:
+        A (10, n_wavelengths) sensitivity matrix, with seven MS rows followed
+        by camera R, G, B, and a Boolean mask selecting wavelengths to fit.
+
+    Notes:
+        Each matrix row predicts one sensor reading from a candidate spectrum.
+        Camera sensitivities are interpolated onto the MS wavelength grid,
+        zeroed outside their measured range, and peak-normalized as in MATLAB.
+        The result is cached; callers must not modify these shared arrays.
     """
     # Numeric export of the canonical MATLAB table (cameraWls=T{:,1},
     # cameraSens=[T.red,T.green,T.blue]); checked by the validation notebook.
     camera: dict[str, Any] = scipy.io.loadmat(
         _DATA_DIR / "IMX219_spectralSensitivity_numeric.mat"
     )
+    # Interpolate each RGB sensitivity curve onto the same wavelengths as MS.
+    # axis=0 means interpolation follows wavelength rows, preserving three columns.
     camera_t: np.ndarray = CubicSpline(
         camera["cameraWls"].ravel(), camera["cameraSens"], axis=0
     )(MS_SPECTRAL_WAVELENGTHS)
+
+    # Do not extrapolate camera sensitivity beyond its calibrated wavelength range.
     camera_t[
         (MS_SPECTRAL_WAVELENGTHS < camera["cameraWls"].min())
         | (MS_SPECTRAL_WAVELENGTHS > camera["cameraWls"].max())
     ] = 0
+
+    # Normalize each camera channel independently so its peak sensitivity is one.
     camera_t /= camera_t.max(axis=0)
-    model: np.ndarray = np.vstack((MS_SPECTRAL_SENSITIVITY[:MS_JOINT_CHANNEL_COUNT], camera_t.T))
+
+    # Stack the sensor curves in exactly the order used for the observed readings.
+    model: np.ndarray = np.vstack((
+        MS_SPECTRAL_SENSITIVITY[:MS_JOINT_CHANNEL_COUNT], camera_t.T,
+    ))
+
+    # MATLAB fixes these excluded wavelengths to zero rather than estimating them.
     active: np.ndarray = (MS_SPECTRAL_WAVELENGTHS > 200) & (
         MS_SPECTRAL_WAVELENGTHS < 1000
     )
+
     return model, active
 
 
@@ -138,35 +161,78 @@ def estimate_joint_radiance_spectrum(
     beta: float = MS_JOINT_BETA,
     solver_tolerance: float = MS_JOINT_SOLVER_TOLERANCE,
     solver_max_iterations: int = MS_JOINT_SOLVER_MAX_ITERATIONS,
-) -> tuple[np.ndarray, np.ndarray, float | np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, float | np.ndarray, float | np.ndarray, float | np.ndarray, np.ndarray]:
     """Match estimateJointRadianceSpectrum using spatial/temporal RGB means.
 
-    Accept one AS reading and RGB triplet, or matching buffers (readings, channels)
-    and (readings, 3). Returns spectrum, S, fVal and ten signed channel residuals.
-    Spatial means of the temporally averaged demosaiced maps are sufficient;
-    callers need not allocate or retain full mean maps. S is [start, step, count].
+    Args:
+        minispect_values: One raw MS reading shaped (channels,) or a buffer
+            shaped (readings, channels). The first seven channels enter the fit.
+        camera_rgb_radiance: Calibrated camera RGB means shaped (3,) for one
+            reading or (readings, 3) for a buffer, aligned with the MS readings.
+        base_alpha: Base strength of the spectrum's smoothness penalty.
+        reference_intensity: Reference signal used to increase smoothing for
+            dimmer readings. Defaults match the MATLAB implementation.
+        beta: Strength of the penalty on the spectrum's squared magnitude.
+        solver_tolerance: Numerical convergence tolerance for bounded least squares.
+        solver_max_iterations: Maximum number of iterations allowed per reading.
 
-    base_alpha controls smoothness, reference_intensity scales that penalty by
-    measured intensity, and beta controls shrinkage. Solver tolerance/iteration
-    defaults govern numerical convergence. Defaults preserve the existing fit.
+    Returns:
+        Six outputs in MATLAB order: spectrum, S, photopic illuminance in lux,
+        melanopic EDI in lux, residual norm, and signed sensor residuals.
+        S is [start_nm, step_nm, wavelength_count]. A single reading returns a
+        one-dimensional spectrum, scalar lux/EDI/norm, and ten residuals.
+        Buffered input adds a leading reading axis, except to the shared S array.
+
+    Raises:
+        ValueError: MS or RGB shapes are incompatible, or calibrated measurements
+            are nonfinite or negative.
+        RuntimeError: A spectral fit fails to converge.
+        AssertionError: Photoreceptor calibration does not match the wavelength grid.
+
+    Notes:
+        Spatial and temporal RGB means are sufficient; full camera images are
+        not required. The solver balances measurement agreement, smoothness,
+        and small spectral magnitude, subject to nonnegative spectral values.
+        Lux and melanopic EDI are calculated from the resulting joint spectrum,
+        using sensorToPhotoreceptorMatrix.mat. They are not independent MS-only
+        estimates. A zero measurement vector returns a zero spectrum and outputs.
     """
+    # Convert inputs once, retaining whether the caller supplied one reading.
     values: np.ndarray = np.asarray(minispect_values, dtype=np.float64)
     rgb: np.ndarray = np.asarray(camera_rgb_radiance, dtype=np.float64)
     single: bool = values.ndim == 1
-    if values.ndim not in (1, 2) or values.shape[-1] < MS_JOINT_CHANNEL_COUNT:
-        raise ValueError(
-            "Expected one AS reading or a buffer with at least seven channels."
-        )
+
+    if values.ndim not in (1, 2):
+        raise ValueError(f"MS readings must be one- or two-dimensional; got {values.shape}.")
+
+    if values.shape[-1] < MS_JOINT_CHANNEL_COUNT:
+        raise ValueError(f"MS readings need at least seven channels; got {values.shape}.")
+
+    # A temporary reading axis lets single readings and buffers share the same solver.
     values = np.atleast_2d(values)
-    if rgb.shape != ((3,) if single else (len(values), 3)):
-        raise ValueError("Camera RGB means must match the AS reading count.")
-    y: np.ndarray = np.column_stack(
-        (values[:, :MS_JOINT_CHANNEL_COUNT] / 10 ** MS_RADIANCE_WEIGHTS[:MS_JOINT_CHANNEL_COUNT], np.atleast_2d(rgb))
+    expected_rgb_shape: tuple[int, ...] = (3,) if single else (len(values), 3)
+    if rgb.shape != expected_rgb_shape:
+        raise ValueError(f"Camera RGB means must have shape {expected_rgb_shape}; got {rgb.shape}.")
+
+    # Convert the seven raw MS channels to integrated radiance, then append RGB.
+    # Each row now contains the ten observations the spectrum must explain.
+    calibrated_ms: np.ndarray = (
+        values[:, :MS_JOINT_CHANNEL_COUNT]
+        / 10 ** MS_RADIANCE_WEIGHTS[:MS_JOINT_CHANNEL_COUNT]
     )
-    if not np.all(np.isfinite(y)) or np.any(y < 0):
-        raise ValueError("Joint radiance measurements must be finite and nonnegative.")
+    y: np.ndarray = np.column_stack(
+        (calibrated_ms, np.atleast_2d(rgb))
+    )
+
+    if not np.all(np.isfinite(y)):
+        raise ValueError("Joint radiance measurements contain nonfinite values.")
+
+    if np.any(y < 0):
+        raise ValueError("Joint radiance measurements contain negative values.")
 
     # Reuse the calibrated model across readings and recording chunks.
+    model: np.ndarray
+    active: np.ndarray
     model, active = _joint_radiance_model()
     spectra: np.ndarray = np.zeros((len(values), model.shape[1]))
     channel_count: int = model.shape[0]
@@ -175,6 +241,9 @@ def estimate_joint_radiance_spectrum(
     # Eliminate fixed-zero variables: scipy requires strictly unequal bounds.
     forward: np.ndarray = model[:, active]
     derivative: np.ndarray = MS_RADIANCE_SECOND_DERIVATIVE[:, active]
+
+    # The derivative rows penalize curvature; identity rows penalize magnitude.
+    # Both penalties target zero, whereas sensor rows target the measured values.
     shrinkage: np.ndarray = np.sqrt(beta) * np.eye(np.count_nonzero(active))
     target: np.ndarray = np.zeros(
         forward.shape[0] + derivative.shape[0] + shrinkage.shape[0]
@@ -183,27 +252,73 @@ def estimate_joint_radiance_spectrum(
     # Allocate the augmented system once per buffer; only smoothness changes.
     system: np.ndarray = np.vstack((forward, derivative, shrinkage))
 
+    index: int
+    observed: np.ndarray
     for index, observed in enumerate(y):
+        # With no signal, the all-zero spectrum exactly satisfies all three goals.
         if not np.any(observed):
             errors[index] = 0
             continue
-        alpha = base_alpha * reference_intensity / (observed.mean() + np.finfo(float).eps)
-        np.multiply(derivative, np.sqrt(alpha), out=system[channel_count : channel_count + len(derivative)])
+
+        # Dim readings receive stronger smoothing. Epsilon prevents division by zero.
+        alpha: float = float(
+            base_alpha * reference_intensity / (observed.mean() + np.finfo(float).eps)
+        )
+
+        # Update only the smoothness rows; sensor and shrinkage rows are unchanged.
+        np.multiply(
+            derivative, np.sqrt(alpha),
+            out=system[channel_count:channel_count + len(derivative)],
+        )
         target[:channel_count] = observed
-        fit = lsq_linear(system, target, bounds=(0, np.inf), tol=solver_tolerance, max_iter=solver_max_iterations)
+
+        # Fit the active wavelengths with a nonnegative lower bound and no upper bound.
+        fit: OptimizeResult = lsq_linear(
+            system, target, bounds=(0, np.inf),
+            tol=solver_tolerance, max_iter=solver_max_iterations,
+        )
         if not fit.success:
             raise RuntimeError(
                 f"Joint spectral fit failed at reading {index}: {fit.message}"
             )
+
+        # Restore the complete spectrum, leaving excluded wavelengths at zero.
+        # Residuals compare measurements with predictions, excluding penalty rows.
         spectra[index, active] = fit.x
         errors[index] = observed - model @ spectra[index]
 
+    # Convert the fitted spectra using Geoff's wavelength-matched photoreceptor
+    # sensitivities. These already share the MS sampling grid; pi converts the
+    # scene radiance estimate to irradiance, matching the MATLAB implementation.
+    calibration: dict[str, Any] = scipy.io.loadmat(
+        _DERIVED_CALIBRATION_DIR / "sensorToPhotoreceptorMatrix.mat"
+    )
+    photopic_weights: np.ndarray = np.asarray(calibration["T_xyz_minispect"], dtype=float)[1]
+    melanopic_weights: np.ndarray = np.asarray(calibration["T_mel_minispect"], dtype=float).reshape(-1)
+    assert photopic_weights.shape == (spectra.shape[1],), "Photopic calibration must match the spectrum wavelength grid."
+    assert melanopic_weights.shape == photopic_weights.shape, "Melanopic calibration must match the spectrum wavelength grid."
+
+    photopic_scale: float = float(calibration["Km_photo"].item())
+    melanopic_scale: float = float(calibration["Km_mel"].item())
+    illuminance_lux: np.ndarray = photopic_scale * (spectra @ photopic_weights * np.pi)
+    melanopic_edi: np.ndarray = melanopic_scale * (spectra @ melanopic_weights * np.pi)
+
+    # One Euclidean norm summarizes the ten measurement residuals for each reading.
+    # This is not the solver's augmented objective, which also includes penalties.
     fvals: np.ndarray = np.linalg.norm(errors, axis=1)
+
     # Restore the caller's single-reading or buffer shape.
     if single:
-        return spectra[0], MS_SPECTRAL_SAMPLING.copy(), float(fvals[0]), errors[0]
+        return (
+            spectra[0], MS_SPECTRAL_SAMPLING.copy(),
+            float(illuminance_lux[0]), float(melanopic_edi[0]),
+            float(fvals[0]), errors[0],
+        )
 
-    return spectra, MS_SPECTRAL_SAMPLING.copy(), fvals, errors
+    return (
+        spectra, MS_SPECTRAL_SAMPLING.copy(), illuminance_lux,
+        melanopic_edi, fvals, errors,
+    )
 
 
 def estimate_radiance_spectrum_form_ms(minispect_values: np.ndarray,
