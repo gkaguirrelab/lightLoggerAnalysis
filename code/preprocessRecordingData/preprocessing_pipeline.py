@@ -3430,6 +3430,7 @@ def rename_world_recordings(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOut
 
 
 def verify_data_integrity(src_dir: str = "/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026",
+                          output_path: str | None="/Users/zacharykelly/Library/CloudStorage/Dropbox-Aguirre-BrainardLab/Zachary Kelly/FLIC_subject/NEWscriptedIndoorOutdoorVideos2026/FLIC_dataCuration_LL.xlsx",
                           subjects_to_skip: Iterable[int] = set(),
                           subjects_to_process: Iterable[int] = set(),
                           activities_to_skip: Iterable[str] = set(),
@@ -3448,6 +3449,9 @@ def verify_data_integrity(src_dir: str = "/Volumes/FLIC_raw/NEWscriptedIndoorOut
 
     Args:
         src_dir: Directory containing FLIC_<ID> subject folders.
+        output_path: Optional .xlsx report path. Existing errors and Fixes are
+            preserved; only new errors are appended. None disables saving.
+            The .pkl and .json formats are not yet implemented.
         subjects_to_skip: Subject IDs to exclude, including explicitly selected IDs.
         subjects_to_process: Subject IDs to check. Empty uses the FLIC spreadsheets.
         activities_to_skip: Activity names to exclude from the selected activities.
@@ -3472,6 +3476,12 @@ def verify_data_integrity(src_dir: str = "/Volumes/FLIC_raw/NEWscriptedIndoorOut
 
     # Assert that the top-level directories actually exist
     assert os.path.exists(src_dir), f"Source dir path: {src_dir} does not exist"
+
+    # If we desire an output path, we need to check it's a supported variety 
+    if(output_path is not None):
+        assert isinstance(output_path, str), f"Output path: {output_path} must be a string"
+        assert any(output_path.endswith(filetype) for filetype in (".xlsx", ".pkl", ".json"))
+
 
     # First, let's check the expected folder structure, then each recording.
     # We collect problems instead of stopping at the first bad recording.
@@ -3785,6 +3795,103 @@ def verify_data_integrity(src_dir: str = "/Volumes/FLIC_raw/NEWscriptedIndoorOut
                         f"Recording Idx (1 indexed): {idx} Number: {recording_number} "
                         f"timeseries_and_video_export is missing, is not a directory, or is empty"
                     )
+
+    # If we want to output this somewhere, we should support a few types of output paths 
+    if(output_path is not None):
+        # If we want to output to a spreadsheet
+        if(output_path.endswith('.xlsx')):
+
+            # If the spreadsheet does not already exist, let's just create it 
+            # Schema will be rows = subject, cols = activity. Within each col, 
+            # each separate error should be separated with a ; and a space
+            # e.g. error; error2 
+
+            # The cols should be labeled with 1st column Subject ID, then the actiivty names 
+            # from get_activity_names(). Then at the end, there should be a column called "Fixes"
+            # This will be empty for all rows at first
+            spreadsheet_activities: list[str] = natsorted(set(get_activity_names()) | set(activity_names_to_check))
+            spreadsheet_columns: list[str] = ["Subject ID"] + spreadsheet_activities + ["Fixes"]
+            sheet_name: str = "Sheet1"
+            spreadsheet_exists: bool = os.path.exists(output_path)
+
+            if(not os.path.exists(output_path)):
+                spreadsheet: pd.DataFrame = pd.DataFrame(columns=spreadsheet_columns) 
+
+
+            # Otherwise, if it exists, we will need to load it in and append to it before rewriting
+            # By append to it, basically check if the subject exists in the primary key (subject ID)
+            # column. If it exists, check to see if there is any new errors with the subjects. If new, append 
+            # them to he cell 
+            else:
+                with pd.ExcelFile(output_path) as workbook:
+                    sheet_name = workbook.sheet_names[0]
+                    spreadsheet = pd.read_excel(workbook, sheet_name=sheet_name, dtype=object).fillna("")
+
+                assert "Subject ID" in spreadsheet.columns, "Spreadsheet must contain a Subject ID column"
+                for column in spreadsheet_columns:
+                    if(column not in spreadsheet.columns):
+                        spreadsheet[column] = ""
+
+            # Match numeric IDs as well as existing FLIC_<ID> labels without changing them.
+            subject_rows: dict = {}
+            for row_idx in spreadsheet.index:
+                subject_label: str = str(spreadsheet.at[row_idx, "Subject ID"]).strip()
+                subject_label = subject_label.removeprefix("FLIC_")
+                if(subject_label.endswith(".0")):
+                    subject_label = subject_label[:-2]
+                if(subject_label.isdigit()):
+                    spreadsheet_subject_id: int = int(subject_label)
+                    assert spreadsheet_subject_id not in subject_rows, f"Duplicate subject ID: {spreadsheet_subject_id}"
+                    subject_rows[spreadsheet_subject_id] = row_idx
+
+            for subject_id_number in integrity_issues:
+                if(subject_id_number not in subject_rows):
+                    new_row_idx: int = len(spreadsheet)
+                    spreadsheet.loc[new_row_idx] = [""] * len(spreadsheet.columns)
+                    spreadsheet.at[new_row_idx, "Subject ID"] = subject_id_number
+                    subject_rows[subject_id_number] = new_row_idx
+
+                row_idx: int = subject_rows[subject_id_number]
+                subject_issues: dict = integrity_issues[subject_id_number]
+
+                for activity_name in activity_names_to_check:
+                    # Subject folder problems apply to every activity checked for that subject.
+                    cell_problems: list[str] = list(subject_issues["meta_problems"])
+                    if(activity_name in subject_issues["activities"]):
+                        activity_problems: dict = subject_issues["activities"][activity_name]
+                        cell_problems.extend(activity_problems["meta_problems"])
+                        for device_name in ("GKA", "Neon"):
+                            for problem in activity_problems[device_name]:
+                                cell_problems.append(f"{device_name}: {problem}")
+
+                    # Keep existing errors and append each new error only once.
+                    existing_errors: str = str(spreadsheet.at[row_idx, activity_name])
+                    saved_errors: list[str] = [error.strip() for error in existing_errors.split("; ") if error.strip()]
+                    for problem in cell_problems:
+                        for error in problem.split("; "):
+                            if(error.strip() and error.strip() not in saved_errors):
+                                saved_errors.append(error.strip())
+                    spreadsheet.at[row_idx, activity_name] = "; ".join(saved_errors)
+
+            # Retain any extra columns, and leave the Fixes column at the end.
+            extra_columns: list[str] = [column for column in spreadsheet.columns if column not in spreadsheet_columns]
+            spreadsheet = spreadsheet[["Subject ID"] + spreadsheet_activities + extra_columns + ["Fixes"]]
+
+            # Replace only the report sheet when updating an existing workbook.
+            if(spreadsheet_exists):
+                with pd.ExcelWriter(output_path, engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:
+                    spreadsheet.to_excel(writer, sheet_name=sheet_name, index=False)
+            else:
+                spreadsheet.to_excel(output_path, sheet_name=sheet_name, index=False) 
+
+
+
+        elif(output_path.endswith(".pkl")):
+            raise NotImplementedError("This method is not yet implemented")
+
+        elif(output_path.endswith(".json")):
+            raise NotImplementedError("this method is not yet implemented")
+
 
     return integrity_issues
 
