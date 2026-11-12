@@ -5802,7 +5802,47 @@ def opponentmap_to_videoframe(
     return frame
 
 
+def world_fps_from_chunks(input: str | pathlib.Path | np.ndarray) -> float:
+    """Return average world-camera FPS from timestamps in seconds.
 
+    Args:
+        input: A raw recording directory, or a one-dimensional NumPy timestamp
+            array in seconds. Directory inputs always use fill_missing_frames=True;
+            all returned timestamps, including interpolated timestamps, are used.
+
+    Returns:
+        The reciprocal of the mean frame interval in seconds.
+
+    Raises:
+        ValueError: Fewer than two timestamps are provided, timestamps are not
+            a finite one-dimensional array, or frame intervals are not positive
+            and finite.
+        OSError: Recording metadata cannot be read.
+    """
+
+    # Load in the timestamps either given the numpy array provided
+    # or from the path to the recording chunks, filling in missing frames in this case
+    timestamps: np.ndarray = (
+        np.asarray(input, dtype=np.float64)
+        if isinstance(input, np.ndarray)
+        else world_timestamps_from_chunks(
+            str(input), convert_to_seconds=True, fill_missing_frames=True
+        )
+    )
+
+    # Validity checking the timestamps
+    if(timestamps.ndim != 1 or timestamps.size < 2):
+        raise ValueError("At least two timestamps in a one-dimensional array are required")
+    if(not np.all(np.isfinite(timestamps))):
+        raise ValueError("All timestamps must be finite")
+
+    # Timestamps must be monotonic
+    delta_t: np.ndarray = np.diff(timestamps)
+    if(not np.all(np.isfinite(delta_t)) or np.any(delta_t <= 0)):
+        raise ValueError("Frame intervals must be finite and positive")
+
+    # Reciprocal seconds gives frames per second; no factor of 60 is needed.
+    return float(1.0 / np.mean(delta_t))
 
 
 def main() -> None:

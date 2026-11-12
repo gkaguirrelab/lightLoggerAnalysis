@@ -1376,13 +1376,15 @@ def _plot_processed_eye_helper(
 
     # Each mapper row pairs a world-video frame with its Neon timestamp.
     mapped_world_timestamp_table: pd.DataFrame = pd.read_csv(mapper_path / "alternative_camera_timestamps.csv")
+    
     # Subtract the shared epoch before converting to float seconds, preserving
     # precision. Every Neon timeline below uses this same world-frame origin.
     if mapped_world_timestamp_table.empty:
         raise ValueError(f"Mapper video timestamps are empty. Recording: {recording_path}")
-    first_world_frame_neon_ns = mapped_world_timestamp_table["timestamp [ns]"].iloc[0]
+    
+    # Let's get the relative time of the recording frome the Neon and then convert it to seconds
     mapped_world_time_s: np.ndarray = (
-        mapped_world_timestamp_table["timestamp [ns]"].to_numpy() - first_world_frame_neon_ns
+        mapped_world_timestamp_table["timestamp [ns]"].to_numpy() - mapped_world_timestamp_table["timestamp [ns]"].iloc[0]
     ).astype(float) * 1e-9
 
     # Include missing-frame rows so the metadata follows the mapper video layout.

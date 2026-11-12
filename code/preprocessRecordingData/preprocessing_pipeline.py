@@ -27,7 +27,7 @@ import shutil
 from natsort import natsorted
 import re
 from tqdm.auto import tqdm
-from typing import Any, BinaryIO, Iterable, Literal, TypedDict, cast
+from typing import Any, BinaryIO, Iterable, Literal
 import pathlib
 import sys
 import zipfile
@@ -91,32 +91,34 @@ def get_subject_ids(FLIC_subject_dir: str="/Users/zacharykelly/Library/CloudStor
     # Map each numeric subject ID to its age in years.
     subject_ids: dict[int, int] = {}
 
-    # Iterate over the filepaths which contain the subject information
-    for session_filepath in session_filepaths:
-        if(not os.path.isfile(session_filepath)):
-            raise FileNotFoundError(
-                f"Sessions workbook does not exist or is not a file: "
-                f"{session_filepath}"
-            )
 
-        # Make it a pandas dataframe
-        df: pd.DataFrame = pd.read_excel(session_filepath, header=0)
-        
-        # Strip spaces from the headings before looking up the ID column.
-        # Blank ID cells are dropped below before parsing the FLIC_<ID> names.
-        df.columns = df.columns.astype(str).str.strip()
-        if("Subject ID" not in df.columns):
-            raise KeyError(
-                f"Subject ID column not found in {session_filepath}. "
-                f"Columns: {list(df.columns)}"
-            )
-        if("Age" not in df.columns):
-            raise KeyError(f"Age column not found in {session_filepath}. Columns: {list(df.columns)}")
+    # First, let's build the dataframe from the 2026 non test experiment
+    # This requires 2 things. It requires the excel excel sheet with the participants 
+    # and their age, as well as the session summary (usable or non usable)
 
-        # Ignore empty ID rows, but do not silently omit subjects missing an age.
-        relevant_columns_df: pd.DataFrame = df[["Subject ID", "Age"]]
-        for subject_name, age in relevant_columns_df.itertuples(index=False, name=None):
-            if pd.isna(subject_name) or str(subject_name).strip().lower() == "nan":
+    # Let's first load in the subject summary (information about this subject)
+    # and select just the columns we want 
+    non_test_subject_summary: pd.DataFrame = pd.read_excel(os.path.join(FLIC_subject_dir, "FLIC_SubjectSummaryMigraine_LL.xlsx"), 
+                                                           header=0, usecols=["Subject ID", "Age"])
+    non_test_subject_sessions: pd.DataFrame = pd.read_excel(os.path.join(FLIC_subject_dir, "FLIC_SessionsMigraine_LL.xlsx"), 
+                                                            header=0, usecols=["Subject ID", "Usable"])
+
+    # Next, we need to join these two dataframes on the Subject ID column, then only select the usable ones 
+    non_test_subjects_joined: pd.DataFrame = pd.merge(non_test_subject_summary, non_test_subject_sessions, on="Subject ID", how="outer") 
+    non_test_subjects_joined = non_test_subjects_joined[non_test_subjects_joined["Usable"].str.strip() == "yes"]
+
+    # Now, let's get the much simpler test subject excel file. This does not require any joins 
+    test_subject_summary: pd.DataFrame = pd.read_excel(os.path.join(FLIC_subject_dir, "Test_Subjects", "FLIC_SubjectSummary_LL.xlsx"), header=0, usecols=["Subject ID", "Age", "Usable"])
+
+    # There might be some weird parsing results, for either of these dataframes, 
+    # so let's go through them and just cherry pick the information actually want
+    for df in (non_test_subjects_joined, test_subject_summary): 
+        # Ensure we just have the columns we ant 
+        relevant_cols_df: pd.DataFrame = df[["Subject ID", "Age", "Usable"]]
+
+        for subject_name, age, usable in relevant_cols_df.itertuples(index=False, name=None):
+            # Exclude bad rows OR unusable subjects
+            if pd.isna(subject_name) or str(subject_name).strip().lower() == "nan" or usable.lower() != "yes":
                 break
 
             # Get the subject name and ID        
@@ -130,7 +132,7 @@ def get_subject_ids(FLIC_subject_dir: str="/Users/zacharykelly/Library/CloudStor
             # Repeated IDs are fine only when their validated ages agree.
             if subject_id in subject_ids and subject_ids[subject_id] != int(numeric_age):
                 raise ValueError(
-                    f"Age mismatch for FLIC_{subject_id} in {session_filepath}: "
+                    f"Age mismatch for FLIC_{subject_id} in {df}: "
                     f"previous age {subject_ids[subject_id]}, new age {int(numeric_age)}"
                 )
             subject_ids[subject_id] = int(numeric_age)
@@ -570,6 +572,7 @@ def generate_egocentric_mapper_results(src_dir: str="/Volumes/FLIC_raw/NEWscript
     # Assert that the top-level directories actually exist
     assert os.path.exists(src_dir), f"Source dir path: {src_dir} does not exist"
     assert os.path.exists(dst_dir), f"Destination dir path: {dst_dir} does not exist"
+    
     # First, let's find all of the subjects in this experiment
     # Here, we need two inputs for the SAME recording attempt: the raw Neon
     # timeseries and the world video we already generated. We find both before
@@ -3426,200 +3429,45 @@ def rename_world_recordings(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOut
     return 
 
 
-# These dictionaries keep their existing runtime layout. Naming the fields here
-# lets the editor distinguish issue lists from nested activities and plot data.
-class SubjectIntegrityIssues(TypedDict):
-    meta_problems: list[str]
-    activities: dict[str, dict[Literal["meta_problems", "GKA", "Neon"], list[str]]]
-
-
-class AGCMetadataEntry(TypedDict):
-    metadata: pd.DataFrame | None
-    error: str | None
-
-
-class WorldSensorMode(TypedDict):
-    fps: float
-    size: tuple[int, int]
-
-
-class WorldRecordingConfig(TypedDict):
-    sensor_mode: WorldSensorMode
-    agc: str | dict[str, float]
-
-
-def _extract_agc_columns_from_metadata(metadata: pd.DataFrame) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Extract analog gain, digital gain, and exposure from known metadata schemas."""
-
-    # First, let's account for the two column naming schemes used by the camera.
-    # Both cases return analog gain, digital gain, and exposure in that order,
-    # so the plotting code does not need a separate branch for each schema.
-    legacy_columns: tuple[str, str, str] = ("Again", "Dgain", "exposure")
-    modern_columns: tuple[str, str, str] = ("cameraAgain", "AGCDgain", "cameraExposure")
-
-    if(all(column in metadata.columns for column in legacy_columns)):
-        analog_gain_column, digital_gain_column, exposure_column = legacy_columns
-    elif(all(column in metadata.columns for column in modern_columns)):
-        analog_gain_column, digital_gain_column, exposure_column = modern_columns
-    else:
-        raise ValueError(f"World metadata does not contain supported AGC columns. Columns: {list(metadata.columns)}")
-
-    analog_gain: np.ndarray = metadata[analog_gain_column].to_numpy(dtype=float)
-    digital_gain: np.ndarray = metadata[digital_gain_column].to_numpy(dtype=float)
-    exposure: np.ndarray = metadata[exposure_column].to_numpy(dtype=float)
-
-    return analog_gain, digital_gain, exposure
-
-
-def _plot_agc_metadata_by_activity(agc_metadata_by_activity: dict[str, dict[str, AGCMetadataEntry]],
-                                   activity_names: Iterable[str],
-                                   subject_ids: Iterable[int],
-                                   output_dir: str | None=None,
-                                   output_filetype: Literal["png", "pdf", "svg"]="png",
-                                   close_figures: bool | None=None
-                                  ) -> list[plt.Figure]:
-    """Create one AGC diagnostic figure per activity and recording."""
-
-    # Now, we will make one figure per activity, with a subplot for each
-    # subject/recording label. Failed metadata reads remain in the grid as
-    # messages, so a missing plot is not mistaken for a missing recording.
-    # When saving to disk, close figures by default to avoid keeping a
-    # large batch open. Without an output path, leave them available to view.
-    if(close_figures is None):
-        close_figures = output_dir is not None
-
-    if(output_dir is not None):
-        os.makedirs(output_dir, exist_ok=True)
-
-    figures: list[plt.Figure] = []
-
-    for activity_name in activity_names:
-        activity_metadata: dict[str, AGCMetadataEntry] = agc_metadata_by_activity.get(activity_name, {})
-        subject_labels: list[str] = natsorted(activity_metadata)
-        subject_count: int = len(subject_labels)
-        if(subject_count == 0):
-            continue
-
-        # Use a roughly square grid, capped at four columns. squeeze=False
-        # keeps the axes array two-dimensional even for a single recording.
-        column_count: int = min(4, max(1, math.ceil(math.sqrt(subject_count))))
-        row_count: int = math.ceil(subject_count / column_count)
-        fig, axes = plt.subplots(row_count, column_count, figsize=(4.8 * column_count, 2.9 * row_count), squeeze=False)
-        axes_flat: np.ndarray = axes.ravel()
-        for subplot_num, subject_label in enumerate(subject_labels):
-            axis_left: plt.Axes = axes_flat[subplot_num]
-            subject_entry: AGCMetadataEntry = activity_metadata[subject_label]
-            metadata: pd.DataFrame | None = subject_entry.get("metadata")
-            error_message: str | None = subject_entry.get("error")
-
-            axis_left.set_title(subject_label, fontsize=9, fontweight="bold")
-            if(metadata is None or len(metadata) == 0):
-                axis_left.text(0.5, 0.5, error_message or "No AGC metadata", ha="center", va="center", fontsize=8, wrap=True)
-                axis_left.set_xticks([])
-                axis_left.set_yticks([])
-                continue
-
-            try:
-                analog_gain, digital_gain, exposure = _extract_agc_columns_from_metadata(metadata)
-                timestamp: np.ndarray = metadata["timestamp"].to_numpy(dtype=float)
-                # Plot elapsed seconds relative to the first finite timestamp.
-                # If there are no usable timestamps, fall back to row/frame numbers.
-                finite_timestamp: np.ndarray = timestamp[np.isfinite(timestamp)]
-                if(len(finite_timestamp) > 0):
-                    x_values: np.ndarray = timestamp - finite_timestamp[0]
-                    x_label: str = "Time (s)"
-                else:
-                    x_values = np.arange(len(metadata))
-                    x_label = "Frame"
-
-                # Gain and exposure have different units and scales, so exposure
-                # gets its own y-axis while all three traces share the same time axis.
-                # NaNs remain in the traces, leaving visible breaks in missing data.
-                axis_right: plt.Axes = axis_left.twinx()
-                again_line = axis_left.plot(x_values, analog_gain, color="tab:red", linewidth=0.8, label="AGain")[0]
-                dgain_line = axis_left.plot(x_values, digital_gain, color="lightcoral", linewidth=0.8, label="Dgain")[0]
-                exposure_line = axis_right.plot(x_values, exposure, color="tab:blue", linewidth=0.8, label="Exposure")[0]
-
-                axis_left.tick_params(axis="both", labelsize=7)
-                axis_left.tick_params(axis="y", colors="tab:red")
-                axis_right.tick_params(axis="y", labelsize=7, colors="tab:blue")
-                axis_left.set_xlabel(x_label, fontsize=8)
-                axis_left.set_ylabel("AGain / Dgain", fontsize=8, color="tab:red")
-                axis_right.set_ylabel("Exposure", fontsize=8, color="tab:blue")
-                axis_left.grid(True, alpha=0.25)
-                axis_left.legend([again_line, dgain_line, exposure_line],
-                                 [again_line.get_label(), dgain_line.get_label(), exposure_line.get_label()],
-                                 loc="best",
-                                 fontsize=7)
-            except Exception as e:
-                axis_left.text(0.5, 0.5, f"AGC plot error:\n{e}", ha="center", va="center", fontsize=8, wrap=True)
-                axis_left.set_xticks([])
-                axis_left.set_yticks([])
-
-        for unused_axis in axes_flat[subject_count:]:
-            unused_axis.axis("off")
-
-        fig.suptitle(f"{activity_name} AGC Metadata", fontsize=14, fontweight="bold")
-        fig.tight_layout(rect=(0, 0, 1, 0.95))
-
-        if(output_dir is not None):
-            safe_activity_name: str = re.sub(r"[^A-Za-z0-9_.-]+", "_", activity_name).strip("_")
-            output_path: str = os.path.join(output_dir, f"{safe_activity_name}_agc_metadata.{output_filetype}")
-            fig.savefig(output_path, dpi=200)
-
-        figures.append(fig)
-        if(close_figures is True):
-            plt.close(fig)
-
-    return figures
-
-
-def verify_data_integrity(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026",
-                          subjects_to_skip: Iterable[int]=set(),
-                          subjects_to_process: Iterable[int]=set(),
-                          activities_to_skip: Iterable[str]=set(),
-                          activities_to_process: Iterable[str]=set(),
-                          verbose: bool=False,
-                          target_fps: int =120,
+def verify_data_integrity(src_dir: str = "/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026",
+                          subjects_to_skip: Iterable[int] = set(),
+                          subjects_to_process: Iterable[int] = set(),
+                          activities_to_skip: Iterable[str] = set(),
+                          activities_to_process: Iterable[str] = set(),
+                          verbose: bool = False,
+                          target_fps: int = 120,
                           target_world_size: tuple[int, int] = (480, 640),
                           target_sensors: set[Literal["M", "W"]] = set("MW"),
-                          plot_agc_metadata: bool=True,
-                          agc_plot_output_dir: str | None=None,
-                          agc_plot_filetype: Literal["png", "pdf", "svg"]="png",
-                          close_agc_plots: bool | None=None,
-                          fps_relative_tolerance: float=0.01
-                         ) -> tuple[bool, dict[int, SubjectIntegrityIssues]]:
-    """
-    Performs sanity checks on raw recording folders to ensure that both GKA and
-    Neon data exist for each requested subject/activity. By default, subjects
-    and activities are taken from the FLIC subject spreadsheets; explicit
-    process filters override those defaults.
+                         ) -> dict:
+    """Collect integrity issues for selected raw GKA and Neon recordings.
 
-    Inputs:
-      src_dir                raw dataset directory
-      subjects_to_skip       subject numbers to ignore
-      subjects_to_process    subject numbers to exclusively process
-      activities_to_skip     activity names to ignore
-      activities_to_process  activity names to exclusively process
-      verbose                print additional diagnostics
-      target_fps             expected world-camera recording FPS
-      target_world_size      expected world-camera frame size as (height, width)
-      target_sensors         expected GKA sensors
-      plot_agc_metadata      create one AGC yy-axis diagnostic figure per activity
-      agc_plot_output_dir    optional directory where AGC figures are saved
-      agc_plot_filetype      file type used when saving AGC figures
-      close_agc_plots        close AGC figures after creation; defaults to True
-                             when saving to disk and False otherwise
-      fps_relative_tolerance allowed fractional deviation of measured FPS from
-                             target_fps (default 0.01, or 1%). Measured FPS is
-                             valid interval count / summed interval duration;
-                             intervals touching NaN rows are excluded.
+    Check folder structure, matching recording numbers, GKA configuration,
+    sensor chunk files and ordering, measured world-camera FPS, and nonempty
+    Neon export folders. Measured FPS includes filled timestamps and must be
+    within 5 FPS of the target; the configured FPS must match exactly.
+
+    Args:
+        src_dir: Directory containing FLIC_<ID> subject folders.
+        subjects_to_skip: Subject IDs to exclude, including explicitly selected IDs.
+        subjects_to_process: Subject IDs to check. Empty uses the FLIC spreadsheets.
+        activities_to_skip: Activity names to exclude from the selected activities.
+        activities_to_process: Activity names to check. Empty uses the FLIC spreadsheets.
+        verbose: Show subject and activity progress bars.
+        target_fps: Expected configured and measured world-camera frame rate.
+        target_world_size: Expected frame size as (height, width).
+        target_sensors: Expected GKA sensor identifiers, usually M and W.
 
     Returns:
-      A tuple of (problems_detected, integrity_issues). The second item is a
-      nested dictionary organized as subject -> meta_problems / activities,
-      with each activity storing meta_problems, GKA problems, and Neon problems.
-      Recording-specific messages include the numbered recording directory.
+        A dictionary keyed by numeric subject ID. Each subject has meta_problems
+        and activities; each activity has meta_problems, GKA, and Neon issue lists.
+        Clean entries have empty lists. Recording issues include the recording number.
+
+    Raises:
+        AssertionError: The source path does not exist, or no subjects or activities
+            are selected.
+        ValueError: target_fps is not finite and positive.
+        OSError: A directory cannot be read. Config and FPS errors are collected
+            in the issue lists instead.
     """
 
     # Assert that the top-level directories actually exist
@@ -3628,14 +3476,10 @@ def verify_data_integrity(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
     # First, let's check the expected folder structure, then each recording.
     # We collect problems instead of stopping at the first bad recording.
     # The config tells us what the camera was ASKED to do; the timestamps
-    # tell us how fast it actually recorded within valid stretches of data.
-    # AGC figures are optional, but the measured FPS check always runs.
+    # provide the measured frame rate after filling missing frames.
     # Reject invalid comparison settings before reading any recordings.
-    # The tolerance is a fraction: 0.01 means one percent of target FPS.
     if(not np.isfinite(target_fps) or target_fps <= 0):
         raise ValueError("target_fps must be finite and positive")
-    if(not np.isfinite(fps_relative_tolerance) or fps_relative_tolerance < 0):
-        raise ValueError("fps_relative_tolerance must be finite and nonnegative")
 
     subjects_to_process = set(subjects_to_process)
     subjects_to_skip = set(subjects_to_skip)
@@ -3662,18 +3506,19 @@ def verify_data_integrity(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
     ])
     assert len(activity_names_to_check) > 0, "No activity names selected for verification"
 
-
     # Save a dictionary that stores integrity issues
-    problems_detected: bool = False
     # meta_problems describe a missing/invalid subject or activity folder.
     # GKA and Neon lists contain the recording-specific problems beneath it.
-    # The boolean is a quick summary; the dictionary holds the explanations.
-    integrity_issues: dict[int, SubjectIntegrityIssues] = {}
-    agc_metadata_by_activity: dict[str, dict[str, AGCMetadataEntry]] = {activity_name: {} for activity_name in activity_names_to_check}
+    integrity_issues: dict = {}
 
     # Now, let's iterate over all the subject paths
-    subject_iterator: Iterable[int] = subject_ids_to_check if verbose is False else tqdm(subject_ids_to_check, desc="Processing Subjects", leave=True)
+    subject_iterator: Iterable[int] = (
+        subject_ids_to_check if verbose is False else
+        tqdm(subject_ids_to_check, desc="Processing Subjects", leave=True)
+    )
     for subject_id_number in subject_iterator:
+        # Get the subject ID path to this subject and save some information about meta problems
+        # for the entire subject as well as for each activity
         subject_id: str = f"FLIC_{subject_id_number}"
         subject_path: str = os.path.join(src_dir, subject_id)
         integrity_issues[subject_id_number] = {"meta_problems": [], "activities": {}}
@@ -3681,10 +3526,8 @@ def verify_data_integrity(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
         # Ensure the path exists and it is a directory
         if(not os.path.exists(subject_path)):
             integrity_issues[subject_id_number]["meta_problems"].append("Subject path does not exist")
-            problems_detected = True
         if(not os.path.isdir(subject_path)):
             integrity_issues[subject_id_number]["meta_problems"].append("Subject path is not a directory")
-            problems_detected = True
 
         # If this subject folder is unusable, keep its reported problems and
         # move on. Trying to inspect activities below it would only add noise.
@@ -3692,7 +3535,10 @@ def verify_data_integrity(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
             continue
 
         # Now, let's iterate over the activities for this subject
-        activities_iterator: Iterable[str] = activity_names_to_check if verbose is False else tqdm(activity_names_to_check, desc="Processing Activities", leave=False)
+        activities_iterator: Iterable[str] = (
+            activity_names_to_check if verbose is False else
+            tqdm(activity_names_to_check, desc="Processing Activities", leave=False)
+        )
         for activity_name in activities_iterator:
             # Initialize an entry for this activity
             integrity_issues[subject_id_number]["activities"][activity_name] = {"meta_problems": [], "GKA": [], "Neon": []}
@@ -3702,220 +3548,245 @@ def verify_data_integrity(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
 
             # Ensure the path to the activity exists and it is a directory
             if(not os.path.exists(activity_path)):
-                integrity_issues[subject_id_number]["activities"][activity_name]["meta_problems"].append("Activity path does not exist")
-                problems_detected = True
+                integrity_issues[subject_id_number]["activities"][activity_name]["meta_problems"].append(
+                    "Activity path does not exist"
+                )
 
             if(not os.path.isdir(activity_path)):
-                integrity_issues[subject_id_number]["activities"][activity_name]["meta_problems"].append("Activity path is not a directory")
-                problems_detected = True
+                integrity_issues[subject_id_number]["activities"][activity_name]["meta_problems"].append(
+                    "Activity path is not a directory"
+                )
 
             if(len(integrity_issues[subject_id_number]["activities"][activity_name]["meta_problems"]) > 0):
                 continue
 
-            activity_issues: dict[Literal["meta_problems", "GKA", "Neon"], list[str]] = integrity_issues[subject_id_number]["activities"][activity_name]
-            # First, collect the numbered attempts present in each modality.
-            # The sets let us compare GKA and Neon, while recording_paths lets us
-            # find each attempt again without rebuilding its path.
-            recording_numbers: dict[Literal["GKA", "Neon"], set[str]] = {}
-            recording_paths: dict[str, str] = {}
-            for modality in ("GKA", "Neon"):
-                folder_path: str = os.path.join(activity_path, modality)
-                recording_numbers[modality] = set()
-                if(not os.path.exists(folder_path)):
-                    activity_issues[modality].append(f"{modality} path does not exist")
-                    problems_detected = True
-                    continue
-                if(not os.path.isdir(folder_path)):
-                    activity_issues[modality].append(f"{modality} path is not a directory")
-                    problems_detected = True
-                    continue
-                entries: list[str] = os.listdir(folder_path)
-                if(not entries):
-                    activity_issues[modality].append(f"{modality} path is empty")
-                    problems_detected = True
-                # Only numerical directory names represent attempts. A numerical
-                # file is an error; other names are ignored as ancillary entries.
-                for name in entries:
-                    path: str = os.path.join(folder_path, name)
-                    if(name.isdigit() and os.path.isdir(path)):
-                        recording_numbers[modality].add(name)
-                        recording_paths[f"{modality}/{name}"] = path
-                    elif(name.isdigit()):
-                        activity_issues[modality].append(f"Recording {name}: path is not a directory")
-                        problems_detected = True
-                if(entries and not recording_numbers[modality]):
-                    activity_issues[modality].append("No numerical recording directories found")
-                    problems_detected = True
+            # Let's get a pointer to the problems dict for this subject and activity
+            activity_issues: dict = integrity_issues[subject_id_number]["activities"][activity_name]
 
-            # Now, check both directions. For example, GKA/2 without Neon/2
-            # is a missing Neon attempt, even if Neon/1 exists.
-            for modality, other in (("GKA", "Neon"), ("Neon", "GKA")):
-                for number in natsorted(recording_numbers[modality] - recording_numbers[other]):
-                    activity_issues[other].append(f"Recording {number}: missing matching {other} directory")
-                    problems_detected = True
+            # Firstly, let's make sure both the Neon and GKA dirs exist
+            activity_gka_path: str = os.path.join(activity_path, "GKA")
+            activity_neon_path: str = os.path.join(activity_path, "Neon")
 
-            # Check every GKA attempt independently. We append to the activity's
-            # shared GKA list, so each message includes its recording number.
-            for number in natsorted(recording_numbers["GKA"]):
-                gka_recording_path: str = recording_paths[f"GKA/{number}"]
-                gka_problems: list[str] = activity_issues["GKA"]
-                config_path: str = os.path.join(gka_recording_path, "config.pkl")
+            for device_path in (activity_gka_path, activity_neon_path):
+                # Grab the device name from the end of the path
+                device_name: str = os.path.basename(device_path)
+
+                # If the path doesn't exist for this device, save it as a problem
+                if(not os.path.isdir(device_path) or len(os.listdir(device_path)) == 0):
+                    activity_issues[device_name].append(
+                        f"Path: {device_path} is missing, is not a directory, or is empty"
+                    )
+
+            # Skip this activity when a device folder cannot be inspected.
+            if(activity_issues["GKA"] or activity_issues["Neon"]):
+                continue
+
+            # Now, we know that both device dirs exist and are not empty
+            # Let's make sure now that they have the matching numbers of recordings
+            gka_recording_paths: list[str] = natsorted([
+                os.path.join(activity_gka_path, recording_num)
+                for recording_num in os.listdir(activity_gka_path)
+                if not recording_num.startswith(".")
+            ])
+            neon_recording_paths: list[str] = natsorted([
+                os.path.join(activity_neon_path, recording_num)
+                for recording_num in os.listdir(activity_neon_path)
+                if not recording_num.startswith(".")
+            ])
+
+            for device_name, device_recordings in (("GKA", gka_recording_paths), ("Neon", neon_recording_paths)):
+                # Iterate over each recording path for each device
+                # and ensure it is non empty
+                for idx, recording_path in enumerate(device_recordings, start=1):
+                    # Grab the number of recording this is
+                    recording_number: str = os.path.basename(recording_path)
+
+                    # Recording names must be numerical directories before inspection.
+                    if(not recording_number.isdigit() or not os.path.isdir(recording_path)):
+                        activity_issues[device_name].append(f"Invalid recording directory: {recording_path}")
+                        continue
+
+                    # If the idx is not equal to the recording number,
+                    # when starting at 1 and after sorting,
+                    # that means something has gone out of order (e.g. a recording was mislabeled or not transfered)
+                    if(idx != int(recording_number)):
+                        activity_issues[device_name].append(
+                            f"Recording index (1 indexed): {idx} Number: {recording_number} index and number do not match"
+                        )
+
+                    # If the recording dir is empty, that is a problem
+                    if(len(os.listdir(recording_path)) == 0):
+                        activity_issues[device_name].append(
+                            f"Recording Idx (1 indexed): {idx} Number: {recording_number} is empty"
+                        )
+
+            # Keep invalid entries in the report, but exclude them from later checks.
+            gka_recording_paths = [path for path in gka_recording_paths
+                                   if os.path.basename(path).isdigit() and os.path.isdir(path)]
+            neon_recording_paths = [path for path in neon_recording_paths
+                                    if os.path.basename(path).isdigit() and os.path.isdir(path)]
+
+            # Now, let's ensure that the numbers of recordings (and their numbers)
+            # match between GKA and neon
+            gka_recording_numbers: set[int] = set([int(os.path.basename(path)) for path in gka_recording_paths])
+            neon_recording_numbers: set[int] = set([int(os.path.basename(path)) for path in neon_recording_paths])
+
+            if(gka_recording_numbers != neon_recording_numbers):
+                activity_issues["meta_problems"].append(
+                    f"GKA and Neon recording numbers do not match. GKA has {gka_recording_numbers} "
+                    f"and Neon has: {neon_recording_numbers}"
+                )
+
+            # Next, let's check a bit about the GKA world camera specifically, like with some of its metadata
+            for idx, recording_path in enumerate(gka_recording_paths, start=1):
+                # Grab the recording number from the path like we did above
+                recording_number: str = os.path.basename(recording_path)
+
+                # Each recording should have a config file, so make sure this is true
+                config_path: str = os.path.join(recording_path, "config.pkl")
                 if(not os.path.isfile(config_path)):
-                    gka_problems.append(f"Recording {number}: config.pkl does not exist")
-                    problems_detected = True
-                else:
+                    activity_issues["GKA"].append(
+                        f"Recording Idx (1 indexed): {idx} Number: {recording_number} has no config path"
+                    )
+
+                # If the config path exists, let's load it in and check the reported FPS and
+                # that it has both sensors
+                if(os.path.isfile(config_path)):
                     try:
-                        # The pickle contains other sensor-specific fields, so keep Any
-                        # at this external boundary and type the world fields we use.
-                        # cast documents the schema; the surrounding try still reports
-                        # missing or malformed fields as recording problems.
                         with open(config_path, "rb") as config_file:
-                            config: dict[str, Any] = dill.load(config_file)
-                        sensors: dict[str, Any] = config["sensors"]
-                        if(set(sensors) != target_sensors):
-                            gka_problems.append(f"Recording {number}: recorded sensors: {set(sensors)} != target sensors: {target_sensors}")
-                        world: WorldRecordingConfig = cast(WorldRecordingConfig, sensors["W"])
-                        # This is the nominal FPS saved in config.pkl. A correct setting
-                        # does not prove that the actual frame timestamps meet that rate.
-                        recorded_fps: float = world["sensor_mode"]["fps"]
-                        if(recorded_fps != target_fps):
-                            gka_problems.append(f"Recording {number}: recorded FPS: {recorded_fps} != target fps: {target_fps}")
-                        recorded_size: tuple[int, int] = world["sensor_mode"]["size"]
-                        # The function takes (height, width), but the config stores
-                        # (width, height), so reverse the requested tuple for comparison.
-                        if(recorded_size != target_world_size[::-1]):
-                            gka_problems.append(f"Recording {number}: recorded size: {recorded_size} != target size: {target_world_size[::-1]}")
-                        agc: str | dict[str, float] = world["agc"]
-                        # Older configs store just the mode string and assume target 127.
-                        # The dictionary form stores the target under the selected mode.
-                        agc_mode: str = agc if isinstance(agc, str) else next(iter(agc))
-                        agc_target: float = 127 if isinstance(agc, str) else agc[agc_mode]
-                        if(agc_mode != "custom" or agc_target != 127):
-                            gka_problems.append(f"Recording {number}: AGC configured incorrectly. Mode: {agc_mode} | Target: {agc_target}")
+                            config_data: dict | None = dill.load(config_file)
                     except Exception as error:
-                        gka_problems.append(f"Recording {number}: GKA config could not be validated: {error}")
-                    if(gka_problems):
-                        problems_detected = True
+                        activity_issues["GKA"].append(
+                            f"Recording {recording_number}: config could not be loaded: {error}"
+                        )
+                        config_data = None
 
-                # Read the world metadata once for both the FPS check and optional
-                # AGC plots. Keep the same dictionary in the plotting collection so
-                # a read error can be shown in that recording's subplot too.
-                plot_entry: AGCMetadataEntry = {"metadata": None, "error": None}
-                if(plot_agc_metadata is True):
-                    agc_metadata_by_activity[activity_name][f"{subject_id}/{number}"] = plot_entry
-                try:
-                    # Keep the helper's gap-filling rows. Their camera-setting fields
-                    # are NaN even though their interpolated timestamps can be finite.
-                    # Request seconds here so the reciprocal frame period is in FPS.
-                    metadata: pd.DataFrame = world_util.world_metadata_from_chunks(
-                        gka_recording_path, convert_to_seconds=True, verbose=False,
-                        fill_missing_frames=True)
-                    plot_entry["metadata"] = metadata
-                    timestamps: NDArray[np.float64] = metadata["timestamp"].to_numpy(dtype=float)
-                    # A valid row must have no NaN in ANY metadata column and must have
-                    # a finite timestamp. A NaN ends the current block; the next valid
-                    # row starts another block, which can be any length.
-                    valid_rows: NDArray[np.bool_] = ~metadata.isna().any(axis=1).to_numpy() & np.isfinite(timestamps)
-                    # np.diff gives t[i+1] - t[i] for each adjacent pair of rows.
-                    # The two shifted masks require BOTH rows of the pair to be valid.
-                    # This keeps every interval within a block and removes every
-                    # interval entering, leaving, or lying inside a NaN gap.
-                    #
-                    # For block lengths N1, N2, ..., the number of intervals is
-                    # (N1 - 1) + (N2 - 1) + ... . A single-frame block contributes none.
-                    # Do not remove NaN rows before np.diff: that would join separate
-                    # blocks and incorrectly count the downtime as a frame interval.
-                    intervals: NDArray[np.float64] = np.diff(timestamps)[valid_rows[:-1] & valid_rows[1:]]
-                    # An empty recording, all-NaN rows, or isolated valid frames give
-                    # us no measurable interval. Report this rather than dividing by zero.
-                    if(intervals.size == 0):
-                        gka_problems.append(f"Recording {number}: average camera FPS could not be measured: no adjacent valid frames")
-                        problems_detected = True
-                    # Repeated or backward timestamps cannot define a positive frame
-                    # period. Flag them rather than hiding them inside the average.
-                    elif(np.any(~np.isfinite(intervals)) or np.any(intervals <= 0)):
-                        gka_problems.append(f"Recording {number}: average camera FPS could not be measured: nonpositive or nonfinite frame intervals")
-                        problems_detected = True
-                    else:
-                        # Sum the elapsed time WITHIN all valid blocks, then divide by
-                        # the total number of intervals. Longer blocks contribute more
-                        # intervals; we do not give a short block the same weight as a long one.
-                        #
-                        # Mean period = total valid elapsed seconds / valid interval count.
-                        # Average FPS = valid interval count / total valid elapsed seconds.
-                        # This is the reciprocal of the mean period, not the mean of 1/dt.
-                        average_frame_period: np.float64 = intervals.sum() / intervals.size
-                        average_fps: np.float64 = 1.0 / average_frame_period
-                        # Compare measured FPS with the requested rate. At 120 FPS and
-                        # 1% tolerance, 118.8 through 121.2 FPS are accepted. atol=0
-                        # means there is no additional fixed allowance on top of that.
-                        if(not np.isclose(average_fps, target_fps, rtol=fps_relative_tolerance, atol=0)):
-                            gka_problems.append(
-                                f"Recording {number}: average camera FPS: {average_fps:.6g} != target fps: {target_fps} "
-                                f"(mean frame interval: {average_frame_period:.6g} s; tolerance: {fps_relative_tolerance:.1%})")
-                            problems_detected = True
-                except Exception as error:
-                    plot_entry["error"] = f"GKA world metadata / average camera FPS could not be validated: {error}"
-                    gka_problems.append(f"Recording {number}: {plot_entry['error']}")
-                    problems_detected = True
+                    if(config_data is not None):
+                        try:
+                            # First check to make sure it has both sensors
+                            if(set(config_data["sensors"]) != target_sensors):
+                                activity_issues["GKA"].append(
+                                    f"Recording Idx (1 indexed): {idx} Number: {recording_number} has the wrong sensors. "
+                                    f"Should have: {target_sensors} but has: {set(config_data['sensors'])}"
+                                )
 
-            # Now, check the matching Neon exports. These are presence/layout
-            # checks, not an analysis of the values inside their CSV files.
-            required_neon_files: tuple[str, ...] = ("enrichment_info.txt", "sections.csv", "3d_eye_states.csv",
-                                   "blinks.csv", "events.csv", "fixations.csv", "gaze.csv",
-                                   "world_timestamps.csv", "saccades.csv", "template.csv")
-            for number in natsorted(recording_numbers["Neon"]):
-                # Check both format folders before inspecting the CSV export,
-                # so both missing directories are reported for this attempt.
-                for folder in ("timeseries_and_video_export", "native_recording_data"):
-                    folder_path: str = os.path.join(recording_paths[f"Neon/{number}"], folder)
-                    if not os.path.isdir(folder_path):
-                        activity_issues["Neon"].append(
-                            f"Recording {number}: missing directory {folder}")
-                        problems_detected = True
+                            # Now let's check the world FPS and size
+                            if("W" in config_data["sensors"]):
+                                world: dict = config_data["sensors"]["W"]
 
-                neon_recording_path: str = os.path.join(recording_paths[f"Neon/{number}"], "timeseries_and_video_export")
-                if not os.path.isdir(neon_recording_path):
-                    continue
-                # Cloud can retain an enclosing folder inside this export.
-                # Never search the sibling native_recording_data directory.
-                timeseries_dirs: list[str] = [root for root, _, filenames in os.walk(neon_recording_path)
-                                   if "world_timestamps.csv" in filenames]
-                if(len(timeseries_dirs) != 1):
+                                recording_fps: float | int = world["sensor_mode"]["fps"]
+                                if(recording_fps != target_fps):
+                                    activity_issues["GKA"].append(
+                                        f"Recording Idx (1 indexed): {idx} Number: {recording_number} GKA W "
+                                        f"has the wrong requested FPS. Should have: {target_fps} but has: {recording_fps}"
+                                    )
+
+                                # The function takes (height, width), but the config stores
+                                # (width, height), so reverse the requested tuple for comparison.
+                                recording_size: tuple[int, int] = world["sensor_mode"]["size"]
+                                if(recording_size != tuple(target_world_size[::-1])):
+                                    activity_issues["GKA"].append(
+                                        f"Recording Idx (1 indexed): {idx} Number: {recording_number} GKA W "
+                                        f"has the wrong frame size (width, height). Should have: {target_world_size[::-1]} but has: {recording_size}"
+                                    )
+
+                                # Now let's check the AGC mode and its target setting
+                                agc: str | dict = world["agc"]
+
+                                # Very old recordings only supported the string method, but later
+                                # we updated it to support a target value too. So if it's a very old recording
+                                # set it to the default at that time, 127
+                                if(isinstance(agc, str)):
+                                    agc_mode: str = agc
+                                    agc_target: float = 127
+                                else:
+                                    agc_mode = list(agc.keys())[0]
+                                    agc_target = agc[agc_mode]
+
+                                if(agc_mode != "custom" or agc_target != 127):
+                                    activity_issues["GKA"].append(
+                                        f"Recording {recording_number}: AGC configured incorrectly. Mode: {agc_mode} | Target: {agc_target}"
+                                    )
+                        except Exception as error:
+                            activity_issues["GKA"].append(
+                                f"Recording {recording_number}: config could not be validated: {error}"
+                            )
+
+                # Now, let's ensure that there are both actually chunks for the world and the MS
+                # and that they are monotonic
+                sensor_files: dict = sensors_utility.group_sensors_files(recording_path)
+                for sensor in target_sensors:
+                    # Ensure that the sensors actually exist
+                    if(sensor not in sensor_files or len(sensor_files[sensor]) == 0):
+                        activity_issues["GKA"].append(
+                            f"Recording Idx (1 indexed): {idx} Number: {recording_number} "
+                            f"Sensor: {sensor} has no chunk files"
+                        )
+                        continue
+
+                    # Then we will check for monotonicity
+                    chunk_numbers: np.ndarray = np.full(
+                        (len(sensor_files[sensor]),), np.nan, dtype=np.float64
+                    )
+
+                    # group_sensors_files returns naturally sorted (metadata, data) pairs.
+                    for chunk_idx, (metadata_path, data_path) in enumerate(sensor_files[sensor]):
+                        for chunk_path in (metadata_path, data_path):
+                            if(not os.path.isfile(chunk_path)):
+                                activity_issues["GKA"].append(
+                                    f"Recording {recording_number} Sensor: {sensor} "
+                                    f"chunk file is missing: {chunk_path}"
+                                )
+
+                        # Regex the chunk number out of the path
+                        match: re.Match[str] | None = re.search(r"chunk_(\d+)", os.path.basename(data_path))
+                        chunk_number: int = int(match.group(1))
+
+                        # Save it in the list of numbers
+                        chunk_numbers[chunk_idx] = chunk_number
+
+                    if(not np.all(np.diff(chunk_numbers) == 1)):
+                        activity_issues["GKA"].append(
+                            f"Recording Idx (1 indexed): {idx} Number: {recording_number} "
+                            f"Sensor: {sensor} chunk numbers are not consecutive "
+                            f"and increasing: {chunk_numbers}"
+                        )
+
+                # Then, let's check that the observed FPS matched the requested FPS, with a +-5 FPS tolerance
+                if("W" in target_sensors and "W" in sensor_files and len(sensor_files["W"]) > 0):
+                    observed_fps: float = world_util.world_fps_from_chunks(recording_path)
+
+                    if(not np.isclose(observed_fps, target_fps, rtol=0, atol=5)):
+                        
+                        activity_issues["GKA"].append(
+                            f"Recording Idx (1 indexed): {idx} Number: {recording_number} "
+                            f"observed FPS: {observed_fps:.6g} is outside "
+                            f"target FPS: {target_fps} +/- 5 FPS"
+                        )
+                
+            # Finally, let's check the neon stuff. This is much much simpler
+            for idx, recording_path in enumerate(neon_recording_paths, start=1):
+                # Grab the recording number from the path like we did above
+                recording_number: str = os.path.basename(recording_path)
+
+                # A neon directory should have below it two folders, timeseries_and_video_export and
+                # native_recording_data
+                native_recording_path: str = os.path.join(recording_path, "native_recording_data")
+                timeseries_and_video_export_path: str = os.path.join(recording_path, "timeseries_and_video_export")
+
+                if(not os.path.isdir(native_recording_path) or len(os.listdir(native_recording_path)) == 0):
                     activity_issues["Neon"].append(
-                        f"Recording {number}: expected one world_timestamps.csv, found {len(timeseries_dirs)}")
-                    problems_detected = True
-                    if(not timeseries_dirs):
-                        timeseries_dirs = [neon_recording_path]
-                for timeseries_dir in timeseries_dirs:
-                    for filename in required_neon_files:
-                        # The export-level summary files may be at the export root or
-                        # with the timeseries. The remaining CSVs must be with timestamps.
-                        candidate_dirs: tuple[str, ...] = (neon_recording_path, timeseries_dir) if filename in ("enrichment_info.txt", "sections.csv") else (timeseries_dir,)
-                        if(not any(os.path.isfile(os.path.join(directory, filename)) for directory in candidate_dirs)):
-                            activity_issues["Neon"].append(f"Recording {number}: {filename} does not exist in {os.path.relpath(timeseries_dir, neon_recording_path)}")
-                            problems_detected = True
-                    if(not any(filename.lower().endswith(".mp4") for filename in os.listdir(timeseries_dir))):
-                        activity_issues["Neon"].append(f"Recording {number}: Neon recording folder does not have an .mp4 video")
-                        problems_detected = True
+                        f"Recording Idx (1 indexed): {idx} Number: {recording_number} "
+                        f"native_recording_data is missing, is not a directory, or is empty"
+                    )
 
-            if(verbose is True):
-                if(all(len(problems) == 0 for problems in activity_issues.values())):
-                    print(f"{subject_id} | {activity_name}: OK")
-                else:
-                    print(f"{subject_id} | {activity_name}: PROBLEMS")
+                if(not os.path.isdir(timeseries_and_video_export_path) or len(os.listdir(timeseries_and_video_export_path)) == 0):
+                    activity_issues["Neon"].append(
+                        f"Recording Idx (1 indexed): {idx} Number: {recording_number} "
+                        f"timeseries_and_video_export is missing, is not a directory, or is empty"
+                    )
 
-    if(plot_agc_metadata is True):
-        # All recordings have now been checked. Plot the collected metadata
-        # by activity without loading each recording a second time.
-        _plot_agc_metadata_by_activity(agc_metadata_by_activity,
-                                       activity_names_to_check,
-                                       subject_ids_to_check,
-                                       output_dir=agc_plot_output_dir,
-                                       output_filetype=agc_plot_filetype,
-                                       close_figures=close_agc_plots)
-
-    return problems_detected, integrity_issues
+    return integrity_issues
 
 def display_integrity_issues(integrity_issues: dict,
                              show_clean: bool=False,
@@ -3925,8 +3796,7 @@ def display_integrity_issues(integrity_issues: dict,
 
     Args:
         integrity_issues: The integrity-issues dictionary returned by
-            verify_data_integrity, or the full
-            (problems_detected, integrity_issues) tuple.
+            verify_data_integrity.
         show_clean: Include recordings with no problems in the output.
         print_output: Print the formatted report when True.
 
