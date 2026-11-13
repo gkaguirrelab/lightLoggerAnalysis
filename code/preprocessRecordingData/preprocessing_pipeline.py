@@ -43,6 +43,10 @@ import copy
 import dill
 import requests
 import pandas as pd
+from openpyxl import load_workbook
+from openpyxl.styles import Alignment, Font
+from openpyxl.workbook.workbook import Workbook
+from openpyxl.worksheet.worksheet import Worksheet
 
 # Construct the paths to our custom utility libraries
 light_loger_analysis_dir: str = str(pathlib.Path(__file__).parents[2]) 
@@ -67,29 +71,20 @@ import world_util
 import cleanEyeTracking
 
 
-def get_subject_ids(FLIC_subject_dir: str="/Users/zacharykelly/Library/CloudStorage/Dropbox-Aguirre-BrainardLab/Zachary Kelly/FLIC_subject/NEWscriptedIndoorOutdoorVideos2026") -> dict[int, int]:
+def get_subject_ids(FLIC_subject_dir: str="/Users/zacharykelly/Library/CloudStorage/Dropbox-Aguirre-BrainardLab/Zachary Kelly/FLIC_subject/NEWscriptedIndoorOutdoorVideos2026") -> dict[int, int | None]:
     """Return {numeric subject ID: age in years} from both session workbooks.
 
     Duplicate IDs within or across workbooks are allowed when ages agree;
-    conflicting ages raise ValueError. Rows without an ID are ignored; subjects require a
-    nonnegative whole-number age.
+    conflicting known ages raise ValueError. Invalid ages are stored as None;
+    a known age takes precedence over None for duplicate IDs. Stop reading each
+    dataframe at its first empty subject ID. Unusable subjects are skipped.
     """
 
     # Assert that the top-level directories actually exist
     assert os.path.exists(FLIC_subject_dir), f"FLIC subject dir path: {FLIC_subject_dir} does not exist"
 
-    # Collect the expected subjects from both session workbooks.
-    session_filepaths: tuple[str, str] = (
-        os.path.join(FLIC_subject_dir, "FLIC_SubjectSummaryMigraine_LL.xlsx"),
-        os.path.join(
-            FLIC_subject_dir,
-            "Test_Subjects",
-            "FLIC_SubjectSummary_LL.xlsx",
-        ),
-    )
-
     # Map each numeric subject ID to its age in years.
-    subject_ids: dict[int, int] = {}
+    subject_ids: dict[int, int | None] = {}
 
 
     # First, let's build the dataframe from the 2026 non test experiment
@@ -100,15 +95,36 @@ def get_subject_ids(FLIC_subject_dir: str="/Users/zacharykelly/Library/CloudStor
     # and select just the columns we want 
     non_test_subject_summary: pd.DataFrame = pd.read_excel(os.path.join(FLIC_subject_dir, "FLIC_SubjectSummaryMigraine_LL.xlsx"), 
                                                            header=0, usecols=["Subject ID", "Age"])
+   
+    # Drop missing IDs, clean surrounding whitespace and asterisks, then keep valid IDs.
+    non_test_subject_summary = non_test_subject_summary.dropna(subset=["Subject ID"]).copy()
+    non_test_subject_summary["Subject ID"] = non_test_subject_summary["Subject ID"].astype(str).str.replace(r"^[\s*]+|[\s*]+$", "", regex=True)
+    non_test_subject_summary = non_test_subject_summary[non_test_subject_summary["Subject ID"].str.fullmatch(r"FLIC_\d+")].copy()
+   
+    # Then, lets load in the sheet with the information about the sessions that each subject did
     non_test_subject_sessions: pd.DataFrame = pd.read_excel(os.path.join(FLIC_subject_dir, "FLIC_SessionsMigraine_LL.xlsx"), 
                                                             header=0, usecols=["Subject ID", "Usable"])
 
+    # Drop missing IDs, clean surrounding whitespace and asterisks, then keep valid IDs.
+    non_test_subject_sessions = non_test_subject_sessions.dropna(subset=["Subject ID"]).copy()
+    non_test_subject_sessions["Subject ID"] = non_test_subject_sessions["Subject ID"].astype(str).str.replace(r"^[\s*]+|[\s*]+$", "", regex=True)
+    non_test_subject_sessions = non_test_subject_sessions[non_test_subject_sessions["Subject ID"].str.fullmatch(r"FLIC_\d+")].copy()
+
+    # The same subjects should exist in both the summary and the session 
+    non_test_subject_summary_subjects: set[str] = set(non_test_subject_summary["Subject ID"])
+    non_test_subject_sessions_subjects: set[str] = set(non_test_subject_sessions["Subject ID"])
+
     # Next, we need to join these two dataframes on the Subject ID column, then only select the usable ones 
-    non_test_subjects_joined: pd.DataFrame = pd.merge(non_test_subject_summary, non_test_subject_sessions, on="Subject ID", how="outer") 
+    # We do an inner join because we only want subjects that actually had sessions
+    non_test_subjects_joined: pd.DataFrame = pd.merge(non_test_subject_summary, non_test_subject_sessions, on="Subject ID", how="inner") 
     non_test_subjects_joined = non_test_subjects_joined[non_test_subjects_joined["Usable"].str.strip() == "yes"]
 
     # Now, let's get the much simpler test subject excel file. This does not require any joins 
     test_subject_summary: pd.DataFrame = pd.read_excel(os.path.join(FLIC_subject_dir, "Test_Subjects", "FLIC_SubjectSummary_LL.xlsx"), header=0, usecols=["Subject ID", "Age", "Usable"])
+    # Drop missing IDs, clean surrounding whitespace and asterisks, then keep valid IDs.
+    test_subject_summary = test_subject_summary.dropna(subset=["Subject ID"]).copy()
+    test_subject_summary["Subject ID"] = test_subject_summary["Subject ID"].astype(str).str.replace(r"^[\s*]+|[\s*]+$", "", regex=True)
+    test_subject_summary = test_subject_summary[test_subject_summary["Subject ID"].str.fullmatch(r"FLIC_\d+")].copy()
 
     # There might be some weird parsing results, for either of these dataframes, 
     # so let's go through them and just cherry pick the information actually want
@@ -117,25 +133,48 @@ def get_subject_ids(FLIC_subject_dir: str="/Users/zacharykelly/Library/CloudStor
         relevant_cols_df: pd.DataFrame = df[["Subject ID", "Age", "Usable"]]
 
         for subject_name, age, usable in relevant_cols_df.itertuples(index=False, name=None):
-            # Exclude bad rows OR unusable subjects
-            if pd.isna(subject_name) or str(subject_name).strip().lower() == "nan" or usable.lower() != "yes":
+            # An empty subject ID marks the end of this dataframe.
+            if(pd.isna(subject_name) or str(subject_name).strip().lower() in ("", "nan")):
                 break
 
-            # Get the subject name and ID        
-            try:   
-                subject_id: int = _extract_num_from_id(str(subject_name).strip().strip("*"))    
-                numeric_age: int = int(age)
-            except:
-                warnings.warn(f"Entry: {subject_name} did not fit the format: FLIC_ID, skipping")
+            # Unusable subjects do not stop later subjects from being checked.
+            if(str(usable).strip().lower() != "yes"):
                 continue
 
-            # Repeated IDs are fine only when their validated ages agree.
-            if subject_id in subject_ids and subject_ids[subject_id] != int(numeric_age):
-                raise ValueError(
-                    f"Age mismatch for FLIC_{subject_id} in {df}: "
-                    f"previous age {subject_ids[subject_id]}, new age {int(numeric_age)}"
-                )
-            subject_ids[subject_id] = int(numeric_age)
+            # Validate the subject ID separately so age errors are not mislabeled.
+            try:
+                subject_id: int = _extract_num_from_id(str(subject_name).strip().strip("*"))
+            except (AssertionError, ValueError) as error:
+                warnings.warn(f"Subject ID: {subject_name!r} must match FLIC_<digits>; skipping row. {error}")
+                continue
+
+            # Keep the subject even when its age is missing or invalid.
+            validated_age: int | None = None
+            try:
+                # Try to convert the age to a number 
+                # if there is a problem with this (e.g. age is not convertible)
+                # then just fill in with None
+                numeric_age: float = float(age)
+
+                # If there was a convertible age, ensure that is a finite positive int
+                if(not math.isfinite(numeric_age) or numeric_age < 0 or not numeric_age.is_integer()):
+                    raise ValueError("Age must be finite, nonnegative, and a whole number")
+
+                # Finally convert to int
+                validated_age = int(numeric_age)
+            
+            except (TypeError, ValueError, OverflowError) as error:
+                warnings.warn(f"Subject: {subject_name!r} has invalid Age: {age!r}; expected a nonnegative whole number of years, using age = None by default. {error}")
+
+            # If we somehow get repeated subject IDs (shouldn't, but just in case)
+            # it's fine if the ages agree, but not fine if they do not agree
+            if(subject_id in subject_ids and subject_ids[subject_id] != validated_age):
+                    raise ValueError(
+                        f"Age mismatch for FLIC_{subject_id}: "
+                        f"previous age {subject_ids[subject_id]}, new age {validated_age}"
+                    )
+            else:
+                subject_ids[subject_id] = validated_age
 
     return subject_ids
 
@@ -3433,8 +3472,6 @@ def verify_data_integrity(src_dir: str = "/Volumes/FLIC_raw/NEWscriptedIndoorOut
                           output_path: str | None="/Users/zacharykelly/Library/CloudStorage/Dropbox-Aguirre-BrainardLab/Zachary Kelly/FLIC_subject/NEWscriptedIndoorOutdoorVideos2026/FLIC_dataCuration_LL.xlsx",
                           subjects_to_skip: Iterable[int] = set(),
                           subjects_to_process: Iterable[int] = set(),
-                          activities_to_skip: Iterable[str] = set(),
-                          activities_to_process: Iterable[str] = set(),
                           verbose: bool = False,
                           target_fps: int = 120,
                           target_world_size: tuple[int, int] = (480, 640),
@@ -3444,8 +3481,9 @@ def verify_data_integrity(src_dir: str = "/Volumes/FLIC_raw/NEWscriptedIndoorOut
 
     Check folder structure, matching recording numbers, GKA configuration,
     sensor chunk files and ordering, measured world-camera FPS, and nonempty
-    Neon export folders. Measured FPS includes filled timestamps and must be
-    within 5 FPS of the target; the configured FPS must match exactly.
+    Neon export folders. Activities always come from get_activity_names(); only
+    subject selection is configurable. Measured FPS includes filled timestamps
+    and must be within 5 FPS of the target; configured FPS must match exactly.
 
     Args:
         src_dir: Directory containing FLIC_<ID> subject folders.
@@ -3454,8 +3492,6 @@ def verify_data_integrity(src_dir: str = "/Volumes/FLIC_raw/NEWscriptedIndoorOut
             The .pkl and .json formats are not yet implemented.
         subjects_to_skip: Subject IDs to exclude, including explicitly selected IDs.
         subjects_to_process: Subject IDs to check. Empty uses the FLIC spreadsheets.
-        activities_to_skip: Activity names to exclude from the selected activities.
-        activities_to_process: Activity names to check. Empty uses the FLIC spreadsheets.
         verbose: Show subject and activity progress bars.
         target_fps: Expected configured and measured world-camera frame rate.
         target_world_size: Expected frame size as (height, width).
@@ -3493,8 +3529,6 @@ def verify_data_integrity(src_dir: str = "/Volumes/FLIC_raw/NEWscriptedIndoorOut
 
     subjects_to_process = set(subjects_to_process)
     subjects_to_skip = set(subjects_to_skip)
-    activities_to_process = set(activities_to_process)
-    activities_to_skip = set(activities_to_skip)
 
     # Filter subjects and IDs for just those that we want to check
     # Use the explicit selection when supplied; otherwise read the session
@@ -3507,13 +3541,8 @@ def verify_data_integrity(src_dir: str = "/Volumes/FLIC_raw/NEWscriptedIndoorOut
     ])
     assert len(subject_ids_to_check) > 0, "No subject IDs selected for verification"
 
-    # Apply the same logic to activities. Every selected subject is checked
-    # against this expected activity list, including folders absent on disk.
-    activity_names_to_check: list[str] = natsorted([
-        activity_name
-        for activity_name in (activities_to_process if len(activities_to_process) > 0 else get_activity_names())
-        if activity_name not in activities_to_skip
-    ])
+    # Always get all of the activity names for this experiment
+    activity_names_to_check: list[str] = natsorted(set(get_activity_names()))
     assert len(activity_names_to_check) > 0, "No activity names selected for verification"
 
     # Save a dictionary that stores integrity issues
@@ -3764,16 +3793,23 @@ def verify_data_integrity(src_dir: str = "/Volumes/FLIC_raw/NEWscriptedIndoorOut
 
                 # Then, let's check that the observed FPS matched the requested FPS, with a +-5 FPS tolerance
                 if("W" in target_sensors and "W" in sensor_files and len(sensor_files["W"]) > 0):
-                    observed_fps: float = world_util.world_fps_from_chunks(recording_path)
+                    
+                    try:
+                        observed_fps: float = world_util.world_fps_from_chunks(recording_path)
+                        if(not np.isclose(observed_fps, target_fps, rtol=0, atol=5)):                    
+                            activity_issues["GKA"].append(
+                                f"Recording Idx (1 indexed): {idx} Number: {recording_number} "
+                                f"observed FPS: {observed_fps:.6g} is outside "
+                                f"target FPS: {target_fps} +/- 5 FPS"
+                            )
 
-                    if(not np.isclose(observed_fps, target_fps, rtol=0, atol=5)):
-                        
+                    except Exception as e:
                         activity_issues["GKA"].append(
-                            f"Recording Idx (1 indexed): {idx} Number: {recording_number} "
-                            f"observed FPS: {observed_fps:.6g} is outside "
-                            f"target FPS: {target_fps} +/- 5 FPS"
-                        )
-                
+                                                        f"Recording Idx (1 indexed): {idx} Number: {recording_number} "
+                                                        f"Could not calculate observed FPS (timestamps are either not monotonic or not finite)"
+                                                    )
+
+                        
             # Finally, let's check the neon stuff. This is much much simpler
             for idx, recording_path in enumerate(neon_recording_paths, start=1):
                 # Grab the recording number from the path like we did above
@@ -3801,21 +3837,53 @@ def verify_data_integrity(src_dir: str = "/Volumes/FLIC_raw/NEWscriptedIndoorOut
         # If we want to output to a spreadsheet
         if(output_path.endswith('.xlsx')):
 
-            # If the spreadsheet does not already exist, let's just create it 
-            # Schema will be rows = subject, cols = activity. Within each col, 
-            # each separate error should be separated with a ; and a space
-            # e.g. error; error2 
-
             # The cols should be labeled with 1st column Subject ID, then the actiivty names 
             # from get_activity_names(). Then at the end, there should be a column called "Fixes"
             # This will be empty for all rows at first
-            spreadsheet_activities: list[str] = natsorted(set(get_activity_names()) | set(activity_names_to_check))
-            spreadsheet_columns: list[str] = ["Subject ID"] + spreadsheet_activities + ["Fixes"]
+            spreadsheet_columns: list[str] = ["Subject ID"] + natsorted(activity_names_to_check) + ["Fixes"]
             sheet_name: str = "Sheet1"
-            spreadsheet_exists: bool = os.path.exists(output_path)
 
-            if(not os.path.exists(output_path)):
+
+            # If the spreadsheet does not already exist, let's just create it 
+            # Schema will be rows = subject, cols = activity. Within each col, 
+            # each separate error should be on its own line
+            # e.g. error on the first line, error2 on the next
+            if(not os.path.exists(output_path)):    
+                # Initialie a dataframe with the intended columns
                 spreadsheet: pd.DataFrame = pd.DataFrame(columns=spreadsheet_columns) 
+
+                # Let's initialize the subject ID column as the sorted subjects we have 
+                # and then everything else as ""
+                subjects_sorted: list[int] = natsorted(list(integrity_issues.keys()))
+                spreadsheet["Subject ID"] = [f"FLIC_{subject:04d}" for subject in subjects_sorted]
+                spreadsheet = spreadsheet.fillna("")
+
+                # Now, let's iterate over the subjects 
+                # and populate the data frame 
+                for subject in subjects_sorted:
+                    # Iterate over the activities for this subject 
+                    for activity in integrity_issues[subject]["activities"]:
+                        # Find the cell for this subject / activity pair 
+                        row_idx: int = spreadsheet.index[spreadsheet["Subject ID"] == f"FLIC_{subject:04d}"][0]
+
+                        # Then, populate errors into this cell as strings 
+                        # using one line for each error
+                        cell_errors: list[str] = []
+
+                        # first, meta issues
+                        cell_errors.extend(integrity_issues[subject]["meta_problems"])
+                        activity_errors: dict = integrity_issues[subject]["activities"][activity]
+                        cell_errors.extend(activity_errors["meta_problems"])
+
+                        # then GKA
+                        for error in activity_errors["GKA"]:
+                            cell_errors.append(f"GKA: {error}")
+
+                        # then Neon 
+                        for error in activity_errors["Neon"]:
+                            cell_errors.append(f"Neon: {error}")
+
+                        spreadsheet.at[row_idx, activity] = "\n".join(cell_errors)
 
 
             # Otherwise, if it exists, we will need to load it in and append to it before rewriting
@@ -3823,68 +3891,114 @@ def verify_data_integrity(src_dir: str = "/Volumes/FLIC_raw/NEWscriptedIndoorOut
             # column. If it exists, check to see if there is any new errors with the subjects. If new, append 
             # them to he cell 
             else:
-                with pd.ExcelFile(output_path) as workbook:
-                    sheet_name = workbook.sheet_names[0]
-                    spreadsheet = pd.read_excel(workbook, sheet_name=sheet_name, dtype=object).fillna("")
-
+                # Load in the spreadsheet from disk, filling na with ""
+                spreadsheet: pd.DataFrame = pd.read_excel(output_path, dtype=object).fillna("")
                 assert "Subject ID" in spreadsheet.columns, "Spreadsheet must contain a Subject ID column"
-                for column in spreadsheet_columns:
-                    if(column not in spreadsheet.columns):
-                        spreadsheet[column] = ""
 
-            # Match numeric IDs as well as existing FLIC_<ID> labels without changing them.
-            subject_rows: dict = {}
-            for row_idx in spreadsheet.index:
-                subject_label: str = str(spreadsheet.at[row_idx, "Subject ID"]).strip()
-                subject_label = subject_label.removeprefix("FLIC_")
-                if(subject_label.endswith(".0")):
-                    subject_label = subject_label[:-2]
-                if(subject_label.isdigit()):
-                    spreadsheet_subject_id: int = int(subject_label)
-                    assert spreadsheet_subject_id not in subject_rows, f"Duplicate subject ID: {spreadsheet_subject_id}"
-                    subject_rows[spreadsheet_subject_id] = row_idx
+                # Standardize existing IDs before matching subjects to their rows.
+                for row_idx in spreadsheet.index:
+                    subject_label: str = str(spreadsheet.at[row_idx, "Subject ID"]).strip().removeprefix("FLIC_")
+                    if(subject_label.endswith(".0")):
+                        subject_label = subject_label[:-2]
+                    if(subject_label.isdigit()):
+                        spreadsheet.at[row_idx, "Subject ID"] = f"FLIC_{int(subject_label):04d}"
 
-            for subject_id_number in integrity_issues:
-                if(subject_id_number not in subject_rows):
-                    new_row_idx: int = len(spreadsheet)
-                    spreadsheet.loc[new_row_idx] = [""] * len(spreadsheet.columns)
-                    spreadsheet.at[new_row_idx, "Subject ID"] = subject_id_number
-                    subject_rows[subject_id_number] = new_row_idx
+                # Add missing columns if they don't exist already 
+                for activity in activity_names_to_check:
+                    if(activity not in spreadsheet.columns):
+                        spreadsheet[activity] = ""
+                if("Fixes" not in spreadsheet.columns):
+                    spreadsheet["Fixes"] = ""
 
-                row_idx: int = subject_rows[subject_id_number]
-                subject_issues: dict = integrity_issues[subject_id_number]
+                # Ensure the expected order is consistent (should always be true, but let's double check)
+                spreadsheet_activities: list[str] = [column for column in spreadsheet.columns
+                                                     if column not in ("Subject ID", "Fixes")]
+                spreadsheet = spreadsheet[["Subject ID"] + natsorted(spreadsheet_activities) + ["Fixes"]]
 
-                for activity_name in activity_names_to_check:
-                    # Subject folder problems apply to every activity checked for that subject.
-                    cell_problems: list[str] = list(subject_issues["meta_problems"])
-                    if(activity_name in subject_issues["activities"]):
-                        activity_problems: dict = subject_issues["activities"][activity_name]
-                        cell_problems.extend(activity_problems["meta_problems"])
-                        for device_name in ("GKA", "Neon"):
-                            for problem in activity_problems[device_name]:
-                                cell_problems.append(f"{device_name}: {problem}")
+                # Convert older semicolon-separated cells to the new line format.
+                # Leave cells already using new lines and the Fixes notes unchanged.
+                for activity in spreadsheet_activities:
+                    for row_idx in spreadsheet.index:
+                        cell_text: str = str(spreadsheet.at[row_idx, activity])
+                        if("\n" not in cell_text and ";" in cell_text):
+                            spreadsheet.at[row_idx, activity] = "\n".join(
+                                error.strip() for error in cell_text.split(";") if error.strip()
+                            )
 
-                    # Keep existing errors and append each new error only once.
-                    existing_errors: str = str(spreadsheet.at[row_idx, activity_name])
-                    saved_errors: list[str] = [error.strip() for error in existing_errors.split("; ") if error.strip()]
-                    for problem in cell_problems:
-                        for error in problem.split("; "):
-                            if(error.strip() and error.strip() not in saved_errors):
-                                saved_errors.append(error.strip())
-                    spreadsheet.at[row_idx, activity_name] = "; ".join(saved_errors)
+                # Iterate over the subjects in our integrity issues 
+                for subject in integrity_issues:
+                    # Add a blank row if this subject is not already in the spreadsheet.
+                    row_idx: int
+                    if(f"FLIC_{subject:04d}" not in spreadsheet["Subject ID"].values):
+                        row_idx = len(spreadsheet)
+                        spreadsheet.loc[row_idx] = [""] * len(spreadsheet.columns)
+                        spreadsheet.at[row_idx, "Subject ID"] = f"FLIC_{subject:04d}"
 
-            # Retain any extra columns, and leave the Fixes column at the end.
-            extra_columns: list[str] = [column for column in spreadsheet.columns if column not in spreadsheet_columns]
-            spreadsheet = spreadsheet[["Subject ID"] + spreadsheet_activities + extra_columns + ["Fixes"]]
+                    # Otherwise, get the row index where this subject is at 
+                    else:
+                        row_idx = spreadsheet.index[spreadsheet["Subject ID"] == f"FLIC_{subject:04d}"][0]
 
-            # Replace only the report sheet when updating an existing workbook.
-            if(spreadsheet_exists):
-                with pd.ExcelWriter(output_path, engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:
-                    spreadsheet.to_excel(writer, sheet_name=sheet_name, index=False)
-            else:
-                spreadsheet.to_excel(output_path, sheet_name=sheet_name, index=False) 
+                    # Iterate over the activities for this subject 
+                    for activity in integrity_issues[subject]["activities"]:
 
+                        # Then, populate errors into this cell as strings 
+                        # using one line for each error
+                        cell_errors: list[str] = []
 
+                        # first, meta issues
+                        cell_errors.extend(integrity_issues[subject]["meta_problems"])
+                        activity_errors: dict = integrity_issues[subject]["activities"][activity]
+                        cell_errors.extend(activity_errors["meta_problems"])
+
+                        # then GKA
+                        for error in activity_errors["GKA"]:
+                            cell_errors.append(f"GKA: {error}")
+
+                        # then Neon
+                        for error in activity_errors["Neon"]:
+                            cell_errors.append(f"Neon: {error}")
+
+                        # Now, let's find the existing errors
+                        existing_errors: list[str] = [error.strip() for error in str(spreadsheet.at[row_idx, activity]).splitlines() if error.strip()]
+
+                        # Reformat the cell errors into the form we see in the spreadsheet 
+                        for error in cell_errors:
+                            error = error.strip()
+
+                            # If it is a valid token and not an existing error, add this to new errors 
+                            if(error and error not in existing_errors):
+                                existing_errors.append(error)
+
+                        # Save all errors for this item
+                        spreadsheet.at[row_idx, activity] = "\n".join(existing_errors)
+
+            # Write the completed dataframe back to disk.
+            spreadsheet.to_excel(output_path, sheet_name=sheet_name, index=False)
+
+            # Size each column from its header, regardless of how long the errors are.
+            workbook: Workbook = load_workbook(output_path)
+            worksheet: Worksheet = workbook[sheet_name]
+            for column_idx, column in enumerate(spreadsheet.columns, start=1):
+                column_letter: str = worksheet.cell(row=1, column=column_idx).column_letter
+                worksheet.column_dimensions[column_letter].width = len(str(column)) + 2
+
+            # Use Calibri for all cells and make the header row bold.
+            for row in worksheet.iter_rows():
+                for cell in row:
+                    cell_font: Font = copy.copy(cell.font)
+                    cell_font.name = "Calibri"
+                    if(cell.row == 1):
+                        cell_font.bold = True
+                    cell.font = cell_font
+
+            # Keep text inside each cell without expanding the rows to show every error.
+            for row_idx in range(2, worksheet.max_row + 1):
+                worksheet.row_dimensions[row_idx].height = 15
+                for cell in worksheet[row_idx]:
+                    cell.alignment = Alignment(wrap_text=True, vertical="top")
+
+            workbook.save(output_path)
+            workbook.close()
 
         elif(output_path.endswith(".pkl")):
             raise NotImplementedError("This method is not yet implemented")
@@ -3899,22 +4013,28 @@ def display_integrity_issues(integrity_issues: dict,
                              show_clean: bool=False,
                              print_output: bool=True
                             ) -> str:
-    """Format and optionally print data-integrity issues.
+    """Format the subject and activity results from verify_data_integrity.
+
+    Show subject folder problems, activity folder and recording-number problems,
+    and GKA and Neon recording issues. Preserve each message, including its
+    recording number. This function only displays the supplied results; it does
+    not read the activity workbooks or check recordings again.
 
     Args:
-        integrity_issues: The integrity-issues dictionary returned by
-            verify_data_integrity.
-        show_clean: Include recordings with no problems in the output.
+        integrity_issues: Dictionary keyed by numeric subject ID. Each subject
+            has meta_problems and activities; each activity has meta_problems,
+            GKA, and Neon issue lists, as returned by verify_data_integrity.
+        show_clean: Include subjects and activities with empty issue lists.
         print_output: Print the formatted report when True.
 
     Returns:
-        A formatted string report.
+        A formatted string report. Totals count individual issue messages and
+        subjects and activities with issues. Activities skipped because a subject
+        folder is unusable are not included in the activity totals.
     """
 
-    # Now, let's turn the nested issues dictionary into a readable report.
-    # We count individual messages as issues, and separately count subjects
-    # and activities with at least one issue. This function formats the
-    # existing results; it does not read or check recordings again.
+    # First, collect the report lines and counts for the supplied results.
+    # Subject folder problems are counted once, rather than for every activity.
     lines: list[str] = []
     total_subjects: int = len(integrity_issues)
     total_activities: int = 0
@@ -3922,70 +4042,69 @@ def display_integrity_issues(integrity_issues: dict,
     activities_with_issues: int = 0
     total_issues: int = 0
 
-    def _sorted_keys(values: dict) -> list:
-        return natsorted(values.keys(), key=lambda value: str(value))
-
-    def _as_problem_list(value) -> list[str]:
-        return value if isinstance(value, list) else []
-
-    for subject_id_number in _sorted_keys(integrity_issues):
-        subject_data: dict = integrity_issues[subject_id_number]
-        subject_meta_problems: list[str] = _as_problem_list(subject_data.get("meta_problems", []))
-        activities: dict = subject_data.get("activities", {})
-        subject_issue_count: int = len(subject_meta_problems)
+    # Now, let's iterate over the subjects in numerical order, as in verification.
+    subject_ids_to_display: list[int] = sorted(integrity_issues)
+    for subject_id_number in subject_ids_to_display:
+        subject_id: str = f"FLIC_{subject_id_number}"
+        subject_issues: dict = integrity_issues[subject_id_number]
+        subject_issue_count: int = len(subject_issues["meta_problems"])
         subject_lines: list[str] = []
 
-        for problem in subject_meta_problems:
+        for problem in subject_issues["meta_problems"]:
             subject_lines.append(f"  Subject: {problem}")
 
-        # Build the activity's lines first so we can omit clean entries
-        # unless show_clean was requested.
-        for activity_name in _sorted_keys(activities):
+        # Use the activities saved by verification. An unusable subject folder
+        # has an empty activities dictionary because its checks were skipped.
+        activity_names_to_display: list[str] = natsorted(subject_issues["activities"])
+        for activity_name in activity_names_to_display:
+            activity_issues: dict = subject_issues["activities"][activity_name]
+            activity_lines: list[str] = []
             total_activities += 1
-            activity_data: dict = activities[activity_name]
-            activity_issue_lines: list[str] = []
 
-            for issue_group in ("meta_problems", "GKA", "Neon"):
-                group_problems: list[str] = _as_problem_list(activity_data.get(issue_group, []))
-                if(len(group_problems) == 0):
-                    continue
+            # Folder and recording-number mismatches belong to the activity.
+            for problem in activity_issues["meta_problems"]:
+                activity_lines.append(f"    Activity: {problem}")
 
-                group_label: str = "Activity" if issue_group == "meta_problems" else issue_group
-                for problem in group_problems:
-                    activity_issue_lines.append(f"    {group_label}: {problem}")
+            # Keep device names and the original recording details together.
+            for device_name in ("GKA", "Neon"):
+                for problem in activity_issues[device_name]:
+                    activity_lines.append(f"    {device_name}: {problem}")
 
-            activity_issue_count: int = len(activity_issue_lines)
+            activity_issue_count: int = len(activity_lines)
             subject_issue_count += activity_issue_count
             if(activity_issue_count > 0):
                 activities_with_issues += 1
                 subject_lines.append(f"  {activity_name}:")
-                subject_lines.extend(activity_issue_lines)
+                subject_lines.extend(activity_lines)
             elif(show_clean is True):
                 subject_lines.append(f"  {activity_name}: OK")
 
+        # Omit clean subjects by default, but always include them in the totals.
         if(subject_issue_count > 0):
             subjects_with_issues += 1
             total_issues += subject_issue_count
 
         if(subject_issue_count > 0 or show_clean is True):
-            subject_label: str = f"FLIC_{subject_id_number}"
             status_label: str = "PROBLEMS" if subject_issue_count > 0 else "OK"
-            lines.append(f"{subject_label}: {status_label}")
+            lines.append(f"{subject_id}: {status_label}")
             lines.extend(subject_lines)
             lines.append("")
 
-    # Put the totals above the detailed messages. Counts reflect the
-    # entries checked, including missing-folder messages in meta_problems.
-    if(total_issues == 0):
-        lines.insert(0, "No integrity issues detected.")
+    # Put the totals above the details, distinguishing an empty input from a
+    # completed check with no issues. No missing activities are assumed clean.
+    summary_lines: list[str] = []
+    if(total_subjects == 0):
+        summary_lines.append("No integrity results to display.")
+    elif(total_issues == 0):
+        summary_lines.append("No integrity issues detected.")
     else:
-        lines.insert(0, f"Integrity issues detected: {total_issues}")
+        summary_lines.append(f"Integrity issues detected: {total_issues}")
 
-    lines.insert(1, f"Subjects with issues: {subjects_with_issues} / {total_subjects}")
-    lines.insert(2, f"Activities with issues: {activities_with_issues} / {total_activities}")
-    lines.insert(3, "")
+    summary_lines.append(f"Subjects with issues: {subjects_with_issues} / {total_subjects}")
+    summary_lines.append(f"Activities with issues: {activities_with_issues} / {total_activities}")
+    summary_lines.append("")
 
-    report: str = "\n".join(lines).rstrip()
+    report: str = "\n".join(summary_lines + lines).rstrip()
     if(print_output is True):
         print(report)
 
