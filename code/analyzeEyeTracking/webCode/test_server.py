@@ -146,6 +146,58 @@ class ViewerTests(AsyncHTTPTestCase):
         show_figure.assert_not_called()
         self.assertTrue(output_path.read_bytes().startswith(b"%PDF"))
 
+    def test_save_updates_metadata_and_default_view_pdf_only(self):
+        self.post("/api/directory", {"directory": str(self.root)})
+        metadata_path = self.eye_directory / "eye_cleaning_metadata.pkl"
+        metadata_path.write_bytes(pickle.dumps(dict(server.PARAMETER_DEFAULTS, note="keep me")))
+        parameters = dict(server.PARAMETER_DEFAULTS, pupil_diameter_thresholds=[1.5, 4.05])
+        response = self.post("/api/plot", {**self.selection, "parameters": parameters})
+        self.assertEqual(response.code, 200, response.body)
+        preview = server.plt.gcf()
+        default_limits = [axis.get_xlim() for axis in preview.axes]
+        preview.axes[0].set_xlim(0.2, 0.3)
+        before = snapshot_files(self.root)
+        from matplotlib.figure import Figure
+        original_savefig = Figure.savefig
+        captured = []
+        def capture(figure, *args, **kwargs):
+            captured.append([axis.get_xlim() for axis in figure.axes])
+            return original_savefig(figure, *args, **kwargs)
+        with patch.object(Figure, "savefig", capture):
+            response = self.post("/api/save", {**self.selection, "parameters": parameters})
+        self.assertEqual(response.code, 200, response.body)
+        self.assertEqual(captured, [default_limits])
+        self.assertEqual(preview.axes[0].get_xlim(), (0.2, 0.3))
+        self.assertEqual(server.plt.get_fignums(), [preview.number])
+        metadata = pickle.loads(metadata_path.read_bytes())
+        self.assertEqual(metadata["note"], "keep me")
+        self.assertEqual(metadata["pupil_diameter_thresholds"], (1.5, 4.05))
+        self.assertTrue((self.eye_directory / "eye_cleaned_vs_raw.pdf").read_bytes().startswith(b"%PDF"))
+        after = snapshot_files(self.root)
+        changed = {name for name in before if before[name] != after[name]}
+        self.assertEqual(changed, {str((self.eye_directory / name).relative_to(self.root))
+                                  for name in ("eye_cleaning_metadata.pkl", "eye_cleaned_vs_raw.pdf")})
+        self.assertEqual(set(before), set(after))
+        self.assertEqual(server.read_parameters(self.eye_directory)["pupil_diameter_thresholds"], (1.5, 4.05))
+
+    def test_failed_save_preserves_outputs(self):
+        self.post("/api/directory", {"directory": str(self.root)})
+        before = snapshot_files(self.root)
+        with patch.object(server.cleanEyeTracking, "clean_eye_data", side_effect=OSError("PDF failed")):
+            response = self.post("/api/save", {**self.selection, "parameters": server.PARAMETER_DEFAULTS})
+        self.assertEqual(response.code, 400)
+        self.assertEqual(snapshot_files(self.root), before)
+        original_replace = server.os.replace
+        def fail_metadata(source, destination):
+            if Path(destination).name == "eye_cleaning_metadata.pkl":
+                raise OSError("Metadata failed")
+            return original_replace(source, destination)
+        with patch.object(server.os, "replace", side_effect=fail_metadata):
+            response = self.post("/api/save", {**self.selection, "parameters": server.PARAMETER_DEFAULTS})
+        self.assertEqual(response.code, 400)
+        after = snapshot_files(self.root)
+        self.assertEqual({k: v[0] for k, v in before.items()}, {k: v[0] for k, v in after.items()})
+
     def test_folder_picker_selection_and_cancel(self):
         """A selected folder loads choices; cancelling preserves that folder."""
         before = snapshot_files(self.root)

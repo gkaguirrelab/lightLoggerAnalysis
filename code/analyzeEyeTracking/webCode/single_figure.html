@@ -21,6 +21,13 @@
         const figure = new mpl.figure({{ fig_id }}, socket, mpl_ondownload,
             document.getElementById("figure"));
 
+        // Notify the parent only after WebAgg has received and drawn its image.
+        figure.imageObj.addEventListener("load", () => {
+            requestAnimationFrame(() => parent.postMessage({
+                type: "eye-plot-ready", path: location.pathname
+            }, location.origin));
+        });
+
         // The page provides the recording title; hide WebAgg's duplicate bar.
         figure.header.parentElement.hidden = true;
 
@@ -28,7 +35,7 @@
             if (socket.readyState === WebSocket.OPEN) {
                 // WebAgg's ResizeObserver reports this size back to Python.
                 figure.canvas_div.style.width = `${Math.max(224, document.documentElement.clientWidth - 8)}px`;
-                figure.canvas_div.style.height = "595px";
+                figure.canvas_div.style.height = `${Math.max(180, document.documentElement.clientHeight - 65)}px`;
             }
         }
         socket.addEventListener("open", fitFigureWidth);

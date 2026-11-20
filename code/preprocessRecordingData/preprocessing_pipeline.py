@@ -16,15 +16,16 @@
 # Some older helpers below still use one unnumbered recording per activity;
 # the comments at those functions point out the paths they expect.
 #
-# Most functions with process/skip filters use _is_desired_item, where an
-# explicit process list wins. verify_data_integrity instead applies the skip
-# list after selecting the requested items. Check the local selection logic
-# when calling a function directly.
+# Subject/activity filters map numeric subject IDs to sets of activity names.
+# None selects spreadsheet subjects and activities; an empty dict selects none.
+# Pairs also present in the skip dictionary are warned about and excluded.
 #
+from email.policy import default
 import os
+from collections import defaultdict
 import pickle
 import shutil
-from natsort import natsorted
+from natsort import natsorted, natsort_keygen
 import re
 from tqdm.auto import tqdm
 from typing import Any, BinaryIO, Iterable, Literal
@@ -55,8 +56,9 @@ virtual_foveation_util_path: str = os.path.join(light_loger_analysis_dir, "code"
 spd_util_path: str = os.path.join(light_loger_analysis_dir, "code", "analyzeSPD", "pythonCode")
 eye_tracking_util_path: str = os.path.join(light_loger_analysis_dir, "code", "analyzeEyeTracking", "pythonCode")
 sensor_utility_path: str = os.path.join(light_loger_analysis_dir, "code", "library", "sensor_utility")
+local_llm_util_path: str = os.path.join(light_loger_analysis_dir, "code", "library")
 
-custom_library_paths: list[str] = (light_loger_analysis_dir, video_util_path, virtual_foveation_util_path, spd_util_path, sensor_utility_path, eye_tracking_util_path)
+custom_library_paths: list[str] = (light_loger_analysis_dir, video_util_path, virtual_foveation_util_path, spd_util_path, sensor_utility_path, eye_tracking_util_path, local_llm_util_path)
 assert all(os.path.exists(path) for path in custom_library_paths)
 
 for path in custom_library_paths:
@@ -69,12 +71,13 @@ import virtual_foveation
 import spd_util
 import world_util
 import cleanEyeTracking
+import local_llm_util
 
 
-def get_subject_ids(FLIC_subject_dir: str="/Users/zacharykelly/Library/CloudStorage/Dropbox-Aguirre-BrainardLab/Zachary Kelly/FLIC_subject/NEWscriptedIndoorOutdoorVideos2026") -> dict[int, int | None]:
-    """Return {numeric subject ID: age in years} from both session workbooks.
+def get_subject_ids(FLIC_subject_dir: str="/Users/zacharykelly/Desktop/tempFolderForDataCuration") -> dict[int, int | None]:
+    """Return {numeric subject ID: age in years} for usable experiment subjects.
 
-    Duplicate IDs within or across workbooks are allowed when ages agree;
+    Duplicate IDs are allowed when ages agree;
     conflicting known ages raise ValueError. Invalid ages are stored as None;
     a known age takes precedence over None for duplicate IDs. Stop reading each
     dataframe at its first empty subject ID. Unusable subjects are skipped.
@@ -87,7 +90,7 @@ def get_subject_ids(FLIC_subject_dir: str="/Users/zacharykelly/Library/CloudStor
     subject_ids: dict[int, int | None] = {}
 
 
-    # First, let's build the dataframe from the 2026 non test experiment
+    # First, let's build the dataframe from the 2026 experiment
     # This requires 2 things. It requires the excel excel sheet with the participants 
     # and their age, as well as the session summary (usable or non usable)
 
@@ -110,75 +113,60 @@ def get_subject_ids(FLIC_subject_dir: str="/Users/zacharykelly/Library/CloudStor
     non_test_subject_sessions["Subject ID"] = non_test_subject_sessions["Subject ID"].astype(str).str.replace(r"^[\s*]+|[\s*]+$", "", regex=True)
     non_test_subject_sessions = non_test_subject_sessions[non_test_subject_sessions["Subject ID"].str.fullmatch(r"FLIC_\d+")].copy()
 
-    # The same subjects should exist in both the summary and the session 
-    non_test_subject_summary_subjects: set[str] = set(non_test_subject_summary["Subject ID"])
-    non_test_subject_sessions_subjects: set[str] = set(non_test_subject_sessions["Subject ID"])
-
     # Next, we need to join these two dataframes on the Subject ID column, then only select the usable ones 
     # We do an inner join because we only want subjects that actually had sessions
     non_test_subjects_joined: pd.DataFrame = pd.merge(non_test_subject_summary, non_test_subject_sessions, on="Subject ID", how="inner") 
     non_test_subjects_joined = non_test_subjects_joined[non_test_subjects_joined["Usable"].str.strip() == "yes"]
 
-    # Now, let's get the much simpler test subject excel file. This does not require any joins 
-    test_subject_summary: pd.DataFrame = pd.read_excel(os.path.join(FLIC_subject_dir, "Test_Subjects", "FLIC_SubjectSummary_LL.xlsx"), header=0, usecols=["Subject ID", "Age", "Usable"])
-    # Drop missing IDs, clean surrounding whitespace and asterisks, then keep valid IDs.
-    test_subject_summary = test_subject_summary.dropna(subset=["Subject ID"]).copy()
-    test_subject_summary["Subject ID"] = test_subject_summary["Subject ID"].astype(str).str.replace(r"^[\s*]+|[\s*]+$", "", regex=True)
-    test_subject_summary = test_subject_summary[test_subject_summary["Subject ID"].str.fullmatch(r"FLIC_\d+")].copy()
+    relevant_cols_df: pd.DataFrame = non_test_subjects_joined[["Subject ID", "Age", "Usable"]]
 
-    # There might be some weird parsing results, for either of these dataframes, 
-    # so let's go through them and just cherry pick the information actually want
-    for df in (non_test_subjects_joined, test_subject_summary): 
-        # Ensure we just have the columns we ant 
-        relevant_cols_df: pd.DataFrame = df[["Subject ID", "Age", "Usable"]]
+    for subject_name, age, usable in relevant_cols_df.itertuples(index=False, name=None):
+        # An empty subject ID marks the end of this dataframe.
+        if(pd.isna(subject_name) or str(subject_name).strip().lower() in ("", "nan")):
+            break
 
-        for subject_name, age, usable in relevant_cols_df.itertuples(index=False, name=None):
-            # An empty subject ID marks the end of this dataframe.
-            if(pd.isna(subject_name) or str(subject_name).strip().lower() in ("", "nan")):
-                break
+        # Unusable subjects do not stop later subjects from being checked.
+        if(str(usable).strip().lower() != "yes"):
+            continue
 
-            # Unusable subjects do not stop later subjects from being checked.
-            if(str(usable).strip().lower() != "yes"):
-                continue
+        # Validate the subject ID separately so age errors are not mislabeled.
+        try:
+            subject_id: int = _extract_num_from_id(str(subject_name).strip().strip("*"))
+        except (AssertionError, ValueError) as error:
+            warnings.warn(f"Subject ID: {subject_name!r} must match FLIC_<digits>; skipping row. {error}")
+            continue
 
-            # Validate the subject ID separately so age errors are not mislabeled.
-            try:
-                subject_id: int = _extract_num_from_id(str(subject_name).strip().strip("*"))
-            except (AssertionError, ValueError) as error:
-                warnings.warn(f"Subject ID: {subject_name!r} must match FLIC_<digits>; skipping row. {error}")
-                continue
+        # Keep the subject even when its age is missing or invalid.
+        validated_age: int | None = None
+        try:
+            # Try to convert the age to a number 
+            # if there is a problem with this (e.g. age is not convertible)
+            # then just fill in with None
+            numeric_age: float = float(age)
 
-            # Keep the subject even when its age is missing or invalid.
-            validated_age: int | None = None
-            try:
-                # Try to convert the age to a number 
-                # if there is a problem with this (e.g. age is not convertible)
-                # then just fill in with None
-                numeric_age: float = float(age)
+            # If there was a convertible age, ensure that is a finite positive int
+            if(not math.isfinite(numeric_age) or numeric_age < 0 or not numeric_age.is_integer()):
+                raise ValueError("Age must be finite, nonnegative, and a whole number")
 
-                # If there was a convertible age, ensure that is a finite positive int
-                if(not math.isfinite(numeric_age) or numeric_age < 0 or not numeric_age.is_integer()):
-                    raise ValueError("Age must be finite, nonnegative, and a whole number")
+            # Finally convert to int
+            validated_age = int(numeric_age)
+        
+        except (TypeError, ValueError, OverflowError) as error:
+            warnings.warn(f"Subject: {subject_name!r} has invalid Age: {age!r}; expected a nonnegative whole number of years, using age = None by default. {error}")
 
-                # Finally convert to int
-                validated_age = int(numeric_age)
-            
-            except (TypeError, ValueError, OverflowError) as error:
-                warnings.warn(f"Subject: {subject_name!r} has invalid Age: {age!r}; expected a nonnegative whole number of years, using age = None by default. {error}")
-
-            # If we somehow get repeated subject IDs (shouldn't, but just in case)
-            # it's fine if the ages agree, but not fine if they do not agree
-            if(subject_id in subject_ids and subject_ids[subject_id] != validated_age):
-                    raise ValueError(
-                        f"Age mismatch for FLIC_{subject_id}: "
-                        f"previous age {subject_ids[subject_id]}, new age {validated_age}"
-                    )
-            else:
-                subject_ids[subject_id] = validated_age
+        # If we somehow get repeated subject IDs (shouldn't, but just in case)
+        # it's fine if the ages agree, but not fine if they do not agree
+        if(subject_id in subject_ids and subject_ids[subject_id] != validated_age):
+                raise ValueError(
+                    f"Age mismatch for FLIC_{subject_id}: "
+                    f"previous age {subject_ids[subject_id]}, new age {validated_age}"
+                )
+        else:
+            subject_ids[subject_id] = validated_age
 
     return subject_ids
 
-def get_activity_names(FLIC_subject_dir: str="/Users/zacharykelly/Library/CloudStorage/Dropbox-Aguirre-BrainardLab/Zachary Kelly/FLIC_subject/NEWscriptedIndoorOutdoorVideos2026",
+def get_activity_names(FLIC_subject_dir: str="//Users/zacharykelly/Desktop/tempFolderForDataCuration",
                        group_by: list[str] | None=["Activity Name"]
                       ) -> set[str] | dict[tuple, str]:
     """Load activity names from the activities Excel spreadsheet.
@@ -254,6 +242,94 @@ def get_activity_names(FLIC_subject_dir: str="/Users/zacharykelly/Library/CloudS
 
     return groups
 
+
+def _get_desired_subjects_and_activities(
+    subjects_and_activities_to_process: dict[int, set[str]] | None,
+    subjects_and_activities_to_skip: dict[int, set[str]] | None,
+) -> dict[int, set[str]]:
+    """Return the requested subject/activity pairs after applying exclusions.
+
+    Args:
+        subjects_and_activities_to_process: Numeric subject IDs mapped to sets
+            of activity names. None selects every subject from get_subject_ids()
+            with every activity from get_activity_names(). An empty dictionary
+            raises AssertionError because there is nothing to process.
+        subjects_and_activities_to_skip: Numeric subject IDs mapped to sets of
+            activity names to exclude. None means no exclusions. Pairs present
+            in both dictionaries are skipped without a warning.
+
+    Returns:
+        A nonempty dictionary containing independent sets of selected activities
+        for each subject. Subjects with no remaining activities are omitted.
+        Neither input dictionary nor its activity sets are modified.
+
+    Raises:
+        AssertionError: The default subject or activity collection is empty,
+            or no subject/activity pairs remain after filtering.
+    """
+
+    # When we have no specific set of subjects / activities to process,
+    # let's make the dictionary the default (all subjects and all activities)
+    if subjects_and_activities_to_process is None:
+        subject_ids: set[int] = set(get_subject_ids().keys())
+        activity_names: set[str] = get_activity_names()
+
+        assert len(subject_ids) > 0, f"Subject ids len is 0"
+        assert len(activity_names) > 0, f"Activity names len is 0"
+
+        subjects_and_activities_to_process = {subject: activity_names for subject in subject_ids}
+
+    # If we did not specify subjects to skip, just set an empty dictionary
+    if subjects_and_activities_to_skip is None:
+        subjects_and_activities_to_skip = {}
+
+    # Create a default dict of sets to store the pairs of subjects 
+    # and activities that are actually desired 
+    selected_subjects_and_activities: defaultdict[int, set[str]] | dict[int, set[str]] = defaultdict(set)
+
+    # First, we go over each subject in the processing list and 
+    # and get their activiites
+    for subject, requested_activities in subjects_and_activities_to_process.items():
+
+        # If the subject is not even in the skip dictionary, we can entirely just add this 
+        # subject to the final dictionary 
+        if(subject not in subjects_and_activities_to_skip):
+
+            # Only add subjects that have requested activities, even 
+            # if they were not in the skip dict 
+            if(len(requested_activities) == 0):
+                continue 
+
+            selected_subjects_and_activities[subject] = requested_activities.copy()
+            continue 
+
+        # Otherwise, we need to filter the activities for this subject 
+        activities_to_skip: set[str] = subjects_and_activities_to_skip[subject]
+
+        # First, iterate over the requested activities
+        for activity in requested_activities:
+
+            # If that activitiy is an activity to skip
+            # do not add it to the final set 
+            if activity in activities_to_skip:
+                continue
+
+            # Otherwise, add it to the final set 
+            selected_subjects_and_activities[subject].add(activity)
+
+
+        # If a subject has no activities, just remove them from the final filtering 
+        if(len(selected_subjects_and_activities[subject ]) == 0):
+            selected_subjects_and_activities.pop(subject)
+
+    # Convert the default dict to normal dict, and make sure there are at least some subjects and activities to process 
+    selected_subjects_and_activities = dict(selected_subjects_and_activities)
+    assert len(selected_subjects_and_activities) > 0, f"No subjects survived filtering for desired / undesired"
+    assert max(len(activities) for subject, activities in selected_subjects_and_activities.items()), f"No activities for any subject survived filtering for desired / undesired "
+
+    return selected_subjects_and_activities
+
+
 def get_pupil_cloud_apikey() -> str:
     """Read and return the Pupil Cloud API key from a local text file.
 
@@ -268,25 +344,23 @@ def get_pupil_cloud_apikey() -> str:
 
 def populate_FLIC_data(raw_dir_path: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026",
                        data_dir_path: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_data/lightLogger/scriptedIndoorOutdoor_2026_photophobia",
-                       subjects_to_skip: Iterable[int]=(),
-                       subjects_to_process: Iterable[int]=(),
-                       activities_to_skip: Iterable[str]=(),
-                       activities_to_process: Iterable[str]=(),
+                       subjects_and_activities_to_skip: dict[int, set[str]] | None=None,
+                       subjects_and_activities_to_process: dict[int, set[str]] | None=None,
                        overwrite_existing: bool=False,
                        verbose: bool=False
                        ) -> None:
     """Collect eye data for every recording in the selected subjects and activities.
 
     Args:
+        subjects_and_activities_to_process: Subject IDs mapped to activity sets;
+            None uses get_subject_ids() and get_activity_names(). Empty selects none.
+        subjects_and_activities_to_skip: Subject/activity pairs to exclude;
+            None skips nothing. Overlapping pairs warn and are excluded.
         raw_dir_path: Experiment directory containing raw FLIC subject folders.
             The processing path is obtained by replacing FLIC_raw with
             FLIC_processing in this path.
         data_dir_path: Destination experiment directory. Files are saved under
             FLIC_<four-digit ID>/<activity>/<recording number>/eyeData.
-        subjects_to_skip: Numeric subject IDs to exclude.
-        subjects_to_process: Numeric subject IDs to include; empty selects all.
-        activities_to_skip: Activity names to exclude.
-        activities_to_process: Activity names to include; empty selects all.
         overwrite_existing: Replace existing destination files when True.
         verbose: Show subject/activity progress and copied file paths.
 
@@ -296,7 +370,7 @@ def populate_FLIC_data(raw_dir_path: str="/Volumes/FLIC_raw/NEWscriptedIndoorOut
     Notes:
         Raw, processing, and data experiment directories must already exist.
         Subject, activity, recording, and eyeData directories are created as needed.
-        Explicit process lists override their corresponding skip lists.
+        Pairs in both dictionaries are warned about and skipped.
         All raw measurements, mapped gaze, cleaned data, the comparison PDF,
         and cleaning/mapper metadata must exist before any files are copied
         for a recording. Missing files raise AssertionError; ambiguous raw
@@ -305,6 +379,10 @@ def populate_FLIC_data(raw_dir_path: str="/Volumes/FLIC_raw/NEWscriptedIndoorOut
         individually unless overwrite_existing=True. This only copies data;
         it does not run gaze mapping or eye cleaning.
     """
+
+    subjects_and_activities_to_process = _get_desired_subjects_and_activities(
+        subjects_and_activities_to_process, subjects_and_activities_to_skip
+    )
     # Assert that the raw and data directories actually exist
     assert os.path.exists(raw_dir_path), f"Raw dir path: {raw_dir_path} does not exist"
     assert os.path.exists(data_dir_path), f"Data dir path: {data_dir_path} does not exist"
@@ -316,11 +394,6 @@ def populate_FLIC_data(raw_dir_path: str="/Volumes/FLIC_raw/NEWscriptedIndoorOut
     # Assert that the matching processing directory exists too
     assert os.path.exists(processing_dir_path), f"Processing dir path: {processing_dir_path} does not exist"
 
-    # Materialize filters once so generators work across subjects and activities.
-    subjects_to_skip = set(subjects_to_skip)
-    subjects_to_process = set(subjects_to_process)
-    activities_to_skip = set(activities_to_skip)
-    activities_to_process = set(activities_to_process)
 
     # Get the subject paths for the subjects we want to process
     subject_paths: list[str] = natsorted([
@@ -328,7 +401,7 @@ def populate_FLIC_data(raw_dir_path: str="/Volumes/FLIC_raw/NEWscriptedIndoorOut
         for subject_name in os.listdir(raw_dir_path)
         if re.fullmatch(r"FLIC_\d+", subject_name)
         and os.path.isdir(subject_path := os.path.join(raw_dir_path, subject_name))
-        and _is_desired_item(_extract_num_from_id(subject_name), subjects_to_process, subjects_to_skip)
+        and _extract_num_from_id(subject_name) in subjects_and_activities_to_process
     ])
     # Show subject progress when verbose is enabled
     subject_iterator: Iterable[str] = (
@@ -344,12 +417,9 @@ def populate_FLIC_data(raw_dir_path: str="/Volumes/FLIC_raw/NEWscriptedIndoorOut
         destination_subject_id: str = f"FLIC_{_extract_num_from_id(subject_id):04d}"
 
         # Get the desired activity paths for this subject
-        activity_paths: list[str] = [
-            activity_path
-            for filename in natsorted(os.listdir(subject_path))
-            if os.path.isdir(activity_path := os.path.join(subject_path, filename))
-            and _is_desired_item(filename, activities_to_process, activities_to_skip)
-        ]
+        activity_paths: list[str] = [os.path.join(subject_path, activity)
+            for activity in natsorted(subjects_and_activities_to_process[_extract_num_from_id(os.path.basename(subject_path))])
+            if os.path.isdir(os.path.join(subject_path, activity))]
         # Show activity progress within the current subject
         activities_iterator: Iterable[str] = (
             activity_paths if not verbose else
@@ -437,12 +507,10 @@ def populate_FLIC_data(raw_dir_path: str="/Volumes/FLIC_raw/NEWscriptedIndoorOut
     return
 
 
-def generate_world_videos(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026", 
+def generate_world_videos(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026/usableSubjects", 
                           dst_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoorVideos2026", 
-                          subjects_to_skip: Iterable=set(), 
-                          subjects_to_process: Iterable=set(), 
-                          activities_to_skip: Iterable=set(), 
-                          activities_to_process: Iterable=set(), 
+                          subjects_and_activities_to_skip: dict[int, set[str]] | None=None,
+                          subjects_and_activities_to_process: dict[int, set[str]] | None=None,
                           overwrite_existing: bool=False,
                           linearize_camera_responsivity: bool=True, 
                           apply_color_weights: bool=True, 
@@ -471,6 +539,10 @@ def generate_world_videos(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
       verbose            print progress information
     """
 
+    subjects_and_activities_to_process = _get_desired_subjects_and_activities(
+        subjects_and_activities_to_process, subjects_and_activities_to_skip
+    )
+
     # Assert that the top-level directories actually exist
     assert os.path.exists(src_dir), f"Source dir path: {src_dir} does not exist"
     assert os.path.exists(dst_dir), f"Destination dir path: {dst_dir} does not exist"
@@ -485,8 +557,8 @@ def generate_world_videos(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
         for subject_name in os.listdir(src_dir)
         if re.fullmatch(r"FLIC_\d+", subject_name)
         and os.path.isdir( (subject_path := os.path.join(src_dir, subject_name) ) )
-        and _is_desired_item(_extract_num_from_id(subject_name), subjects_to_process, subjects_to_skip)
-    ]) 
+        and _extract_num_from_id(subject_name) in subjects_and_activities_to_process
+    ])
     assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
 
     # Now, let's iterate over all the subject paths
@@ -498,12 +570,9 @@ def generate_world_videos(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
         subject_id_number: int = int(re.search("\d+", subject_id).group())
 
         # Iterate over the activities for this subject
-        activites_paths: list[str] = [
-            activity_path
-            for filename in natsorted(os.listdir(subject_path))
-            if os.path.isdir(  ( activity_path := os.path.join(subject_path, filename)  ))
-            and _is_desired_item(filename, activities_to_process, activities_to_skip)
-        ]
+        activites_paths: list[str] = [os.path.join(subject_path, activity)
+            for activity in natsorted(subjects_and_activities_to_process[_extract_num_from_id(os.path.basename(subject_path))])
+            if os.path.isdir(os.path.join(subject_path, activity))]
         activities_iterator: Iterable = range(len(activites_paths)) if verbose is False else tqdm(range(len(activites_paths)), desc="Processing Activities", leave=False)
         for activity_num in activities_iterator:
             # Retrieve the activity path and activity name
@@ -582,10 +651,8 @@ def generate_egocentric_mapper_results(src_dir: str="/Volumes/FLIC_raw/NEWscript
                                        image_matcher: Literal["Efficient_LOFTR", "LOFTR_indoor"] = "Efficient_LOFTR",
                                        show_video_preview: bool=False, 
                                        overwrite_existing: bool=False,
-                                       subjects_to_skip: Iterable=set(), 
-                                       subjects_to_process: Iterable=set(), 
-                                       activities_to_skip: Iterable=set(), 
-                                       activities_to_process: Iterable=set(), 
+                                       subjects_and_activities_to_skip: dict[int, set[str]] | None=None,
+                                       subjects_and_activities_to_process: dict[int, set[str]] | None=None,
                                        verbose: bool=False
                                       ) -> None:
     """
@@ -608,6 +675,10 @@ def generate_egocentric_mapper_results(src_dir: str="/Volumes/FLIC_raw/NEWscript
       verbose                    print progress
     """
 
+    subjects_and_activities_to_process = _get_desired_subjects_and_activities(
+        subjects_and_activities_to_process, subjects_and_activities_to_skip
+    )
+
     # Assert that the top-level directories actually exist
     assert os.path.exists(src_dir), f"Source dir path: {src_dir} does not exist"
     assert os.path.exists(dst_dir), f"Destination dir path: {dst_dir} does not exist"
@@ -622,8 +693,8 @@ def generate_egocentric_mapper_results(src_dir: str="/Volumes/FLIC_raw/NEWscript
         for subject_name in os.listdir(src_dir)
         if re.fullmatch(r"FLIC_\d+", subject_name)
         and os.path.isdir( (subject_path := os.path.join(src_dir, subject_name)) )
-        and _is_desired_item(_extract_num_from_id(subject_name), subjects_to_process, subjects_to_skip)
-    ]) 
+        and _extract_num_from_id(subject_name) in subjects_and_activities_to_process
+    ])
     assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
 
 
@@ -635,12 +706,9 @@ def generate_egocentric_mapper_results(src_dir: str="/Volumes/FLIC_raw/NEWscript
         subject_id: str = os.path.basename(subject_path)
 
         # Iterate over the activities for this subject
-        activites_paths: list[str] = [
-            activity_path
-            for filename in natsorted(os.listdir(subject_path))
-            if os.path.isdir( (activity_path := os.path.join(subject_path, filename)) ) 
-            and _is_desired_item(filename, activities_to_process, activities_to_skip)
-        ]
+        activites_paths: list[str] = [os.path.join(subject_path, activity)
+            for activity in natsorted(subjects_and_activities_to_process[_extract_num_from_id(os.path.basename(subject_path))])
+            if os.path.isdir(os.path.join(subject_path, activity))]
         activities_iterator: Iterable = range(len(activites_paths)) if verbose is False else tqdm(range(len(activites_paths)), desc="Processing Activities", leave=False)
         for activity_num in activities_iterator:
             # Retrieve the activity path and activity name
@@ -853,10 +921,8 @@ def _align_gaze_to_raw_world_frames(
 def run_transformation_pipeline(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026",
                                 dst_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoorVideos2026",
                                 overwrite_existing: bool=False,
-                                subjects_to_skip: Iterable=set(),
-                                subjects_to_process: Iterable=set(),
-                                activities_to_skip: Iterable=set(),
-                                activities_to_process: Iterable=set(),
+                                subjects_and_activities_to_skip: dict[int, set[str]] | None=None,
+                                subjects_and_activities_to_process: dict[int, set[str]] | None=None,
                                 verbose: bool=False,
                                 n_workers: int=world_util.WORLD_IMPUTATION_WORKERS,
                                 demosaic_n_workers: int=world_util.WORLD_DEMOSAIC_WORKERS,
@@ -872,6 +938,10 @@ def run_transformation_pipeline(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoo
     overwrite_existing=True. Set both worker counts to 1 for serial processing.
     """
 
+    subjects_and_activities_to_process = _get_desired_subjects_and_activities(
+        subjects_and_activities_to_process, subjects_and_activities_to_skip
+    )
+
     # Assert that the top-level directories actually exist
     assert os.path.exists(src_dir), f"Source dir path: {src_dir} does not exist"
     assert os.path.exists(dst_dir), f"Destination dir path: {dst_dir} does not exist"
@@ -886,7 +956,7 @@ def run_transformation_pipeline(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoo
         for subject_name in os.listdir(src_dir)
         if re.fullmatch(r"FLIC_\d+", subject_name)
         and os.path.isdir( (subject_path := os.path.join(src_dir, subject_name) ) )
-        and _is_desired_item(_extract_num_from_id(subject_name), subjects_to_process, subjects_to_skip)
+        and _extract_num_from_id(subject_name) in subjects_and_activities_to_process
     ])
     assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}"
 
@@ -900,12 +970,9 @@ def run_transformation_pipeline(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoo
         
 
         # Iterate over the activities for this subject
-        activites_paths: list[str] = [
-            activity_path
-            for filename in natsorted(os.listdir(subject_path))
-            if os.path.isdir(  ( activity_path := os.path.join(subject_path, filename)  ))
-            and _is_desired_item(filename, activities_to_process, activities_to_skip)
-        ]
+        activites_paths: list[str] = [os.path.join(subject_path, activity)
+            for activity in natsorted(subjects_and_activities_to_process[_extract_num_from_id(os.path.basename(subject_path))])
+            if os.path.isdir(os.path.join(subject_path, activity))]
         activities_iterator: Iterable = range(len(activites_paths)) if verbose is False else tqdm(range(len(activites_paths)), desc="Processing Activities", leave=False)
         for activity_num in activities_iterator:
             # Retrieve the activity path and activity name
@@ -980,10 +1047,8 @@ def run_transformation_pipeline(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoo
 def clean_eye_data(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026",
                    dst_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoorVideos2026",
                    overwrite_existing: bool=False,
-                   subjects_to_skip: Iterable[int]=(),
-                   subjects_to_process: Iterable[int]=(),
-                   activities_to_skip: Iterable[str]=(),
-                   activities_to_process: Iterable[str]=(),
+                   subjects_and_activities_to_skip: dict[int, set[str]] | None=None,
+                   subjects_and_activities_to_process: dict[int, set[str]] | None=None,
                    verbose: bool=True
                    ) -> None:
     """Save cleaned eye data and settings in Neon/<attempt>/egocentric_mapper_results.
@@ -999,20 +1064,20 @@ def clean_eye_data(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideo
     the CSV. Raw CSVs are located beneath timeseries_and_video_export.
     """
 
+    subjects_and_activities_to_process = _get_desired_subjects_and_activities(
+        subjects_and_activities_to_process, subjects_and_activities_to_skip
+    )
+
     # Assert that the top-level directories actually exist
     assert os.path.exists(src_dir), f"Source dir path: {src_dir} does not exist"
     assert os.path.exists(dst_dir), f"Destination dir path: {dst_dir} does not exist"
     # Select subjects using the same filters and ordering as the mapper stage.
-    subjects_to_process = set(subjects_to_process)
-    subjects_to_skip = set(subjects_to_skip)
-    activities_to_process = set(activities_to_process)
-    activities_to_skip = set(activities_to_skip)
     subject_paths: list[str] = natsorted([
         subject_path
         for subject_name in os.listdir(src_dir)
         if re.fullmatch(r"FLIC_\d+", subject_name)
         and os.path.isdir(subject_path := os.path.join(src_dir, subject_name))
-        and _is_desired_item(_extract_num_from_id(subject_name), subjects_to_process, subjects_to_skip)
+        and _extract_num_from_id(subject_name) in subjects_and_activities_to_process
     ])
     assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}"
 
@@ -1027,12 +1092,9 @@ def clean_eye_data(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideo
         subject_id: str = os.path.basename(subject_path)
 
         # Find the desired activities for each subject 
-        activity_paths: list[str] = [
-            activity_path
-            for filename in natsorted(os.listdir(subject_path))
-            if os.path.isdir(activity_path := os.path.join(subject_path, filename))
-            and _is_desired_item(filename, activities_to_process, activities_to_skip)
-        ]
+        activity_paths: list[str] = [os.path.join(subject_path, activity)
+            for activity in natsorted(subjects_and_activities_to_process[_extract_num_from_id(os.path.basename(subject_path))])
+            if os.path.isdir(os.path.join(subject_path, activity))]
         activities_iterator: Iterable[int] = (
             range(len(activity_paths)) if not verbose else
             tqdm(range(len(activity_paths)), desc="Processing Activities", leave=False)
@@ -1140,10 +1202,8 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/NEWscript
                                        overwrite_existing: bool=False,
                                        verbose: bool=False,
                                        video_types: Iterable[Literal["tag", "task"]]= ("tag", "task"),
-                                       subjects_to_skip: Iterable=set(), 
-                                       subjects_to_process: Iterable=set(), 
-                                       activities_to_skip: Iterable= set(),
-                                       activities_to_process: Iterable=set(), 
+                                       subjects_and_activities_to_skip: dict[int, set[str]] | None=None,
+                                       subjects_and_activities_to_process: dict[int, set[str]] | None=None,
                                        projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = set(["virtuallyFoveated", "justProjection"])
                                       ) -> None:
     """
@@ -1158,6 +1218,10 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/NEWscript
       overwrite_existing regenerate existing outputs
       verbose            print progress
     """
+
+    subjects_and_activities_to_process = _get_desired_subjects_and_activities(
+        subjects_and_activities_to_process, subjects_and_activities_to_skip
+    )
 
     # Assert that the top-level directories actually exist
     assert os.path.exists(src_dir), f"Source dir path: {src_dir} does not exist"
@@ -1181,8 +1245,8 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/NEWscript
         for subject_name in os.listdir(src_dir)
         if re.fullmatch(r"FLIC_\d+", subject_name)
         and os.path.isdir(os.path.join(src_dir, subject_name))
-        and _is_desired_item(_extract_num_from_id(subject_name), subjects_to_process, subjects_to_skip)
-    ]) 
+        and _extract_num_from_id(subject_name) in subjects_and_activities_to_process
+    ])
     assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
 
     # Now, let's iterate over all the subject paths
@@ -1194,12 +1258,9 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/NEWscript
         subject_id_number: int = int(re.search("\d+", subject_id).group())
         
         # Iterate over the activities for this subject
-        activites_paths: list[str] = [
-            os.path.join(subject_path, filename)
-            for filename in natsorted(os.listdir(subject_path))
-            if os.path.isdir(os.path.join(subject_path, filename))
-            and _is_desired_item(filename, activities_to_process, activities_to_skip)
-        ]
+        activites_paths: list[str] = [os.path.join(subject_path, activity)
+            for activity in natsorted(subjects_and_activities_to_process[_extract_num_from_id(os.path.basename(subject_path))])
+            if os.path.isdir(os.path.join(subject_path, activity))]
         activities_iterator: Iterable = range(len(activites_paths)) if verbose is False else tqdm(range(len(activites_paths)), desc="Processing Activities", leave=False)
         for activity_num in activities_iterator:
             # Retrieve the activity path and activity name
@@ -1280,10 +1341,8 @@ def generate_virtually_foveated_videos(src_dir: str="/Volumes/FLIC_raw/NEWscript
 def generate_spds(src_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoorVideos2026", 
                   dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026",
                   overwrite_existing: bool=False,
-                  subjects_to_skip: Iterable=set(), 
-                  subjects_to_process: Iterable=set(), 
-                  activities_to_skip: Iterable=set(["lunch", "phone"]), 
-                  activities_to_process: Iterable=set(), 
+                  subjects_and_activities_to_skip: dict[int, set[str]] | None=None,
+                  subjects_and_activities_to_process: dict[int, set[str]] | None=None,
                   projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = set(["virtuallyFoveated", "justProjection"]), 
                   projection_types_for_bounds_calculations:  Iterable[Literal["virtuallyFoveated", "justProjection"]] = ["virtuallyFoveated", "justProjection"],
                   color_mode: Literal["L+M+S", "L-M", "GRAY", "a", "c_lm", "c_s"] = "L+M+S",
@@ -1298,9 +1357,14 @@ def generate_spds(src_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoo
       src_dir             directory containing processed videos
       dst_dir             directory for SPD outputs and figures
       overwrite_existing  recompute existing results
-      activities_to_skip  set of activity names to ignore
+      subjects_and_activities_to_process  subject IDs mapped to activity sets
+      subjects_and_activities_to_skip     pairs to exclude (empty by default)
       verbose             print progress
     """
+
+    subjects_and_activities_to_process = _get_desired_subjects_and_activities(
+        subjects_and_activities_to_process, subjects_and_activities_to_skip
+    )
 
     # Assert that the top-level directories actually exist
     assert os.path.exists(src_dir), f"Source dir path: {src_dir} does not exist"
@@ -1323,8 +1387,8 @@ def generate_spds(src_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoo
         for subject_name in os.listdir(src_dir)
         if re.fullmatch(r"FLIC_\d+", subject_name)
         and os.path.isdir(os.path.join(src_dir, subject_name))
-        and _is_desired_item(_extract_num_from_id(subject_name), subjects_to_process, subjects_to_skip)
-    ]) 
+        and _extract_num_from_id(subject_name) in subjects_and_activities_to_process
+    ])
     assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
 
     # Now, let's iterate over all the subject paths
@@ -1336,12 +1400,9 @@ def generate_spds(src_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoo
         subject_id_number: int = int(re.search("\d+", subject_id).group())
          
         # Iterate over the activities for this subject
-        activites_paths: list[str] = [
-            os.path.join(subject_path, filename)
-            for filename in natsorted(os.listdir(subject_path))
-            if os.path.isdir(os.path.join(subject_path, filename))
-            and _is_desired_item(filename, activities_to_process, activities_to_skip)
-        ]
+        activites_paths: list[str] = [os.path.join(subject_path, activity)
+            for activity in natsorted(subjects_and_activities_to_process[_extract_num_from_id(os.path.basename(subject_path))])
+            if os.path.isdir(os.path.join(subject_path, activity))]
         activities_iterator: Iterable = range(len(activites_paths)) if verbose is False else tqdm(range(len(activites_paths)), desc="Processing Activities", leave=False)
         for activity_num in activities_iterator:
             # Retrieve the activity path and activity name
@@ -1406,31 +1467,14 @@ def generate_spds(src_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoo
     
     return 
 
-def _is_desired_item(item, items_to_process: Iterable, items_to_skip: Iterable) -> bool:
-    """Internal helper to is desired item.
-
-    Args:
-        item: Input value for item.
-        items_to_process: Input value for items to process.
-        items_to_skip: Input value for items to skip.
-
-    Returns:
-        Return value produced by is desired item.
-    """
-    # If we explicitly name items to process, use that list as the selection.
-    # Otherwise, include everything except the items to skip. In this helper,
-    # an explicit process list takes precedence over the skip list.
-    return (item in items_to_process if len(items_to_process) > 0 else item not in items_to_skip)
-    
-
 def group_spds_per_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026", 
                            dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026",
                            groups: dict[str, dict[str, str | None]] = {"indoor": {"work": None, "chat": None, "walkIndoor": None}, 
                                                                     "outdoor": {"walkOutdoor": None, "walkBiopond": None, "sitBiopond": None}
                                                                     }, 
                            overwrite_existing: bool=False,
-                           subjects_to_skip: Iterable=set(), 
-                           activities_to_skip: Iterable=set(["lunch", "phone"]), 
+                           subjects_and_activities_to_skip: dict[int, set[str]] | None=None,
+                           subjects_and_activities_to_process: dict[int, set[str]] | None=None,
                             projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = set(["virtuallyFoveated", "justProjection"]), 
                            projection_types_for_bounds_calculations:  Iterable[Literal["virtuallyFoveated", "justProjection"]] = ["virtuallyFoveated", "justProjection"],
                            sort_by_experiment_ordering: bool=True, 
@@ -1441,12 +1485,14 @@ def group_spds_per_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brainard La
     """Group spds per subject.
 
     Args:
+        subjects_and_activities_to_process: Subject IDs mapped to activity sets;
+            None uses get_subject_ids() and get_activity_names(). Empty selects none.
+        subjects_and_activities_to_skip: Subject/activity pairs to exclude;
+            None skips nothing. Overlapping pairs warn and are excluded.
         src_dir: Path-like input for src dir.
         dst_dir: Path-like input for dst dir.
         groups: Input value for groups.
         overwrite_existing: Input value for overwrite existing.
-        subjects_to_skip: Input value for subjects to skip.
-        activities_to_skip: Input value for activities to skip.
         projection_types: Input value for projection types.
         projection_types_for_bounds_calculations: Input value for projection types for bounds calculations.
         sort_by_experiment_ordering: Input value for sort by experiment ordering.
@@ -1456,6 +1502,10 @@ def group_spds_per_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brainard La
     Returns:
         Return value produced by group spds per subject.
     """
+
+    subjects_and_activities_to_process = _get_desired_subjects_and_activities(
+        subjects_and_activities_to_process, subjects_and_activities_to_skip
+    )
 
     # Assert that the top-level directories actually exist
     assert os.path.exists(src_dir), f"Source dir path: {src_dir} does not exist"
@@ -1484,16 +1534,16 @@ def group_spds_per_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brainard La
                                           for subject_name in os.listdir(os.path.join(src_dir, color_mode) )
                                           if re.fullmatch(r"FLIC_\d+", subject_name) 
                                           and os.path.isdir(os.path.join(src_dir, color_mode, subject_name))
-                                          if _extract_num_from_id(subject_name) not in subjects_to_skip
+                                          if _extract_num_from_id(subject_name) in subjects_and_activities_to_process
                                          ]
-                                        ) 
+                                        )
     assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
 
     # First, we will find the min/max axes across all activities.
     # This will let us build the power by freq graph
     across_all_axes_min_maxes: dict[str, np.ndarray[float]] = _find_spd_axes_across_all(subject_paths, 
-                                                                        subjects_to_skip,
-                                                                        activities_to_skip,
+                                                                        subjects_and_activities_to_skip,
+                                                                        subjects_and_activities_to_process,
                                                                         projection_types_for_bounds_calculations,
                                                                         verbose=False
                                                                         )
@@ -1506,10 +1556,6 @@ def group_spds_per_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brainard La
         subject_id: str = os.path.basename(subject_path)
         subject_id_number: int = int(re.search("\d+", subject_id).group())
 
-        # Skip subjects we don't want to process
-        if(subject_id_number in subjects_to_skip):
-            continue
-        
          # Initialize per subject copy of the activity grouping
         per_subject_activity_grouping: dict = {group: 
                                                     {activity_name: 
@@ -1517,7 +1563,7 @@ def group_spds_per_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brainard La
                                                          for projection_type in projection_types
                                                         }
                                                     for activity_name, _ in activity_dict.items()
-                                                    if activity_name not in activities_to_skip
+                                                    if activity_name in subjects_and_activities_to_process[subject_id_number]
                                                     }
                                                for group, activity_dict in groups.items()
                                               }
@@ -1531,16 +1577,16 @@ def group_spds_per_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brainard La
         axes_min_maxes["frq"]["bounds"][0] = max(across_all_axes_min_maxes["frq"]["bounds"][0], 10e-9)
 
         # Iterate over the activities for this subject
-        activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in natsorted(os.listdir(subject_path))
-                                      if os.path.isdir(os.path.join(subject_path, filename))
-                                     ]
+        activites_paths: list[str] = [os.path.join(subject_path, activity)
+            for activity in natsorted(subjects_and_activities_to_process[_extract_num_from_id(os.path.basename(subject_path))])
+            if os.path.isdir(os.path.join(subject_path, activity))]
         activities_iterator: Iterable = range(len(activites_paths)) if verbose is False else tqdm(range(len(activites_paths)), desc="Processing Activities", leave=False)
         for activity_num in activities_iterator:
             # Retrieve the activity path and activity name
             activity_path: str = activites_paths[activity_num]
             activity_name: str = os.path.basename(activity_path)
 
-            if(activity_name in activities_to_skip or activity_name not in activites_to_groups):
+            if(activity_name not in activites_to_groups):
                 continue
 
             # Now, we will gather the path to the SPD
@@ -1592,8 +1638,8 @@ def group_spds_across_subjects(src_dir: str="/Users/zacharykelly/Aguirre-Brainar
                                                                             "outdoor": {"walkOutdoor": None, "walkBiopond": None, "sitBiopond": None}
                                                                             }, 
                                 overwrite_existing: bool=False,
-                                subjects_to_skip: Iterable=set(), 
-                                activities_to_skip: Iterable=set(["lunch", "phone"]), 
+                                subjects_and_activities_to_skip: dict[int, set[str]] | None=None,
+                                subjects_and_activities_to_process: dict[int, set[str]] | None=None,
                                  projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = set(["virtuallyFoveated", "justProjection"]), 
                                 projection_types_for_bounds_calculations:  Iterable[Literal["virtuallyFoveated", "justProjection"]] = ["virtuallyFoveated", "justProjection"], 
                                 sort_by_experiment_ordering: bool=True, 
@@ -1604,12 +1650,14 @@ def group_spds_across_subjects(src_dir: str="/Users/zacharykelly/Aguirre-Brainar
     """Group spds across subjects.
 
     Args:
+        subjects_and_activities_to_process: Subject IDs mapped to activity sets;
+            None uses get_subject_ids() and get_activity_names(). Empty selects none.
+        subjects_and_activities_to_skip: Subject/activity pairs to exclude;
+            None skips nothing. Overlapping pairs warn and are excluded.
         src_dir: Path-like input for src dir.
         dst_dir: Path-like input for dst dir.
         groups: Input value for groups.
         overwrite_existing: Input value for overwrite existing.
-        subjects_to_skip: Input value for subjects to skip.
-        activities_to_skip: Input value for activities to skip.
         projection_types: Input value for projection types.
         projection_types_for_bounds_calculations: Input value for projection types for bounds calculations.
         sort_by_experiment_ordering: Input value for sort by experiment ordering.
@@ -1619,6 +1667,10 @@ def group_spds_across_subjects(src_dir: str="/Users/zacharykelly/Aguirre-Brainar
     Returns:
         Return value produced by group spds across subjects.
     """
+
+    subjects_and_activities_to_process = _get_desired_subjects_and_activities(
+        subjects_and_activities_to_process, subjects_and_activities_to_skip
+    )
 
     # Assert that the top-level directories actually exist
     assert os.path.exists(src_dir), f"Source dir path: {src_dir} does not exist"
@@ -1646,14 +1698,14 @@ def group_spds_across_subjects(src_dir: str="/Users/zacharykelly/Aguirre-Brainar
                                           for subject_name in os.listdir(os.path.join(src_dir, color_mode) )
                                           if re.fullmatch(r"FLIC_\d+", subject_name) 
                                           and os.path.isdir(os.path.join(src_dir, color_mode, subject_name))
-                                          if _extract_num_from_id(subject_name) not in subjects_to_skip
+                                          if _extract_num_from_id(subject_name) in subjects_and_activities_to_process
                                          ]
-                                        ) 
+                                        )
     assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
 
     min_max_across_all: dict = _find_spd_axes_across_all(subject_paths,
-                                                         subjects_to_skip=subjects_to_skip, 
-                                                         activities_to_skip=activities_to_skip, 
+                                                         subjects_and_activities_to_skip=subjects_and_activities_to_skip,
+                                                         subjects_and_activities_to_process=subjects_and_activities_to_process,
                                                          projection_types=projection_types_for_bounds_calculations, 
                                                          verbose=False
                                                         )
@@ -1667,15 +1719,14 @@ def group_spds_across_subjects(src_dir: str="/Users/zacharykelly/Aguirre-Brainar
                                             for projection_type in projection_types
                                         }
                                     for activity_name, _ in activity_dict.items()
-                                    if activity_name not in activities_to_skip
+                                    if activity_name in set().union(*subjects_and_activities_to_process.values())
                                     }
                                 for group, activity_dict in groups.items()
                             }
     
     # First, let's find all of the activities that exist
-    activities_paths: list[str] = [os.path.join(src_dir, color_mode, "acrossSubjects", activity) for activity in os.listdir(os.path.join(src_dir, color_mode, "acrossSubjects"))
-                                   if activity not in activities_to_skip
-                                   and os.path.isdir(os.path.join(src_dir, color_mode, "acrossSubjects", activity))
+    activities_paths: list[str] = [os.path.join(src_dir, color_mode, "acrossSubjects", activity) for activity in natsorted(set().union(*subjects_and_activities_to_process.values()))
+                                   if os.path.isdir(os.path.join(src_dir, color_mode, "acrossSubjects", activity))
                                   ]
 
     activities_iterator: Iterable = range(len(activities_paths)) if verbose is False else tqdm(range(len(activities_paths)), desc="Processing Activities", leave=False)
@@ -1684,7 +1735,7 @@ def group_spds_across_subjects(src_dir: str="/Users/zacharykelly/Aguirre-Brainar
         activity_path: str = activities_paths[activity_num]
         activity_name: str = os.path.basename(activity_path)
     
-        if(activity_name in activities_to_skip or activity_name not in activities_to_groups):
+        if(activity_name not in activities_to_groups):
             continue
 
         # Now, we will gather the path to the SPD
@@ -1722,8 +1773,8 @@ def group_spds_across_subjects(src_dir: str="/Users/zacharykelly/Aguirre-Brainar
 
 def adjust_spd_axes_copy(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026",
                     dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026",
-                    subjects_to_skip: Iterable= set(),
-                    activities_to_skip: Iterable= set(),
+                    subjects_and_activities_to_skip: dict[int, set[str]] | None=None,
+                    subjects_and_activities_to_process: dict[int, set[str]] | None=None,
                      projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = set(["virtuallyFoveated", "justProjection"]),
                     projection_types_for_bounds_calculations:  Iterable[Literal["virtuallyFoveated", "justProjection"]] = ["virtuallyFoveated", "justProjection"],  
                     combine_figures: bool=True,
@@ -1734,10 +1785,12 @@ def adjust_spd_axes_copy(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab 
     """Adjust spd axes copy.
 
     Args:
+        subjects_and_activities_to_process: Subject IDs mapped to activity sets;
+            None uses get_subject_ids() and get_activity_names(). Empty selects none.
+        subjects_and_activities_to_skip: Subject/activity pairs to exclude;
+            None skips nothing. Overlapping pairs warn and are excluded.
         src_dir: Path-like input for src dir.
         dst_dir: Path-like input for dst dir.
-        subjects_to_skip: Input value for subjects to skip.
-        activities_to_skip: Input value for activities to skip.
         projection_types: Input value for projection types.
         projection_types_for_bounds_calculations: Input value for projection types for bounds calculations.
         combine_figures: Input value for combine figures.
@@ -1748,6 +1801,10 @@ def adjust_spd_axes_copy(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab 
     Returns:
         Return value produced by adjust spd axes copy.
     """
+
+    subjects_and_activities_to_process = _get_desired_subjects_and_activities(
+        subjects_and_activities_to_process, subjects_and_activities_to_skip
+    )
 
     # Assert that the top-level directories actually exist
     assert os.path.exists(src_dir), f"Source dir path: {src_dir} does not exist"
@@ -1768,24 +1825,24 @@ def adjust_spd_axes_copy(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab 
                                           for subject_name in os.listdir(os.path.join(src_dir, color_mode)) 
                                           if re.fullmatch(r"FLIC_\d+", subject_name) 
                                           and os.path.isdir(os.path.join(src_dir, color_mode, subject_name))
-                                          if _extract_num_from_id(subject_name) not in subjects_to_skip
+                                          if _extract_num_from_id(subject_name) in subjects_and_activities_to_process
                                          ]
-                                        ) 
+                                        )
     assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
 
     # First, we will find the min/max axes across all activities.
     # This will let us build the power by freq graph
     across_all_axes_min_maxes: dict[str, np.ndarray[float]] = _find_spd_axes_across_all(subject_paths, 
-                                                                        subjects_to_skip,
-                                                                        activities_to_skip,
+                                                                        subjects_and_activities_to_skip,
+                                                                        subjects_and_activities_to_process,
                                                                         projection_types_for_bounds_calculations,
                                                                         verbose=False
                                                                         )
 
     # Next we will find the colorbar min/maxs by subject
     per_subject_axes_min_maxes: dict[str, np.ndarray[float]] = _find_spd_axes_per_subject(subject_paths, 
-                                                                        subjects_to_skip,
-                                                                        activities_to_skip,
+                                                                        subjects_and_activities_to_skip,
+                                                                        subjects_and_activities_to_process,
                                                                         projection_types_for_bounds_calculations,
                                                                         verbose=False
                                                                     )
@@ -1797,10 +1854,6 @@ def adjust_spd_axes_copy(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab 
         subject_path: str = subject_paths[subject_num]
         subject_id: str = os.path.basename(subject_path)
         subject_id_number: int = int(re.search("\d+", subject_id).group())
-
-        # Skip unwanted subjects
-        if(subject_id_number in subjects_to_skip):
-            continue 
 
         # Construct the min maxes for this subject
         axes_min_maxes: dict[str, np.ndarray] = per_subject_axes_min_maxes[subject_id_number]
@@ -1817,18 +1870,15 @@ def adjust_spd_axes_copy(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab 
             raise Exception(f"Infinite X or Y axis in Log SPD plot: {axes_min_maxes}")
 
         # Iterate over the activities for this subject
-        activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in natsorted(os.listdir(subject_path))
-                                    if os.path.isdir(os.path.join(subject_path, filename))
-                                    ]
+        activites_paths: list[str] = [os.path.join(subject_path, activity)
+            for activity in natsorted(subjects_and_activities_to_process[_extract_num_from_id(os.path.basename(subject_path))])
+            if os.path.isdir(os.path.join(subject_path, activity))]
         activities_iterator: Iterable = range(len(activites_paths)) if verbose is False else tqdm(range(len(activites_paths)), desc="Processing Activities", leave=False)
         for activity_num in activities_iterator:
             # Retrieve the activity path and activity name
             activity_path: str = activites_paths[activity_num]
             activity_name: str = os.path.basename(activity_path)
 
-            # Skip unwanted activities
-            if(activity_name in activities_to_skip):
-                continue 
 
 
             # We will put both projection types onto the same graph
@@ -1888,8 +1938,8 @@ def adjust_spd_axes_copy(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab 
 
 def adjust_spd_axes(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026",
                     dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026",
-                    subjects_to_skip: Iterable= set(),
-                    activities_to_skip: Iterable= set(),
+                    subjects_and_activities_to_skip: dict[int, set[str]] | None=None,
+                    subjects_and_activities_to_process: dict[int, set[str]] | None=None,
                      projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = set(["virtuallyFoveated", "justProjection"]),
                     projection_types_for_bounds_calculations:  Iterable[Literal["virtuallyFoveated", "justProjection"]] = ["virtuallyFoveated", "justProjection"],  
                     combine_figures: bool=True,
@@ -1900,10 +1950,12 @@ def adjust_spd_axes(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropb
     """Adjust spd axes.
 
     Args:
+        subjects_and_activities_to_process: Subject IDs mapped to activity sets;
+            None uses get_subject_ids() and get_activity_names(). Empty selects none.
+        subjects_and_activities_to_skip: Subject/activity pairs to exclude;
+            None skips nothing. Overlapping pairs warn and are excluded.
         src_dir: Path-like input for src dir.
         dst_dir: Path-like input for dst dir.
-        subjects_to_skip: Input value for subjects to skip.
-        activities_to_skip: Input value for activities to skip.
         projection_types: Input value for projection types.
         projection_types_for_bounds_calculations: Input value for projection types for bounds calculations.
         combine_figures: Input value for combine figures.
@@ -1914,6 +1966,10 @@ def adjust_spd_axes(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropb
     Returns:
         Return value produced by adjust spd axes.
     """
+
+    subjects_and_activities_to_process = _get_desired_subjects_and_activities(
+        subjects_and_activities_to_process, subjects_and_activities_to_skip
+    )
 
     # Assert that the top-level directories actually exist
     assert os.path.exists(src_dir), f"Source dir path: {src_dir} does not exist"
@@ -1935,24 +1991,24 @@ def adjust_spd_axes(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropb
                                           for subject_name in os.listdir(os.path.join(src_dir, color_mode)) 
                                           if re.fullmatch(r"FLIC_\d+", subject_name) 
                                           and os.path.isdir(os.path.join(src_dir, color_mode, subject_name))
-                                          if _extract_num_from_id(subject_name) not in subjects_to_skip
+                                          if _extract_num_from_id(subject_name) in subjects_and_activities_to_process
                                          ]
-                                        ) 
+                                        )
     assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
 
     # First, we will find the min/max axes across all activities.
     # This will let us build the power by freq graph
     across_all_axes_min_maxes: dict[str, np.ndarray[float]] = _find_spd_axes_across_all(subject_paths, 
-                                                                        subjects_to_skip,
-                                                                        activities_to_skip,
+                                                                        subjects_and_activities_to_skip,
+                                                                        subjects_and_activities_to_process,
                                                                         projection_types_for_bounds_calculations,
                                                                         verbose=False
                                                                         )
 
     # Next we will find the colorbar min/maxs by subject
     per_subject_axes_min_maxes: dict[str, np.ndarray[float]] = _find_spd_axes_per_subject(subject_paths, 
-                                                                        subjects_to_skip,
-                                                                        activities_to_skip,
+                                                                        subjects_and_activities_to_skip,
+                                                                        subjects_and_activities_to_process,
                                                                         projection_types_for_bounds_calculations,
                                                                         verbose=False
                                                                     )
@@ -1964,10 +2020,6 @@ def adjust_spd_axes(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropb
         subject_path: str = subject_paths[subject_num]
         subject_id: str = os.path.basename(subject_path)
         subject_id_number: int = int(re.search("\d+", subject_id).group())
-
-        # Skip unwanted subjects
-        if(subject_id_number in subjects_to_skip):
-            continue 
 
         # Construct the min maxes for this subject
         axes_min_maxes: dict[str, np.ndarray] = per_subject_axes_min_maxes[subject_id_number]
@@ -1984,18 +2036,15 @@ def adjust_spd_axes(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropb
             raise Exception(f"Infinite X or Y axis in Log SPD plot: {axes_min_maxes}")
 
         # Iterate over the activities for this subject
-        activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in natsorted(os.listdir(subject_path))
-                                    if os.path.isdir(os.path.join(subject_path, filename))
-                                    ]
+        activites_paths: list[str] = [os.path.join(subject_path, activity)
+            for activity in natsorted(subjects_and_activities_to_process[_extract_num_from_id(os.path.basename(subject_path))])
+            if os.path.isdir(os.path.join(subject_path, activity))]
         activities_iterator: Iterable = range(len(activites_paths)) if verbose is False else tqdm(range(len(activites_paths)), desc="Processing Activities", leave=False)
         for activity_num in activities_iterator:
             # Retrieve the activity path and activity name
             activity_path: str = activites_paths[activity_num]
             activity_name: str = os.path.basename(activity_path)
 
-            # Skip unwanted activities
-            if(activity_name in activities_to_skip):
-                continue 
 
 
             # We will put both projection types onto the same graph
@@ -2101,8 +2150,8 @@ def _generate_ellipse_mask(height: int = 480,
 
 
 def _find_spd_axes_across_all(subject_paths: list[str],
-                                   subjects_to_skip: Iterable[str] = set(),
-                                   activities_to_skip: Iterable[str] = set(),
+                                   subjects_and_activities_to_skip: dict[int, set[str]] | None=None,
+                                   subjects_and_activities_to_process: dict[int, set[str]] | None=None,
                                    projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = set(["virtuallyFoveated", "justProjection"]), 
                                    verbose: bool=False
                                  ) -> None:
@@ -2110,9 +2159,11 @@ def _find_spd_axes_across_all(subject_paths: list[str],
     """Internal helper to find spd axes across all.
 
     Args:
+        subjects_and_activities_to_process: Subject IDs mapped to activity sets;
+            None uses get_subject_ids() and get_activity_names(). Empty selects none.
+        subjects_and_activities_to_skip: Subject/activity pairs to exclude;
+            None skips nothing. Overlapping pairs warn and are excluded.
         subject_paths: Path-like input for subject paths.
-        subjects_to_skip: Input value for subjects to skip.
-        activities_to_skip: Input value for activities to skip.
         projection_types: Input value for projection types.
         verbose: Input value for verbose.
 
@@ -2120,7 +2171,11 @@ def _find_spd_axes_across_all(subject_paths: list[str],
         Return value produced by find spd axes across all.
     """
 
-    subject_paths = sorted(subject_paths, key=lambda path: _extract_num_from_id(os.path.basename(path)))
+    subjects_and_activities_to_process = _get_desired_subjects_and_activities(
+        subjects_and_activities_to_process, subjects_and_activities_to_skip
+    )
+
+    subject_paths = sorted((path for subject in subjects_and_activities_to_process for path in subject_paths if _extract_num_from_id(os.path.basename(path)) == subject), key=lambda path: _extract_num_from_id(os.path.basename(path)))
     # Here, we keep one set of bounds for every selected subject and activity.
     # Each graph stores [minimum, maximum] plus the source file for each bound.
     # Starting at [+inf, -inf] lets the first usable graph set both values.
@@ -2151,23 +2206,16 @@ def _find_spd_axes_across_all(subject_paths: list[str],
         subject_id: str = os.path.basename(subject_path)
         subject_id_number: int = int(re.search("\d+", subject_id).group())
 
-        # Skip unwanted subjects
-        if(subject_id_number in subjects_to_skip):
-            continue 
-
         # Iterate over the activities for this subject
-        activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in natsorted(os.listdir(subject_path))
-                                    if os.path.isdir(os.path.join(subject_path, filename))
-                                    ]
+        activites_paths: list[str] = [os.path.join(subject_path, activity)
+            for activity in natsorted(subjects_and_activities_to_process[_extract_num_from_id(os.path.basename(subject_path))])
+            if os.path.isdir(os.path.join(subject_path, activity))]
         activities_iterator: Iterable = range(len(activites_paths)) if verbose is False else tqdm(range(len(activites_paths)), desc="Processing Activities", leave=False)
         for activity_num in activities_iterator:
             # Retrieve the activity path and activity name
             activity_path: str = activites_paths[activity_num]
             activity_name: str = os.path.basename(activity_path)
 
-            # Skip unwanted activities
-            if(activity_name in activities_to_skip):
-                continue 
 
             # Iterate over the projection types
             for projection_type in projection_types:
@@ -2227,8 +2275,8 @@ def _find_spd_axes_across_all(subject_paths: list[str],
 
 
 def _find_spd_axes_per_subject(subject_paths: list[str],
-                                   subjects_to_skip: Iterable[str] = set(),
-                                   activities_to_skip: Iterable[str] = set(),
+                                   subjects_and_activities_to_skip: dict[int, set[str]] | None=None,
+                                   subjects_and_activities_to_process: dict[int, set[str]] | None=None,
                                    projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = set(["virtuallyFoveated", "justProjection"]),
                                    verbose: bool=False
                               ) -> None:
@@ -2237,9 +2285,11 @@ def _find_spd_axes_per_subject(subject_paths: list[str],
     """Internal helper to find spd axes per subject.
 
     Args:
+        subjects_and_activities_to_process: Subject IDs mapped to activity sets;
+            None uses get_subject_ids() and get_activity_names(). Empty selects none.
+        subjects_and_activities_to_skip: Subject/activity pairs to exclude;
+            None skips nothing. Overlapping pairs warn and are excluded.
         subject_paths: Path-like input for subject paths.
-        subjects_to_skip: Input value for subjects to skip.
-        activities_to_skip: Input value for activities to skip.
         projection_types: Input value for projection types.
         verbose: Input value for verbose.
 
@@ -2247,7 +2297,11 @@ def _find_spd_axes_per_subject(subject_paths: list[str],
         Return value produced by find spd axes per subject.
     """
 
-    subject_paths = sorted(subject_paths, key=lambda path: _extract_num_from_id(os.path.basename(path)))
+    subjects_and_activities_to_process = _get_desired_subjects_and_activities(
+        subjects_and_activities_to_process, subjects_and_activities_to_skip
+    )
+
+    subject_paths = sorted((path for subject in subjects_and_activities_to_process for path in subject_paths if _extract_num_from_id(os.path.basename(path)) == subject), key=lambda path: _extract_num_from_id(os.path.basename(path)))
     # Here, each subject gets a separate set of graph bounds. We combine that
     # subject's selected activities and projection types, without mixing in
     # other subjects. The source path records which file supplied each bound.
@@ -2273,10 +2327,6 @@ def _find_spd_axes_per_subject(subject_paths: list[str],
         subject_id: str = os.path.basename(subject_path)
         subject_id_number: int = int(re.search("\d+", subject_id).group())
 
-        # Skip unwanted subjects
-        if(subject_id_number in subjects_to_skip):
-            continue 
-
         # Insert this subject into the min-maxes dict
         min_maxes[subject_id_number] = {"exponentMap": {"bounds": [float("inf"), float("-inf")], "src": ["", ""]},
                                         "varianceMap": {"bounds": [float("inf"), float("-inf")], "src": ["", ""]},
@@ -2285,18 +2335,15 @@ def _find_spd_axes_per_subject(subject_paths: list[str],
                                        }
 
         # Iterate over the activities for this subject
-        activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in natsorted(os.listdir(subject_path))
-                                    if os.path.isdir(os.path.join(subject_path, filename))
-                                    ]
+        activites_paths: list[str] = [os.path.join(subject_path, activity)
+            for activity in natsorted(subjects_and_activities_to_process[_extract_num_from_id(os.path.basename(subject_path))])
+            if os.path.isdir(os.path.join(subject_path, activity))]
         activities_iterator: Iterable = range(len(activites_paths)) if verbose is False else tqdm(range(len(activites_paths)), desc="Processing Activities", leave=False)
         for activity_num in activities_iterator:
             # Retrieve the activity path and activity name
             activity_path: str = activites_paths[activity_num]
             activity_name: str = os.path.basename(activity_path)
 
-            # Skip unwanted activities
-            if(activity_name in activities_to_skip):
-                continue 
 
             # Iterate over the projection types
             for projection_type in projection_types:
@@ -2354,8 +2401,8 @@ def _find_spd_axes_per_subject(subject_paths: list[str],
 
 def _find_spd_axes_per_activity(subject_paths: list[str],
                                 activities_list: list[str],
-                                activities_to_skip: list[str], 
-                                subjects_to_skip: list[int], 
+                                subjects_and_activities_to_skip: dict[int, set[str]] | None=None,
+                                subjects_and_activities_to_process: dict[int, set[str]] | None=None,
                                 projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = set(["virtuallyFoveated", "justProjection"]),
                                 verbose: bool=False 
                               ) -> None:
@@ -2364,10 +2411,12 @@ def _find_spd_axes_per_activity(subject_paths: list[str],
     """Internal helper to find spd axes per activity.
 
     Args:
+        subjects_and_activities_to_process: Subject IDs mapped to activity sets;
+            None uses get_subject_ids() and get_activity_names(). Empty selects none.
+        subjects_and_activities_to_skip: Subject/activity pairs to exclude;
+            None skips nothing. Overlapping pairs warn and are excluded.
         subject_paths: Path-like input for subject paths.
         activities_list: Input value for activities list.
-        activities_to_skip: Input value for activities to skip.
-        subjects_to_skip: Input value for subjects to skip.
         projection_types: Input value for projection types.
         verbose: Input value for verbose.
 
@@ -2375,7 +2424,11 @@ def _find_spd_axes_per_activity(subject_paths: list[str],
         Return value produced by find spd axes per activity.
     """
 
-    subject_paths = sorted(subject_paths, key=lambda path: _extract_num_from_id(os.path.basename(path)))
+    subjects_and_activities_to_process = _get_desired_subjects_and_activities(
+        subjects_and_activities_to_process, subjects_and_activities_to_skip
+    )
+
+    subject_paths = sorted((path for subject in subjects_and_activities_to_process for path in subject_paths if _extract_num_from_id(os.path.basename(path)) == subject), key=lambda path: _extract_num_from_id(os.path.basename(path)))
     # Here, each activity gets a separate set of graph bounds. We combine
     # subjects within that activity, then move on to the next activity.
     # This lets figures for the same activity share scales across subjects.
@@ -2397,7 +2450,7 @@ def _find_spd_axes_per_activity(subject_paths: list[str],
     for activity_num in activities_iterator:
         # Retrieve the activity path and activity name
         activity_name: str = activities_list[activity_num]
-        if(activity_name in activities_to_skip):
+        if(activity_name not in set().union(*subjects_and_activities_to_process.values())):
             continue
         
         # Insert this subject into the min-maxes dict
@@ -2417,7 +2470,7 @@ def _find_spd_axes_per_activity(subject_paths: list[str],
             subject_id_number: int = int(re.search("\d+", subject_id).group())
 
             # Skip unwanted subjects
-            if(subject_id_number in subjects_to_skip):
+            if(activity_name not in subjects_and_activities_to_process.get(subject_id_number, set())):
                 continue 
             
             # Construct the path to this subject's activity
@@ -2481,8 +2534,8 @@ def _find_spd_axes_per_activity(subject_paths: list[str],
 def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026", 
                                  dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026",
                                  overwrite_existing: bool=False,
-                                 subjects_to_skip: Iterable=set(), 
-                                 activities_to_skip: Iterable=set(["lunch", "phone"]), 
+                                 subjects_and_activities_to_skip: dict[int, set[str]] | None=None,
+                                 subjects_and_activities_to_process: dict[int, set[str]] | None=None,
                                  projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = ["virtuallyFoveated", "justProjection"], 
                                  projection_types_for_bounds_calculations:  Iterable[Literal["virtuallyFoveated", "justProjection"]] = ["virtuallyFoveated", "justProjection"],
                                  common_axes: bool=False, 
@@ -2493,11 +2546,13 @@ def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brain
     """Generate spds across subject.
 
     Args:
+        subjects_and_activities_to_process: Subject IDs mapped to activity sets;
+            None uses get_subject_ids() and get_activity_names(). Empty selects none.
+        subjects_and_activities_to_skip: Subject/activity pairs to exclude;
+            None skips nothing. Overlapping pairs warn and are excluded.
         src_dir: Path-like input for src dir.
         dst_dir: Path-like input for dst dir.
         overwrite_existing: Input value for overwrite existing.
-        subjects_to_skip: Input value for subjects to skip.
-        activities_to_skip: Input value for activities to skip.
         projection_types: Input value for projection types.
         projection_types_for_bounds_calculations: Input value for projection types for bounds calculations.
         common_axes: Input value for common axes.
@@ -2508,6 +2563,10 @@ def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brain
     Returns:
         Return value produced by generate spds across subject.
     """
+
+    subjects_and_activities_to_process = _get_desired_subjects_and_activities(
+        subjects_and_activities_to_process, subjects_and_activities_to_skip
+    )
 
     # Assert that the top-level directories actually exist
     assert os.path.exists(src_dir), f"Source dir path: {src_dir} does not exist"
@@ -2529,19 +2588,18 @@ def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brain
                                           for subject_name in os.listdir(os.path.join(src_dir, color_mode)) 
                                           if (re.fullmatch(r"FLIC_\d+", subject_name) 
                                               and os.path.isdir(os.path.join(src_dir, color_mode, subject_name))
-                                              and _extract_num_from_id(subject_name) not in subjects_to_skip
+                                              and _extract_num_from_id(subject_name) in subjects_and_activities_to_process
                                           )
                                          ]
-                                        ) 
+                                        )
 
     assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
 
     # First, let's get all of the activities  we will go over
     activities_list: list[str] = sorted(  set([filename
                                         for subject_path in subject_paths
-                                        for filename in os.listdir(subject_path)
+                                        for filename in subjects_and_activities_to_process[_extract_num_from_id(os.path.basename(subject_path))]
                                         if os.path.isdir(os.path.join(subject_path, filename))
-                                        and filename not in activities_to_skip
                                               ]
                                             )
                                         )
@@ -2557,8 +2615,8 @@ def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brain
     if(common_axes is True):
         # We want ONLY FRQ and SpdByRegion from over all subjects and all axes
         all_axes_min_maxes_across_all: dict = _find_spd_axes_across_all(subject_paths=subject_paths,
-                                                                        activities_to_skip=activities_to_skip,
-                                                                        subjects_to_skip=subjects_to_skip,
+                                                                        subjects_and_activities_to_process=subjects_and_activities_to_process,
+                                                                        subjects_and_activities_to_skip=subjects_and_activities_to_skip,
                                                                         verbose=False, 
                                                                         projection_types=projection_types_for_bounds_calculations
                                                                       )
@@ -2566,8 +2624,8 @@ def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brain
 
         all_axes_min_maxes_per_activity: dict = _find_spd_axes_per_activity(subject_paths=subject_paths,
                                                         activities_list=activities_list, 
-                                                        activities_to_skip=activities_to_skip,
-                                                        subjects_to_skip=subjects_to_skip,
+                                                        subjects_and_activities_to_process=subjects_and_activities_to_process,
+                                                        subjects_and_activities_to_skip=subjects_and_activities_to_skip,
                                                         projection_types=projection_types_for_bounds_calculations,
                                                         verbose=False
                                                         )
@@ -2588,7 +2646,7 @@ def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brain
     for activity_num in activities_iterator:
         # Retrieve the activity path and activity name
         activity_name: str = activities_list[activity_num]
-        if(activity_name in activities_to_skip):
+        if(activity_name not in set().union(*subjects_and_activities_to_process.values())):
             continue
 
         activities_paths: list[str] = []
@@ -2596,7 +2654,7 @@ def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brain
         for subject_path in subject_paths:
             # Gather the subject ID number and skip this subject if we desired to do so
             subject_id_number: int = int(re.search(r"\d+", os.path.basename(subject_path)).group()) 
-            if(subject_id_number in subjects_to_skip):
+            if(activity_name not in subjects_and_activities_to_process.get(subject_id_number, set())):
                 continue     
             subject_activity_path: str = os.path.join(subject_path, activity_name)
             assert os.path.exists(subject_activity_path), f"Problem with: {subject_activity_path}"
@@ -2642,8 +2700,8 @@ def generate_spds_across_subject(src_dir: str="/Users/zacharykelly/Aguirre-Brain
 def generate_spds_across_groups(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026", 
                             dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026",
                             overwrite_existing: bool=False,
-                            subjects_to_skip: Iterable=set(), 
-                            activities_to_skip: Iterable=set(["lunch", "phone"]), 
+                            subjects_and_activities_to_skip: dict[int, set[str]] | None=None,
+                            subjects_and_activities_to_process: dict[int, set[str]] | None=None,
                             projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = ["virtuallyFoveated", "justProjection"], 
                             projection_types_for_bounds_calculations:  Iterable[Literal["virtuallyFoveated", "justProjection"]] = ["virtuallyFoveated", "justProjection"],
                             common_axes: bool=False, 
@@ -2658,11 +2716,13 @@ def generate_spds_across_groups(src_dir: str="/Users/zacharykelly/Aguirre-Braina
     """Generate spds across groups.
 
     Args:
+        subjects_and_activities_to_process: Subject IDs mapped to activity sets;
+            None uses get_subject_ids() and get_activity_names(). Empty selects none.
+        subjects_and_activities_to_skip: Subject/activity pairs to exclude;
+            None skips nothing. Overlapping pairs warn and are excluded.
         src_dir: Path-like input for src dir.
         dst_dir: Path-like input for dst dir.
         overwrite_existing: Input value for overwrite existing.
-        subjects_to_skip: Input value for subjects to skip.
-        activities_to_skip: Input value for activities to skip.
         projection_types: Input value for projection types.
         projection_types_for_bounds_calculations: Input value for projection types for bounds calculations.
         common_axes: Input value for common axes.
@@ -2674,6 +2734,10 @@ def generate_spds_across_groups(src_dir: str="/Users/zacharykelly/Aguirre-Braina
     Returns:
         Return value produced by generate spds across groups.
     """
+
+    subjects_and_activities_to_process = _get_desired_subjects_and_activities(
+        subjects_and_activities_to_process, subjects_and_activities_to_skip
+    )
 
     # Assert that the top-level directories actually exist
     assert os.path.exists(src_dir), f"Source dir path: {src_dir} does not exist"
@@ -2694,14 +2758,14 @@ def generate_spds_across_groups(src_dir: str="/Users/zacharykelly/Aguirre-Braina
                                           for subject_name in os.listdir(os.path.join(src_dir, color_mode) )
                                           if re.fullmatch(r"FLIC_\d+", subject_name) 
                                           and os.path.isdir(os.path.join(src_dir, color_mode, subject_name))
-                                          if(_extract_num_from_id not in subjects_to_skip)
+                                          if(_extract_num_from_id(subject_name) in subjects_and_activities_to_process)
                                          ]
-                                        ) 
+                                        )
     assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
 
     min_max_across_all: dict = _find_spd_axes_across_all(subject_paths,
-                                                         subjects_to_skip=subjects_to_skip, 
-                                                         activities_to_skip=activities_to_skip, 
+                                                         subjects_and_activities_to_skip=subjects_and_activities_to_skip,
+                                                         subjects_and_activities_to_process=subjects_and_activities_to_process,
                                                          projection_types=projection_types_for_bounds_calculations, 
                                                          verbose=False
                                                         )
@@ -2722,13 +2786,16 @@ def generate_spds_across_groups(src_dir: str="/Users/zacharykelly/Aguirre-Braina
             # Find all the activities in the group
             group_activities: list[str] = groups[group_name] if (isinstance(groups[group_name], list) or isinstance(groups[group_name], tuple)) else list(groups[group_name].keys())
 
+            group_activities = [activity for activity in group_activities
+                                if activity in set().union(*subjects_and_activities_to_process.values())]
+
             # Make the output dir
             output_dir: str = os.path.join(dst_dir, color_mode, group_name)
             os.makedirs(output_dir, exist_ok=True)
 
             # Iterate over activities
             for activity in group_activities:
-                if(activity in activities_to_skip):
+                if(activity not in set().union(*subjects_and_activities_to_process.values())):
                     continue 
 
                 # Assert the activity and projection paths exist
@@ -2769,8 +2836,8 @@ def generate_spds_across_all(src_dir: str="/Users/zacharykelly/Aguirre-Brainard 
                             dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026",
                             
                             overwrite_existing: bool=False,
-                            subjects_to_skip: Iterable=set(), 
-                            activities_to_skip: Iterable=set(["lunch", "phone"]), 
+                            subjects_and_activities_to_skip: dict[int, set[str]] | None=None,
+                            subjects_and_activities_to_process: dict[int, set[str]] | None=None,
                             projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = ["virtuallyFoveated", "justProjection"], 
                             projection_types_for_bounds_calculations:  Iterable[Literal["virtuallyFoveated", "justProjection"]] = ["virtuallyFoveated", "justProjection"],
                             common_axes: bool=False, 
@@ -2781,11 +2848,13 @@ def generate_spds_across_all(src_dir: str="/Users/zacharykelly/Aguirre-Brainard 
     """Generate spds across all.
 
     Args:
+        subjects_and_activities_to_process: Subject IDs mapped to activity sets;
+            None uses get_subject_ids() and get_activity_names(). Empty selects none.
+        subjects_and_activities_to_skip: Subject/activity pairs to exclude;
+            None skips nothing. Overlapping pairs warn and are excluded.
         src_dir: Path-like input for src dir.
         dst_dir: Path-like input for dst dir.
         overwrite_existing: Input value for overwrite existing.
-        subjects_to_skip: Input value for subjects to skip.
-        activities_to_skip: Input value for activities to skip.
         projection_types: Input value for projection types.
         projection_types_for_bounds_calculations: Input value for projection types for bounds calculations.
         common_axes: Input value for common axes.
@@ -2796,6 +2865,10 @@ def generate_spds_across_all(src_dir: str="/Users/zacharykelly/Aguirre-Brainard 
     Returns:
         Return value produced by generate spds across all.
     """
+
+    subjects_and_activities_to_process = _get_desired_subjects_and_activities(
+        subjects_and_activities_to_process, subjects_and_activities_to_skip
+    )
 
     # Assert that the top-level directories actually exist
     assert os.path.exists(src_dir), f"Source dir path: {src_dir} does not exist"
@@ -2816,23 +2889,22 @@ def generate_spds_across_all(src_dir: str="/Users/zacharykelly/Aguirre-Brainard 
                                           for subject_name in os.listdir(os.path.join(src_dir, color_mode)) 
                                           if re.fullmatch(r"FLIC_\d+", subject_name) 
                                           and os.path.isdir(os.path.join(src_dir, color_mode, subject_name))
-                                          if _extract_num_from_id(subject_name) not in subjects_to_skip
+                                          if _extract_num_from_id(subject_name) in subjects_and_activities_to_process
                                          ]
-                                        ) 
+                                        )
     assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
 
     min_max_across_all: dict = _find_spd_axes_across_all(subject_paths,
-                                                         subjects_to_skip=subjects_to_skip, 
-                                                         activities_to_skip=activities_to_skip, 
+                                                         subjects_and_activities_to_skip=subjects_and_activities_to_skip,
+                                                         subjects_and_activities_to_process=subjects_and_activities_to_process,
                                                          projection_types=projection_types_for_bounds_calculations, 
                                                          verbose=False
                                                         )
 
     
     # Next, we will find all of the valid activities we will average over
-    activity_names: list[str] = [activity for activity in os.listdir(os.path.join(src_dir, color_mode, "acrossSubjects"))
-                                 if activity not in activities_to_skip
-                                   and os.path.isdir(os.path.join(src_dir, color_mode, "acrossSubjects", activity))
+    activity_names: list[str] = [activity for activity in natsorted(set().union(*subjects_and_activities_to_process.values()))
+                                 if os.path.isdir(os.path.join(src_dir, color_mode, "acrossSubjects", activity))
                                   ]
     
     # Make the output dir if it does not exist already
@@ -2869,10 +2941,8 @@ def generate_mean_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dr
                        dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026", 
                        overwrite_existing: bool=False, 
                        verbose: bool=False, 
-                       subjects_to_skip: Iterable=set(), 
-                       subjects_to_process: Iterable=set(), 
-                       activities_to_skip: Iterable=set(), 
-                       activities_to_process: Iterable=set(), 
+                       subjects_and_activities_to_skip: dict[int, set[str]] | None=None,
+                       subjects_and_activities_to_process: dict[int, set[str]] | None=None,
                        projection_types_to_skip: Iterable[Literal["justProjection", "virtuallyFoveated"]]=set(), 
                        projection_types_to_process: Iterable[Literal["justProjection", "virtuallyFoveated"]]=set(), 
                        color_modes_to_skip: Iterable[Literal["a", "c_lm", "c_s"]]=set(), 
@@ -2883,14 +2953,14 @@ def generate_mean_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dr
     """Generate mean spds.
 
     Args:
+        subjects_and_activities_to_process: Subject IDs mapped to activity sets;
+            None uses get_subject_ids() and get_activity_names(). Empty selects none.
+        subjects_and_activities_to_skip: Subject/activity pairs to exclude;
+            None skips nothing. Overlapping pairs warn and are excluded.
         src_dir: Path-like input for src dir.
         dst_dir: Path-like input for dst dir.
         overwrite_existing: Input value for overwrite existing.
         verbose: Input value for verbose.
-        subjects_to_skip: Input value for subjects to skip.
-        subjects_to_process: Input value for subjects to process.
-        activities_to_skip: Input value for activities to skip.
-        activities_to_process: Input value for activities to process.
         projection_types_to_skip: Input value for projection types to skip.
         projection_types_to_process: Input value for projection types to process.
         color_modes_to_skip: Input value for color modes to skip.
@@ -2900,6 +2970,10 @@ def generate_mean_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dr
     Returns:
         Return value produced by generate mean spds.
     """
+
+    subjects_and_activities_to_process = _get_desired_subjects_and_activities(
+        subjects_and_activities_to_process, subjects_and_activities_to_skip
+    )
 
     # Assert that the top-level directories actually exist
     assert os.path.exists(src_dir), f"Source dir path: {src_dir} does not exist"
@@ -2920,17 +2994,18 @@ def generate_mean_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dr
     # returns a dict in the form:
 
     # color_mode, subject, activity, projection_type
-    spd_paths: dict = spd_util.load_spds(src_dir, 
-                                         subjects_to_skip=subjects_to_skip,
-                                         subjects_to_process=subjects_to_process, 
-                                         activities_to_skip=activities_to_skip, 
-                                         activities_to_process=activities_to_process, 
-                                         color_modes_to_skip=color_modes_to_skip, 
-                                         color_modes_to_process=color_modes_to_process, 
-                                         projection_types_to_skip=projection_types_to_skip, 
-                                         projection_types_to_process=projection_types_to_process, 
-                                         paths_only=True, 
-                                        )
+    spd_paths: dict = {}
+    for subject, activities in subjects_and_activities_to_process.items():
+        subject_spds = spd_util.load_spds(
+            src_dir, subjects_to_process={subject}, activities_to_process=activities,
+            color_modes_to_skip=color_modes_to_skip,
+            color_modes_to_process=color_modes_to_process,
+            projection_types_to_skip=projection_types_to_skip,
+            projection_types_to_process=projection_types_to_process,
+            paths_only=True,
+        )
+        for color_mode, subjects in subject_spds.items():
+            spd_paths.setdefault(color_mode, {}).update(subjects)
     color_modes: list = list(spd_paths.keys())
     
     # Now, let's iterate over the color modes we will process
@@ -2951,7 +3026,7 @@ def generate_mean_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dr
             # First, let's gather the activities
             subjects: list[str] = sorted(color_mode_dict, key=_extract_num_from_id)
 
-            activities: list[str] = list(color_mode_dict[subjects[0]].keys()) 
+            activities: list[str] = sorted({activity for subject in subjects for activity in color_mode_dict[subject]})
             activities_iterator: Iterable = range(len(activities)) if verbose is False else tqdm(range(len(activities)), desc="Meaning across subjects dimension", leave=False)
             for activity_num in activities_iterator:
                 # Retrieve the activity name
@@ -2960,7 +3035,8 @@ def generate_mean_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dr
                 # Assemble a list of the form [ {projection_types: paths} ] for all the subjects of this activity
                 # Each list entry is one subject's projection-to-file mapping.
                 # MATLAB can therefore average corresponding projections separately.
-                subjects_flattened: list[dict] = [ color_mode_dict[subject][activity] for subject in subjects]
+                subjects_flattened: list[dict] = [color_mode_dict[subject][activity] for subject in subjects
+                                                  if activity in color_mode_dict[subject]]
 
                 # Generate the output path
                 output_path: str = os.path.join(dst_dir, color_mode, "acrossSubject", activity, "meanSPDs.mat")
@@ -3005,7 +3081,7 @@ def generate_mean_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dr
             # end up with 1 SPD for this color mode
             # First, let's gather the activities
             subjects: list[str] = sorted(color_mode_dict, key=_extract_num_from_id)
-            activities: list[str] = list(color_mode_dict[subjects[0]].keys()) 
+            activities: list[str] = sorted({activity for subject in subjects for activity in color_mode_dict[subject]})
             
             # First, average all activities for a given subject
             #generate_mean_spds(src_dir=src_dir,
@@ -3044,10 +3120,8 @@ def combine_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/
                  dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026", 
                  overwrite_existing: bool=False,
                  verbose: bool=False,  
-                 subjects_to_skip: Iterable=set(),
-                 subjects_to_process: Iterable=set(),  
-                 activities_to_skip: Iterable=set(["lunch", "phone"]), 
-                 activities_to_process: Iterable=set(), 
+                 subjects_and_activities_to_skip: dict[int, set[str]] | None=None,
+                 subjects_and_activities_to_process: dict[int, set[str]] | None=None,
                  projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = ["virtuallyFoveated", "justProjection"],
                  color_modes_to_skip: Iterable[Literal["a", "c_lm", "c_s", "L-M", "L+M+S"]] = set(),
                  color_modes_to_process: Iterable[Literal["a", "c_lm", "c_s", "L-M", "L+M+S"]] = set()
@@ -3058,6 +3132,10 @@ def combine_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/
        generate a plot for each subject/activity
        with them all on it
     """
+
+    subjects_and_activities_to_process = _get_desired_subjects_and_activities(
+        subjects_and_activities_to_process, subjects_and_activities_to_skip
+    )
 
     # Assert that the top-level directories actually exist
     assert os.path.exists(src_dir), f"Source dir path: {src_dir} does not exist"
@@ -3074,11 +3152,6 @@ def combine_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/
     eng.tbUseProject('lightLoggerAnalysis', nargout=0)
 
 
-    # Ensure the inputs we later use for set equality are in set form
-    subjects_to_skip = set(subjects_to_skip)
-    subjects_to_process = set(subjects_to_process)
-    activities_to_skip = set(activities_to_skip)
-    activities_to_process = set(activities_to_process)
 
     # First, let's get the desired color modes from the source directory
     # that we will combine
@@ -3087,39 +3160,22 @@ def combine_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/
         for color_mode in os.listdir(src_dir)
         if not color_mode.startswith(".")
         and os.path.isdir(os.path.join(src_dir, color_mode))
-        and _is_desired_item(color_mode, color_modes_to_process, color_modes_to_skip)
+        and (color_mode in color_modes_to_process if color_modes_to_process else color_mode not in color_modes_to_skip)
         and "#" not in color_mode
         and not color_mode.startswith("actigraphy")
     ]) 
     assert len(color_mode_paths) > 0, f"No colormode directories found in: {src_dir}" 
     color_modes_list: list[str] = [ os.path.basename(path) for path in color_mode_paths ]
 
-    # Now, let's collect all of the subjects
-    # we want to process from the first color mode
+    # Resolve the selected subjects in the first color mode.
     subject_ids: set[str] = set( subject_id
                                   for subject_id in os.listdir(color_mode_paths[0])
                                   if os.path.isdir(os.path.join(color_mode_paths[0], subject_id))
                                   if not subject_id.startswith(".")
                                   and subject_id.startswith("FLIC")
-                                  and _is_desired_item(_extract_num_from_id(subject_id), subjects_to_process, subjects_to_skip)
+                                  and _extract_num_from_id(subject_id) in subjects_and_activities_to_process
                                  )
-    subject_ids_list: list[str] = sorted(subject_ids, key=_extract_num_from_id)
-
-    # Assert that the very first color mode has all of the subjects we want to process
-    # if we have specified them
-    if(len(subjects_to_process) > 0):
-        assert set(_extract_num_from_id(id_) for id_ in subject_ids) == subjects_to_process, f"Subjects in {color_mode_paths[0]} are {subject_ids} but {subjects_to_process} were requested"
-
-    # Now we need to do the same thing with the activities requested
-    activity_names: set[str] = set( activity_name 
-                                    for activity_name in os.listdir(os.path.join(color_mode_paths[0], subject_ids_list[0]))
-                                    if os.path.isdir(os.path.join(color_mode_paths[0], subject_ids_list[0], activity_name))
-                                    and _is_desired_item(activity_name, activities_to_process, activities_to_skip)
-                                  )
-    activity_names_list: list[str] = list(activity_names)
-
-    if(len(activities_to_process) > 0):
-        assert activity_names == activities_to_process, f"Activities in {os.path.join(color_mode_paths[0], subject_ids_list[0])} are {activity_names} but {activities_to_process} were requested"
+    assert {_extract_num_from_id(subject) for subject in subject_ids} == set(subjects_and_activities_to_process), "Requested subjects are missing"
 
     # Ending dictionary should be of form
     # {subject: {activity:
@@ -3137,11 +3193,11 @@ def combine_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/
         color_mode: str = os.path.basename(color_mode_path)
         
         # Find the subjects of this color mode
-        color_mode_subjects: set[str] =  set( subject_id
+        color_mode_subjects: set[str] = set( subject_id
                                                for subject_id in os.listdir(color_mode_path)
                                                if os.path.isdir(os.path.join(color_mode_path, subject_id))
                                                and subject_id.startswith("FLIC")
-                                               and _is_desired_item(_extract_num_from_id(subject_id), subjects_to_process, subjects_to_skip)
+                                               and _extract_num_from_id(subject_id) in subjects_and_activities_to_process
                                             )
 
         # Assert that this is all of the same subjects we are supposed to process
@@ -3153,15 +3209,8 @@ def combine_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/
             subject_path: str = os.path.join(color_mode_path, subject_id)
             assert os.path.exists(subject_path), f"Subject path: {subject_path} does not exist"
 
-            # Find the activities in this subject path
-            subject_activities: set[str] = set( activity_name 
-                                                for activity_name in os.listdir(subject_path)
-                                                if os.path.isdir(os.path.join(subject_path, activity_name))
-                                                and _is_desired_item(activity_name, activities_to_process, activities_to_skip)
-                                             )
-
-            # Assert it has all of the desired activities we want
-            assert subject_activities == activity_names, f"Subject path: {subject_path} has activities: {subject_activities} but: {activity_names} were requested"
+            # Each subject may request a different set of activities.
+            subject_activities: set[str] = subjects_and_activities_to_process[_extract_num_from_id(subject_id)]
 
             # If this is all true, let's make sure we have the projection files we want to include
             # per activity
@@ -3238,10 +3287,8 @@ def plot_mean_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbo
                  overwrite_existing: bool=False,
                  verbose: bool=False,  
                  dimension: Literal["acrossActivityThenSubject", "acrossSubject", "acrossActivity"]="acrossActivity", 
-                 subjects_to_skip: Iterable=set(),
-                 subjects_to_process: Iterable=set(),  
-                 activities_to_skip: Iterable=set(["lunch", "phone"]), 
-                 activities_to_process: Iterable=set(), 
+                 subjects_and_activities_to_skip: dict[int, set[str]] | None=None,
+                 subjects_and_activities_to_process: dict[int, set[str]] | None=None,
                  projection_types: Iterable[Literal["virtuallyFoveated", "justProjection"]] = ["virtuallyFoveated", "justProjection"],
                  color_modes_to_skip: Iterable[Literal["a", "c_lm", "c_s", "L-M", "L+M+S"]] = set(),
                  color_modes_to_process: Iterable[Literal["a", "c_lm", "c_s", "L-M", "L+M+S"]] = set()
@@ -3249,15 +3296,15 @@ def plot_mean_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbo
     """Plot mean spds.
 
     Args:
+        subjects_and_activities_to_process: Subject IDs mapped to activity sets;
+            None uses get_subject_ids() and get_activity_names(). Empty selects none.
+        subjects_and_activities_to_skip: Subject/activity pairs to exclude;
+            None skips nothing. Overlapping pairs warn and are excluded.
         src_dir: Path-like input for src dir.
         dst_dir: Path-like input for dst dir.
         overwrite_existing: Input value for overwrite existing.
         verbose: Input value for verbose.
         dimension: Input value for dimension.
-        subjects_to_skip: Input value for subjects to skip.
-        subjects_to_process: Input value for subjects to process.
-        activities_to_skip: Input value for activities to skip.
-        activities_to_process: Input value for activities to process.
         projection_types: Input value for projection types.
         color_modes_to_skip: Input value for color modes to skip.
         color_modes_to_process: Input value for color modes to process.
@@ -3265,6 +3312,10 @@ def plot_mean_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbo
     Returns:
         Return value produced by plot mean spds.
     """
+
+    subjects_and_activities_to_process = _get_desired_subjects_and_activities(
+        subjects_and_activities_to_process, subjects_and_activities_to_skip
+    )
 
     # Assert that the top-level directories actually exist
     assert os.path.exists(src_dir), f"Source dir path: {src_dir} does not exist"
@@ -3285,7 +3336,7 @@ def plot_mean_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbo
                                     for filename in natsorted(os.listdir(src_dir))
                                     if not filename.startswith("actigraphy")
                                     and not filename.startswith(".")
-                                    and _is_desired_item(filename, color_modes_to_process, color_modes_to_skip)  
+                                    and (filename in color_modes_to_process if color_modes_to_process else filename not in color_modes_to_skip)
                                   ]
     color_modes_list: list[str] = [os.path.basename(path) for path in color_mode_paths]
 
@@ -3320,7 +3371,7 @@ def plot_mean_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbo
                                         for filename in natsorted(os.listdir(dimension_path))
                                         if not filename.startswith(".")
                                         and os.path.isdir(os.path.join(dimension_path, filename))
-                                        and _is_desired_item(filename, subjects_to_process, subjects_to_skip)
+                                        and _extract_num_from_id(filename) in subjects_and_activities_to_process
                                         ]
             
             # Iterate over these subjects and plot their results
@@ -3340,10 +3391,9 @@ def plot_mean_spds(src_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbo
         elif(dimension == "acrossSubject"):
             # Let's get the activity paths
             activity_paths: list[str] = [ os.path.join(dimension_path, filename) 
-                                            for filename in natsorted(os.listdir(dimension_path))
+                                            for filename in natsorted(set().union(*subjects_and_activities_to_process.values()))
                                             if not filename.startswith(".")
                                             and os.path.isdir(os.path.join(dimension_path, filename))
-                                            and _is_desired_item(filename, activities_to_process, activities_to_skip)
                                         ]
             activity_iterator: Iterable = range(len(activity_paths)) if verbose is False else tqdm(range(len(activity_paths)))
             for activity_num in activity_iterator:
@@ -3468,10 +3518,10 @@ def rename_world_recordings(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOut
     return 
 
 
-def verify_data_integrity(src_dir: str = "/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026",
-                          output_path: str | None="/Users/zacharykelly/Library/CloudStorage/Dropbox-Aguirre-BrainardLab/Zachary Kelly/FLIC_subject/NEWscriptedIndoorOutdoorVideos2026/FLIC_dataCuration_LL.xlsx",
-                          subjects_to_skip: Iterable[int] = set(),
-                          subjects_to_process: Iterable[int] = set(),
+def verify_data_integrity(src_dir: str = "/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026/usableSubjects",
+                          output_path: str | None="/Users/zacharykelly/Library/CloudStorage/Dropbox-Aguirre-BrainardLab/Zachary Kelly/FLIC_subject/scriptedIndoorOutdoor_2026_photophobia/FLIC_dataCuration_LL.xlsx",
+                          subjects_and_activities_to_skip: dict[int, set[str]] | None=None,
+                          subjects_and_activities_to_process: dict[int, set[str]] | None=None,
                           verbose: bool = False,
                           target_fps: int = 120,
                           target_world_size: tuple[int, int] = (480, 640),
@@ -3481,17 +3531,20 @@ def verify_data_integrity(src_dir: str = "/Volumes/FLIC_raw/NEWscriptedIndoorOut
 
     Check folder structure, matching recording numbers, GKA configuration,
     sensor chunk files and ordering, measured world-camera FPS, and nonempty
-    Neon export folders. Activities always come from get_activity_names(); only
-    subject selection is configurable. Measured FPS includes filled timestamps
+    Neon export folders for the selected subject/activity pairs.
+    Measured FPS includes filled timestamps
     and must be within 5 FPS of the target; configured FPS must match exactly.
 
     Args:
+        subjects_and_activities_to_process: Subject IDs mapped to activity sets;
+            None uses get_subject_ids() and get_activity_names(). Empty selects none.
+        subjects_and_activities_to_skip: Subject/activity pairs to exclude;
+            None skips nothing. Overlapping pairs warn and are excluded.
         src_dir: Directory containing FLIC_<ID> subject folders.
-        output_path: Optional .xlsx report path. Existing errors and Fixes are
-            preserved; only new errors are appended. None disables saving.
+        output_path: Optional .xlsx report path. Errors for selected subject/activity
+            pairs and their subject Fixes are replaced; unselected error cells are preserved.
+            None disables saving.
             The .pkl and .json formats are not yet implemented.
-        subjects_to_skip: Subject IDs to exclude, including explicitly selected IDs.
-        subjects_to_process: Subject IDs to check. Empty uses the FLIC spreadsheets.
         verbose: Show subject and activity progress bars.
         target_fps: Expected configured and measured world-camera frame rate.
         target_world_size: Expected frame size as (height, width).
@@ -3503,12 +3556,35 @@ def verify_data_integrity(src_dir: str = "/Volumes/FLIC_raw/NEWscriptedIndoorOut
         Clean entries have empty lists. Recording issues include the recording number.
 
     Raises:
-        AssertionError: The source path does not exist, or no subjects or activities
-            are selected.
+        AssertionError: The source path does not exist or the output format is invalid.
         ValueError: target_fps is not finite and positive.
         OSError: A directory cannot be read. Config and FPS errors are collected
             in the issue lists instead.
     """
+
+    def _parse_manual_edit_readme(contents: str) -> dict[str, str]:
+        """Extract author, date, and description from a manual-edit README.
+
+        Keep the date as written and preserve paragraph breaks in the
+        description. Missing fields are returned as empty strings.
+        """
+        fields: dict[str, str] = {}
+        for field in ("author", "date"):
+            match = re.search(
+                rf"^\s*\*\*{field}:\*\*[^\S\r\n]*([^\r\n]*)",
+                contents,
+                flags=re.MULTILINE | re.IGNORECASE,
+            )
+            fields[field] = match.group(1).strip() if match else ""
+
+        description = re.search(
+            r"^##[^\S\r\n]+Description[^\S\r\n]*\r?\n(.*)",
+            contents,
+            flags=re.MULTILINE | re.IGNORECASE | re.DOTALL,
+        )
+        
+        fields["description"] = description.group(1).strip() if description else ""
+        return fields
 
     # Assert that the top-level directories actually exist
     assert os.path.exists(src_dir), f"Source dir path: {src_dir} does not exist"
@@ -3527,28 +3603,22 @@ def verify_data_integrity(src_dir: str = "/Volumes/FLIC_raw/NEWscriptedIndoorOut
     if(not np.isfinite(target_fps) or target_fps <= 0):
         raise ValueError("target_fps must be finite and positive")
 
-    subjects_to_process = set(subjects_to_process)
-    subjects_to_skip = set(subjects_to_skip)
 
-    # Filter subjects and IDs for just those that we want to check
-    # Use the explicit selection when supplied; otherwise read the session
-    # workbooks. We then remove skipped IDs in either case. Checking expected
-    # IDs, rather than only existing folders, lets us report missing subjects.
-    subject_ids_to_check: list[int] = sorted([
-        subject_id
-        for subject_id in (subjects_to_process if len(subjects_to_process) > 0 else get_subject_ids())
-        if subject_id not in subjects_to_skip
-    ])
-    assert len(subject_ids_to_check) > 0, "No subject IDs selected for verification"
+    # Get the subjects and activities we actually desire to process 
+    subjects_and_activities_to_process = _get_desired_subjects_and_activities(
+        subjects_and_activities_to_process, subjects_and_activities_to_skip
+    )
 
-    # Always get all of the activity names for this experiment
-    activity_names_to_check: list[str] = natsorted(set(get_activity_names()))
-    assert len(activity_names_to_check) > 0, "No activity names selected for verification"
+    # Let's grab just the subject IDs first to easily iterate over them in sorted order
+    subject_ids_to_check: list[int] = sorted(subjects_and_activities_to_process)
 
     # Save a dictionary that stores integrity issues
     # meta_problems describe a missing/invalid subject or activity folder.
     # GKA and Neon lists contain the recording-specific problems beneath it.
     integrity_issues: dict = {}
+
+    # Also save a dictionary that details manual fixes that have been applied to the data 
+    manual_fixes: dict = {}
 
     # Now, let's iterate over all the subject paths
     subject_iterator: Iterable[int] = (
@@ -3556,11 +3626,16 @@ def verify_data_integrity(src_dir: str = "/Volumes/FLIC_raw/NEWscriptedIndoorOut
         tqdm(subject_ids_to_check, desc="Processing Subjects", leave=True)
     )
     for subject_id_number in subject_iterator:
+        activity_names_to_check: list[str] = natsorted(subjects_and_activities_to_process[subject_id_number])
+        
         # Get the subject ID path to this subject and save some information about meta problems
         # for the entire subject as well as for each activity
         subject_id: str = f"FLIC_{subject_id_number}"
         subject_path: str = os.path.join(src_dir, subject_id)
         integrity_issues[subject_id_number] = {"meta_problems": [], "activities": {}}
+
+        # Initialize a dictionary entry also for the manual fixes of this subject 
+        manual_fixes[subject_id_number] = {"activities": {}}
 
         # Ensure the path exists and it is a directory
         if(not os.path.exists(subject_path)):
@@ -3581,6 +3656,8 @@ def verify_data_integrity(src_dir: str = "/Volumes/FLIC_raw/NEWscriptedIndoorOut
         for activity_name in activities_iterator:
             # Initialize an entry for this activity
             integrity_issues[subject_id_number]["activities"][activity_name] = {"meta_problems": [], "GKA": [], "Neon": []}
+            manual_fixes[subject_id_number]["activities"][activity_name] = {"gka": None, "neon": None}
+
 
             # Get the path to this activity
             activity_path: str = os.path.join(subject_path, activity_name)
@@ -3622,21 +3699,50 @@ def verify_data_integrity(src_dir: str = "/Volumes/FLIC_raw/NEWscriptedIndoorOut
 
             # Now, we know that both device dirs exist and are not empty
             # Let's make sure now that they have the matching numbers of recordings
+            # Skip README files and x-prefixed folders left by manual data curation.
             gka_recording_paths: list[str] = natsorted([
                 os.path.join(activity_gka_path, recording_num)
                 for recording_num in os.listdir(activity_gka_path)
                 if not recording_num.startswith(".")
+                and not recording_num.startswith("x")
+                and os.path.isdir(os.path.join(activity_gka_path, recording_num))
+                
             ])
             neon_recording_paths: list[str] = natsorted([
                 os.path.join(activity_neon_path, recording_num)
                 for recording_num in os.listdir(activity_neon_path)
                 if not recording_num.startswith(".")
+                and not recording_num.startswith("x")
+                and os.path.isdir(os.path.join(activity_neon_path, recording_num))
             ])
+
+            # Let's now also see if there have been manual changes applied to 
+            # this subject's activity. If this is true, there will be a README.md file 
+            # at that location 
+            gka_readme_files: list[str] = [os.path.join(activity_gka_path, filename) for filename in os.listdir(activity_gka_path) if filename.endswith(".md")]
+            neon_readme_files: list[str] = [os.path.join(activity_neon_path, filename) for filename in os.listdir(activity_neon_path) if filename.endswith(".md")]
+
+            gka_readme_filepath: str | None = None if not gka_readme_files else gka_readme_files[0]
+            neon_readme_filepath: str | None = None if not neon_readme_files else neon_readme_files[0]
+
+            # If either of the READMEs exist, read their contents in 
+            for device_name, readme_path in (("gka", gka_readme_filepath), ("neon", neon_readme_filepath)):
+
+                readme_contents: str = ""
+                if(readme_path is not None):
+                    with open(readme_path, "r") as f:
+                        readme_contents = f.read()
+                
+                manual_fixes[subject_id_number]["activities"][activity_name][device_name] = _parse_manual_edit_readme(readme_contents) if readme_contents != "" else {}
 
             for device_name, device_recordings in (("GKA", gka_recording_paths), ("Neon", neon_recording_paths)):
                 # Iterate over each recording path for each device
                 # and ensure it is non empty
-                for idx, recording_path in enumerate(device_recordings, start=1):
+                recordings_iterator = (
+                    device_recordings if verbose is False else
+                    tqdm(device_recordings, desc="Processing Recordings", leave=False)
+                )
+                for idx, recording_path in enumerate(recordings_iterator, start=1):
                     # Grab the number of recording this is
                     recording_number: str = os.path.basename(recording_path)
 
@@ -3676,8 +3782,23 @@ def verify_data_integrity(src_dir: str = "/Volumes/FLIC_raw/NEWscriptedIndoorOut
                     f"and Neon has: {neon_recording_numbers}"
                 )
 
+            # We allocate a dictionary to hold the total amount of chunks per sensor 
+            # for all of the sub recordings summed up. We do this to ensure 
+            # that for start, stop recordings there are a sufficient number for the task
+            total_chunks_across_recordings: defaultdict[str, int] = defaultdict(int)
+
+            # Let's also create a dictionary to store any chunks that are corrupted (cannot be loaded in by numpy)
+            # for each recording number and for each sensor in that recording number
+            recordings_with_errored_chunks: defaultdict[str, defaultdict[str, list[int]]] = defaultdict(
+                lambda: defaultdict(list)
+            )
+
             # Next, let's check a bit about the GKA world camera specifically, like with some of its metadata
-            for idx, recording_path in enumerate(gka_recording_paths, start=1):
+            recordings_iterator = (
+                gka_recording_paths if verbose is False else
+                tqdm(gka_recording_paths, desc="Processing Recordings", leave=False)
+            )
+            for idx, recording_path in enumerate(recordings_iterator, start=1):
                 # Grab the recording number from the path like we did above
                 recording_number: str = os.path.basename(recording_path)
 
@@ -3754,7 +3875,14 @@ def verify_data_integrity(src_dir: str = "/Volumes/FLIC_raw/NEWscriptedIndoorOut
                 # Now, let's ensure that there are both actually chunks for the world and the MS
                 # and that they are monotonic
                 sensor_files: dict = sensors_utility.group_sensors_files(recording_path)
-                for sensor in target_sensors:
+                sensors_iterator = (
+                    target_sensors if verbose is False else
+                    tqdm(target_sensors, desc="Processing Sensors", leave=False)
+                )
+                for sensor in sensors_iterator:
+                    # Let's now save the number of chunks for this recording
+                    total_chunks_across_recordings[sensor] += len(sensor_files.get(sensor, []))
+                    
                     # Ensure that the sensors actually exist
                     if(sensor not in sensor_files or len(sensor_files[sensor]) == 0):
                         activity_issues["GKA"].append(
@@ -3769,13 +3897,19 @@ def verify_data_integrity(src_dir: str = "/Volumes/FLIC_raw/NEWscriptedIndoorOut
                     )
 
                     # group_sensors_files returns naturally sorted (metadata, data) pairs.
-                    for chunk_idx, (metadata_path, data_path) in enumerate(sensor_files[sensor]):
+                    chunks_iterator = (
+                        sensor_files[sensor] if verbose is False else
+                        tqdm(sensor_files[sensor], desc="Processing Chunks", leave=False)
+                    )
+                    for chunk_idx, (metadata_path, data_path) in enumerate(chunks_iterator):
+                        # Try to load in each of the files of this chunk and see if it has any issues 
                         for chunk_path in (metadata_path, data_path):
-                            if(not os.path.isfile(chunk_path)):
-                                activity_issues["GKA"].append(
-                                    f"Recording {recording_number} Sensor: {sensor} "
-                                    f"chunk file is missing: {chunk_path}"
-                                )
+                            try:
+                                test_read: np.ndarray = np.load(chunk_path)
+                                del test_read
+                            except Exception as e:
+                                recordings_with_errored_chunks[recording_number][sensor].append(chunk_idx)
+                                break
 
                         # Regex the chunk number out of the path
                         match: re.Match[str] | None = re.search(r"chunk_(\d+)", os.path.basename(data_path))
@@ -3784,6 +3918,8 @@ def verify_data_integrity(src_dir: str = "/Volumes/FLIC_raw/NEWscriptedIndoorOut
                         # Save it in the list of numbers
                         chunk_numbers[chunk_idx] = chunk_number
 
+                    # Throw an error if there is a problem with consecutive chunk numbers 
+                    # (likely due to 2 recordings in the same folder)
                     if(not np.all(np.diff(chunk_numbers) == 1)):
                         activity_issues["GKA"].append(
                             f"Recording Idx (1 indexed): {idx} Number: {recording_number} "
@@ -3809,9 +3945,37 @@ def verify_data_integrity(src_dir: str = "/Volumes/FLIC_raw/NEWscriptedIndoorOut
                                                         f"Could not calculate observed FPS (timestamps are either not monotonic or not finite)"
                                                     )
 
-                        
+
+            # Define the minimum number of chunks that we would expect for a 
+            # recording (9 * 30 = 270 seconds which is a bit between 4 minutes and 5)
+            minimum_chunks: int = 9
+            if(any(total_chunks_across_recordings[sensor] < minimum_chunks for sensor in target_sensors)):
+                chunk_counts = ", ".join(
+                    f"{sensor}: {total_chunks_across_recordings[sensor]}"
+                    for sensor in target_sensors
+                )
+                activity_issues["GKA"].append(
+                    f"Insufficient total chunks across recordings. Counts per sensor: {chunk_counts}. "
+                    f"Expected at least {minimum_chunks} chunks per target sensor."
+                )
+
+
+            # Now report any errored chunks, grouped by recording and sensor.
+            for recording_num, sensors_with_errored_chunks in recordings_with_errored_chunks.items():
+                for sensor, errored_chunks in sensors_with_errored_chunks.items():
+                    # If no errored chunks, just continue
+                    if(len(errored_chunks) == 0):
+                        continue 
+
+                    # Otherwise, if errored chunks, # store an error message 
+                    activity_issues["GKA"].append(f"Recording Number: {recording_num} Sensor: {sensor} has corrupted chunk idxs: {errored_chunks}")
+
             # Finally, let's check the neon stuff. This is much much simpler
-            for idx, recording_path in enumerate(neon_recording_paths, start=1):
+            recordings_iterator = (
+                neon_recording_paths if verbose is False else
+                tqdm(neon_recording_paths, desc="Processing Recordings", leave=False)
+            )
+            for idx, recording_path in enumerate(recordings_iterator, start=1):
                 # Grab the recording number from the path like we did above
                 recording_number: str = os.path.basename(recording_path)
 
@@ -3832,17 +3996,18 @@ def verify_data_integrity(src_dir: str = "/Volumes/FLIC_raw/NEWscriptedIndoorOut
                         f"timeseries_and_video_export is missing, is not a directory, or is empty"
                     )
 
+
     # If we want to output this somewhere, we should support a few types of output paths 
     if(output_path is not None):
+        
         # If we want to output to a spreadsheet
         if(output_path.endswith('.xlsx')):
-
             # The cols should be labeled with 1st column Subject ID, then the actiivty names 
             # from get_activity_names(). Then at the end, there should be a column called "Fixes"
             # This will be empty for all rows at first
-            spreadsheet_columns: list[str] = ["Subject ID"] + natsorted(activity_names_to_check) + ["Fixes"]
+            report_activities: list[str] = natsorted(get_activity_names())
+            spreadsheet_columns: list[str] = ["Subject ID"] + report_activities + ["Fixes"]
             sheet_name: str = "Sheet1"
-
 
             # If the spreadsheet does not already exist, let's just create it 
             # Schema will be rows = subject, cols = activity. Within each col, 
@@ -3886,10 +4051,7 @@ def verify_data_integrity(src_dir: str = "/Volumes/FLIC_raw/NEWscriptedIndoorOut
                         spreadsheet.at[row_idx, activity] = "\n".join(cell_errors)
 
 
-            # Otherwise, if it exists, we will need to load it in and append to it before rewriting
-            # By append to it, basically check if the subject exists in the primary key (subject ID)
-            # column. If it exists, check to see if there is any new errors with the subjects. If new, append 
-            # them to he cell 
+            # Replace selected cells with current errors, preserving other error cells.
             else:
                 # Load in the spreadsheet from disk, filling na with ""
                 spreadsheet: pd.DataFrame = pd.read_excel(output_path, dtype=object).fillna("")
@@ -3904,7 +4066,7 @@ def verify_data_integrity(src_dir: str = "/Volumes/FLIC_raw/NEWscriptedIndoorOut
                         spreadsheet.at[row_idx, "Subject ID"] = f"FLIC_{int(subject_label):04d}"
 
                 # Add missing columns if they don't exist already 
-                for activity in activity_names_to_check:
+                for activity in report_activities:
                     if(activity not in spreadsheet.columns):
                         spreadsheet[activity] = ""
                 if("Fixes" not in spreadsheet.columns):
@@ -3914,16 +4076,6 @@ def verify_data_integrity(src_dir: str = "/Volumes/FLIC_raw/NEWscriptedIndoorOut
                 spreadsheet_activities: list[str] = [column for column in spreadsheet.columns
                                                      if column not in ("Subject ID", "Fixes")]
                 spreadsheet = spreadsheet[["Subject ID"] + natsorted(spreadsheet_activities) + ["Fixes"]]
-
-                # Convert older semicolon-separated cells to the new line format.
-                # Leave cells already using new lines and the Fixes notes unchanged.
-                for activity in spreadsheet_activities:
-                    for row_idx in spreadsheet.index:
-                        cell_text: str = str(spreadsheet.at[row_idx, activity])
-                        if("\n" not in cell_text and ";" in cell_text):
-                            spreadsheet.at[row_idx, activity] = "\n".join(
-                                error.strip() for error in cell_text.split(";") if error.strip()
-                            )
 
                 # Iterate over the subjects in our integrity issues 
                 for subject in integrity_issues:
@@ -3943,37 +4095,82 @@ def verify_data_integrity(src_dir: str = "/Volumes/FLIC_raw/NEWscriptedIndoorOut
 
                         # Then, populate errors into this cell as strings 
                         # using one line for each error
-                        cell_errors: list[str] = []
+                        current_errors: list[str] = []
 
                         # first, meta issues
-                        cell_errors.extend(integrity_issues[subject]["meta_problems"])
+                        current_errors.extend(integrity_issues[subject]["meta_problems"])
                         activity_errors: dict = integrity_issues[subject]["activities"][activity]
-                        cell_errors.extend(activity_errors["meta_problems"])
+                        current_errors.extend(activity_errors["meta_problems"])
 
                         # then GKA
                         for error in activity_errors["GKA"]:
-                            cell_errors.append(f"GKA: {error}")
+                            current_errors.append(f"GKA: {error}")
 
                         # then Neon
                         for error in activity_errors["Neon"]:
-                            cell_errors.append(f"Neon: {error}")
-
-                        # Now, let's find the existing errors
-                        existing_errors: list[str] = [error.strip() for error in str(spreadsheet.at[row_idx, activity]).splitlines() if error.strip()]
-
-                        # Reformat the cell errors into the form we see in the spreadsheet 
-                        for error in cell_errors:
-                            error = error.strip()
-
-                            # If it is a valid token and not an existing error, add this to new errors 
-                            if(error and error not in existing_errors):
-                                existing_errors.append(error)
+                            current_errors.append(f"Neon: {error}")
 
                         # Save all errors for this item
-                        spreadsheet.at[row_idx, activity] = "\n".join(existing_errors)
+                        spreadsheet.at[row_idx, activity] = "\n".join(current_errors)
 
-            # Write the completed dataframe back to disk.
+            # We initialize a local LLM to summarize the manual fixes
+            summary_word_count: int = 15
+            model: object = local_llm_util.initialize_model()
+            try:
+                # Summarize manual fixes for each selected subject in either spreadsheet path.
+                for subject, subject_fixes in manual_fixes.items():
+                    # Get the row for this subject 
+                    row_idx = spreadsheet.index[spreadsheet["Subject ID"] == f"FLIC_{subject:04d}"][0]
+
+                    # Create a list to hold well formatted fixes 
+                    # so that we can join them together in the end into a 1-cell format. 
+                    cell_fixes: list[str] = []
+
+                    # Iterate over the activities in natsorted order 
+                    for activity in natsorted(subject_fixes["activities"]):
+                        fixes: dict = subject_fixes["activities"][activity]
+                        gka: dict = fixes["gka"] or {}
+                        neon: dict = fixes["neon"] or {}
+                        
+                        # If there are no fixes at all, we can just skip
+                        if not gka and not neon:
+                            continue
+
+                        gka_author: str = gka.get("author", "")
+                        gka_date: str = gka.get("date", "")
+                        gka_description: str = " ".join(gka.get("description", "").split())
+                        gka_description_summarized: str = local_llm_util.summarize_text(
+                            gka_description, word_count=summary_word_count, model=model
+                        )
+
+                        neon_author: str = neon.get("author", "")
+                        neon_date: str = neon.get("date", "")
+                        neon_description: str = " ".join(neon.get("description", "").split())
+                        neon_description_summarized: str = local_llm_util.summarize_text(
+                            neon_description, word_count=summary_word_count, model=model
+                        )
+
+                        # Append a new fix to the cell. 
+                        cell_fixes.append(
+                            f"Activity: {activity} | "
+                            f"GKA (Author: {gka_author}, Date: {gka_date}): {gka_description_summarized} | "
+                            f"Neon (Author: {neon_author}, Date: {neon_date}): {neon_description_summarized}"
+                        )
+
+                    # Join all of the activity fixes for this subject together with new lines at the end 
+                    # so it can be inputted into the cell 
+                    spreadsheet.at[row_idx, "Fixes"] = "\n".join(cell_fixes)
+            finally:
+                # Release the model even if summarization or cell formatting fails.
+                model.close()
+
+            # Write the completed dataframe back to disk, but first ensure that we sort 
+            # by the subjectID column in natsorted order
+            spreadsheet = spreadsheet.sort_values("Subject ID", key=natsort_keygen())
             spreadsheet.to_excel(output_path, sheet_name=sheet_name, index=False)
+
+
+            # Now, we do some formatting stuff 
 
             # Size each column from its header, regardless of how long the errors are.
             workbook: Workbook = load_workbook(output_path)
@@ -4008,6 +4205,232 @@ def verify_data_integrity(src_dir: str = "/Volumes/FLIC_raw/NEWscriptedIndoorOut
 
 
     return integrity_issues
+
+def verify_processed_integrity(raw_dir: str= "/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026", 
+                               processing_dir: str = "/Volumes/FLIC_processing/NEWscriptedIndoorOutdoorVideos2026",
+                               output_path: str | None="/Users/zacharykelly/Library/CloudStorage/Dropbox-Aguirre-BrainardLab/Zachary Kelly/FLIC_subject/scriptedIndoorOutdoor_2026_photophobia/FLIC_dataCuration_LL.xlsx",
+                               subjects_and_activities_to_skip: dict[int, set[str]] | None=None,
+                               subjects_and_activities_to_process: dict[int, set[str]] | None=None,
+                              verbose: bool = False,
+                              target_frame_size: tuple[int, int] = (480, 640),
+                              target_fps: float = 120) -> dict:
+
+    # First, let's get the actual  
+    subjects_and_activities_to_process = _get_desired_subjects_and_activities(
+            subjects_and_activities_to_process, subjects_and_activities_to_skip
+        )
+    
+    # Let's first assert that the raw and processing dirs do exist
+    assert os.path.exists(raw_dir), f"Raw dir path: {raw_dir} does not exist"
+    assert os.path.exists(processing_dir), f"Processing dir path: {processing_dir} does not exist"
+
+
+    # If we desire an output path, we need to check it's a support  ed variety 
+    if(output_path is not None):
+        assert isinstance(output_path, str), f"Output path: {output_path} must be a string"
+        assert any(output_path.endswith(filetype) for filetype in (".xlsx", ".pkl", ".json"))
+
+
+    # Next, we will iterate over the subjects, activities, recordings of the raw recordings 
+    # and ensure that they have proper contents in the processed directory (world videos, eye data)
+    subject_ids_to_check: list[int] = sorted(subjects_and_activities_to_process)
+
+    # Save a dictionary that stores integrity issues
+    # meta_problems describe a missing/invalid subject or activity folder.
+    # GKA and Neon lists contain the recording-specific problems beneath it.
+    integrity_issues: dict = {}
+
+    # Now, let's iterate over all the subject paths in the RAW directory first 
+    # this is so that we know how many recording attempts each of them had
+    subject_iterator: Iterable[int] = (
+        subject_ids_to_check if verbose is False else
+        tqdm(subject_ids_to_check, desc="Processing Subjects", leave=True)
+    )
+    for subject_id_number in subject_iterator:
+        # Get the activities for this subject
+        activity_names_to_check: list[str] = natsorted(subjects_and_activities_to_process[subject_id_number])
+        
+        # Get the subject ID path to this subject and save some information about meta problems
+        # for the entire subject as well as for each activity
+        subject_id: str = f"FLIC_{subject_id_number}"
+
+        raw_subject_path: str = os.path.join(raw_dir, subject_id)
+        processing_subject_path: str = os.path.join(processing_dir, subject_id)
+        
+        integrity_issues[subject_id_number] = {"meta_problems": [], "activities": {}}
+
+        # Now, let's iterate over the activities for this subject
+        activities_iterator: Iterable[str] = (
+            activity_names_to_check if verbose is False else
+            tqdm(activity_names_to_check, desc="Processing Activities", leave=False)
+        )
+        for activity_name in activities_iterator:
+            # Initialize an entry for this activity
+            integrity_issues[subject_id_number]["activities"][activity_name] = {"meta_problems": [], "GKA": [], "Neon": []}
+
+            # Get the path to this activity, and make the paths for the GKA and Neon subfolders here 
+            raw_activity_path: str = os.path.join(raw_subject_path, activity_name)
+
+            # Firstly, let's make sure both the Neon and GKA dirs exist
+            raw_activity_gka_path: str = os.path.join(raw_activity_path, "GKA")
+            raw_activity_neon_path: str = os.path.join(raw_activity_path, "Neon")
+
+            processing_activity_gka_path: str = os.path.join(processing_subject_path, activity_name, "GKA")
+            processing_activity_neon_path: str = os.path.join(processing_subject_path, activity_name, "Neon")
+
+            activity_issues: dict = integrity_issues[subject_id_number]["activities"][activity_name]
+            for device_name, raw_device_path, processing_device_path in (
+                ("GKA", raw_activity_gka_path, processing_activity_gka_path),
+                ("Neon", raw_activity_neon_path, processing_activity_neon_path),
+            ):
+                if(not os.path.isdir(raw_device_path)):
+                    activity_issues[device_name].append(f"Raw device directory is missing or invalid: {raw_device_path}")
+                if(not os.path.isdir(processing_device_path)):
+                    activity_issues[device_name].append(f"Processed device directory is missing or invalid: {processing_device_path}")
+
+            # Let's now get the recording paths for both the GKA and Neon devices 
+            # Crucially, they should be definitely matched so that each GKA recording 
+            # corresponds to a single Neon recording at this stage (after raw data has been curated)
+            # Skip README files and x-prefixed folders left by manual data curation
+            # in both the raw and processing directories.
+            raw_gka_recording_paths: list[str] = natsorted([
+                os.path.join(raw_activity_gka_path, recording_num)
+                for recording_num in (os.listdir(raw_activity_gka_path) if os.path.isdir(raw_activity_gka_path) else [])
+                if not recording_num.startswith(".")
+                and not recording_num.startswith("x")
+                and os.path.isdir(os.path.join(raw_activity_gka_path, recording_num))
+            ])
+            raw_neon_recording_paths: list[str] = natsorted([
+                os.path.join(raw_activity_neon_path, recording_num)
+                for recording_num in (os.listdir(raw_activity_neon_path) if os.path.isdir(raw_activity_neon_path) else [])
+                if not recording_num.startswith(".")
+                and not recording_num.startswith("x")
+                and os.path.isdir(os.path.join(raw_activity_neon_path, recording_num))
+            ])
+
+            # Now, let's get the recording paths for the processing dir 
+            processing_gka_recording_paths: list[str] = natsorted([
+                            os.path.join(processing_activity_gka_path, recording_num)
+                            for recording_num in (os.listdir(processing_activity_gka_path) if os.path.isdir(processing_activity_gka_path) else [])
+                            if not recording_num.startswith(".")
+                            and not recording_num.startswith("x")
+                            and os.path.isdir(os.path.join(processing_activity_gka_path, recording_num))
+                        ])
+            processing_neon_recording_paths: list[str] = natsorted([
+                os.path.join(processing_activity_neon_path, recording_num)
+                for recording_num in (os.listdir(processing_activity_neon_path) if os.path.isdir(processing_activity_neon_path) else [])
+                if not recording_num.startswith(".")
+                and not recording_num.startswith("x")
+                and os.path.isdir(os.path.join(processing_activity_neon_path, recording_num))
+            ])
+            
+
+            # Now, let's iterate over the device recordings in each raw directory 
+            # TODO: I need to add a total duration thing here like we did with the chunks in the raw
+            for device_name, raw_device_recordings, processing_device_recordings in (("GKA", raw_gka_recording_paths, processing_gka_recording_paths), 
+                                                                                     ("Neon", raw_neon_recording_paths, processing_neon_recording_paths)):
+                # Iterate over each recording path for each device
+                recordings_iterator = (
+                    raw_device_recordings if verbose is False else
+                    tqdm(raw_device_recordings, desc="Processing Recordings", leave=False)
+                )
+
+                # First, let's make sure the raw device recordings and the procesisng device recordings have the same nunber 
+                # of recordings 
+                if(len(raw_device_recordings) != len(processing_device_recordings)):
+                    activity_issues[device_name].append(f"Raw/processed recording counts differ: {len(raw_device_recordings)} raw, {len(processing_device_recordings)} processed") 
+
+                # Next, iterate over the raw recording paths 
+                for idx, raw_recording_path in enumerate(recordings_iterator, start=1):
+                    # Grab the number of recording this is
+                    raw_recording_number: str = os.path.basename(raw_recording_path)
+                    if(not raw_recording_number.isdigit() or not os.path.isdir(raw_recording_path)):
+                        activity_issues[device_name].append(f"Invalid raw recording directory: {raw_recording_path}")
+                        continue
+
+                    # Let's first make sure this processed recording path exists 
+                    processed_recording_path: str = os.path.join(processing_subject_path, activity_name, device_name, raw_recording_number)
+                    if(not os.path.isdir(processed_recording_path)):
+                        activity_issues[device_name].append(f"Recording {raw_recording_number}: processed recording directory is missing or invalid: {processed_recording_path}")
+                        continue 
+
+                    # If the path does exist, make sure it is in the same order 
+                    if(os.path.exists(processed_recording_path)):
+                        processed_recording_path_index: int = processing_device_recordings.index(processed_recording_path) + 1
+
+                        if(idx != processed_recording_path_index):
+                            activity_issues[device_name].append(f"Recording {raw_recording_number}: raw index {idx} differs from processed index {processed_recording_path_index}") 
+
+
+                        pass 
+
+
+                    # Next, we need to make sure that the desired files for neon and GKA exist 
+                    if(device_name == "GKA"):
+                        # Firstly, there should contain a processed world .avi video that is non corrupted 
+                        world_video_path: str = os.path.join(processed_recording_path, "W.avi")
+                        if(not os.path.exists(world_video_path)):
+                            activity_issues["GKA"].append(f"Recording {raw_recording_number}: missing world video: {world_video_path}") 
+                        
+                        # Next, if it does exist, make sure it's not corrupted and we can open it 
+                        if(os.path.exists(world_video_path)):
+                            try:
+                                video_frame_count: int = video_io.inspect_video_frame_count(world_video_path)
+
+                                if(video_frame_count <= 0):
+                                    activity_issues["GKA"].append(f"Recording {raw_recording_number}: world video has no frames") 
+
+                            except Exception as e:
+                                activity_issues["GKA"].append(f"Recording {raw_recording_number}: could not inspect world video frame count: {e}") 
+                                
+                            try:
+                                video_frame_size: tuple[int] = video_io.inspect_video_framesize(world_video_path)
+
+                                if(video_frame_size != target_frame_size):
+                                    activity_issues["GKA"].append(f"Recording {raw_recording_number}: world video frame size {video_frame_size} differs from target {target_frame_size}")
+
+                            except Exception as e:
+                                activity_issues["GKA"].append(f"Recording {raw_recording_number}: could not inspect world video frame size: {e}") 
+
+                            try:
+                                video_fps: float = video_io.inspect_video_FPS(world_video_path)
+                                
+                                if(video_fps != target_fps):
+                                    activity_issues["GKA"].append(f"Recording {raw_recording_number}: world video FPS {video_fps} differs from target {target_fps}") 
+                            
+                            except Exception as e:
+                                activity_issues["GKA"].append(f"Recording {raw_recording_number}: could not inspect world video FPS: {e}") 
+
+                    elif(device_name == "Neon"):
+                        # First, we need to make sure the egocenric video mapper output exists and is non empty
+                        processing_egocentric_video_mapper_path: str = os.path.join(processed_recording_path, "egocentric_video_mapper_results")
+                        if(not os.path.isdir(processing_egocentric_video_mapper_path) or len(os.listdir(processing_egocentric_video_mapper_path)) == 0):
+                            activity_issues["Neon"].append(f"Recording {raw_recording_number}: mapper results directory is missing, invalid, or empty: {processing_egocentric_video_mapper_path}") 
+                        
+                        # If the path exists and is non empty, let's just make sure all of the required files exist
+                        required_filenames: list[str] = (
+                            "alternative_camera_fixations.csv",
+                            "alternative_camera_gaze.csv",
+                            "alternative_camera_timestamps.csv",
+                            "alternative_camera-neon_comparison.mp4",
+                            "alternative_optic_flow.csv",
+                            "cleaned_eye_data.csv",
+                            "egocentric_mapper_metadata.pkl",
+                            "egocentric_video_mapper_args.json",
+                            "eye_cleaned_vs_raw.pdf",
+                            "eye_cleaning_metadata.pkl",
+                            "neon_optic_flow.csv",
+                        )
+                        
+                        for filename in required_filenames:
+                            required_file_path = os.path.join(processing_egocentric_video_mapper_path, filename)
+                            if(not os.path.isfile(required_file_path)):
+                                activity_issues["Neon"].append(f"Recording {raw_recording_number}: missing required file: {required_file_path}") 
+                    else:
+                        raise Exception(f"Unsuported device name: {device_name}")
+
+    return integrity_issues
+
 
 def display_integrity_issues(integrity_issues: dict,
                              show_clean: bool=False,
@@ -4198,8 +4621,8 @@ def verify_neon_integrity(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
 
 def verify_world_neon_pairing(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026",
                               processing_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoorVideos2026",
-                              subjects_to_skip: Iterable= set(),
-                              activities_to_skip: Iterable= set(),
+                              subjects_and_activities_to_skip: dict[int, set[str]] | None=None,
+                              subjects_and_activities_to_process: dict[int, set[str]] | None=None,
                               verbose: bool=False 
                              ) -> dict[str, str]:
     
@@ -4207,15 +4630,21 @@ def verify_world_neon_pairing(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorO
     """Verify world neon pairing.
 
     Args:
+        subjects_and_activities_to_process: Subject IDs mapped to activity sets;
+            None uses get_subject_ids() and get_activity_names(). Empty selects none.
+        subjects_and_activities_to_skip: Subject/activity pairs to exclude;
+            None skips nothing. Overlapping pairs warn and are excluded.
         raw_dir: Path-like input for raw dir.
         processing_dir: Path-like input for processing dir.
-        subjects_to_skip: Input value for subjects to skip.
-        activities_to_skip: Input value for activities to skip.
         verbose: Input value for verbose.
 
     Returns:
         Return value produced by verify world neon pairing.
     """
+
+    subjects_and_activities_to_process = _get_desired_subjects_and_activities(
+        subjects_and_activities_to_process, subjects_and_activities_to_skip
+    )
 
     # Assert that the top-level directories actually exist
     assert os.path.exists(raw_dir), f"Raw dir path: {raw_dir} does not exist"
@@ -4228,9 +4657,9 @@ def verify_world_neon_pairing(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorO
                                           for subject_name in os.listdir(raw_dir) 
                                           if re.fullmatch(r"FLIC_\d+", subject_name) 
                                           and os.path.isdir(os.path.join(raw_dir, subject_name))
-                                          if _extract_num_from_id(subject_name) not in subjects_to_skip
+                                          if _extract_num_from_id(subject_name) in subjects_and_activities_to_process
                                          ]
-                                        ) 
+                                        )
     assert len(subject_paths) > 0, f"No subject directories found in: {raw_dir}" 
 
     # Initialize return dict
@@ -4245,15 +4674,13 @@ def verify_world_neon_pairing(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorO
         subject_id_number: int = int(re.search("\d+", subject_id).group())
 
         # Skip subjects we are not interested in examining
-        if(subject_id_number in subjects_to_skip):
-            continue
 
         analyzed_data[subject_id_number] = {}
 
         # Iterate over the activities for this subject
-        activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in natsorted(os.listdir(subject_path))
-                                      if os.path.isdir(os.path.join(subject_path, filename))
-                                     ]
+        activites_paths: list[str] = [os.path.join(subject_path, activity)
+            for activity in natsorted(subjects_and_activities_to_process[_extract_num_from_id(os.path.basename(subject_path))])
+            if os.path.isdir(os.path.join(subject_path, activity))]
         
         activities_iterator: Iterable = range(len(activites_paths)) if verbose is False else tqdm(range(len(activites_paths)), desc="Processing Activities", leave=False)
         for activity_num in activities_iterator:
@@ -4262,7 +4689,7 @@ def verify_world_neon_pairing(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorO
             activity_name: str = os.path.basename(activity_path)
 
             # Skip desired activities
-            if(activity_name in activities_to_skip):
+            if(activity_name not in subjects_and_activities_to_process[subject_id_number]):
                 continue 
                 
             analyzed_data[subject_id_number][activity_name] = True
@@ -4338,10 +4765,8 @@ def verify_world_neon_pairing(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorO
 def generate_tag_task_start_ends(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026",
                                  dst_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoorVideos2026",
                                  task_length_seconds: float = 4 * 60,
-                                 subjects_to_skip: Iterable= set(),
-                                 subjects_to_process: Iterable= set(),
-                                 activities_to_skip: Iterable= set(),
-                                 activities_to_process: Iterable= set(),
+                                 subjects_and_activities_to_skip: dict[int, set[str]] | None=None,
+                                 subjects_and_activities_to_process: dict[int, set[str]] | None=None,
                                  overwrite_existing: bool=False, 
                                  verbose: bool=False, 
                                 ) -> dict[str, dict[str, bool]]:
@@ -4351,19 +4776,23 @@ def generate_tag_task_start_ends(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndo
     """Generate tag task start ends.
 
     Args:
+        subjects_and_activities_to_process: Subject IDs mapped to activity sets;
+            None uses get_subject_ids() and get_activity_names(). Empty selects none.
+        subjects_and_activities_to_skip: Subject/activity pairs to exclude;
+            None skips nothing. Overlapping pairs warn and are excluded.
         src_dir: Path-like input for src dir.
         dst_dir: Path-like input for dst dir.
         task_length_seconds: Input value for task length seconds.
-        subjects_to_skip: Input value for subjects to skip.
-        subjects_to_process: Subject IDs to include. An empty iterable includes all.
-        activities_to_skip: Input value for activities to skip.
-        activities_to_process: Activity names to include. An empty iterable includes all.
         overwrite_existing: Input value for overwrite existing.
         verbose: Input value for verbose.
 
     Returns:
         Return value produced by generate tag task start ends.
     """
+
+    subjects_and_activities_to_process = _get_desired_subjects_and_activities(
+        subjects_and_activities_to_process, subjects_and_activities_to_skip
+    )
 
     # Assert that the top-level directories actually exist
     assert os.path.exists(src_dir), f"Source dir path: {src_dir} does not exist"
@@ -4376,13 +4805,9 @@ def generate_tag_task_start_ends(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndo
                                           for subject_name in os.listdir(src_dir) 
                                           if re.fullmatch(r"FLIC_\d+", subject_name) 
                                           and os.path.isdir(os.path.join(src_dir, subject_name))
-                                          and _is_desired_item(
-                                              _extract_num_from_id(subject_name),
-                                              subjects_to_process,
-                                              subjects_to_skip,
-                                          )
+                                          and _extract_num_from_id(subject_name) in subjects_and_activities_to_process
                                          ]
-                                        ) 
+                                        )
     assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
 
     # Initialize a dict to store the unanalyzable videos
@@ -4396,14 +4821,9 @@ def generate_tag_task_start_ends(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndo
         subject_id: str = os.path.basename(subject_path)
 
         # Iterate over the activities for this subject
-        activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in natsorted(os.listdir(subject_path))
-                                      if os.path.isdir(os.path.join(subject_path, filename))
-                                      and _is_desired_item(
-                                          filename,
-                                          activities_to_process,
-                                          activities_to_skip,
-                                      )
-                                     ]
+        activites_paths: list[str] = [os.path.join(subject_path, activity)
+            for activity in natsorted(subjects_and_activities_to_process[_extract_num_from_id(os.path.basename(subject_path))])
+            if os.path.isdir(os.path.join(subject_path, activity))]
         activities_iterator: Iterable = range(len(activites_paths)) if verbose is False else tqdm(range(len(activites_paths)), desc="Processing Activities", leave=False)
         for activity_num in activities_iterator:
             # Retrieve the activity path and activity name
@@ -4475,8 +4895,8 @@ def generate_tag_task_start_ends(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndo
 
 
 def verify_virtually_foveated_video_integrity(src_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoorVideos2026",
-                                              subjects_to_skip: Iterable=set(), 
-                                              activities_to_skip: Iterable=set(),
+                                              subjects_and_activities_to_skip: dict[int, set[str]] | None=None,
+                                              subjects_and_activities_to_process: dict[int, set[str]] | None=None,
                                               verbose: bool=False, 
                                               target_length_seconds: int= 4 * 60
                                              ) -> None:
@@ -4485,15 +4905,21 @@ def verify_virtually_foveated_video_integrity(src_dir: str="/Volumes/FLIC_proces
     """Verify virtually foveated video integrity.
 
     Args:
+        subjects_and_activities_to_process: Subject IDs mapped to activity sets;
+            None uses get_subject_ids() and get_activity_names(). Empty selects none.
+        subjects_and_activities_to_skip: Subject/activity pairs to exclude;
+            None skips nothing. Overlapping pairs warn and are excluded.
         src_dir: Path-like input for src dir.
-        subjects_to_skip: Input value for subjects to skip.
-        activities_to_skip: Input value for activities to skip.
         verbose: Input value for verbose.
         target_length_seconds: Input value for target length seconds.
 
     Returns:
         Return value produced by verify virtually foveated video integrity.
     """
+
+    subjects_and_activities_to_process = _get_desired_subjects_and_activities(
+        subjects_and_activities_to_process, subjects_and_activities_to_skip
+    )
 
     # Assert that the top-level directories actually exist
     assert os.path.exists(src_dir), f"Source dir path: {src_dir} does not exist"
@@ -4504,9 +4930,9 @@ def verify_virtually_foveated_video_integrity(src_dir: str="/Volumes/FLIC_proces
                                           for subject_name in os.listdir(src_dir) 
                                           if re.fullmatch(r"FLIC_\d+", subject_name) 
                                           and os.path.isdir(os.path.join(src_dir, subject_name))
-                                          if _extract_num_from_id(subject_name) not in subjects_to_skip
+                                          if _extract_num_from_id(subject_name) in subjects_and_activities_to_process
                                          ]
-                                        ) 
+                                        )
     assert len(subject_paths) > 0, f"No subject directories found in: {src_dir}" 
 
 
@@ -4519,13 +4945,11 @@ def verify_virtually_foveated_video_integrity(src_dir: str="/Volumes/FLIC_proces
         subject_id_number: int = int(re.search("\d+", subject_id).group())
 
         # Skip subjects we want ot skip
-        if(subject_id_number in subjects_to_skip):
-            continue
 
         # Iterate over the activities for this subject
-        activites_paths: list[str] = [os.path.join(subject_path, filename) for filename in natsorted(os.listdir(subject_path))
-                                      if os.path.isdir(os.path.join(subject_path, filename))
-                                     ]
+        activites_paths: list[str] = [os.path.join(subject_path, activity)
+            for activity in natsorted(subjects_and_activities_to_process[_extract_num_from_id(os.path.basename(subject_path))])
+            if os.path.isdir(os.path.join(subject_path, activity))]
         activities_iterator: Iterable = range(len(activites_paths)) if verbose is False else tqdm(range(len(activites_paths)), desc="Processing Activities", leave=False)
         for activity_num in activities_iterator:
             # Retrieve the activity path and activity name
@@ -4533,7 +4957,7 @@ def verify_virtually_foveated_video_integrity(src_dir: str="/Volumes/FLIC_proces
             activity_name: str = os.path.basename(activity_path)
 
             # Skip activities we want to skip
-            if(activity_name in activities_to_skip):
+            if(activity_name not in subjects_and_activities_to_process[subject_id_number]):
                 continue
 
             # Find all the virtually foveated videos in this directory
@@ -4561,11 +4985,9 @@ def verify_virtually_foveated_video_integrity(src_dir: str="/Volumes/FLIC_proces
 
 
 def transfer_light_logger_recordings(src_dir: str="/Volumes/T7 Shield", 
-                                     dst_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026", 
-                                     subjects_to_skip: Iterable=set(), 
-                                     subjects_to_transfer: Iterable=set(), 
-                                     activities_to_skip: Iterable=set(), 
-                                     activities_to_transfer: Iterable=set(),
+                                     dst_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026/usableSubjects", 
+                                     subjects_and_activities_to_skip: dict[int, set[str]] | None=None,
+                                     subjects_and_activities_to_process: dict[int, set[str]] | None=None,
                                      overwrite_existing: bool=False, 
                                      verbose: bool=False
                                     ) -> None:
@@ -4577,18 +4999,22 @@ def transfer_light_logger_recordings(src_dir: str="/Volumes/T7 Shield",
     copied to ``FLIC_<subject>/<activity>/GKA/<recording_number>``.
 
     Args:
+        subjects_and_activities_to_process: Subject IDs mapped to activity sets;
+            None uses get_subject_ids() and get_activity_names(). Empty selects none.
+        subjects_and_activities_to_skip: Subject/activity pairs to exclude;
+            None skips nothing. Overlapping pairs warn and are excluded.
         src_dir: Path-like input for src dir.
         dst_dir: Path-like input for dst dir.
-        subjects_to_skip: Input value for subjects to skip.
-        subjects_to_transfer: Input value for subjects to transfer.
-        activities_to_skip: Input value for activities to skip.
-        activities_to_transfer: Input value for activities to transfer.
         overwrite_existing: Input value for overwrite existing.
         verbose: Input value for verbose.
 
     Returns:
         Return value produced by transfer light logger recordings.
     """
+
+    subjects_and_activities_to_process = _get_desired_subjects_and_activities(
+        subjects_and_activities_to_process, subjects_and_activities_to_skip
+    )
 
     # Assert that the top-level directories actually exist
     assert os.path.exists(src_dir), f"Source dir path: {src_dir} does not exist"
@@ -4639,9 +5065,7 @@ def transfer_light_logger_recordings(src_dir: str="/Volumes/T7 Shield",
         activity_recordings[recording_number] = recording_name
 
     # Now, let's iterate over all the subject paths
-    subjects_to_download: list[int] = sorted([subject for subject in parsed_recording_map 
-                                       if _is_desired_item(subject, subjects_to_transfer, subjects_to_skip)
-                                      ])
+    subjects_to_download: list[int] = sorted(subject for subject in subjects_and_activities_to_process if subject in parsed_recording_map)
     assert len(subjects_to_download) > 0, f"No subjects to transfer found on the SSD after filtering skip/process"
     subject_iterator: Iterable = range(len(subjects_to_download)) if verbose is False else tqdm(range(len(subjects_to_download)), desc="Processing Subjects", leave=True)
     for subject_num in subject_iterator:
@@ -4653,9 +5077,11 @@ def transfer_light_logger_recordings(src_dir: str="/Volumes/T7 Shield",
         subject_recordings: dict = parsed_recording_map[subject_id_num]
 
         # Filter the recordings for this subject
-        activities_to_download: list[str] = [activity for activity in subject_recordings
-                                             if _is_desired_item(activity, activities_to_transfer, activities_to_skip) 
-                                            ]
+
+        activities_to_download: list[str] = natsorted(
+            activity for activity in subjects_and_activities_to_process[subject_id_num]
+            if activity in subject_recordings
+        )
 
         activities_iterator: Iterable = range(len(activities_to_download)) if verbose is False else tqdm(range(len(activities_to_download)), desc="Processing Activities", leave=False)
         for activity_num in activities_iterator:
@@ -4803,10 +5229,8 @@ def _plot_rerecording_frequency(rerecording_statistics: pd.DataFrame,
 def analyze_rerecording_frequency(api_key: str,
                                   api_url = "https://api.cloud.pupil-labs.com/v2",
                                   workspace_id: str="default",
-                                  subjects_to_process: Iterable=set(),
-                                  subjects_to_skip: Iterable=set(),
-                                  activities_to_process: Iterable=set(),
-                                  activities_to_skip: Iterable=set(),
+                                  subjects_and_activities_to_skip: dict[int, set[str]] | None=None,
+                                  subjects_and_activities_to_process: dict[int, set[str]] | None=None,
                                   verbose: bool=False,
                                   plot_output_dir: str | None=None,
                                   plot_filetype: Literal["png", "pdf", "svg"]="png",
@@ -4815,15 +5239,13 @@ def analyze_rerecording_frequency(api_key: str,
     """Analyze how often Pupil Cloud activities had to be re-recorded.
 
     Args:
+        subjects_and_activities_to_process: Subject IDs mapped to activity sets;
+            None uses get_subject_ids() and get_activity_names(). Empty selects none.
+        subjects_and_activities_to_skip: Subject/activity pairs to exclude;
+            None skips nothing. Overlapping pairs warn and are excluded.
         api_key: Pupil Cloud API key.
         api_url: Base URL for the Pupil Cloud API.
         workspace_id: Identifier for workspace id.
-        subjects_to_process: Subject IDs to include. An empty iterable includes
-            all subjects not listed in ``subjects_to_skip``.
-        subjects_to_skip: Subject IDs to exclude.
-        activities_to_process: Activity names to include. An empty iterable
-            includes all activities not listed in ``activities_to_skip``.
-        activities_to_skip: Activity names to exclude.
         verbose: Show progress bars while processing subjects and activities.
         plot_output_dir: Optional directory where the figures are saved.
         plot_filetype: File type used when saving figures.
@@ -4834,6 +5256,10 @@ def analyze_rerecording_frequency(api_key: str,
         A dataframe with one row per subject and activity. ``num_recordings``
         is the total number of recording attempts, including the first.
     """
+
+    subjects_and_activities_to_process = _get_desired_subjects_and_activities(
+        subjects_and_activities_to_process, subjects_and_activities_to_skip
+    )
     # First, we will get a list of all the recordings on pupil cloud
     # First, let's ask Pupil Cloud for its recording list and parse the names.
     # We count unique attempt numbers within each subject/activity pair.
@@ -4889,11 +5315,7 @@ def analyze_rerecording_frequency(api_key: str,
             parsed_recording_map[subject_id][activity_name].add(recording_number)
 
     # Now, let's iterate over all of the subjects and collect their statistics
-    subjects_to_analyze: list[int] = natsorted([
-        subject
-        for subject in parsed_recording_map
-        if _is_desired_item(subject, subjects_to_process, subjects_to_skip)
-    ])
+    subjects_to_analyze: list[int] = sorted(subject for subject in subjects_and_activities_to_process if subject in parsed_recording_map)
     rerecording_statistics: list[dict] = []
     subject_iterator: Iterable = range(len(subjects_to_analyze)) if verbose is False else tqdm(range(len(subjects_to_analyze)), desc="Processing Subjects", leave=True)
     for subject_num in subject_iterator:
@@ -4901,11 +5323,7 @@ def analyze_rerecording_frequency(api_key: str,
         subject_recordings: dict[str, set[int]] = parsed_recording_map[subject_id]
 
         # Filter the recordings for this subject
-        activities_to_analyze: list[str] = natsorted([
-            activity
-            for activity in subject_recordings
-            if _is_desired_item(activity, activities_to_process, activities_to_skip)
-        ])
+        activities_to_analyze: list[str] = natsorted(activity for activity in subjects_and_activities_to_process[subject_id] if activity in subject_recordings)
         activities_iterator: Iterable = range(len(activities_to_analyze)) if verbose is False else tqdm(range(len(activities_to_analyze)), desc="Processing Activities", leave=False)
         for activity_num in activities_iterator:
             activity_name: str = activities_to_analyze[activity_num]
@@ -4933,13 +5351,11 @@ def analyze_rerecording_frequency(api_key: str,
 
 
 def download_pupil_cloud_recordings(api_key: str,
-                                    dst_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026", 
+                                    dst_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026/usableSubjects", 
                                     api_url = "https://api.cloud.pupil-labs.com/v2",
                                     workspace_id: str="default", 
-                                    subjects_to_download: Iterable=set(), 
-                                    subjects_to_skip: Iterable=set(), 
-                                    activities_to_download: Iterable=set(),
-                                    activities_to_skip: Iterable=set(), 
+                                    subjects_and_activities_to_skip: dict[int, set[str]] | None=None,
+                                    subjects_and_activities_to_process: dict[int, set[str]] | None=None,
                                     overwrite_existing: bool=False, 
                                     verbose: bool=False
                                 ) -> None:
@@ -4956,20 +5372,24 @@ def download_pupil_cloud_recordings(api_key: str,
     ZIP-internal folders are preserved.
 
     Args:
+        subjects_and_activities_to_process: Subject IDs mapped to activity sets;
+            None uses get_subject_ids() and get_activity_names(). Empty selects none.
+        subjects_and_activities_to_skip: Subject/activity pairs to exclude;
+            None skips nothing. Overlapping pairs warn and are excluded.
         api_key: Input value for api key.
         dst_dir: Path-like input for dst dir.
         api_url: Input value for api url.
         workspace_id: Identifier for workspace id.
-        subjects_to_download: Input value for subjects to download.
-        subjects_to_skip: Input value for subjects to skip.
-        activities_to_download: Input value for activities to download.
-        activities_to_skip: Input value for activities to skip.
         overwrite_existing: Input value for overwrite existing.
         verbose: Input value for verbose.
 
     Returns:
         Return value produced by download pupil cloud recordings.
     """
+
+    subjects_and_activities_to_process = _get_desired_subjects_and_activities(
+        subjects_and_activities_to_process, subjects_and_activities_to_skip
+    )
 
     # Assert that the top-level directories actually exist
     assert os.path.exists(dst_dir), f"Destination dir path: {dst_dir} does not exist"
@@ -5038,9 +5458,7 @@ def download_pupil_cloud_recordings(api_key: str,
         }
 
     # Now, let's iterate over all the subject paths
-    subjects_to_transfer: list[int] = sorted([subject for subject in parsed_recording_map 
-                                       if _is_desired_item(subject, subjects_to_download, subjects_to_skip)
-                                      ])
+    subjects_to_transfer: list[int] = sorted(subject for subject in subjects_and_activities_to_process if subject in parsed_recording_map)
     subject_iterator: Iterable = range(len(subjects_to_transfer)) if verbose is False else tqdm(range(len(subjects_to_transfer)), desc="Processing Subjects", leave=True)
     for subject_num in subject_iterator:
         # Retrieve the subject path and subject name
@@ -5051,9 +5469,11 @@ def download_pupil_cloud_recordings(api_key: str,
         subject_recordings: dict = parsed_recording_map[subject_id_num]
 
         # Filter the recordings for this subject
-        activities_to_transfer: list[str] = [activity for activity in subject_recordings
-                                             if _is_desired_item(activity, activities_to_download, activities_to_skip) 
-                                            ]
+
+        activities_to_transfer: list[str] = natsorted(
+            activity for activity in subjects_and_activities_to_process[subject_id_num]
+            if activity in subject_recordings
+        )
 
         activities_iterator: Iterable = range(len(activities_to_transfer)) if verbose is False else tqdm(range(len(activities_to_transfer)), desc="Processing Activities", leave=False)
         for activity_num in activities_iterator:
@@ -5172,27 +5592,29 @@ def generate_actigraphy_graphs(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoor
                                dst_dir: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_analysis/lightLogger/NEWscriptedIndoorOutdoorVideos2026", 
                                overwrite_exsiting=False, 
                                 verbose=False,  
-                                subjects_to_skip: Iterable=set(), 
-                                subjects_to_process: Iterable=set(), 
-                                activities_to_skip: Iterable=set(), 
-                                activities_to_process: Iterable=set()
+                                subjects_and_activities_to_skip: dict[int, set[str]] | None=None,
+                                subjects_and_activities_to_process: dict[int, set[str]] | None=None,
                               ) -> None:
     """Generate actigraphy graphs.
 
     Args:
+        subjects_and_activities_to_process: Subject IDs mapped to activity sets;
+            None uses get_subject_ids() and get_activity_names(). Empty selects none.
+        subjects_and_activities_to_skip: Subject/activity pairs to exclude;
+            None skips nothing. Overlapping pairs warn and are excluded.
         raw_dir: Path-like input for raw dir.
         processing_dir: Path-like input for processing dir.
         dst_dir: Path-like input for dst dir.
         overwrite_exsiting: Input value for overwrite exsiting.
         verbose: Input value for verbose.
-        subjects_to_skip: Input value for subjects to skip.
-        subjects_to_process: Input value for subjects to process.
-        activities_to_skip: Input value for activities to skip.
-        activities_to_process: Input value for activities to process.
 
     Returns:
         Return value produced by generate actigraphy graphs.
     """
+
+    subjects_and_activities_to_process = _get_desired_subjects_and_activities(
+        subjects_and_activities_to_process, subjects_and_activities_to_skip
+    )
 
     # Assert that the top-level directories actually exist
     assert os.path.exists(raw_dir), f"Raw dir path: {raw_dir} does not exist"
@@ -5220,8 +5642,8 @@ def generate_actigraphy_graphs(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoor
         for subject_name in os.listdir(raw_dir)
         if re.fullmatch(r"FLIC_\d+", subject_name)
         and os.path.isdir(os.path.join(raw_dir, subject_name))
-        and _is_desired_item(_extract_num_from_id(subject_name), subjects_to_process, subjects_to_skip)
-    ]) 
+        and _extract_num_from_id(subject_name) in subjects_and_activities_to_process
+    ])
     assert len(subject_paths) > 0, f"No subject directories found in: {raw_dir}" 
 
 
@@ -5238,12 +5660,9 @@ def generate_actigraphy_graphs(raw_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoor
         assert os.path.exists(subject_processing_path), f"Problem with: {subject_processing_path}"
 
         # Iterate over the activities for this subject
-        activites_paths: list[str] = [
-            os.path.join(subject_raw_path, filename)
-            for filename in natsorted(os.listdir(subject_raw_path))
-            if os.path.isdir(os.path.join(subject_raw_path, filename))
-            and _is_desired_item(filename, activities_to_process, activities_to_skip)
-        ]
+        activites_paths: list[str] = [os.path.join(subject_raw_path, activity)
+            for activity in natsorted(subjects_and_activities_to_process[_extract_num_from_id(os.path.basename(subject_raw_path))])
+            if os.path.isdir(os.path.join(subject_raw_path, activity))]
         activities_iterator: Iterable = range(len(activites_paths)) if verbose is False else tqdm(range(len(activites_paths)), desc="Processing Activities", leave=False)
         for activity_num in activities_iterator:
             # Retrieve the activity path and activity name

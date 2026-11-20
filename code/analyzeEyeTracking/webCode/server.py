@@ -2,7 +2,7 @@
 
 Run this file with the same Python environment used for cleanEyeTracking.py.
 The browser sends parameter values; the existing cleaner does all numerical
-processing and plotting. Recording files are only ever opened for reading.
+processing and plotting. Previews are read-only; explicit Save updates cleaning metadata and the PDF.
 """
 
 import argparse
@@ -13,6 +13,8 @@ import pickle
 import re
 import sys
 import subprocess
+import tempfile
+import os
 from pathlib import Path
 
 import matplotlib
@@ -100,7 +102,43 @@ def read_parameters(eye_data_directory: Path) -> dict:
     """Load the settings saved for this recording without changing the file."""
     with (eye_data_directory / "eye_cleaning_metadata.pkl").open("rb") as metadata_file:
         parameters = MetadataUnpickler(metadata_file).load()
-    return validate_parameters(parameters)
+    return validate_parameters({name: parameters[name] for name in PARAMETER_DEFAULTS})
+
+
+def save_settings_and_plot(eye_directory: Path, parameters: dict) -> dict:
+    """Regenerate an unzoomed PDF and update only the cleaning metadata fields."""
+    metadata_path = eye_directory / "eye_cleaning_metadata.pkl"
+    pdf_path = eye_directory / "eye_cleaned_vs_raw.pdf"
+    if metadata_path.is_symlink() or pdf_path.is_symlink():
+        raise ValueError("Save requires regular metadata and PDF files, not symbolic links.")
+    with metadata_path.open("rb") as source:
+        metadata = MetadataUnpickler(source).load()
+    old_pdf = pdf_path.read_bytes() if pdf_path.exists() else None
+    # Stage both outputs before replacing either destination. A fresh figure
+    # retains the cleaner's default size, limits, titles, and PDF styling.
+    with tempfile.TemporaryDirectory(prefix=".eye-save-", dir=eye_directory) as staging:
+        staged_pdf = Path(staging) / pdf_path.name
+        _, effective = cleanEyeTracking.clean_eye_data(
+            eye_directory, eye_directory, verbose=False,
+            plot_output_path=staged_pdf, **parameters)
+        metadata.update(effective)
+        staged_metadata = Path(staging) / metadata_path.name
+        staged_metadata.write_bytes(pickle.dumps(metadata, protocol=pickle.HIGHEST_PROTOCOL))
+        os.chmod(staged_metadata, metadata_path.stat().st_mode & 0o777)
+        if pdf_path.exists():
+            os.chmod(staged_pdf, pdf_path.stat().st_mode & 0o777)
+        os.replace(staged_pdf, pdf_path)
+        try:
+            os.replace(staged_metadata, metadata_path)
+        except OSError:
+            if old_pdf is None:
+                pdf_path.unlink()
+            else:
+                rollback = Path(staging) / "rollback.pdf"
+                rollback.write_bytes(old_pdf)
+                os.replace(rollback, pdf_path)
+            raise
+    return effective
 
 
 def list_recordings(data_directory: Path) -> dict:
@@ -219,6 +257,15 @@ class ApiHandler(tornado.web.RequestHandler):
             saved_parameters = read_parameters(eye_directory)
             parameters = saved_parameters if request.get("parameters") is None else validate_parameters(request["parameters"])
 
+            if self.request.path == "/api/save":
+                if request.get("parameters") is None:
+                    raise ValueError("Provide the applied settings to save.")
+                effective_parameters = save_settings_and_plot(eye_directory, parameters)
+                for figure_number in set(plt.get_fignums()) - previous_figures:
+                    plt.close(figure_number)
+                self.write({"saved_parameters": effective_parameters})
+                return
+
             # Reuse both the existing cleaner AND its plotting helper. The two
             # preview options suppress PDF writes and desktop windows; no CSV,
             # metadata, or other recording output is written by this call.
@@ -256,18 +303,26 @@ class ApiHandler(tornado.web.RequestHandler):
             self.write({"error": str(error)})
 
 
+class ViewerStaticFileHandler(tornado.web.StaticFileHandler):
+    """Always revalidate local UI assets after an explorer update."""
+
+    def set_extra_headers(self, path: str) -> None:
+        self.set_header("Cache-Control", "no-store")
+
+
 class ViewerApplication(WebAggApplication):
     """Serve local interface files alongside Matplotlib's own browser viewer."""
 
     def __init__(self, port: int, initial_directory: str = ""):
         super().__init__(url_prefix="/plot")
+        self.settings["compiled_template_cache"] = False
         self.data_directory: Path | None = None
         self.initial_directory = initial_directory
         self.allowed_hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
         self.add_handlers(r".*", [
-            (r"/api/(?:config|directory|choose-directory|plot)", ApiHandler),
+            (r"/api/(?:config|directory|choose-directory|plot|save)", ApiHandler),
             (r"/plot/([0-9]+)", FigurePage, {"url_prefix": "/plot"}),
-            (r"/(|index.html|app.js|style.css)", tornado.web.StaticFileHandler,
+            (r"/(|index.html|app.js|style.css)", ViewerStaticFileHandler,
              {"path": str(WEB_DIRECTORY), "default_filename": "index.html"}),
         ])
 
@@ -288,7 +343,7 @@ def main() -> None:
     application = ViewerApplication(arguments.port, arguments.data_directory)
     application.listen(arguments.port, address="127.0.0.1", max_buffer_size=1024 * 1024)
     print(f"FLIC eye viewer: http://127.0.0.1:{arguments.port}", flush=True)
-    print("Press Ctrl+C to stop. Recording files are read-only.", flush=True)
+    print("Press Ctrl+C to stop. Previews are read-only; Save updates metadata and PDF.", flush=True)
     try:
         tornado.ioloop.IOLoop.current().start()
     except KeyboardInterrupt:

@@ -10,6 +10,7 @@ const recordingSelect = document.getElementById("recording");
 const parameterForm = document.getElementById("parameter-form");
 const parameterFields = document.getElementById("parameter-fields");
 const applyButton = document.getElementById("apply-button");
+const saveButton = document.getElementById("save-button");
 const resetButton = document.getElementById("reset-button");
 const plotFrame = document.getElementById("plot-frame");
 const statusText = document.getElementById("status");
@@ -18,7 +19,9 @@ const previewState = document.getElementById("preview-state");
 let recordingTree = {};
 let parameterLabels = {};
 let savedParameters = null;
+let plottedParameters = null;
 let requestInProgress = false;
+let saveInProgress = false;
 
 function showStatus(message, isError = false) {
     // Text content also keeps filenames and server errors out of HTML markup.
@@ -36,9 +39,54 @@ function setBusy(isBusy) {
         select.disabled = isBusy || select.options.length === 0;
     }
     parameterFields.disabled = isBusy || savedParameters === null;
-    applyButton.disabled = isBusy || savedParameters === null;
+    updateApplyState();
     resetButton.disabled = isBusy || savedParameters === null;
-    applyButton.textContent = isBusy ? "Calculating…" : "Apply & replot";
+    applyButton.classList.toggle("loading", isBusy && !saveInProgress);
+    applyButton.setAttribute("aria-busy", String(isBusy));
+    applyButton.textContent = isBusy && !saveInProgress ? "Calculating…" : "Apply & replot";
+}
+
+function parametersDiffer(left, right) {
+    return !left || !right || Object.keys(parameterLabels).some(name =>
+        JSON.stringify(left[name]) !== JSON.stringify(right[name]));
+}
+
+function updateApplyState() {
+    const dirty = plottedParameters !== null && parametersDiffer(collectParameters(), plottedParameters);
+    applyButton.disabled = requestInProgress || !dirty;
+    saveButton.disabled = requestInProgress || saveInProgress || !plottedParameters || dirty ||
+        !parameterForm.checkValidity() || !parametersDiffer(plottedParameters, savedParameters);
+    if (!requestInProgress && plottedParameters) {
+        previewState.textContent = dirty ? "Unapplied changes" :
+            (parametersDiffer(plottedParameters, savedParameters) ? "Adjusted preview" : "Saved settings");
+    }
+}
+
+// Keep navigation locked until both saved outputs have been written.
+function setSaveBusy(isBusy) {
+    saveInProgress = isBusy;
+    saveButton.classList.toggle("loading", isBusy);
+    saveButton.setAttribute("aria-busy", String(isBusy));
+    saveButton.textContent = isBusy ? "Saving…" : "Save New Setting and Plot";
+    setBusy(isBusy);
+}
+
+function loadFigure(url) {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => finish(new Error("The plot took too long to load. Please apply again.")), 60000);
+        function finish(error) {
+            clearTimeout(timer);
+            window.removeEventListener("message", onMessage);
+            error ? reject(error) : resolve();
+        }
+        function onMessage(event) {
+            if (event.origin === location.origin && event.source === plotFrame.contentWindow &&
+                event.data?.type === "eye-plot-ready" && event.data.path === new URL(url, location.href).pathname) finish();
+        }
+        window.addEventListener("message", onMessage);
+        plotFrame.src = url;
+        plotFrame.hidden = false;
+    });
 }
 
 async function postRequest(path, body) {
@@ -147,6 +195,7 @@ async function showRecording(parameters = null) {
     // A new recording must never show the previous recording's plot or controls.
     if (parameters === null) {
         savedParameters = null;
+        plottedParameters = null;
         parameterFields.replaceChildren();
         plotFrame.hidden = true;
         plotFrame.removeAttribute("src");
@@ -162,8 +211,8 @@ async function showRecording(parameters = null) {
         const result = await postRequest("/api/plot", selection);
         savedParameters = result.saved_parameters;
         displayParameters(result.parameters);
-        plotFrame.src = result.figure_url;
-        plotFrame.hidden = false;
+        await loadFigure(result.figure_url);
+        plottedParameters = result.parameters;
         document.getElementById("empty-state").hidden = true;
         const changed = Object.keys(savedParameters).some(name =>
             JSON.stringify(savedParameters[name]) !== JSON.stringify(result.parameters[name]));
@@ -207,12 +256,34 @@ activitySelect.addEventListener("change", () => { fillRecordings(); showRecordin
 recordingSelect.addEventListener("change", () => showRecording());
 parameterForm.addEventListener("submit", event => {
     event.preventDefault();
-    if (parameterForm.reportValidity()) showRecording(collectParameters());
+    if (!applyButton.disabled && parameterForm.reportValidity()) showRecording(collectParameters());
 });
-resetButton.addEventListener("click", () => showRecording(savedParameters));
-parameterForm.addEventListener("input", () => {
-    previewState.textContent = "Unapplied changes";
+saveButton.addEventListener("click", async () => {
+    if (saveButton.disabled || requestInProgress) return;
+    setSaveBusy(true);
+    showStatus("Saving settings and regenerating the full-view PDF…");
+    try {
+        const result = await postRequest("/api/save", {
+            subject: subjectSelect.value,
+            activity: activitySelect.value,
+            recording: recordingSelect.value,
+            parameters: plottedParameters,
+        });
+        savedParameters = result.saved_parameters;
+        showStatus("Saved eye_cleaning_metadata.pkl and eye_cleaned_vs_raw.pdf.");
+    } catch (error) {
+        showStatus(error.message, true);
+    } finally {
+        setSaveBusy(false);
+    }
 });
+resetButton.addEventListener("click", () => {
+    if (requestInProgress || !savedParameters) return;
+    displayParameters(savedParameters);
+    updateApplyState();
+    if (parametersDiffer(savedParameters, plottedParameters)) showRecording(savedParameters);
+});
+parameterForm.addEventListener("input", updateApplyState);
 
 // Read optional startup configuration, then let the user choose when to load.
 fetch("/api/config").then(response => {

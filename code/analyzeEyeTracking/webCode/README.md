@@ -65,7 +65,7 @@ The initial values come from `eye_cleaning_metadata.pkl`. These are the settings
 used to generate the recording's cleaned data.
 
 Edit a value and click **Apply & replot**. Until you apply it, the plot still
-shows the previous result. Click **Restore saved settings** to discard your
+shows the previous result. Click **Reset to original values** to discard your
 changes and recalculate with the original values. Scroll within the left panel
 to reach the remaining settings and buttons.
 
@@ -116,3 +116,13 @@ Use the toolbar below the figure:
 You can also scroll over a plot to zoom its time axis. The time axes are linked,
 so all six panels stay aligned. Scroll outside the plot to move through the
 page. Browser zoom can make the compact interface larger if needed.
+
+## Save settings and plot
+
+After applying changed settings, click **Save New Setting and Plot** to overwrite
+the supported fields in `eye_cleaning_metadata.pkl` and replace
+`eye_cleaned_vs_raw.pdf` in the selected recording’s `eyeData` folder. Other
+metadata fields are preserved. The PDF is regenerated at the cleaner’s default
+size and full view, regardless of browser zoom or pan. CSV files are unchanged.
+The button animates during saving and becomes gray after success. Reset then
+uses these newly saved settings. Failed saves show an error and can be retried.
