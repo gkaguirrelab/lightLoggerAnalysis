@@ -16,3 +16,6 @@ code/analyzePupilData/*_timeseriesData/
 
 # Generated numeric copy of the ASM7341 spectral-sensitivity data.
 /data/ASM7341_spectralSensitivity_numeric.mat
+
+# Local pipeline notes.
+/LIGHT_LOGGER_ANALYSIS_PIPELINE.md

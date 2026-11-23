@@ -8,7 +8,10 @@ runs locally. Pass a loaded model to reuse it across multiple summaries.
 from __future__ import annotations
 
 import warnings
-from llama_cpp import Llama
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from llama_cpp import Llama
 
 
 def initialize_model(
@@ -39,6 +42,8 @@ def initialize_model(
         and cached locally. GPU support depends on the installed build.
         Call model.close() when finished using the returned model.
     """
+    from llama_cpp import Llama
+
     # Load directly from disk if a model path was provided.
     if(model_path is not None):
         return Llama(

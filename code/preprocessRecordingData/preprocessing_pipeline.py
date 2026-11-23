@@ -74,7 +74,7 @@ import cleanEyeTracking
 import local_llm_util
 
 
-def get_subject_ids(FLIC_subject_dir: str="/Users/zacharykelly/Desktop/tempFolderForDataCuration") -> dict[int, int | None]:
+def get_subject_ids(FLIC_subject_dir: str="/Users/zacharykelly/Library/CloudStorage/Dropbox-Aguirre-BrainardLab/Zachary Kelly/FLIC_subject/scriptedIndoorOutdoor_2026_photophobia") -> dict[int, int | None]:
     """Return {numeric subject ID: age in years} for usable experiment subjects.
 
     Duplicate IDs are allowed when ages agree;
@@ -96,7 +96,7 @@ def get_subject_ids(FLIC_subject_dir: str="/Users/zacharykelly/Desktop/tempFolde
 
     # Let's first load in the subject summary (information about this subject)
     # and select just the columns we want 
-    non_test_subject_summary: pd.DataFrame = pd.read_excel(os.path.join(FLIC_subject_dir, "FLIC_SubjectSummaryMigraine_LL.xlsx"), 
+    non_test_subject_summary: pd.DataFrame = pd.read_excel(os.path.join(FLIC_subject_dir, "FLIC_SubjectSummary.xlsx"), 
                                                            header=0, usecols=["Subject ID", "Age"])
    
     # Drop missing IDs, clean surrounding whitespace and asterisks, then keep valid IDs.
@@ -105,7 +105,7 @@ def get_subject_ids(FLIC_subject_dir: str="/Users/zacharykelly/Desktop/tempFolde
     non_test_subject_summary = non_test_subject_summary[non_test_subject_summary["Subject ID"].str.fullmatch(r"FLIC_\d+")].copy()
    
     # Then, lets load in the sheet with the information about the sessions that each subject did
-    non_test_subject_sessions: pd.DataFrame = pd.read_excel(os.path.join(FLIC_subject_dir, "FLIC_SessionsMigraine_LL.xlsx"), 
+    non_test_subject_sessions: pd.DataFrame = pd.read_excel(os.path.join(FLIC_subject_dir, "FLIC_Sessions.xlsx"), 
                                                             header=0, usecols=["Subject ID", "Usable"])
 
     # Drop missing IDs, clean surrounding whitespace and asterisks, then keep valid IDs.
@@ -166,7 +166,7 @@ def get_subject_ids(FLIC_subject_dir: str="/Users/zacharykelly/Desktop/tempFolde
 
     return subject_ids
 
-def get_activity_names(FLIC_subject_dir: str="//Users/zacharykelly/Desktop/tempFolderForDataCuration",
+def get_activity_names(FLIC_subject_dir: str="/Users/zacharykelly/Library/CloudStorage/Dropbox-Aguirre-BrainardLab/Zachary Kelly/FLIC_subject/scriptedIndoorOutdoor_2026_photophobia",
                        group_by: list[str] | None=["Activity Name"]
                       ) -> set[str] | dict[tuple, str]:
     """Load activity names from the activities Excel spreadsheet.
@@ -191,12 +191,13 @@ def get_activity_names(FLIC_subject_dir: str="//Users/zacharykelly/Desktop/tempF
 
     # Assert that the top-level directories actually exist
     assert os.path.exists(FLIC_subject_dir), f"FLIC subject dir path: {FLIC_subject_dir} does not exist"
+    
     # Use the current activity workbook name exactly.
     # First, let's read the activity definitions for this experiment.
     # The default gives us just the names. Grouping by another column lets us
     # collect activities that share a property, such as an indoor/outdoor flag.
     activities_filepath: str = os.path.join(
-        FLIC_subject_dir, "FLIC_activitiesMigraine_LL.xlsx"
+        FLIC_subject_dir, "FLIC_Activities.xlsx"
     )
     if(not os.path.isfile(activities_filepath)):
         raise FileNotFoundError(
@@ -206,12 +207,15 @@ def get_activity_names(FLIC_subject_dir: str="//Users/zacharykelly/Desktop/tempF
 
     try:
         df: pd.DataFrame = pd.read_excel(activities_filepath, header=0)
+    
     except ValueError as error:
         raise ValueError(
             f"Could not read the activity workbook at {activities_filepath}. "
             "Check that Dropbox has downloaded the file locally and that it "
             "contains a valid .xlsx workbook."
         ) from error
+    
+    
     df.columns = df.columns.astype(str).str.strip()
     if("Activity Name" not in df.columns):
         raise KeyError(
@@ -508,7 +512,7 @@ def populate_FLIC_data(raw_dir_path: str="/Volumes/FLIC_raw/NEWscriptedIndoorOut
 
 
 def generate_world_videos(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026/usableSubjects", 
-                          dst_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoorVideos2026", 
+                          dst_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoorVideos2026/usableSubjects", 
                           subjects_and_activities_to_skip: dict[int, set[str]] | None=None,
                           subjects_and_activities_to_process: dict[int, set[str]] | None=None,
                           overwrite_existing: bool=False,
@@ -642,8 +646,8 @@ def generate_world_videos(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdo
             
     return 
 
-def generate_egocentric_mapper_results(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026", 
-                                       dst_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoorVideos2026",
+def generate_egocentric_mapper_results(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026/usableSubjects", 
+                                       dst_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoorVideos2026/usableSubjects",
                                        refresh_time_threshold_sec: float=0.5 ,
                                        render_video: bool= False,
                                        render_video_comparison: bool= True,
@@ -3519,7 +3523,7 @@ def rename_world_recordings(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOut
 
 
 def verify_data_integrity(src_dir: str = "/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026/usableSubjects",
-                          output_path: str | None="/Users/zacharykelly/Library/CloudStorage/Dropbox-Aguirre-BrainardLab/Zachary Kelly/FLIC_subject/scriptedIndoorOutdoor_2026_photophobia/FLIC_dataCuration_LL.xlsx",
+                          output_path: str | None="/Users/zacharykelly/Library/CloudStorage/Dropbox-Aguirre-BrainardLab/Zachary Kelly/FLIC_subject/scriptedIndoorOutdoor_2026_photophobia/FLIC_DataCuration.xlsx",
                           subjects_and_activities_to_skip: dict[int, set[str]] | None=None,
                           subjects_and_activities_to_process: dict[int, set[str]] | None=None,
                           verbose: bool = False,

@@ -2,8 +2,9 @@
 
 Use this page to look through FLIC eye recordings, examine default performance, and try different cleaning
 settings. It runs the existing `cleanEyeTracking.py` code and shows its results
-in the browser. Changing a setting does not overwrite the recording's data,
-PDF, or metadata. The screenshots and demo below use synthetic data, not participant recordings.
+in the browser. Editing and applying settings only updates the preview. Use
+**Save New Setting and Plot** to update the recording’s metadata and PDF. The
+screenshots and demos below use synthetic data, not participant recordings.
 
 ![Recording selection, cleaning settings, and the six comparison plots](media/overview.png)
 
@@ -41,17 +42,24 @@ scriptedIndoorOutdoor_2026_photophobia/
 Select `scriptedIndoorOutdoor_2026_photophobia` in this example, not `FLIC_0021`
 or `eyeData`.
 
-The viewer needs these four files in each `eyeData` directory:
+Each recording’s `eyeData` directory in Dropbox needs all eight files below.
+Make sure they are downloaded to this computer before reviewing it:
 
 | File | Used for |
 | --- | --- |
 | `3d_eye_states.csv` | Pupil diameter and eyelid measurements. |
 | `blinks.csv` | Blink start and end times. |
 | `alternative_camera_gaze.csv` | Gaze mapped into world-camera coordinates. |
+| `gaze.csv` | The original gaze export. |
+| `cleaned_eye_data.csv` | The cleaned eye and gaze data used by later analysis. |
+| `egocentric_mapper_metadata.pkl` | The saved settings for mapping gaze into the world camera. |
+| `eye_cleaned_vs_raw.pdf` | The saved comparison of raw and cleaned signals. |
 | `eye_cleaning_metadata.pkl` | The settings saved when the recording was cleaned. |
 
-For Dropbox folders, make sure the files are downloaded to this computer.
-The viewer does not need a NAS connection once the input files are local.
+The viewer reads the eye-state, blink, alternative-camera gaze, and cleaning
+metadata files to calculate a preview. Keep the other files alongside them as
+part of the complete recording. The viewer does not need a NAS connection once
+the files are local.
 
 ## 1. Select Recording
 
@@ -61,13 +69,24 @@ recording's saved cleaning settings; adjustments do not carry over.
 
 ## 2. Examine or Set Settings
 
-The initial values come from `eye_cleaning_metadata.pkl`. These are the settings
-used to generate the recording's cleaned data.
+The initial values come from `eye_cleaning_metadata.pkl`. These are the recording’s
+saved cleaning settings. Saving changes in this viewer updates that metadata
+and the PDF, but does not regenerate `cleaned_eye_data.csv`.
 
 Edit a value and click **Apply & replot**. Until you apply it, the plot still
 shows the previous result. Click **Reset to original values** to discard your
-changes and recalculate with the original values. Scroll within the left panel
-to reach the remaining settings and buttons.
+changes and return to the most recently saved values. The three action buttons
+are above the plots. Scroll within the left panel to reach the remaining settings.
+
+The label beside the buttons shows where you are:
+
+- **Saved settings:** the plot uses the settings stored in the recording’s metadata.
+- **Unapplied changes:** a value has been edited, but the plot still shows the previous result.
+- **Adjusted preview:** the changed settings have been applied to the plot but have not been saved.
+
+**Apply & replot** becomes available when you edit a value. **Save New Setting
+and Plot** becomes available after you apply a change that differs from the
+saved settings. If you edit again, apply those changes before saving.
 
 | Setting | What it controls |
 | --- | --- |
@@ -117,12 +136,25 @@ You can also scroll over a plot to zoom its time axis. The time axes are linked,
 so all six panels stay aligned. Scroll outside the plot to move through the
 page. Browser zoom can make the compact interface larger if needed.
 
-## Save settings and plot
+## 4. Save settings and plot
 
-After applying changed settings, click **Save New Setting and Plot** to overwrite
-the supported fields in `eye_cleaning_metadata.pkl` and replace
+Once the adjusted preview looks right, click **Save New Setting and Plot** above
+the plots. This overwrites the supported fields in `eye_cleaning_metadata.pkl` and replaces
 `eye_cleaned_vs_raw.pdf` in the selected recording’s `eyeData` folder. Other
 metadata fields are preserved. The PDF is regenerated at the cleaner’s default
 size and full view, regardless of browser zoom or pan. CSV files are unchanged.
-The button animates during saving and becomes gray after success. Reset then
-uses these newly saved settings. Failed saves show an error and can be retried.
+The button shows **Saving…** while the files are written. Wait for the saved
+confirmation before continuing; the controls are disabled during saving. After
+success, the label returns to **Saved settings** and the save button becomes
+gray. **Reset to original values** then uses these newly saved settings, not the
+values from before the save. Failed saves show an error and can be retried.
+
+This demo applies the same pupil-bound change and saves it to the synthetic
+recording. The confirmation names the two files that were updated.
+
+![Demo: apply the changed pupil bound and save the settings and full-view PDF](media/save-settings.gif)
+
+Saving here does not update `cleaned_eye_data.csv`, `gaze.csv`, or
+`egocentric_mapper_metadata.pkl`. If you need cleaned data for later analysis,
+rerun the cleaning step with the updated settings. The toolbar’s **Download**
+control only downloads a figure; it does not save cleaning settings.
