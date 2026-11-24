@@ -346,7 +346,7 @@ def get_pupil_cloud_apikey() -> str:
     with open(api_key_path, "r") as f:
         return f.readline().strip()
 
-def populate_FLIC_data(raw_dir_path: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026",
+def populate_FLIC_data(raw_dir_path: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026/usableSubjects",
                        data_dir_path: str="/Users/zacharykelly/Aguirre-Brainard Lab Dropbox/Zachary Kelly/FLIC_data/lightLogger/scriptedIndoorOutdoor_2026_photophobia",
                        subjects_and_activities_to_skip: dict[int, set[str]] | None=None,
                        subjects_and_activities_to_process: dict[int, set[str]] | None=None,
@@ -835,6 +835,7 @@ def generate_egocentric_mapper_results(src_dir: str="/Volumes/FLIC_raw/NEWscript
                         shutil.rmtree(neon_output_dir)
                     os.makedirs(neon_recording_output_dir, exist_ok=True)
                     shutil.copytree(temp_output_dir, neon_output_dir)
+                
                 # Whether mapping or copying succeeds or fails, discard its temporary
                 # working directory once this attempt exits.
                 finally:
@@ -1048,8 +1049,8 @@ def run_transformation_pipeline(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoo
                 )
 
 
-def clean_eye_data(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026",
-                   dst_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoorVideos2026",
+def clean_eye_data(src_dir: str="/Volumes/FLIC_raw/NEWscriptedIndoorOutdoorVideos2026/usableSubjects",
+                   dst_dir: str="/Volumes/FLIC_processing/NEWscriptedIndoorOutdoorVideos2026/usableSubjects",
                    overwrite_existing: bool=False,
                    subjects_and_activities_to_skip: dict[int, set[str]] | None=None,
                    subjects_and_activities_to_process: dict[int, set[str]] | None=None,
@@ -3565,6 +3566,9 @@ def verify_data_integrity(src_dir: str = "/Volumes/FLIC_raw/NEWscriptedIndoorOut
         OSError: A directory cannot be read. Config and FPS errors are collected
             in the issue lists instead.
     """
+
+    # Check the LLM dependency before processing recordings.
+    from llama_cpp import Llama
 
     def _parse_manual_edit_readme(contents: str) -> dict[str, str]:
         """Extract author, date, and description from a manual-edit README.

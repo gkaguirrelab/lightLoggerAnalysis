@@ -4,6 +4,7 @@ import hashlib
 import json
 import pickle
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -93,6 +94,7 @@ class ViewerTests(AsyncHTTPTestCase):
         response = self.post("/api/plot", self.selection)
         self.assertEqual(response.code, 200, response.body)
         result = json.loads(response.body)
+        self.assertEqual(set(result["parameters"]), set(server.PARAMETER_DEFAULTS))
         figure = server.plt.gcf()
         self.assertEqual(len(figure.axes), 6)
         self.assertEqual([axis.get_title() for axis in figure.axes], expected_titles)
@@ -133,7 +135,10 @@ class ViewerTests(AsyncHTTPTestCase):
         """None never saves; explicit paths save even when display is disabled."""
         original_files = snapshot_files(self.root)
         with patch.object(server.plt, "show") as show_figure:
-            server.cleanEyeTracking.clean_eye_data(self.eye_directory, self.eye_directory)
+            _, metadata = server.cleanEyeTracking.clean_eye_data(self.eye_directory, self.eye_directory)
+        generated = datetime.fromisoformat(metadata["date_generated"])
+        self.assertEqual(generated.utcoffset().total_seconds(), 0)
+        self.assertIsNone(metadata["date_settings_changed"])
         show_figure.assert_called_once_with(block=False)
         self.assertEqual(snapshot_files(self.root), original_files)
 
@@ -149,10 +154,14 @@ class ViewerTests(AsyncHTTPTestCase):
     def test_save_updates_metadata_and_default_view_pdf_only(self):
         self.post("/api/directory", {"directory": str(self.root)})
         metadata_path = self.eye_directory / "eye_cleaning_metadata.pkl"
-        metadata_path.write_bytes(pickle.dumps(dict(server.PARAMETER_DEFAULTS, note="keep me")))
+        generated = "2026-01-01T12:00:00+00:00"
+        metadata_path.write_bytes(pickle.dumps(dict(
+            server.PARAMETER_DEFAULTS, note="keep me", date_generated=generated,
+            date_settings_changed=None)))
         parameters = dict(server.PARAMETER_DEFAULTS, pupil_diameter_thresholds=[1.5, 4.05])
         response = self.post("/api/plot", {**self.selection, "parameters": parameters})
         self.assertEqual(response.code, 200, response.body)
+        parameters = json.loads(response.body)["parameters"]
         preview = server.plt.gcf()
         default_limits = [axis.get_xlim() for axis in preview.axes]
         preview.axes[0].set_xlim(0.2, 0.3)
@@ -164,6 +173,7 @@ class ViewerTests(AsyncHTTPTestCase):
             captured.append([axis.get_xlim() for axis in figure.axes])
             return original_savefig(figure, *args, **kwargs)
         with patch.object(Figure, "savefig", capture):
+            save_started = datetime.now(timezone.utc)
             response = self.post("/api/save", {**self.selection, "parameters": parameters})
         self.assertEqual(response.code, 200, response.body)
         self.assertEqual(captured, [default_limits])
@@ -171,6 +181,11 @@ class ViewerTests(AsyncHTTPTestCase):
         self.assertEqual(server.plt.get_fignums(), [preview.number])
         metadata = pickle.loads(metadata_path.read_bytes())
         self.assertEqual(metadata["note"], "keep me")
+        self.assertEqual(metadata["date_generated"], generated)
+        changed_at = datetime.fromisoformat(metadata["date_settings_changed"])
+        self.assertEqual(changed_at.utcoffset().total_seconds(), 0)
+        self.assertGreaterEqual(changed_at, save_started)
+        self.assertEqual(set(json.loads(response.body)["saved_parameters"]), set(server.PARAMETER_DEFAULTS))
         self.assertEqual(metadata["pupil_diameter_thresholds"], (1.5, 4.05))
         self.assertTrue((self.eye_directory / "eye_cleaned_vs_raw.pdf").read_bytes().startswith(b"%PDF"))
         after = snapshot_files(self.root)

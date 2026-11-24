@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from scipy.interpolate import PchipInterpolator
 from scipy.ndimage import maximum_filter1d
-
+from datetime import datetime, timezone
 
 
 def _fill_missing(values: np.ndarray, method: str, max_gap: int) -> np.ndarray:
@@ -766,6 +766,8 @@ def clean_eye_data(
         "general_max_gap": general_max_gap,
         "blink_max_gap": blink_max_gap,
         "smoothing_samples": smoothing_samples,
+        "date_generated": datetime.now(timezone.utc).isoformat(),
+        "date_settings_changed": None,
     }
 
     # Prepend elapsed time and return the settings that produced these signals.

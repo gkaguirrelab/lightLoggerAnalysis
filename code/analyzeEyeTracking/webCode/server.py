@@ -15,6 +15,7 @@ import sys
 import subprocess
 import tempfile
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 import matplotlib
@@ -121,7 +122,11 @@ def save_settings_and_plot(eye_directory: Path, parameters: dict) -> dict:
         _, effective = cleanEyeTracking.clean_eye_data(
             eye_directory, eye_directory, verbose=False,
             plot_output_path=staged_pdf, **parameters)
-        metadata.update(effective)
+        # Update settings only: preserve the original generation timestamp.
+        metadata.update({name: effective[name] for name in PARAMETER_DEFAULTS})
+        # Older metadata has no known generation date; do not invent one.
+        metadata.setdefault("date_generated", None)
+        metadata["date_settings_changed"] = datetime.now(timezone.utc).isoformat()
         staged_metadata = Path(staging) / metadata_path.name
         staged_metadata.write_bytes(pickle.dumps(metadata, protocol=pickle.HIGHEST_PROTOCOL))
         os.chmod(staged_metadata, metadata_path.stat().st_mode & 0o777)
@@ -138,7 +143,7 @@ def save_settings_and_plot(eye_directory: Path, parameters: dict) -> dict:
                 rollback.write_bytes(old_pdf)
                 os.replace(rollback, pdf_path)
             raise
-    return effective
+    return {name: effective[name] for name in PARAMETER_DEFAULTS}
 
 
 def list_recordings(data_directory: Path) -> dict:
@@ -288,7 +293,7 @@ class ApiHandler(tornado.web.RequestHandler):
             figure.canvas.mpl_connect("scroll_event", zoom_time_axis)
             figure.canvas.manager.toolbar.push_current()
             self.write({"figure_url": f"/plot/{figure.number}",
-                        "parameters": effective_parameters,
+                        "parameters": {name: effective_parameters[name] for name in PARAMETER_DEFAULTS},
                         "saved_parameters": saved_parameters,
                         "sample_count": len(cleaned_data)})
 
